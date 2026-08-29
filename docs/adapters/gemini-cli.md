@@ -1,5 +1,15 @@
 # Gemini CLI 接入调研（T2.0）
 
+> **勘误（W2.5 实现期发现，2026-08-29）：**
+> ① §3.4 拒绝事件的 `error.type`：0.57.0 源码中策略拒绝走 `getPolicyDenialError()`，
+> errorType 实为 **`policy_violation`**（fixture 中的 `permission_denied` 是构造样例的
+> 误标；映射器已兼容三种形态）。补录真实 fixture 时以源码为准。
+> ② §8.3 的 `--policy` 优先级样例：传入的策略文件会被强制提到 USER 层
+> （真机报错前缀 `[USER]` 佐证），deny 规则建议用 priority 999 而非样例的 900。
+> ③ 重要：CLI 的 ReDoS 校验（isSafeRegExp）会**静默丢弃**不合格的 argsPattern
+> 规则（仅 stderr 一行提示），策略模式必须用字符类量词写法并做生成侧自检
+> （见 packages/adapters/src/gemini-cli/policy.ts）。
+
 - **调研日期：** 2026-08-29
 - **CLI 版本：** @google/gemini-cli **0.57.0**（调研当日 npm latest）
 - **调研环境：** Windows 11 + PowerShell，Node v24
