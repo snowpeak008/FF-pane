@@ -1,0 +1,10 @@
+packages:
+  - apps/*
+  - packages/*
+
+# 依赖布局策略（开发计划 §12 风险 R6）：
+# 为 T0.2 起引入的 Electron 原生依赖（better-sqlite3）预先采用扁平 node_modules，
+# 规避 pnpm 默认符号链接布局下 electron-rebuild / electron-builder 对原生模块
+# 解析与打包的兼容性问题。代价是放弃 pnpm 的严格依赖隔离，对单人维护项目可接受。
+# 注：pnpm 11 起该设置只能写在本文件（.npmrc 仅保留 auth/registry 配置）。
+nodeLinker: hoisted
