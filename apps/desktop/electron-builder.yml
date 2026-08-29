@@ -1,0 +1,53 @@
+# T0.5 打包链路：electron-builder 最小可用配置（docs/技术选型.md §9，先只出 Windows NSIS）。
+# 图标未配置，使用 Electron 默认图标：正式图标属 Phase 3 设计系统任务（T3.1）。
+
+appId: com.ffpane.app
+productName: FF-pane
+
+directories:
+  output: release
+
+# devDependencies 里 electron 是 ^44 区间，而 hoisted 布局下包不在 apps/desktop/node_modules，
+# electron-builder 推断不出精确版本，必须显式钉住；升级 electron 时需同步本行
+# （与根 node_modules/electron/package.json 的实际安装版本一致）。
+electronVersion: 44.0.0
+
+# Electron 二进制直接取本机已就位的 node_modules/electron/dist（hoisted 布局在仓库根），
+# 避免打包时从网络重复下载同版本发行包。
+electronDist: ../../node_modules/electron/dist
+
+# better-sqlite3 13.x 以 Node-API 预编译分发（ABI 稳定），无需对 Electron 重编译；
+# 关闭可避免 electron-builder 触发 node-gyp / 包管理器安装（本仓库 lockfile 不允许变动）。
+npmRebuild: false
+
+# 应用源码只收 electron-vite 产物（out/main、out/preload、out/renderer）。
+# package.json 恒定收录；生产依赖（better-sqlite3 / i18next / react-i18next 及其传递依赖）
+# 由 electron-builder 的依赖收集器从仓库根 node_modules（pnpm hoisted 布局）解析收集，
+# 不走本 files 匹配器。
+files:
+  - out/**
+
+asar: true
+# 原生 .node 无法从 asar 内 dlopen，必须解包到 app.asar.unpacked。
+# better-sqlite3 13.x 的绑定解析顺序（lib/binding.js）：
+#   1) prebuilds/<platform>-<arch>.node —— Node-API 预编译，本机当前生效形态
+#   2) build/{Debug,Release}/better_sqlite3.node —— node-gyp 源码编译形态
+# 两种路径形态都覆盖，防止换机后依赖形态不同导致安装版加载失败。
+asarUnpack:
+  - node_modules/better-sqlite3/build/Release/**
+  - node_modules/better-sqlite3/prebuilds/**
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+
+nsis:
+  # 向导式安装（非一键），允许用户自选安装目录
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  # 用户级安装（默认 %LOCALAPPDATA%\Programs\FF-pane），免管理员权限
+  perMachine: false
+  # 安装包文件名不含空格，便于脚本化静默安装
+  artifactName: ${productName}-Setup-${version}.${ext}
