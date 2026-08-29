@@ -6,7 +6,7 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!packages/adapters/fixtures/**"]
+    "includes": ["**", "!packages/adapters/fixtures"]
   },
   "formatter": {
     "enabled": true,
