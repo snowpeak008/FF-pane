@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"01a04cc1-c42a-7f40-b237-6f384b9e6f17"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"hello.txt contains `hello`."}}
+{"type":"turn.completed","usage":{"input_tokens":61868,"cached_input_tokens":55296,"cache_write_input_tokens":0,"output_tokens":460,"reasoning_output_tokens":131}}
