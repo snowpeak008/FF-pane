@@ -1,0 +1,1 @@
+[93m[1m! [0mpermission requested: edit (Users\REDACTED\AppData\Local\Temp\ffpane-oc\proj\hello.txt); auto-rejecting

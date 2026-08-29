@@ -1,0 +1,42 @@
+[
+  {
+    "id": "ses_fb3393f6affei4NEAUsj17fuPT",
+    "title": "Hello! This is a deterministic mock response recorded for the FF-pane fixture.",
+    "updated": 1787994600279,
+    "created": 1787994488981,
+    "projectId": "global",
+    "directory": "C:\\Users\\REDACTED\\AppData\\Local\\Temp\\ffpane-oc\\proj"
+  },
+  {
+    "id": "ses_fb337e5f4ffeEJQBtAwHWnEqEd",
+    "title": "New session - 2026-08-29T09:09:37.420Z",
+    "updated": 1787994578641,
+    "created": 1787994577420,
+    "projectId": "global",
+    "directory": "C:\\Users\\REDACTED\\AppData\\Local\\Temp\\ffpane-oc\\proj"
+  },
+  {
+    "id": "ses_fb3381f14ffeXSALQUOe6Jximm",
+    "title": "New session - 2026-08-29T09:09:22.795Z",
+    "updated": 1787994563977,
+    "created": 1787994562795,
+    "projectId": "global",
+    "directory": "C:\\Users\\REDACTED\\AppData\\Local\\Temp\\ffpane-oc\\proj"
+  },
+  {
+    "id": "ses_fb3388346ffeCjFHynfHmVbhqY",
+    "title": "New session - 2026-08-29T09:08:57.145Z",
+    "updated": 1787994538111,
+    "created": 1787994537145,
+    "projectId": "global",
+    "directory": "C:\\Users\\REDACTED\\AppData\\Local\\Temp\\ffpane-oc\\proj"
+  },
+  {
+    "id": "ses_fb338ebc0ffe0iY3LRNscwFfY5",
+    "title": "New session - 2026-08-29T09:08:30.399Z",
+    "updated": 1787994511367,
+    "created": 1787994510400,
+    "projectId": "global",
+    "directory": "C:\\Users\\REDACTED\\AppData\\Local\\Temp\\ffpane-oc\\proj"
+  }
+]

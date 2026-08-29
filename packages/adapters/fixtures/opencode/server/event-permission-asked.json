@@ -1,0 +1,23 @@
+{
+  "id": "evt_04ccad30200239lAxcIH0Q8OQC",
+  "type": "permission.asked",
+  "properties": {
+    "id": "per_04ccad3020013jbMcwNJsjxC9Q",
+    "sessionID": "ses_fb3353344ffeNaOCRu612L62J1",
+    "permission": "edit",
+    "patterns": [
+      "Users\\REDACTED\\AppData\\Local\\Temp\\ffpane-oc\\proj\\hello.txt"
+    ],
+    "metadata": {
+      "filepath": "C:\\Users\\REDACTED\\AppData\\Local\\Temp\\ffpane-oc\\proj\\hello.txt",
+      "diff": "Index: C:\\Users\\REDACTED\\AppData\\Local\\Temp\\ffpane-oc\\proj\\hello.txt\n===================================================================\n--- C:\\Users\\REDACTED\\AppData\\Local\\Temp\\ffpane-oc\\proj\\hello.txt\n+++ C:\\Users\\REDACTED\\AppData\\Local\\Temp\\ffpane-oc\\proj\\hello.txt\n@@ -0,0 +1,1 @@\n+hello from FF-pane opencode probe\n"
+    },
+    "always": [
+      "*"
+    ],
+    "tool": {
+      "messageID": "msg_04ccacf32001x47qf7O6qQa9Gw",
+      "callID": "call_mock_02kz057r"
+    }
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "info": {
+    "parentID": "msg_04ccaccdc001yW8YkZRzQkrJzQ",
+    "role": "assistant",
+    "mode": "build",
+    "agent": "build",
+    "path": {
+      "cwd": "C:\\Users\\REDACTED\\AppData\\Local\\Temp\\ffpane-oc\\proj",
+      "root": "/"
+    },
+    "cost": 0,
+    "tokens": {
+      "total": 132,
+      "input": 120,
+      "output": 12,
+      "reasoning": 0,
+      "cache": {
+        "write": 0,
+        "read": 0
+      }
+    },
+    "modelID": "mock-model",
+    "providerID": "mockai",
+    "time": {
+      "created": 1787994754290,
+      "completed": 1787994754834
+    },
+    "finish": "stop",
+    "id": "msg_04ccaccf20019VFrzp4SPnScMg",
+    "sessionID": "ses_fb3353344ffeNaOCRu612L62J1"
+  },
+  "parts": [
+    {
+      "type": "step-start",
+      "id": "prt_04ccacefe001eX3UCx4KM7Q3Lm",
+      "sessionID": "ses_fb3353344ffeNaOCRu612L62J1",
+      "messageID": "msg_04ccaccf20019VFrzp4SPnScMg"
+    },
+    {
+      "type": "text",
+      "text": "Hello! This is a deterministic mock response recorded for the FF-pane fixture.",
+      "time": {
+        "start": 1787994754817,
+        "end": 1787994754823
+      },
+      "id": "prt_04ccacf01001hIyX2OLhVCF5JS",
+      "sessionID": "ses_fb3353344ffeNaOCRu612L62J1",
+      "messageID": "msg_04ccaccf20019VFrzp4SPnScMg"
+    },
+    {
+      "reason": "stop",
+      "type": "step-finish",
+      "tokens": {
+        "total": 132,
+        "input": 120,
+        "output": 12,
+        "reasoning": 0,
+        "cache": {
+          "write": 0,
+          "read": 0
+        }
+      },
+      "cost": 0,
+      "id": "prt_04ccacf0d001kmXEKh5OYPLqro",
+      "sessionID": "ses_fb3353344ffeNaOCRu612L62J1",
+      "messageID": "msg_04ccaccf20019VFrzp4SPnScMg"
+    }
+  ]
+}

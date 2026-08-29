@@ -1,0 +1,23 @@
+{
+  "id": "ses_fb3353344ffeNaOCRu612L62J1",
+  "slug": "cosmic-circuit",
+  "projectID": "global",
+  "directory": "C:\\Users\\REDACTED\\AppData\\Local\\Temp\\ffpane-oc\\proj",
+  "path": "Users/REDACTED/AppData/Local/Temp/ffpane-oc/proj",
+  "cost": 0,
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "reasoning": 0,
+    "cache": {
+      "read": 0,
+      "write": 0
+    }
+  },
+  "title": "ffpane server-mode probe",
+  "version": "1.18.25",
+  "time": {
+    "created": 1787994754235,
+    "updated": 1787994754235
+  }
+}

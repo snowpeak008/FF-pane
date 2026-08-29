@@ -1,0 +1,375 @@
+[
+  {
+    "info": {
+      "id": "msg_04ccaccdc001yW8YkZRzQkrJzQ",
+      "sessionID": "ses_fb3353344ffeNaOCRu612L62J1",
+      "role": "user",
+      "time": {
+        "created": 1787994754268
+      },
+      "summary": {
+        "diffs": []
+      },
+      "agent": "build",
+      "model": {
+        "providerID": "mockai",
+        "modelID": "mock-model"
+      }
+    },
+    "parts": [
+      {
+        "id": "prt_04ccacce4001ye5ubhiBq04vw5",
+        "sessionID": "ses_fb3353344ffeNaOCRu612L62J1",
+        "messageID": "msg_04ccaccdc001yW8YkZRzQkrJzQ",
+        "type": "text",
+        "text": "Say hello. (server-mode probe)"
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_04ccaccf20019VFrzp4SPnScMg",
+      "sessionID": "ses_fb3353344ffeNaOCRu612L62J1",
+      "role": "assistant",
+      "time": {
+        "created": 1787994754290,
+        "completed": 1787994754834
+      },
+      "parentID": "msg_04ccaccdc001yW8YkZRzQkrJzQ",
+      "modelID": "mock-model",
+      "providerID": "mockai",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "C:\\Users\\REDACTED\\AppData\\Local\\Temp\\ffpane-oc\\proj",
+        "root": "/"
+      },
+      "cost": 0,
+      "tokens": {
+        "total": 132,
+        "input": 120,
+        "output": 12,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "finish": "stop"
+    },
+    "parts": [
+      {
+        "id": "prt_04ccacefe001eX3UCx4KM7Q3Lm",
+        "sessionID": "ses_fb3353344ffeNaOCRu612L62J1",
+        "messageID": "msg_04ccaccf20019VFrzp4SPnScMg",
+        "type": "step-start"
+      },
+      {
+        "id": "prt_04ccacf01001hIyX2OLhVCF5JS",
+        "sessionID": "ses_fb3353344ffeNaOCRu612L62J1",
+        "messageID": "msg_04ccaccf20019VFrzp4SPnScMg",
+        "type": "text",
+        "text": "Hello! This is a deterministic mock response recorded for the FF-pane fixture.",
+        "time": {
+          "start": 1787994754817,
+          "end": 1787994754823
+        }
+      },
+      {
+        "id": "prt_04ccacf0d001kmXEKh5OYPLqro",
+        "sessionID": "ses_fb3353344ffeNaOCRu612L62J1",
+        "messageID": "msg_04ccaccf20019VFrzp4SPnScMg",
+        "type": "step-finish",
+        "reason": "stop",
+        "cost": 0,
+        "tokens": {
+          "total": 132,
+          "input": 120,
+          "output": 12,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_04ccacf20001SLA2cLJXyD3HDx",
+      "sessionID": "ses_fb3353344ffeNaOCRu612L62J1",
+      "role": "user",
+      "time": {
+        "created": 1787994754848
+      },
+      "summary": {
+        "diffs": []
+      },
+      "agent": "build",
+      "model": {
+        "providerID": "mockai",
+        "modelID": "mock-model"
+      }
+    },
+    "parts": [
+      {
+        "id": "prt_04ccacf21001HOaHPRcHt0MaGw",
+        "sessionID": "ses_fb3353344ffeNaOCRu612L62J1",
+        "messageID": "msg_04ccacf20001SLA2cLJXyD3HDx",
+        "type": "text",
+        "text": "Create the file. MOCK_WRITE (server-mode)"
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_04ccacf32001x47qf7O6qQa9Gw",
+      "sessionID": "ses_fb3353344ffeNaOCRu612L62J1",
+      "role": "assistant",
+      "time": {
+        "created": 1787994754866,
+        "completed": 1787994756020
+      },
+      "parentID": "msg_04ccacf20001SLA2cLJXyD3HDx",
+      "modelID": "mock-model",
+      "providerID": "mockai",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "C:\\Users\\REDACTED\\AppData\\Local\\Temp\\ffpane-oc\\proj",
+        "root": "/"
+      },
+      "cost": 0,
+      "tokens": {
+        "total": 180,
+        "input": 150,
+        "output": 30,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "finish": "tool-calls"
+    },
+    "parts": [
+      {
+        "id": "prt_04ccad2ef001bU4DFKPiYyfsBn",
+        "sessionID": "ses_fb3353344ffeNaOCRu612L62J1",
+        "messageID": "msg_04ccacf32001x47qf7O6qQa9Gw",
+        "type": "step-start"
+      },
+      {
+        "id": "prt_04ccad2f30010ZSZCjGwbgsHNi",
+        "sessionID": "ses_fb3353344ffeNaOCRu612L62J1",
+        "messageID": "msg_04ccacf32001x47qf7O6qQa9Gw",
+        "type": "tool",
+        "callID": "call_mock_02kz057r",
+        "tool": "write",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "hello.txt",
+            "content": "hello from FF-pane opencode probe\n"
+          },
+          "output": "Wrote file successfully.",
+          "title": "Users\\REDACTED\\AppData\\Local\\Temp\\ffpane-oc\\proj\\hello.txt",
+          "metadata": {
+            "diagnostics": {},
+            "filepath": "C:\\Users\\REDACTED\\AppData\\Local\\Temp\\ffpane-oc\\proj\\hello.txt",
+            "exists": false,
+            "truncated": false
+          },
+          "time": {
+            "start": 1787994755836,
+            "end": 1787994756015
+          }
+        }
+      },
+      {
+        "id": "prt_04ccad3b1001pDmfGfSsjjh7Ba",
+        "sessionID": "ses_fb3353344ffeNaOCRu612L62J1",
+        "messageID": "msg_04ccacf32001x47qf7O6qQa9Gw",
+        "type": "step-finish",
+        "reason": "tool-calls",
+        "cost": 0,
+        "tokens": {
+          "total": 180,
+          "input": 150,
+          "output": 30,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_04ccad3b7001lRG0E2a3cDzp2m",
+      "sessionID": "ses_fb3353344ffeNaOCRu612L62J1",
+      "role": "assistant",
+      "time": {
+        "created": 1787994756023,
+        "completed": 1787994756188
+      },
+      "parentID": "msg_04ccacf20001SLA2cLJXyD3HDx",
+      "modelID": "mock-model",
+      "providerID": "mockai",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "C:\\Users\\REDACTED\\AppData\\Local\\Temp\\ffpane-oc\\proj",
+        "root": "/"
+      },
+      "cost": 0,
+      "tokens": {
+        "total": 128,
+        "input": 120,
+        "output": 8,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "finish": "stop"
+    },
+    "parts": [
+      {
+        "id": "prt_04ccad453001pM0gvWGFvLokKW",
+        "sessionID": "ses_fb3353344ffeNaOCRu612L62J1",
+        "messageID": "msg_04ccad3b7001lRG0E2a3cDzp2m",
+        "type": "step-start"
+      },
+      {
+        "id": "prt_04ccad455001eeZffduwihUuaU",
+        "sessionID": "ses_fb3353344ffeNaOCRu612L62J1",
+        "messageID": "msg_04ccad3b7001lRG0E2a3cDzp2m",
+        "type": "text",
+        "text": "Done. The requested step has been completed successfully.",
+        "time": {
+          "start": 1787994756181,
+          "end": 1787994756184
+        }
+      },
+      {
+        "id": "prt_04ccad459001J3OIVXmHxbfDpQ",
+        "sessionID": "ses_fb3353344ffeNaOCRu612L62J1",
+        "messageID": "msg_04ccad3b7001lRG0E2a3cDzp2m",
+        "type": "step-finish",
+        "reason": "stop",
+        "cost": 0,
+        "tokens": {
+          "total": 128,
+          "input": 120,
+          "output": 8,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_04ccad432001Sna4fwENFFCKDO",
+      "sessionID": "ses_fb3353344ffeNaOCRu612L62J1",
+      "role": "user",
+      "time": {
+        "created": 1787994756146
+      },
+      "summary": {
+        "diffs": []
+      },
+      "agent": "build",
+      "model": {
+        "providerID": "mockai",
+        "modelID": "mock-model"
+      }
+    },
+    "parts": [
+      {
+        "id": "prt_04ccad433001tMmmshlUyW9Oiq",
+        "sessionID": "ses_fb3353344ffeNaOCRu612L62J1",
+        "messageID": "msg_04ccad432001Sna4fwENFFCKDO",
+        "type": "text",
+        "text": "Stream slowly please. MOCK_SLOW"
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_04ccad45f001wKFnTfaDDINWZy",
+      "sessionID": "ses_fb3353344ffeNaOCRu612L62J1",
+      "role": "assistant",
+      "time": {
+        "created": 1787994756191,
+        "completed": 1787994756224
+      },
+      "parentID": "msg_04ccad432001Sna4fwENFFCKDO",
+      "modelID": "mock-model",
+      "providerID": "mockai",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "C:\\Users\\REDACTED\\AppData\\Local\\Temp\\ffpane-oc\\proj",
+        "root": "/"
+      },
+      "cost": 0,
+      "tokens": {
+        "total": 128,
+        "input": 120,
+        "output": 8,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "finish": "stop"
+    },
+    "parts": [
+      {
+        "id": "prt_04ccad474001tN2or3qx13r0B6",
+        "sessionID": "ses_fb3353344ffeNaOCRu612L62J1",
+        "messageID": "msg_04ccad45f001wKFnTfaDDINWZy",
+        "type": "step-start"
+      },
+      {
+        "id": "prt_04ccad476001bRczxA5dTJDmoE",
+        "sessionID": "ses_fb3353344ffeNaOCRu612L62J1",
+        "messageID": "msg_04ccad45f001wKFnTfaDDINWZy",
+        "type": "text",
+        "text": "Done. The requested step has been completed successfully.",
+        "time": {
+          "start": 1787994756214,
+          "end": 1787994756218
+        }
+      },
+      {
+        "id": "prt_04ccad47b0016c6883w2GbtGsX",
+        "sessionID": "ses_fb3353344ffeNaOCRu612L62J1",
+        "messageID": "msg_04ccad45f001wKFnTfaDDINWZy",
+        "type": "step-finish",
+        "reason": "stop",
+        "cost": 0,
+        "tokens": {
+          "total": 128,
+          "input": 120,
+          "output": 8,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      }
+    ]
+  }
+]
