@@ -75,6 +75,9 @@ importers:
 
   packages/adapters:
     dependencies:
+      '@ff-pane/core':
+        specifier: workspace:*
+        version: link:../core
       '@ff-pane/shared':
         specifier: workspace:*
         version: link:../shared
