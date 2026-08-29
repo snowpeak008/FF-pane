@@ -21,3 +21,6 @@ allowBuilds:
   electron: true
   better-sqlite3: true
   esbuild: true
+  # electron-builder 依赖链（T0.5）：Squirrel 安装器的 vendor 二进制就位脚本。
+  # 我们目标是 NSIS，但放行以保证依赖树完整、避免打包工具静默缺失。
+  electron-winstaller: true
