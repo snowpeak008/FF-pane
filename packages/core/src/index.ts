@@ -16,4 +16,10 @@ export * from "./permission/index.js";
 
 /** Plan 状态机（W1.4a）：迁移表、迁移函数、版本演进、typed error。 */
 export * from "./plan/index.js";
+
+/** Agent Profile 校验（W1.6）：草稿校验、预设 ⊆ 角色默认信封的合规检查。 */
+export * from "./profile/index.js";
+
+/** Provider 连接探测（W1.5c）：连接测试 + /models 拉取，纯网络逻辑、零密钥存取。 */
+export * from "./provider-probe/index.js";
 export * from "./task/index.js";

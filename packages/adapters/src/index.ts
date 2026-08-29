@@ -1,4 +1,6 @@
 /** Agent Runtime 适配器（codex / claude / gemini / opencode / generic-exec，T2.x 落地）。 */
+export * from "./auth-probe/index.js";
+
 export const PACKAGE_NAME = "@ff-pane/adapters";
 
 /**
