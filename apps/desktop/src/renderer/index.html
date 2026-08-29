@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- CSP 由主进程经 onHeadersReceived 统一注入（src/main/csp.ts），开发/生产双模式生效 -->
+    <title>FF-pane</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

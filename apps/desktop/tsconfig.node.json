@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "module": "Preserve",
+    "moduleResolution": "Bundler",
+    "types": ["node"]
+  },
+  "include": [
+    "src/main",
+    "src/preload",
+    "src/shared-ipc",
+    "tests",
+    "electron.vite.config.ts",
+    "vitest.config.ts"
+  ]
+}

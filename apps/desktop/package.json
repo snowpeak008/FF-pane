@@ -1,15 +1,29 @@
 {
   "name": "@ff-pane/desktop",
   "version": "0.1.0",
+  "productName": "FF-pane",
   "private": true,
   "type": "module",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    }
-  },
+  "main": "./out/main/index.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "dev": "electron-vite dev",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit --composite false && tsc -p tsconfig.web.json --noEmit --composite false",
+    "build": "pnpm run typecheck && electron-vite build",
+    "smoke": "electron-vite build && electron . --smoke"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.4.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "@vitejs/plugin-react": "^5.2.0",
+    "electron": "^44.0.0",
+    "electron-vite": "^5.0.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "vite": "^7.3.6"
   }
 }

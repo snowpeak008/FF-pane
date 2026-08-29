@@ -1,0 +1,121 @@
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { app, BrowserWindow, dialog, ipcMain, session, shell } from "electron";
+import { registerInvokeHandlers } from "../shared-ipc/server";
+import { installCsp } from "./csp";
+import { startSmokeMode } from "./smoke";
+import { runSqliteCheck } from "./sqlite-check";
+import { loadWindowState, trackWindowState } from "./window-state";
+
+const moduleDir = dirname(fileURLToPath(import.meta.url));
+const isSmokeMode = process.argv.includes("--smoke");
+/** electron-vite dev 会注入渲染层 dev server 地址；生产/冒烟模式下为空。 */
+const devRendererUrl = process.env["ELECTRON_RENDERER_URL"];
+
+function createMainWindow(options: { readonly hidden: boolean }): BrowserWindow {
+  const state = loadWindowState();
+  const window = new BrowserWindow({
+    title: "FF-pane",
+    width: state.width,
+    height: state.height,
+    ...(state.x !== undefined && state.y !== undefined ? { x: state.x, y: state.y } : {}),
+    show: false,
+    webPreferences: {
+      preload: join(moduleDir, "../preload/index.cjs"),
+      // 安全基线（技术选型 §2 / §3 硬性规则）
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+    },
+  });
+
+  trackWindowState(window);
+  window.on("ready-to-show", () => {
+    if (!options.hidden) {
+      if (state.maximized) {
+        window.maximize();
+      }
+      window.show();
+    }
+  });
+
+  // 安全基线：不开新窗口；http(s) 外链交给系统浏览器
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith("https:") || url.startsWith("http:")) {
+      void shell.openExternal(url);
+    }
+    return { action: "deny" };
+  });
+  // 安全基线：禁止页面导航离开应用（开发模式放行 dev server 自身）
+  window.webContents.on("will-navigate", (event, url) => {
+    const allowed = devRendererUrl !== undefined && url.startsWith(devRendererUrl);
+    if (!allowed) {
+      event.preventDefault();
+    }
+  });
+
+  if (devRendererUrl !== undefined && !isSmokeMode) {
+    void window.loadURL(devRendererUrl);
+  } else {
+    void window.loadFile(
+      join(moduleDir, "../renderer/index.html"),
+      isSmokeMode ? { query: { smoke: "1" } } : undefined,
+    );
+  }
+  return window;
+}
+
+function registerAppHandlers(): void {
+  registerInvokeHandlers(ipcMain, {
+    "app:get-info": () => ({
+      name: "FF-pane",
+      version: app.getVersion(),
+      runtime: {
+        electron: process.versions["electron"] ?? "unknown",
+        chrome: process.versions["chrome"] ?? "unknown",
+        node: process.versions.node,
+      },
+    }),
+    "app:ping": (request) => ({
+      reply: "pong" as const,
+      echoed: request.message,
+      repliedAt: Date.now(),
+    }),
+    "diagnostics:check-sqlite": () => runSqliteCheck(),
+  });
+}
+
+function bootstrap(): void {
+  installCsp(session.defaultSession, devRendererUrl !== undefined);
+  registerAppHandlers();
+
+  if (isSmokeMode) {
+    startSmokeMode(() => createMainWindow({ hidden: true }));
+    return;
+  }
+
+  // 正常启动：先做 R1 自检；失败给出明确的日志与弹窗，但不阻止窗口打开
+  try {
+    const report = runSqliteCheck();
+    console.log(`[main] better-sqlite3 自检通过（SQLite ${report.sqliteVersion}）`);
+  } catch (thrown) {
+    const message = thrown instanceof Error ? thrown.message : String(thrown);
+    console.error(`[main] ${message}`);
+    dialog.showErrorBox("FF-pane：SQLite 自检失败", message);
+  }
+  createMainWindow({ hidden: false });
+}
+
+app
+  .whenReady()
+  .then(bootstrap)
+  .catch((thrown: unknown) => {
+    console.error(`[main] 启动失败：${String(thrown)}`);
+    app.exit(1);
+  });
+
+app.on("window-all-closed", () => {
+  // 单窗口应用：所有平台关窗即退出（macOS 常驻托盘习惯留待后续任务决策）
+  app.quit();
+});

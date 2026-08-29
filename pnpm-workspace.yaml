@@ -8,3 +8,16 @@ packages:
 # 解析与打包的兼容性问题。代价是放弃 pnpm 的严格依赖隔离，对单人维护项目可接受。
 # 注：pnpm 11 起该设置只能写在本文件（.npmrc 仅保留 auth/registry 配置）。
 nodeLinker: hoisted
+
+# pnpm 11 默认拒绝执行依赖的构建脚本（strictDepBuilds）。
+# 格式为「包名: true/false」映射（pnpm 11 实测，数组写法无效且会被 pnpm 改写）。
+# 放行说明（T0.2 实测）：
+#   better-sqlite3  —— 13.x 以 Node-API prebuilds 分发、无 install 脚本，但 pnpm 因其
+#                      含 binding.gyp 仍要求显式放行（不放行则 install 直接报错）
+#   esbuild         —— postinstall 做平台二进制就位检查（vite 工具链依赖）
+#   electron        —— 44.x 已无 install 脚本（首次 require 时懒下载二进制），
+#                      条目为防御性保留，防后续版本恢复安装脚本时 CI 静默失败
+allowBuilds:
+  electron: true
+  better-sqlite3: true
+  esbuild: true
