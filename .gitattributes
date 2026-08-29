@@ -1,0 +1,14 @@
+# 统一 LF 行尾，避免 Windows autocrlf 造成的跨平台差异与 diff 噪声
+* text=auto eol=lf
+
+# Windows 专用脚本保留 CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# 二进制文件不做转换
+*.png binary
+*.jpg binary
+*.ico binary
+*.pdf binary
+*.sqlite binary
