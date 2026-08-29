@@ -1,0 +1,88 @@
+/** Gemini CLI 适配器（W2.5）barrel。 */
+
+export {
+  createGeminiCliAdapter,
+  GEMINI_CLI_CAPABILITIES,
+  type GeminiCliAdapterOptions,
+} from "./adapter.js";
+export {
+  buildGeminiCommand,
+  GEMINI_APPROVAL_MODES,
+  GEMINI_DEFAULT_COMMAND,
+  GEMINI_PROMPT_ARG_MAX_CHARS,
+  type GeminiApprovalMode,
+  GeminiCommandError,
+  type GeminiCommandInput,
+  type GeminiCommandPlan,
+} from "./command.js";
+export {
+  createGeminiEventMapper,
+  GEMINI_RAW_NOTE_STDERR,
+  GEMINI_RAW_NOTE_UNMAPPED,
+  type GeminiEventMapper,
+  type GeminiEventMapperOptions,
+  type GeminiTurnOutcome,
+} from "./events.js";
+export {
+  describeGeminiExitCode,
+  GEMINI_EXIT_AUTH_FAILURE,
+  GEMINI_EXIT_CANCELLED,
+  GEMINI_EXIT_CODE_MEANINGS,
+  GEMINI_EXIT_CONFIG_ERROR,
+  GEMINI_EXIT_GENERAL_ERROR,
+  GEMINI_EXIT_INPUT_ERROR,
+  GEMINI_EXIT_MAX_TURNS,
+  GEMINI_EXIT_OK,
+  GEMINI_EXIT_SANDBOX_ERROR,
+  GEMINI_EXIT_TOOL_FATAL,
+  GEMINI_EXIT_UNTRUSTED_WORKSPACE,
+} from "./exit-codes.js";
+export {
+  GEMINI_CLI_RUNTIME,
+  GEMINI_DENIAL_ERROR_TYPES,
+  GEMINI_DENIAL_MESSAGE_PATTERN,
+  GEMINI_EDIT_TOOL_NAMES,
+  GEMINI_NETWORK_TOOL_NAMES,
+  GEMINI_SHELL_TOOL_NAME,
+  GEMINI_STREAM_EVENT_TYPES,
+  type GeminiErrorEvent,
+  type GeminiInitEvent,
+  type GeminiMessageEvent,
+  type GeminiResultEvent,
+  type GeminiStreamEvent,
+  type GeminiStreamEventType,
+  type GeminiStreamStats,
+  type GeminiToolResultEvent,
+  type GeminiToolUseEvent,
+  isGeminiEditTool,
+  isGeminiPolicyDenial,
+  isGeminiStreamEventType,
+  parseGeminiStreamEvent,
+} from "./native.js";
+export {
+  buildGeminiPolicyRules,
+  buildGeminiPolicyToml,
+  evaluateGeminiPolicyRules,
+  GEMINI_POLICY_DECISIONS,
+  GEMINI_POLICY_OVERRIDE_PRIORITY,
+  GEMINI_POLICY_PATTERN_MAX_LENGTH,
+  GEMINI_YOLO_ALLOW_ALL_PRIORITY,
+  type GeminiPolicyDecision,
+  GeminiPolicyError,
+  type GeminiPolicyInput,
+  type GeminiPolicyRenderOptions,
+  type GeminiPolicyRule,
+  type GeminiPolicyVerdict,
+  type GeminiToolCall,
+  isGeminiSafePolicyRegExp,
+  renderGeminiPolicyToml,
+  stringifyGeminiToolArgs,
+} from "./policy.js";
+export {
+  GEMINI_POLICY_DIR_PREFIX,
+  GEMINI_POLICY_FILE_NAME,
+  type GeminiPolicyFile,
+  GeminiPolicyFileError,
+  type GeminiPolicyFileOptions,
+  writeGeminiPolicyFile,
+} from "./policy-file.js";
