@@ -1,0 +1,9 @@
+{"type":"init","timestamp":"2026-08-29T09:30:00.000Z","session_id":"11111111-2222-4333-8444-555555555555","model":"auto"}
+{"type":"message","timestamp":"2026-08-29T09:30:00.010Z","role":"user","content":"Create a file named hello.txt containing exactly 'hello'. Then run 'node -v' and briefly say what you did."}
+{"type":"message","timestamp":"2026-08-29T09:30:03.100Z","role":"assistant","content":"I'll create the file first, then check the Node.js version.","delta":true}
+{"type":"tool_use","timestamp":"2026-08-29T09:30:03.500Z","tool_name":"write_file","tool_id":"write_file-1787011803500-1","parameters":{"file_path":"C:\\Users\\USER\\AppData\\Local\\Temp\\ffpane-gemini-probe\\hello.txt","content":"hello"}}
+{"type":"tool_result","timestamp":"2026-08-29T09:30:03.700Z","tool_id":"write_file-1787011803500-1","status":"success","output":"Index: hello.txt\n===================================================================\n--- hello.txt\tOriginal\n+++ hello.txt\tModified\n@@ -0,0 +1,1 @@\n+hello\n\\ No newline at end of file\n"}
+{"type":"tool_use","timestamp":"2026-08-29T09:30:05.200Z","tool_name":"run_shell_command","tool_id":"run_shell_command-1787011805200-2","parameters":{"command":"node -v","description":"Check the installed Node.js version","is_background":false}}
+{"type":"tool_result","timestamp":"2026-08-29T09:30:05.900Z","tool_id":"run_shell_command-1787011805200-2","status":"success","output":"v24.4.0"}
+{"type":"message","timestamp":"2026-08-29T09:30:07.400Z","role":"assistant","content":"Done. I created hello.txt containing \"hello\" and ran node -v: the installed version is v24.4.0.","delta":true}
+{"type":"result","timestamp":"2026-08-29T09:30:07.600Z","status":"success","stats":{"total_tokens":8512,"input_tokens":7810,"output_tokens":702,"cached":0,"input":7810,"duration_ms":7600,"tool_calls":2,"models":{"gemini-3.1-pro-preview":{"total_tokens":8512,"input_tokens":7810,"output_tokens":702,"cached":0,"input":7810}}}}

@@ -1,0 +1,2 @@
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Create a file p.txt with content x using the Write tool. Then reply with one word: done"}]}}
+{"type":"control_response","response":{"subtype":"success","request_id":"ee857bcb-a95f-485f-84d5-dbb8cf2db2a6","response":{"behavior":"allow","updatedInput":{"file_path":"C:\\Users\\USER\\AppData\\Local\\Temp\\ffpane-cc-rec\\c\\p.txt","content":"x"}}}}

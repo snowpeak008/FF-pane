@@ -1,0 +1,2 @@
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Run this exact bash command: sleep 60 && echo finished. Then reply with one word: done"}]}}
+{"type":"control_request","request_id":"ffpane-cancel-1","request":{"subtype":"interrupt"}}

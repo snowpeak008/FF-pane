@@ -1,0 +1,58 @@
+{
+  "session_id": "33333333-4444-4555-8666-777777777777",
+  "response": "Done. I created hello.txt containing \"hello\" and ran node -v: the installed version is v24.4.0.",
+  "stats": {
+    "models": {
+      "gemini-3.1-pro-preview": {
+        "api": {
+          "totalRequests": 3,
+          "totalErrors": 0,
+          "totalLatencyMs": 5210,
+          "errorsByType": {}
+        },
+        "tokens": {
+          "input": 7810,
+          "prompt": 7810,
+          "candidates": 702,
+          "total": 8512,
+          "cached": 0,
+          "thoughts": 210,
+          "tool": 96
+        },
+        "roles": {}
+      }
+    },
+    "tools": {
+      "totalCalls": 2,
+      "totalSuccess": 2,
+      "totalFail": 0,
+      "totalDurationMs": 900,
+      "totalDecisions": {
+        "accept": 0,
+        "reject": 0,
+        "modify": 0,
+        "auto_accept": 2
+      },
+      "byName": {
+        "write_file": {
+          "count": 1,
+          "success": 1,
+          "fail": 0,
+          "durationMs": 200,
+          "decisions": { "accept": 0, "reject": 0, "modify": 0, "auto_accept": 1 }
+        },
+        "run_shell_command": {
+          "count": 1,
+          "success": 1,
+          "fail": 0,
+          "durationMs": 700,
+          "decisions": { "accept": 0, "reject": 0, "modify": 0, "auto_accept": 1 }
+        }
+      }
+    },
+    "files": {
+      "totalLinesAdded": 1,
+      "totalLinesRemoved": 0
+    }
+  }
+}
