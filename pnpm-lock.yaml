@@ -66,13 +66,28 @@ importers:
 
   packages/adapters: {}
 
-  packages/core: {}
+  packages/core:
+    dependencies:
+      '@ff-pane/shared':
+        specifier: workspace:*
+        version: link:../shared
 
   packages/rag: {}
 
   packages/shared: {}
 
-  packages/storage: {}
+  packages/storage:
+    dependencies:
+      '@ff-pane/shared':
+        specifier: workspace:*
+        version: link:../shared
+      better-sqlite3:
+        specifier: ^13.0.3
+        version: 13.0.3
+    devDependencies:
+      '@types/better-sqlite3':
+        specifier: ^9.6.0
+        version: 9.6.0
 
 packages:
 

@@ -11,5 +11,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@ff-pane/shared": "workspace:*"
   }
 }
