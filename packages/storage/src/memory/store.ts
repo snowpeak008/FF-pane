@@ -184,6 +184,35 @@ export async function updateEntryStatus(
   return { ok: true, value: updated };
 }
 
+/**
+ * 删除条目：清理全部条目目录下同 id 的所有副本（含崩溃残留的旧址副本），
+ * 与 saveEntry 的自愈语义对称。设计文档 §8.1：用户拒绝候选 → 直接删除。
+ * 返回是否确实删除了至少一个文件（false = 条目本就不存在，幂等）。
+ * 调用方在本函数成功后应调用 syncEntryDeleted（W1.3b）同步索引。
+ * （集成期补齐：W1.3b 交付时发现 W1.2c 缺失本 API，由主管理员补写。）
+ */
+export async function deleteEntry(layout: ProjectLayout, id: MemoryEntryId): Promise<boolean> {
+  if (!isFileNameSafeEntryId(id)) {
+    throw new MemoryEncodeError(
+      `记忆条目 id 无法用作文件名（不允许控制字符、<>:"/\\|?* 与前导点）: ${id}`,
+    );
+  }
+  let removed = false;
+  for (const dir of allEntryDirs(layout)) {
+    const filePath = join(dir, entryFileName(id));
+    try {
+      await rm(filePath);
+      removed = true;
+    } catch (error) {
+      if (errnoCodeOf(error) === "ENOENT") {
+        continue;
+      }
+      throw new StorageIoError(filePath, "删除记忆条目失败", { cause: error });
+    }
+  }
+  return removed;
+}
+
 /** listEntries 的过滤条件（state 是快照不是条目，故类别取 MemoryDirCategory）。 */
 export interface ListEntriesFilter {
   readonly category?: MemoryDirCategory;

@@ -12,12 +12,14 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { FrontmatterDocument, ProjectLayout } from "../src/index.js";
 import {
   decodeMemoryEntryFile,
+  deleteEntry,
   encodeFrontmatterDocument,
   encodeMemoryEntryFile,
   initProjectLayout,
   listEntries,
   loadEntry,
   loadStateSnapshot,
+  MemoryEncodeError,
   MemoryStateCategoryError,
   parseFrontmatterDocument,
   saveEntry,
@@ -453,5 +455,43 @@ describe("state 快照（单文件覆盖更新）", () => {
     await writeFile(layout.memoryStateFile, "手写的纯 Markdown 状态\n", "utf8");
     const corrupt = expectErr(await loadStateSnapshot(layout));
     expect(corrupt.code).toBe("frontmatter-syntax");
+  });
+});
+
+describe("deleteEntry（§8.1 用户拒绝候选 → 直接删除；集成期补齐）", () => {
+  it("删除存在的条目：返回 true，loadEntry 转 not-found，列表不再含该条", async () => {
+    await saveEntry(layout, makeEntry({ status: "candidate" }));
+    expect(await deleteEntry(layout, baseEntry.id)).toBe(true);
+
+    const gone = expectErr(await loadEntry(layout, baseEntry.id));
+    expect(gone.code).toBe("entry-not-found");
+    const { entries } = await listEntries(layout);
+    expect(entries).toHaveLength(0);
+  });
+
+  it("删除不存在的条目：返回 false（幂等），不抛错", async () => {
+    expect(await deleteEntry(layout, "mem-none" as MemoryEntryId)).toBe(false);
+  });
+
+  it("清理全部目录下同 id 的崩溃残留副本（与 saveEntry 自愈语义对称）", async () => {
+    // 人为制造双址残留：candidates/ 与 decisions/ 各一份
+    const inCandidates = join(layout.memoryCandidatesDir, `${baseEntry.id}.md`);
+    const inDecisions = join(layout.memoryCategoryDirs.decision, `${baseEntry.id}.md`);
+    await writeFile(
+      inCandidates,
+      encodeMemoryEntryFile(makeEntry({ status: "candidate" })),
+      "utf8",
+    );
+    await writeFile(inDecisions, encodeMemoryEntryFile(makeEntry({ status: "active" })), "utf8");
+
+    expect(await deleteEntry(layout, baseEntry.id)).toBe(true);
+    expect(await readdir(layout.memoryCandidatesDir)).toHaveLength(0);
+    expect(await readdir(layout.memoryCategoryDirs.decision)).toHaveLength(0);
+  });
+
+  it("非法文件名 id 抛 MemoryEncodeError（与 saveEntry 同规）", async () => {
+    await expect(deleteEntry(layout, "../逃逸" as MemoryEntryId)).rejects.toBeInstanceOf(
+      MemoryEncodeError,
+    );
   });
 });

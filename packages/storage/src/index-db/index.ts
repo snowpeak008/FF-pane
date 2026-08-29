@@ -1,7 +1,9 @@
 /**
- * SQLite 索引基座(W1.3a)barrel。
+ * SQLite 索引基座(W1.3a)+ 记忆同步钩子与业务检索 API(W1.3b)barrel。
  * 索引永远是派生数据(设计文档 §8.4):真实源为 Markdown,删库即可由
- * rebuildIndex 全量重建。W1.3b 的记忆同步钩子与业务检索 API 在此之上搭建。
+ * rebuildIndex / rebuildIndexFromStore 全量重建。
+ * 宿主与 UI 一律用 W1.3b 的 searchMemory 与 syncEntry* 钩子,
+ * W1.3a 原语只在需要绕过业务策略时直用。
  */
 
 export {
@@ -20,6 +22,23 @@ export {
   searchMemoryIndex,
   upsertMemoryEntry,
 } from "./memory-index.js";
+export {
+  MEMORY_FTS_MIN_QUERY_CODE_POINTS,
+  type MemoryHydrateIssue,
+  type MemoryMatchKind,
+  type MemorySearchBaseOptions,
+  type MemorySearchHit,
+  type MemorySearchOptions,
+  type MemorySearchResult,
+  searchMemory,
+} from "./memory-search.js";
+export {
+  type RebuildIndexFromStoreResult,
+  rebuildIndexFromStore,
+  syncEntryDeleted,
+  syncEntrySaved,
+  syncEntryStatusChanged,
+} from "./memory-sync.js";
 export {
   type IndexDbMigration,
   IndexDbVersionError,
