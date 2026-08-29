@@ -48,8 +48,11 @@ jobs:
       - name: Lint
         run: pnpm lint
 
-      - name: Test
-        run: pnpm test
-
+      # Build 必须先于 Test：workspace 包的 exports 指向 dist/，
+      # 跨包测试（如 core 测试 import @ff-pane/shared）在全新检出中
+      # 依赖已构建的 dist 产物。
       - name: Build
         run: pnpm build
+
+      - name: Test
+        run: pnpm test
