@@ -7,9 +7,11 @@
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
+    "lint": "node ../../scripts/check-i18n.mjs",
     "typecheck": "tsc -p tsconfig.node.json --noEmit --composite false && tsc -p tsconfig.web.json --noEmit --composite false",
     "build": "pnpm run typecheck && electron-vite build",
-    "smoke": "electron-vite build && electron . --smoke"
+    "smoke": "electron-vite build && electron . --smoke",
+    "package": "electron-vite build && electron-builder --win nsis"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",

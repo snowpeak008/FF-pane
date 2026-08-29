@@ -21,6 +21,11 @@ export interface AppInfo {
   };
 }
 
+/** app:get-locale 响应：主进程 app.getLocale() 检测到的系统语言（BCP 47，如 zh-CN）。 */
+export interface LocaleInfo {
+  readonly locale: string;
+}
+
 /** app:ping 请求。 */
 export interface PingRequest {
   readonly message: string;
@@ -55,6 +60,8 @@ export interface SmokeReport {
 /** invoke（请求/响应）通道契约表。 */
 export interface IpcInvokeContracts {
   "app:get-info": { request: undefined; response: AppInfo };
+  /** 系统语言检测（Electron 下 navigator.language 不可靠，统一走主进程）。 */
+  "app:get-locale": { request: undefined; response: LocaleInfo };
   "app:ping": { request: PingRequest; response: PingResponse };
   "diagnostics:check-sqlite": { request: undefined; response: SqliteCheckReport };
   /** 仅冒烟模式注册：请求主进程向本窗口推送一条 smoke:event。 */
@@ -86,6 +93,7 @@ export function isValidChannelName(name: string): boolean {
 /** invoke 通道运行时允许清单（preload 据此拦截契约之外的通道调用）。 */
 export const INVOKE_CHANNELS = [
   "app:get-info",
+  "app:get-locale",
   "app:ping",
   "diagnostics:check-sqlite",
   "smoke:emit-event",

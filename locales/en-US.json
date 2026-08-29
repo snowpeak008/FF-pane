@@ -1,0 +1,14 @@
+{
+  "app": {
+    "loading": "Loading application info…",
+    "loadError": "Failed to load application info: {{message}}",
+    "version": "Version {{version}}",
+    "runtime": "Electron {{electron}} · Chromium {{chrome}} · Node {{node}}"
+  },
+  "settings": {
+    "language": {
+      "label": "UI language",
+      "displayName": "English"
+    }
+  }
+}

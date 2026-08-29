@@ -77,6 +77,8 @@ function registerAppHandlers(): void {
         node: process.versions.node,
       },
     }),
+    // T0.3 i18n：系统语言检测统一由主进程提供（renderer 侧 navigator.language 不可靠）
+    "app:get-locale": () => ({ locale: app.getLocale() }),
     "app:ping": (request) => ({
       reply: "pong" as const,
       echoed: request.message,
