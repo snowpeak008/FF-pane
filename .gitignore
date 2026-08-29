@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+out/
+release/
+*.tsbuildinfo
+
+# Logs
+*.log
+logs/
+
+# Environment / secrets
+.env
+.env.*
+*.secrets
+
+# Derived indexes (rebuildable, see design doc §10)
+index.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
+# Workbench raw run logs (kept locally, not committed)
+.workbench/runs/**/raw.log
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/
+.idea/
