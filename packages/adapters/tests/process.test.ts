@@ -591,6 +591,22 @@ describe("Windows 命令解析与 .cmd 垫片", () => {
     expect(findExecutableOnWindowsPath("ff-pane-no-such-cli-20260829")).toBeUndefined();
   });
 
+  it.skipIf(!isWindows)(
+    "PATH/PATHEXT 大小写不敏感取值（W2.3 真机发现：普通对象展开丢失 process.env 魔法访问）",
+    () => {
+      // 键名故意用 Windows 常见的 "Path"（非全大写）：修复前 env["PATH"] 精确取值
+      // 得 undefined → 搜索目录为空 → 裸命令名被误判 ENOENT。
+      const plainEnv: NodeJS.ProcessEnv = {
+        Path: path.dirname(NODE),
+        pathext: ".COM;.EXE",
+      };
+      expect(findExecutableOnWindowsPath("node", plainEnv)?.toLowerCase()).toMatch(/node\.exe$/);
+      // buildAgentEnv 的产物（普通对象）同样必须可解析
+      const built = buildAgentEnv({ baseEnv: plainEnv }).env;
+      expect(findExecutableOnWindowsPath("node", built)?.toLowerCase()).toMatch(/node\.exe$/);
+    },
+  );
+
   it("垫片命令行：最外层加引号，参数双层 ^ 转义", () => {
     const line = buildCmdShimCommandLine("C:\\bin\\fake.cmd", ["a&b", 'q"uote', "plain"]);
     expect(line.startsWith('"')).toBe(true);

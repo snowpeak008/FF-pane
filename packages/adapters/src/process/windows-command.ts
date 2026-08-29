@@ -54,6 +54,26 @@ function isExecutableFile(candidate: string): boolean {
 }
 
 /**
+ * Windows 环境变量语义是大小写不敏感的（实际键名可能是 Path / path / PATH）。
+ * `process.env` 有魔法访问兜住这一点，但 `{...process.env}` 展开成普通对象后
+ * 魔法即失效——W2.3 真机冒烟实测：buildAgentEnv 的产物里 env["PATH"] 取不到
+ * 键名为 Path 的值，裸命令名被误判 ENOENT。故本模块一律经本函数取值。
+ */
+export function getEnvCaseInsensitive(env: NodeJS.ProcessEnv, name: string): string | undefined {
+  const direct = env[name];
+  if (direct !== undefined) {
+    return direct;
+  }
+  const lower = name.toLowerCase();
+  for (const key of Object.keys(env)) {
+    if (key.toLowerCase() === lower) {
+      return env[key];
+    }
+  }
+  return undefined;
+}
+
+/**
  * 在 PATH × PATHEXT 中查找 Windows 可执行文件，找不到返回 undefined。
  * command 自带路径分隔符时不扫 PATH，只在原地按 PATHEXT 补全。
  */
@@ -61,13 +81,13 @@ export function findExecutableOnWindowsPath(
   command: string,
   env: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
-  const rawPathExt = env["PATHEXT"] ?? ".COM;.EXE;.BAT;.CMD";
+  const rawPathExt = getEnvCaseInsensitive(env, "PATHEXT") ?? ".COM;.EXE;.BAT;.CMD";
   const pathExts = rawPathExt.split(";").filter((ext) => ext !== "");
   const hasOwnExt = path.extname(command) !== "";
   const searchDirs =
     command.includes("\\") || command.includes("/")
       ? [""]
-      : (env["PATH"] ?? "").split(path.delimiter);
+      : (getEnvCaseInsensitive(env, "PATH") ?? "").split(path.delimiter);
 
   for (const rawDir of searchDirs) {
     const dir = rawDir.replace(/^"|"$/g, "");
