@@ -14,6 +14,9 @@
     "package": "electron-vite build && electron-builder --win nsis"
   },
   "dependencies": {
+    "@ff-pane/core": "workspace:*",
+    "@ff-pane/shared": "workspace:*",
+    "@ff-pane/storage": "workspace:*",
     "better-sqlite3": "^13.0.3",
     "i18next": "^26.4.0",
     "react-i18next": "^17.0.12"
