@@ -379,6 +379,46 @@
       }
     }
   },
+  "memory": {
+    "loadError": "读取记忆失败",
+    "searchLabel": "搜索记忆",
+    "searchPlaceholder": "搜索标题、正文、标签…",
+    "emptyProject": "这个项目还没有记忆。会话与任务验收后会沉淀出来。",
+    "emptyCandidates": "没有待审核的候选。",
+    "sharedPlaceholder": "共享记忆（用户习惯）在 Phase 5 接入。",
+    "approve": "通过",
+    "edit": "编辑",
+    "reject": "拒绝",
+    "saveAndApprove": "保存并通过",
+    "approved": "已通过「{{title}}」",
+    "rejected": "已拒绝「{{title}}」",
+    "approveError": "通过失败",
+    "rejectError": "拒绝失败",
+    "restoreError": "撤销失败",
+    "tab": {
+      "project": "项目记忆",
+      "shared": "共享记忆",
+      "candidates": "候选"
+    },
+    "category": {
+      "decision": "决策",
+      "rule": "规则",
+      "lesson": "教训",
+      "state": "状态"
+    },
+    "confidence": {
+      "high": "已确认",
+      "low": "待验证"
+    },
+    "editDialog": {
+      "title": "编辑候选",
+      "description": "改好后点「保存并通过」，条目将转为已启用。"
+    },
+    "field": {
+      "title": "标题",
+      "body": "正文"
+    }
+  },
   "runs": {
     "empty": "还没有执行记录。派发任务后这里会出现 AI 的每次改动。",
     "loadError": "读取执行记录失败",

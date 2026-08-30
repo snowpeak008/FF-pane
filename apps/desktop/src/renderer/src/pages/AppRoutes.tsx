@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { ALL_NAV_ITEMS, DEFAULT_ROUTE_PATH } from "../layout/nav";
+import { MemoryPage } from "./memory";
 import { NotFoundPage } from "./NotFoundPage";
 import { PlaceholderPage } from "./PlaceholderPage";
 import { ProjectsPage } from "./projects";
@@ -18,6 +19,7 @@ import { TasksPage } from "./tasks";
  * 未接入的回落到 PlaceholderPage），路径不要另起。
  */
 const PAGE_ELEMENTS: Partial<Record<string, ReactElement>> = {
+  memory: <MemoryPage />,
   projects: <ProjectsPage />,
   runs: <RunsPage />,
   session: <SessionPage />,

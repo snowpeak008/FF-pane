@@ -379,6 +379,46 @@
       }
     }
   },
+  "memory": {
+    "loadError": "Failed to load memory",
+    "searchLabel": "Search memory",
+    "searchPlaceholder": "Search title, body, tags…",
+    "emptyProject": "This project has no memory yet. It accrues from sessions and accepted tasks.",
+    "emptyCandidates": "No candidates awaiting review.",
+    "sharedPlaceholder": "Shared memory (user habits) arrives in Phase 5.",
+    "approve": "Approve",
+    "edit": "Edit",
+    "reject": "Reject",
+    "saveAndApprove": "Save and approve",
+    "approved": "Approved \"{{title}}\"",
+    "rejected": "Rejected \"{{title}}\"",
+    "approveError": "Failed to approve",
+    "rejectError": "Failed to reject",
+    "restoreError": "Failed to undo",
+    "tab": {
+      "project": "Project memory",
+      "shared": "Shared memory",
+      "candidates": "Candidates"
+    },
+    "category": {
+      "decision": "Decision",
+      "rule": "Rule",
+      "lesson": "Lesson",
+      "state": "State"
+    },
+    "confidence": {
+      "high": "Confirmed",
+      "low": "Unverified"
+    },
+    "editDialog": {
+      "title": "Edit candidate",
+      "description": "After editing, click \"Save and approve\" to make it active."
+    },
+    "field": {
+      "title": "Title",
+      "body": "Body"
+    }
+  },
   "runs": {
     "empty": "No run records yet. Every AI change shows up here after a task is dispatched.",
     "loadError": "Failed to load run records",

@@ -16,6 +16,8 @@ import type {
   AgentProfile,
   ApiKeyRef,
   GlobalConfig,
+  MemoryEntry,
+  MemoryEntryId,
   ModelId,
   ProfileId,
   ProjectId,
@@ -188,6 +190,16 @@ export interface TaskActionRequest extends ProjectScopedRequest {
   readonly id: TaskId;
 }
 
+/** 记忆条目操作请求（通过 / 拒绝）：项目根 + 条目 ID。 */
+export interface MemoryActionRequest extends ProjectScopedRequest {
+  readonly id: MemoryEntryId;
+}
+
+/** 记忆条目整条写回请求（编辑后通过：内容 + 状态一并落盘）。 */
+export interface UpdateMemoryRequest extends ProjectScopedRequest {
+  readonly entry: MemoryEntry;
+}
+
 /** invoke（请求/响应）通道契约表。 */
 export interface IpcInvokeContracts {
   "app:get-info": { request: undefined; response: AppInfo };
@@ -242,6 +254,14 @@ export interface IpcInvokeContracts {
   "tasks:cancel": { request: TaskActionRequest; response: Task };
   /** 列出当前项目的全部执行记录（§11.5，含 file_changes/commands/verify_result）。 */
   "runs:list": { request: ProjectScopedRequest; response: readonly Run[] };
+  /** 列出当前项目的全部记忆条目（§11.6；含 active / candidate / archived）。 */
+  "memory:list": { request: ProjectScopedRequest; response: readonly MemoryEntry[] };
+  /** 通过候选（candidate → active，走 updateEntryStatus 迁移文件）。 */
+  "memory:approve": { request: MemoryActionRequest; response: MemoryEntry };
+  /** 拒绝候选（直接删除，§8.1）。 */
+  "memory:reject": { request: MemoryActionRequest; response: { readonly removed: boolean } };
+  /** 整条写回（编辑后通过：内容 + 状态一并保存）。 */
+  "memory:update": { request: UpdateMemoryRequest; response: MemoryEntry };
   /** 仅冒烟模式注册：请求主进程向本窗口推送一条 smoke:event。 */
   "smoke:emit-event": { request: { readonly seq: number }; response: { readonly emitted: true } };
   /** 仅冒烟模式注册：上报渲染层检查结果，主进程据此决定退出码。 */
@@ -296,6 +316,10 @@ export const INVOKE_CHANNELS = [
   "tasks:accept",
   "tasks:cancel",
   "runs:list",
+  "memory:list",
+  "memory:approve",
+  "memory:reject",
+  "memory:update",
   "smoke:emit-event",
   "smoke:report",
 ] as const satisfies readonly InvokeChannel[];

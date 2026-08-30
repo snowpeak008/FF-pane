@@ -26,9 +26,11 @@ import {
   createProfileStore,
   createProjectRegistry,
   createProviderStore,
+  deleteEntry,
   GLOBAL_ROOT_DIR_NAME,
   initGlobalLayout,
   initProjectLayout,
+  listEntries,
   listRuns,
   listTasks,
   loadTask,
@@ -36,7 +38,9 @@ import {
   type ProviderDraft,
   profileReferencesProvider,
   resolveProjectLayout,
+  saveEntry,
   saveTask,
+  updateEntryStatus,
 } from "@ff-pane/storage";
 import { type BrowserWindow, dialog, type OpenDialogOptions } from "electron";
 import type { InvokeHandlers } from "../shared-ipc/server";
@@ -65,7 +69,11 @@ type DataChannel =
   | "tasks:list"
   | "tasks:accept"
   | "tasks:cancel"
-  | "runs:list";
+  | "runs:list"
+  | "memory:list"
+  | "memory:approve"
+  | "memory:reject"
+  | "memory:update";
 
 /** 目录选择器挂靠的父窗口取值器（窗口在数据层装配后才创建，故惰性取用）。 */
 export type MainWindowGetter = () => BrowserWindow | null;
@@ -271,6 +279,35 @@ export async function createDataHandlers(
         throw result.error;
       }
       return result.value;
+    },
+
+    "memory:list": async (request) => {
+      const layout = resolveProjectLayout(request.projectRoot);
+      // listEntries 内部对缺目录容错（ENOENT 跳过），损坏文件进 issues 不阻断
+      const { entries } = await listEntries(layout);
+      return entries;
+    },
+
+    "memory:approve": async (request) => {
+      const layout = resolveProjectLayout(request.projectRoot);
+      const result = await updateEntryStatus(layout, request.id, "active");
+      if (!result.ok) {
+        throw result.error;
+      }
+      return result.value;
+    },
+
+    "memory:reject": async (request) => {
+      const layout = resolveProjectLayout(request.projectRoot);
+      const removed = await deleteEntry(layout, request.id);
+      return { removed };
+    },
+
+    "memory:update": async (request) => {
+      const layout = resolveProjectLayout(request.projectRoot);
+      // saveEntry 按 status 落位并自愈旧址副本（编辑后通过：内容 + 状态一并写回）
+      await saveEntry(layout, request.entry);
+      return request.entry;
     },
   };
 }
