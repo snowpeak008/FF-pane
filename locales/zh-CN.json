@@ -215,6 +215,8 @@
     "approved": "已批准 v{{n}}",
     "approveError": "批准失败",
     "version": "v{{n}}",
+    "compare": "对比 v{{n}}",
+    "hideDiff": "收起对比",
     "none": "（无）",
     "status": {
       "draft": "草稿",

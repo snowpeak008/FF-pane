@@ -13,6 +13,8 @@ import { useInvokeQuery } from "../../ipc/useInvokeQuery";
 import { PageHeader } from "../../layout/PageHeader";
 import { cn } from "../../lib/cn";
 import { NoActiveProject } from "../NoActiveProject";
+import { DiffView } from "../runs/DiffView";
+import { planVersionDiff } from "./plan-diff";
 
 /** 计划状态 → 徽章底色/文字类。 */
 const STATUS_CLASS: Readonly<Record<PlanStatus, string>> = {
@@ -61,15 +63,18 @@ function ListSection({
 
 function PlanBody({
   plan,
+  previous,
   projectRoot,
   onApproved,
 }: {
   readonly plan: Plan;
+  readonly previous: Plan | undefined;
   readonly projectRoot: string;
   readonly onApproved: () => void;
 }): ReactElement {
   const { t } = useTranslation();
   const [approving, setApproving] = useState(false);
+  const [showDiff, setShowDiff] = useState(false);
 
   const approve = async (): Promise<void> => {
     setApproving(true);
@@ -90,6 +95,11 @@ function PlanBody({
         <span className="font-mono text-sm font-medium text-fg">
           {t("plan.version", { n: plan.version })}
         </span>
+        {previous !== undefined ? (
+          <Button variant="ghost" size="sm" onClick={() => setShowDiff((v) => !v)}>
+            {showDiff ? t("plan.hideDiff") : t("plan.compare", { n: previous.version })}
+          </Button>
+        ) : null}
         {plan.status === "draft" ? (
           <Button
             variant="primary"
@@ -102,6 +112,10 @@ function PlanBody({
           </Button>
         ) : null}
       </div>
+
+      {showDiff && previous !== undefined ? (
+        <DiffView diff={planVersionDiff(previous, plan)} />
+      ) : null}
 
       <section className="flex flex-col gap-1">
         <h3 className="text-xs font-medium text-fg-muted">{t("plan.section.goal")}</h3>
@@ -185,7 +199,12 @@ function PlanView({ projectRoot }: { readonly projectRoot: string }): ReactEleme
         ))}
       </div>
       {selected !== undefined ? (
-        <PlanBody plan={selected} projectRoot={projectRoot} onApproved={refetch} />
+        <PlanBody
+          plan={selected}
+          previous={state.data.find((p) => p.version === selected.version - 1)}
+          projectRoot={projectRoot}
+          onApproved={refetch}
+        />
       ) : null}
     </div>
   );

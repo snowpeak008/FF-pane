@@ -215,6 +215,8 @@
     "approved": "Approved v{{n}}",
     "approveError": "Failed to approve",
     "version": "v{{n}}",
+    "compare": "Compare v{{n}}",
+    "hideDiff": "Hide diff",
     "none": "(none)",
     "status": {
       "draft": "Draft",
