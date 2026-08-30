@@ -24,6 +24,9 @@ export * from "./prompt/index.js";
 /** Provider 连接探测（W1.5c）：连接测试 + /models 拉取，纯网络逻辑、零密钥存取。 */
 export * from "./provider-probe/index.js";
 
+/** 会话恢复（T4.3）：恢复方式判定 + 上下文重建文本组装（设计文档 §10.3）。 */
+export * from "./resume/index.js";
+
 /** Run 权限执行层（W2.7a）：信封装配 + 写路径/命令事前裁决 + 证据事后审计。 */
 export * from "./run-guard/index.js";
 export * from "./task/index.js";

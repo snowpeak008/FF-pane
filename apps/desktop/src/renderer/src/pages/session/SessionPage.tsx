@@ -1,5 +1,7 @@
+import type { SessionRecord } from "@ff-pane/shared";
 import { type ReactElement, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { LoadingState } from "../../components/states/LoadingState";
 import { Button } from "../../components/ui/Button";
 import { useActiveProject } from "../../hooks/useActiveProject";
@@ -12,6 +14,7 @@ import type { ChatMessageView } from "./ChatMessage";
 import { Composer } from "./Composer";
 import { MessageStream } from "./MessageStream";
 import { PermissionBanner } from "./PermissionBanner";
+import { SessionResumePanel } from "./SessionResumePanel";
 import { SessionStatusBar } from "./SessionStatusBar";
 
 /**
@@ -30,6 +33,9 @@ export function SessionPage(): ReactElement {
   const turnRole = useSessionStore((s) => s.turnRole);
   const turnModel = useSessionStore((s) => s.turnModel);
   const turnStatus = useSessionStore((s) => s.turnStatus);
+  const turnResumeKind = useSessionStore((s) => s.turnResumeKind);
+  const activeSessionId = useSessionStore((s) => s.activeSessionId);
+  const setActiveSessionId = useSessionStore((s) => s.setActiveSessionId);
   const [cancelling, setCancelling] = useState(false);
 
   // 目前唯一的消息源是流式缓存；无在飞轮次时为空。
@@ -55,7 +61,15 @@ export function SessionPage(): ReactElement {
       projectRoot: entry.rootPath,
       profileId: plannerProfile.id,
       input: { kind: "planner-message", text },
+      // 有当前会话 = 续接（原生恢复 / 上下文重建）；无 = 开新会话（T4.3）
+      ...(activeSessionId !== null ? { sessionId: activeSessionId } : {}),
     });
+  };
+
+  // 从恢复列表选中一条历史会话作为续接目标：下一次发言即以该会话续接。
+  const onResume = (session: SessionRecord): void => {
+    setActiveSessionId(session.id);
+    toast.info(t("session.resume.readyToast"));
   };
 
   const onCancel = (): void => {
@@ -87,7 +101,16 @@ export function SessionPage(): ReactElement {
             role={turnRole}
             model={turnModel}
             status={turnStatus}
+            resumeKind={turnResumeKind}
           />
+          {!busy ? (
+            <SessionResumePanel
+              projectRoot={entry.rootPath}
+              activeSessionId={activeSessionId}
+              onResume={onResume}
+              disabled={plannerProfile === null}
+            />
+          ) : null}
           <MessageStream messages={messages} emptyMessage={t("session.empty")} />
           <PermissionBanner />
           {busy ? (

@@ -27,6 +27,7 @@ import {
   createProfileStore,
   createProjectRegistry,
   createProviderStore,
+  createSessionStore,
   deleteEntry,
   GLOBAL_ROOT_DIR_NAME,
   initGlobalLayout,
@@ -78,7 +79,8 @@ type DataChannel =
   | "memory:reject"
   | "memory:update"
   | "plans:list"
-  | "plans:approve";
+  | "plans:approve"
+  | "sessions:list";
 
 /** 目录选择器挂靠的父窗口取值器（窗口在数据层装配后才创建，故惰性取用）。 */
 export type MainWindowGetter = () => BrowserWindow | null;
@@ -313,6 +315,11 @@ export async function createDataHandlers(
       // saveEntry 按 status 落位并自愈旧址副本（编辑后通过：内容 + 状态一并写回）
       await saveEntry(layout, request.entry);
       return request.entry;
+    },
+
+    "sessions:list": async (request) => {
+      const layout = resolveProjectLayout(request.projectRoot);
+      return createSessionStore(layout.sessionsFile).listSessions();
     },
 
     "plans:list": async (request) => {

@@ -8,9 +8,14 @@
  * 依赖全部经构造参数注入（注册表、存取、密钥、时钟、ID），故编排逻辑可用假适配器
  * 与假依赖完整单测，不需要真机 CLI。
  *
+ * 会话恢复（T4.3，设计文档 §10.3）：每个本地会话登记一条 SessionRecord（Local↔Native
+ * ID 映射 + 元数据，不含会话正文）。首轮开新会话；续接轮据登记的原生绑定与适配器
+ * 能力判定 native（传 resume 绑定给适配器）或 context_rebuild（重建计划/任务/state/Run
+ * 上下文前置到提示词）。session_start 报出的原生会话 ID 回写登记，供后续续接。
+ *
  * 边界（各归其工单，本编排器不越界）：
  * - Planner 讨论只产出对话，不解析结构化计划（计划生成是后续细化）；
- * - 会话恢复（resume）见 T4.3；记忆候选闭环见 T4.4。
+ * - 跨 Agent 迁移（handoff）见 Phase 7；记忆候选闭环见 T4.4。
  */
 
 import {
@@ -23,7 +28,9 @@ import {
 } from "@ff-pane/adapters";
 import {
   assemblePrompt,
+  assembleRebuildContext,
   assembleRunEnvelope,
+  decideResumeKind,
   dispatchTask,
   endRun,
   failTask,
@@ -40,12 +47,17 @@ import type {
   CommandRecord,
   FileChange,
   GlobalConfig,
+  LocalSessionId,
   MemoryEntry,
   ModelId,
+  NativeSessionBinding,
+  Plan,
   Provider,
   Role,
   Run,
   RunId,
+  SessionRecord,
+  SessionResumeKind,
   Task,
   VerifyResult,
 } from "@ff-pane/shared";
@@ -90,6 +102,17 @@ export interface SessionOrchestratorDeps {
   readonly loadTask: (layout: ProjectLayout, id: Task["id"]) => Promise<Task | undefined>;
   readonly saveTask: (layout: ProjectLayout, task: Task) => Promise<void>;
   readonly listRuns: (layout: ProjectLayout) => Promise<readonly Run[]>;
+  /** 项目全部任务（上下文重建用）。 */
+  readonly listTasks: (layout: ProjectLayout) => Promise<readonly Task[]>;
+  /** 最新计划版本（上下文重建用；无计划返回 undefined）。 */
+  readonly loadLatestPlan: (layout: ProjectLayout) => Promise<Plan | undefined>;
+  /** 读取一条会话登记（续接判定用；不存在返回 undefined）。 */
+  readonly loadSession: (
+    layout: ProjectLayout,
+    id: LocalSessionId,
+  ) => Promise<SessionRecord | undefined>;
+  /** 落位一条会话登记（按 id upsert）。 */
+  readonly saveSession: (layout: ProjectLayout, record: SessionRecord) => Promise<void>;
   /** 落库一条已结束 Run（run.json + raw.log + changes.diff）。 */
   readonly persistRun: (
     layout: ProjectLayout,
@@ -99,11 +122,27 @@ export interface SessionOrchestratorDeps {
   ) => Promise<void>;
   readonly now: () => number;
   readonly newRunId: () => RunId;
+  /** 生成一个新的本地会话 ID（开新会话时）。 */
+  readonly newLocalSessionId: () => LocalSessionId;
 }
 
 /** 在飞轮次的内部状态。 */
 interface ActiveTurn {
   readonly guarded: GuardedTurn;
+}
+
+/** 会话登记上下文（每轮都有；session_start 报出原生 ID 时据此回写登记）。 */
+interface SessionContext {
+  readonly layout: ProjectLayout;
+  readonly sessionId: LocalSessionId;
+  readonly role: Role;
+  readonly profileId: AgentProfile["id"];
+  /** 会话首次创建时间（续接时沿用原值）。 */
+  readonly createdAt: number;
+  /** 本轮的恢复方式（首轮 undefined）。 */
+  readonly resumeKind?: SessionResumeKind;
+  /** 已知的原生会话绑定（续接时从登记沿用；session_start 报出新值则覆盖）。 */
+  readonly native?: NativeSessionBinding;
 }
 
 /** Worker 轮落库所需的上下文（Planner 轮为 undefined）。 */
@@ -125,6 +164,40 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
       global: config.aiOutputLanguage,
       ...(profile.outputLanguage !== undefined ? { profile: profile.outputLanguage } : {}),
     };
+  }
+
+  /** 从登记事实（计划/任务/state/最近 Run）重建上下文文本（context_rebuild 用）。 */
+  async function buildRebuildContext(layout: ProjectLayout): Promise<string> {
+    const [plan, tasks, stateSnapshot, runs] = await Promise.all([
+      deps.loadLatestPlan(layout),
+      deps.listTasks(layout),
+      deps.loadStateSnapshot(layout),
+      deps.listRuns(layout),
+    ]);
+    return assembleRebuildContext({
+      ...(plan !== undefined ? { plan } : {}),
+      tasks,
+      ...(stateSnapshot !== undefined ? { stateSnapshot } : {}),
+      recentRuns: runs,
+    });
+  }
+
+  /** 落位会话登记（upsert）。binding 覆盖 ctx.native（session_start 报出新原生 ID 时）。 */
+  async function registerSession(
+    ctx: SessionContext,
+    binding?: NativeSessionBinding,
+  ): Promise<void> {
+    const native = binding ?? ctx.native;
+    const record: SessionRecord = {
+      id: ctx.sessionId,
+      profileId: ctx.profileId,
+      role: ctx.role,
+      createdAt: ctx.createdAt,
+      lastActiveAt: deps.now(),
+      ...(native !== undefined ? { native } : {}),
+      ...(ctx.resumeKind !== undefined ? { resumeKind: ctx.resumeKind } : {}),
+    };
+    await deps.saveSession(ctx.layout, record);
   }
 
   async function start(request: StartSessionRequest): Promise<StartSessionAck> {
@@ -152,6 +225,31 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         deps.loadGlobalConfig(),
       ]);
       const outputLanguage = outputLanguageSettings(config, profile);
+
+      // 会话恢复（T4.3）：判定本轮所属会话与恢复方式。
+      // 首轮（无 sessionId 或该会话未登记）= 全新会话；续接轮据登记的原生绑定 + cwd +
+      // 适配器能力判定 native / context_rebuild。
+      const sessionId = request.sessionId ?? deps.newLocalSessionId();
+      const existing =
+        request.sessionId !== undefined
+          ? await deps.loadSession(layout, request.sessionId)
+          : undefined;
+      const priorBinding = existing?.native;
+      let resumeKind: SessionResumeKind | undefined;
+      let resumeBinding: NativeSessionBinding | undefined;
+      let resumeContext: string | undefined;
+      if (existing !== undefined) {
+        resumeKind = decideResumeKind({
+          hasNativeBinding: priorBinding !== undefined,
+          bindingCwdMatches: priorBinding?.cwd === request.projectRoot,
+          supportsNativeResume: adapter.capabilities().nativeResume === "yes",
+        });
+        if (resumeKind === "native" && priorBinding !== undefined) {
+          resumeBinding = priorBinding;
+        } else {
+          resumeContext = await buildRebuildContext(layout);
+        }
+      }
 
       // 密钥解密 → Run 级注入环境变量（唯一密钥通道，§4.3）
       const apiKeyPlaintext =
@@ -220,12 +318,31 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         };
       }
 
+      // 上下文重建：把重建文本前置到提示词（native 恢复走原生会话，不注入）
+      if (resumeContext !== undefined) {
+        prompt = `${resumeContext}\n\n${prompt}`;
+      }
+
       const turnCtx: AdapterTurnContext = {
         cwd: request.projectRoot,
         prompt,
         ...(Object.keys(env).length > 0 ? { env } : {}),
         ...(model !== undefined ? { model } : {}),
+        ...(resumeBinding !== undefined ? { resume: resumeBinding } : {}),
       };
+
+      // 登记会话（首轮建档；续接轮沿用 createdAt + 已知原生绑定）。session_start 报出
+      // 新原生 ID 时由 drain 回写覆盖。即便本轮失败，会话已可被后续续接。
+      const sessionCtx: SessionContext = {
+        layout,
+        sessionId,
+        role,
+        profileId: profile.id,
+        createdAt: existing?.createdAt ?? deps.now(),
+        ...(resumeKind !== undefined ? { resumeKind } : {}),
+        ...(priorBinding !== undefined ? { native: priorBinding } : {}),
+      };
+      await registerSession(sessionCtx);
 
       const guarded = guardTurn(adapter.startTurn(turnCtx), guardCtx);
       active.set(request.turnId, { guarded });
@@ -233,15 +350,17 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         turnId: request.turnId,
         kind: "started",
         role,
+        sessionId,
         ...(model !== undefined ? { model } : {}),
+        ...(resumeKind !== undefined ? { resumeKind } : {}),
       });
 
       // 事件流消费独立于受理应答（fire-and-forget，结束时清理登记）
-      void drain(request.turnId, guarded, workerCtx).finally(() => {
+      void drain(request.turnId, guarded, workerCtx, sessionCtx).finally(() => {
         active.delete(request.turnId);
       });
 
-      return { accepted: true, turnId: request.turnId };
+      return { accepted: true, turnId: request.turnId, sessionId };
     } catch (thrown) {
       const message = thrown instanceof Error ? thrown.message : String(thrown);
       return { accepted: false, reason: message };
@@ -253,6 +372,7 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
     turnId: string,
     guarded: GuardedTurn,
     workerCtx: WorkerContext | undefined,
+    sessionCtx: SessionContext,
   ): Promise<void> {
     let answerText = "";
     let verifyResult: VerifyResult | undefined;
@@ -270,6 +390,10 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
           return;
         }
         if (event.kind === "session_start") {
+          // 原生会话 ID 报出即回写登记（cwd 成对，供后续续接原生恢复，§10.2 规则 3）
+          if (event.native !== undefined) {
+            await registerSession(sessionCtx, event.native).catch(() => undefined);
+          }
           continue;
         }
         if (event.kind === "text" && event.channel === "answer") {

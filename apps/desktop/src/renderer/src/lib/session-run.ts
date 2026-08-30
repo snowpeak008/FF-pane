@@ -6,7 +6,7 @@
  * 回执权限、取消，不订阅事件。
  */
 
-import type { ProfileId } from "@ff-pane/shared";
+import type { LocalSessionId, ProfileId } from "@ff-pane/shared";
 import type { SessionInput, StartSessionAck } from "../../../shared-ipc/contracts";
 import { invokeQuery } from "../ipc/query";
 import { useSessionStore } from "../stores/session";
@@ -23,6 +23,11 @@ export async function startSessionTurn(params: {
   readonly projectRoot: string;
   readonly profileId: ProfileId;
   readonly input: SessionInput;
+  /**
+   * 续接的本地会话 ID（T4.3）。缺省 = 开新会话。会话页跟进发言传当前会话以续接；
+   * 从恢复列表选中的会话亦经此传入触发原生恢复 / 上下文重建。
+   */
+  readonly sessionId?: LocalSessionId;
 }): Promise<{ readonly turnId: string; readonly ack: StartSessionAck | null }> {
   const turnId = newTurnId();
   const role = params.input.kind === "planner-message" ? "planner" : "worker";
@@ -34,6 +39,7 @@ export async function startSessionTurn(params: {
     projectRoot: params.projectRoot,
     profileId: params.profileId,
     input: params.input,
+    ...(params.sessionId !== undefined ? { sessionId: params.sessionId } : {}),
   });
   if (settled.status === "error") {
     store.failLocalTurn(turnId, settled.error.message);

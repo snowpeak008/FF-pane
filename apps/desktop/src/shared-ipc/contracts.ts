@@ -16,6 +16,7 @@ import type {
   AgentProfile,
   ApiKeyRef,
   GlobalConfig,
+  LocalSessionId,
   MemoryEntry,
   MemoryEntryId,
   ModelId,
@@ -30,6 +31,8 @@ import type {
   Run,
   RunEndReason,
   RunId,
+  SessionRecord,
+  SessionResumeKind,
   Task,
   TaskId,
 } from "@ff-pane/shared";
@@ -228,11 +231,21 @@ export interface StartSessionRequest extends ProjectScopedRequest {
   /** 用哪个 Agent Profile 执行（决定 runtime / provider / 模型 / 权限预设）。 */
   readonly profileId: ProfileId;
   readonly input: SessionInput;
+  /**
+   * 续接的本地会话 ID（T4.3 会话恢复）。缺省 = 开新会话（主进程生成新 ID）；
+   * 提供且该会话已登记 = 续接（据登记的原生绑定与适配器能力判定 native / context_rebuild）。
+   */
+  readonly sessionId?: LocalSessionId;
 }
 
 /** session:start 应答：仅表示已受理（true）或拒绝受理（false + reason）。 */
 export type StartSessionAck =
-  | { readonly accepted: true; readonly turnId: string }
+  | {
+      readonly accepted: true;
+      readonly turnId: string;
+      /** 本轮所属的本地会话 ID（新建时为主进程生成值，供渲染层登记为当前会话）。 */
+      readonly sessionId: LocalSessionId;
+    }
   | { readonly accepted: false; readonly reason: string };
 
 /** session:respond-permission 请求：回执一条上浮的权限请求（§7 用户二选一）。 */
@@ -262,6 +275,13 @@ export type SessionStreamEvent =
       readonly kind: "started";
       readonly role: Role;
       readonly model?: ModelId;
+      /** 本轮所属会话（T4.3）。 */
+      readonly sessionId: LocalSessionId;
+      /**
+       * 恢复方式（T4.3，§10.3）。缺省 = 全新会话首轮；否则为本次续接的方式
+       *（native 原生恢复 / context_rebuild 上下文重建），供状态条标注会话类型。
+       */
+      readonly resumeKind?: SessionResumeKind;
     }
   | {
       readonly turnId: string;
@@ -366,6 +386,8 @@ export interface IpcInvokeContracts {
   "plans:list": { request: ProjectScopedRequest; response: readonly Plan[] };
   /** 批准计划（draft → approved，只能由用户触发，走 core 计划状态机）。 */
   "plans:approve": { request: ApprovePlanRequest; response: Plan };
+  /** 列出当前项目已登记的会话（T4.3 会话恢复；按最近活跃降序，供恢复选择）。 */
+  "sessions:list": { request: ProjectScopedRequest; response: readonly SessionRecord[] };
   /** 启动一轮会话执行（Planner 讨论 / Worker 派发）；增量经 session:event 推送。 */
   "session:start": { request: StartSessionRequest; response: StartSessionAck };
   /** 回执一条上浮的权限请求（§7）。 */
@@ -434,6 +456,7 @@ export const INVOKE_CHANNELS = [
   "memory:update",
   "plans:list",
   "plans:approve",
+  "sessions:list",
   "session:start",
   "session:respond-permission",
   "session:cancel",

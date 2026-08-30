@@ -67,6 +67,8 @@ export interface ProjectLayout {
   readonly workbenchDir: string;
   /** project.json —— 项目配置：角色绑定、输出语言覆盖、权限策略。 */
   readonly projectFile: string;
+  /** sessions.json —— 会话登记表（Local↔Native Session ID 映射，供原生恢复，§10.2 规则 3）。 */
+  readonly sessionsFile: string;
   /** plans/ —— 计划正文与 meta（plan-v<N>.md / plan-v<N>.meta.json，文件命名归 W1.2b）。 */
   readonly plansDir: string;
   /** tasks/ —— 任务合同 + 状态（task-<id>.json，文件命名归 W1.2b）。 */
@@ -123,6 +125,7 @@ export function resolveProjectLayout(projectRootDir: string): ProjectLayout {
     projectRootDir,
     workbenchDir,
     projectFile: join(workbenchDir, "project.json"),
+    sessionsFile: join(workbenchDir, "sessions.json"),
     plansDir: join(workbenchDir, "plans"),
     tasksDir: join(workbenchDir, "tasks"),
     runsDir: join(workbenchDir, "runs"),

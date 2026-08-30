@@ -9,17 +9,21 @@
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { RunId } from "@ff-pane/shared";
+import type { LocalSessionId, Plan, PlanVersion, RunId } from "@ff-pane/shared";
 import {
   createConfigStore,
   createProfileStore,
   createProviderStore,
+  createSessionStore,
   GLOBAL_ROOT_DIR_NAME,
   initGlobalLayout,
   listEntries,
   listRuns,
+  listTasks,
+  loadPlan,
   loadStateSnapshot,
   loadTask,
+  type ProjectLayout,
   resolveProjectLayout,
   saveRun,
   saveTask,
@@ -59,6 +63,22 @@ export async function createSessionHandlers(
   });
   const registry = createDesktopAdapterRegistry();
 
+  // 最新计划版本：v1..vN 连续，逐版加载到 not-found 为止，返回末版（与 data.ts plans:list 同构）
+  async function loadLatestPlan(projectLayout: ProjectLayout): Promise<Plan | undefined> {
+    let latest: Plan | undefined;
+    for (let v = 1; ; v += 1) {
+      const result = await loadPlan(projectLayout, v as PlanVersion);
+      if (!result.ok) {
+        if (result.error.code === "not-found") {
+          break;
+        }
+        throw result.error;
+      }
+      latest = result.value.plan;
+    }
+    return latest;
+  }
+
   const orchestrator = createSessionOrchestrator({
     registry,
     publish: (event) => {
@@ -91,6 +111,15 @@ export async function createSessionHandlers(
       const result = await listRuns(projectLayout);
       return result.ok ? result.value : [];
     },
+    listTasks: async (projectLayout) => {
+      const result = await listTasks(projectLayout);
+      return result.ok ? result.value : [];
+    },
+    loadLatestPlan,
+    loadSession: (projectLayout, id) =>
+      createSessionStore(projectLayout.sessionsFile).getSession(id),
+    saveSession: (projectLayout, record) =>
+      createSessionStore(projectLayout.sessionsFile).saveSession(record),
     persistRun: async (projectLayout, run, rawLog, changesDiff) => {
       await saveRun(projectLayout, run);
       await writeRunRawLog(projectLayout, run.id, rawLog);
@@ -100,6 +129,7 @@ export async function createSessionHandlers(
     },
     now: () => Date.now(),
     newRunId: () => randomUUID() as RunId,
+    newLocalSessionId: () => randomUUID() as LocalSessionId,
   });
 
   return {

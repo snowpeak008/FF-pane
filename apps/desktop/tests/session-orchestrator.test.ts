@@ -11,9 +11,13 @@ import { WORKER_DEFAULT_ENVELOPE } from "@ff-pane/core";
 import type {
   AgentProfile,
   GlobalConfig,
+  LocalSessionId,
+  NativeSessionId,
+  Plan,
   ProfileId,
   Provider,
   Run,
+  SessionRecord,
   Task,
   TaskId,
 } from "@ff-pane/shared";
@@ -25,26 +29,42 @@ import {
 } from "../src/main/session/orchestrator";
 import type { SessionStreamEvent, StartSessionRequest } from "../src/shared-ipc/contracts";
 
-function fakeAdapter(runtime: string, events: readonly AgentEvent[]): AgentAdapter {
+/** 记录每次 startTurn 收到的上下文（断言 resume 绑定是否透传）。 */
+interface CapturedTurn {
+  readonly prompt: string;
+  readonly resume?: { readonly nativeSessionId: string; readonly cwd: string };
+}
+
+function fakeAdapter(
+  runtime: string,
+  events: readonly AgentEvent[],
+  opts: { readonly nativeResume?: "yes" | "no"; readonly captured?: CapturedTurn[] } = {},
+): AgentAdapter {
   return {
     runtime,
     displayName: "fake",
     capabilities: () => ({
-      nativeResume: "no",
+      nativeResume: opts.nativeResume ?? "no",
       streaming: "yes",
       fileChangeEvents: "yes",
       commandEvents: "yes",
       permissionForwarding: "no",
       gracefulCancel: "yes",
     }),
-    startTurn: () => ({
-      events: (async function* () {
-        for (const e of events) {
-          yield e;
-        }
-      })(),
-      cancel: async () => {},
-    }),
+    startTurn: (ctx) => {
+      opts.captured?.push({
+        prompt: ctx.prompt,
+        ...(ctx.resume !== undefined ? { resume: ctx.resume } : {}),
+      });
+      return {
+        events: (async function* () {
+          for (const e of events) {
+            yield e;
+          }
+        })(),
+        cancel: async () => {},
+      };
+    },
   };
 }
 
@@ -92,6 +112,9 @@ interface Harness {
   readonly published: SessionStreamEvent[];
   readonly savedTasks: Task[];
   readonly persistedRuns: Run[];
+  readonly savedSessions: SessionRecord[];
+  readonly sessions: Map<string, SessionRecord>;
+  readonly captured: CapturedTurn[];
 }
 
 function makeHarness(
@@ -100,13 +123,31 @@ function makeHarness(
     readonly profile?: AgentProfile | null;
     readonly provider?: Provider | null;
     readonly task?: Task | null;
+    readonly nativeResume?: "yes" | "no";
+    /** 预置会话登记（续接/恢复测试用）。 */
+    readonly existingSession?: SessionRecord;
+    readonly latestPlan?: Plan;
+    readonly tasks?: readonly Task[];
+    readonly runs?: readonly Run[];
+    readonly stateSnapshot?: string;
   } = {},
 ): Harness {
   const published: SessionStreamEvent[] = [];
   const savedTasks: Task[] = [];
   const persistedRuns: Run[] = [];
+  const savedSessions: SessionRecord[] = [];
+  const captured: CapturedTurn[] = [];
+  const sessions = new Map<string, SessionRecord>();
+  if (opts.existingSession !== undefined) {
+    sessions.set(opts.existingSession.id, opts.existingSession);
+  }
   const registry = createAdapterRegistry();
-  registry.register(fakeAdapter("fake", events));
+  registry.register(
+    fakeAdapter("fake", events, {
+      ...(opts.nativeResume !== undefined ? { nativeResume: opts.nativeResume } : {}),
+      captured,
+    }),
+  );
   const layout = {} as ProjectLayout;
 
   const deps: SessionOrchestratorDeps = {
@@ -119,20 +160,28 @@ function makeHarness(
     revealSecret: async () => undefined,
     resolveLayout: () => layout,
     loadActiveMemory: async () => [],
-    loadStateSnapshot: async () => undefined,
+    loadStateSnapshot: async () => opts.stateSnapshot,
     loadGlobalConfig: async () => CONFIG,
     loadTask: async () => (opts.task === null ? undefined : (opts.task ?? task())),
     saveTask: async (_l, tk) => {
       savedTasks.push(tk);
     },
-    listRuns: async () => [],
+    listRuns: async () => opts.runs ?? [],
+    listTasks: async () => opts.tasks ?? [],
+    loadLatestPlan: async () => opts.latestPlan,
+    loadSession: async (_l, id) => sessions.get(id),
+    saveSession: async (_l, record) => {
+      sessions.set(record.id, record);
+      savedSessions.push(record);
+    },
     persistRun: async (_l, run) => {
       persistedRuns.push(run);
     },
     now: () => 1000,
     newRunId: () => "run-1" as unknown as Run["id"],
+    newLocalSessionId: () => "sess-new" as unknown as LocalSessionId,
   };
-  return { deps, published, savedTasks, persistedRuns };
+  return { deps, published, savedTasks, persistedRuns, savedSessions, sessions, captured };
 }
 
 async function flushUntilEnd(published: readonly SessionStreamEvent[]): Promise<void> {
@@ -249,5 +298,108 @@ describe("createSessionOrchestrator", () => {
       await orch.respondPermission({ turnId: "x", requestId: "r", decision: "allow" }),
     ).toEqual({ ok: false });
     expect(await orch.cancel({ turnId: "x" })).toEqual({ ok: false });
+  });
+
+  // --- T4.3 会话恢复 ---
+
+  it("新会话首轮：ack 回传生成的 sessionId，登记一条无 resumeKind 的会话", async () => {
+    const events: AgentEvent[] = [
+      { kind: "session_start" },
+      { kind: "text", content: "hi", final: true, channel: "answer" },
+      { kind: "end", reason: "completed" },
+    ];
+    const h = makeHarness(events, { profile: profile({ defaultRole: "planner" }) });
+    const orch = createSessionOrchestrator(h.deps);
+
+    const ack = await orch.start(plannerRequest());
+    expect(ack).toMatchObject({ accepted: true, sessionId: "sess-new" });
+    await flushUntilEnd(h.published);
+
+    expect(h.published[0]).toMatchObject({ kind: "started", sessionId: "sess-new" });
+    expect(h.published[0]).not.toHaveProperty("resumeKind");
+    const registered = h.sessions.get("sess-new");
+    expect(registered).toMatchObject({ role: "planner" });
+    expect(registered?.resumeKind).toBeUndefined();
+    expect(registered?.native).toBeUndefined();
+  });
+
+  it("session_start 报出原生会话 ID → 回写登记原生绑定（ID + cwd 成对）", async () => {
+    const events: AgentEvent[] = [
+      {
+        kind: "session_start",
+        native: { nativeSessionId: "native-xyz" as unknown as NativeSessionId, cwd: "/proj" },
+      },
+      { kind: "text", content: "hi", final: true, channel: "answer" },
+      { kind: "end", reason: "completed" },
+    ];
+    const h = makeHarness(events, { profile: profile({ defaultRole: "planner" }) });
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start(plannerRequest());
+    await flushUntilEnd(h.published);
+
+    expect(h.sessions.get("sess-new")?.native).toEqual({
+      nativeSessionId: "native-xyz",
+      cwd: "/proj",
+    });
+  });
+
+  it("续接有原生绑定的会话 + 适配器支持原生恢复 → native：透传 resume 绑定，不注入重建上下文", async () => {
+    const events: AgentEvent[] = [
+      { kind: "session_start" },
+      { kind: "text", content: "ok", final: true, channel: "answer" },
+      { kind: "end", reason: "completed" },
+    ];
+    const existingSession: SessionRecord = {
+      id: "sess-1" as unknown as LocalSessionId,
+      profileId: "prof-1" as unknown as ProfileId,
+      role: "planner",
+      native: { nativeSessionId: "native-1" as unknown as NativeSessionId, cwd: "/proj" },
+      createdAt: 500,
+      lastActiveAt: 500,
+    } as unknown as SessionRecord;
+    const h = makeHarness(events, {
+      profile: profile({ defaultRole: "planner" }),
+      nativeResume: "yes",
+      existingSession,
+    });
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start({ ...plannerRequest(), sessionId: "sess-1" as unknown as LocalSessionId });
+    await flushUntilEnd(h.published);
+
+    expect(h.published[0]).toMatchObject({ kind: "started", resumeKind: "native" });
+    expect(h.captured[0]?.resume).toMatchObject({ nativeSessionId: "native-1", cwd: "/proj" });
+    expect(h.captured[0]?.prompt).not.toContain("会话恢复上下文");
+  });
+
+  it("续接会话但适配器不支持原生恢复 → context_rebuild：注入重建上下文，不透传 resume", async () => {
+    const events: AgentEvent[] = [
+      { kind: "session_start" },
+      { kind: "text", content: "ok", final: true, channel: "answer" },
+      { kind: "end", reason: "completed" },
+    ];
+    const existingSession: SessionRecord = {
+      id: "sess-1" as unknown as LocalSessionId,
+      profileId: "prof-1" as unknown as ProfileId,
+      role: "planner",
+      createdAt: 500,
+      lastActiveAt: 500,
+    } as unknown as SessionRecord;
+    const h = makeHarness(events, {
+      profile: profile({ defaultRole: "planner" }),
+      nativeResume: "no",
+      existingSession,
+      stateSnapshot: "正在做某事",
+    });
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start({ ...plannerRequest(), sessionId: "sess-1" as unknown as LocalSessionId });
+    await flushUntilEnd(h.published);
+
+    expect(h.published[0]).toMatchObject({ kind: "started", resumeKind: "context_rebuild" });
+    expect(h.captured[0]?.resume).toBeUndefined();
+    expect(h.captured[0]?.prompt).toContain("会话恢复上下文");
+    expect(h.captured[0]?.prompt).toContain("正在做某事");
   });
 });

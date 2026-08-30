@@ -10,7 +10,14 @@
  * 调 ingestSessionEvent 归并；会话页与任务页只读本 store。单活跃轮模型：以 streamingTurn.turnId
  * 标识当前在飞轮，非当前轮的事件被忽略。本 store 不持久化。
  */
-import type { LocalSessionId, ModelId, Role, RunEndReason, RunId } from "@ff-pane/shared";
+import type {
+  LocalSessionId,
+  ModelId,
+  Role,
+  RunEndReason,
+  RunId,
+  SessionResumeKind,
+} from "@ff-pane/shared";
 import { create } from "zustand";
 import type { SessionStreamEvent } from "../../../shared-ipc/contracts";
 
@@ -66,6 +73,11 @@ export interface SessionUiState {
   readonly turnRole: Role | null;
   /** 当前轮使用的模型（Runtime 报出或 Profile 指定）。 */
   readonly turnModel: ModelId | null;
+  /**
+   * 本轮恢复方式（T4.3，§10.3 状态条「会话类型」标注）：
+   * null = 全新会话首轮；否则为原生恢复 / 上下文重建。
+   */
+  readonly turnResumeKind: SessionResumeKind | null;
   /** 当前轮的错误信息（结束原因非 completed 时的原文）。 */
   readonly turnError: string | null;
   /** 最近一次动作摘要（文件改动 / 命令），用于状态条轻量展示。 */
@@ -108,6 +120,7 @@ export const INITIAL_SESSION_UI_STATE: SessionUiState = {
   turnStatus: "idle",
   turnRole: null,
   turnModel: null,
+  turnResumeKind: null,
   turnError: null,
   lastActivity: null,
   pendingPermission: null,
@@ -143,6 +156,7 @@ export const useSessionStore = create<SessionStore>()((set) => ({
       turnStatus: "running",
       turnRole: role,
       turnModel: null,
+      turnResumeKind: null,
       turnError: null,
       lastActivity: null,
       pendingPermission: null,
@@ -175,6 +189,9 @@ export const useSessionStore = create<SessionStore>()((set) => ({
           turnStatus: "running",
           turnRole: event.role,
           turnModel: event.model ?? null,
+          turnResumeKind: event.resumeKind ?? null,
+          // 会话类型标注 + 续接会话据 started 事件登记为当前会话（T4.3）
+          activeSessionId: event.sessionId,
           turnError: null,
           pendingPermission: null,
         };

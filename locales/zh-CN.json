@@ -495,6 +495,20 @@
       "running": "执行中",
       "awaiting-permission": "待审批",
       "ended": "已结束"
+    },
+    "resumeKind": {
+      "native": "原生恢复",
+      "context_rebuild": "上下文重建"
+    },
+    "resume": {
+      "title": "恢复历史会话",
+      "action": "续接",
+      "selected": "当前会话",
+      "readyToast": "已选为当前会话，发言即续接。",
+      "willUse": {
+        "native": "原生恢复",
+        "context_rebuild": "上下文重建"
+      }
     }
   },
   "shortcut": {
