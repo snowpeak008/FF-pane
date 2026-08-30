@@ -509,7 +509,10 @@
         "native": "Native resume",
         "context_rebuild": "Context rebuild"
       }
-    }
+    },
+    "generatePlan": "Generate plan",
+    "planGenerated": "Plan v{{version}} generated",
+    "viewPlan": "View plan"
   },
   "shortcut": {
     "scope": {

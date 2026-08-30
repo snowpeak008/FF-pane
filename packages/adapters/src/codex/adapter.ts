@@ -190,7 +190,6 @@ function startCodexTurn(options: CodexAdapterOptions, ctx: AdapterTurnContext): 
       : undefined;
   const args = buildCodexArgs({
     cwd: ctx.cwd,
-    prompt: ctx.prompt,
     model: ctx.model,
     resume: ctx.resume,
     sandbox: options.sandbox,
@@ -227,15 +226,19 @@ function startCodexTurn(options: CodexAdapterOptions, ctx: AdapterTurnContext): 
   // 是本地毫秒级操作；且基线只用于"turn 前已脏"标注，不参与 diff 采集本身。
   void collector?.prime();
 
+  // 提示词经 stdin 下发（见 command.ts 模块头：绕开 Windows cmd 垫片对多行位置参数的截断）。
   const handle: AgentProcessHandle = spawnAgentProcess({
     command,
     args,
     cwd: ctx.cwd,
-    stdin: "closed",
+    stdin: "pipe",
     ...(ctx.env === undefined ? {} : { env: ctx.env }),
     ...(ctx.timeoutMs === undefined ? {} : { timeoutMs: ctx.timeoutMs }),
     ...(options.stripApiKeyEnv === undefined ? {} : { stripApiKeyEnv: options.stripApiKeyEnv }),
   });
+  // 写入提示词并关闭写端（end = 送 EOF，codex 读到 EOF 后开始执行）。子进程可能已
+  // 先退出 → EPIPE，spawn 层已吞掉 stdin 的 error 事件。
+  handle.stdin?.end(ctx.prompt, "utf8");
 
   const mapper = createCodexEventMapper({
     cwd: ctx.cwd,

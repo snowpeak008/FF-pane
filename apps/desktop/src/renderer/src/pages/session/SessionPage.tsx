@@ -1,6 +1,7 @@
 import type { SessionRecord } from "@ff-pane/shared";
-import { type ReactElement, useState } from "react";
+import { type ReactElement, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { LoadingState } from "../../components/states/LoadingState";
 import { Button } from "../../components/ui/Button";
@@ -29,6 +30,7 @@ export function SessionPage(): ReactElement {
   const { entry, loading } = useActiveProject();
   const { profile: plannerProfile, loading: profileLoading } = useRoleProfile("planner");
 
+  const navigate = useNavigate();
   const streamingTurn = useSessionStore((s) => s.streamingTurn);
   const turnRole = useSessionStore((s) => s.turnRole);
   const turnModel = useSessionStore((s) => s.turnModel);
@@ -36,7 +38,25 @@ export function SessionPage(): ReactElement {
   const turnResumeKind = useSessionStore((s) => s.turnResumeKind);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const setActiveSessionId = useSessionStore((s) => s.setActiveSessionId);
+  const endedTurnSeq = useSessionStore((s) => s.endedTurnSeq);
+  const lastEndedTurn = useSessionStore((s) => s.lastEndedTurn);
   const [cancelling, setCancelling] = useState(false);
+
+  // 计划生成轮结束：toast「已生成计划 vN」+ 一键跳计划页。以 endedTurnSeq 单调递增触发，
+  // 仅处理一次（seq 去重）。planVersion 缺席 = 普通讨论轮，不打扰。
+  const handledPlanSeq = useRef(0);
+  useEffect(() => {
+    if (endedTurnSeq === handledPlanSeq.current) {
+      return;
+    }
+    handledPlanSeq.current = endedTurnSeq;
+    const version = lastEndedTurn?.planVersion;
+    if (version !== undefined) {
+      toast.success(t("session.planGenerated", { version }), {
+        action: { label: t("session.viewPlan"), onClick: () => void navigate("/plan") },
+      });
+    }
+  }, [endedTurnSeq, lastEndedTurn, navigate, t]);
 
   // 目前唯一的消息源是流式缓存；无在飞轮次时为空。
   const messages: readonly ChatMessageView[] =
@@ -62,6 +82,19 @@ export function SessionPage(): ReactElement {
       profileId: plannerProfile.id,
       input: { kind: "planner-message", text },
       // 有当前会话 = 续接（原生恢复 / 上下文重建）；无 = 开新会话（T4.3）
+      ...(activeSessionId !== null ? { sessionId: activeSessionId } : {}),
+    });
+  };
+
+  // 生成计划（T4.6，§12「出计划」）：据当前讨论发起一轮 planner-plan（续接当前会话以复用上下文）。
+  const onGeneratePlan = (): void => {
+    if (entry === null || plannerProfile === null) {
+      return;
+    }
+    void startSessionTurn({
+      projectRoot: entry.rootPath,
+      profileId: plannerProfile.id,
+      input: { kind: "planner-plan" },
       ...(activeSessionId !== null ? { sessionId: activeSessionId } : {}),
     });
   };
@@ -124,6 +157,7 @@ export function SessionPage(): ReactElement {
           ) : null}
           <Composer
             onSend={onSend}
+            onGeneratePlan={onGeneratePlan}
             disabled={busy || plannerProfile === null}
             {...(composerDisabledReason !== undefined
               ? { disabledReason: composerDisabledReason }

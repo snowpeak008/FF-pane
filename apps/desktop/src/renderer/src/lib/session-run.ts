@@ -30,7 +30,7 @@ export async function startSessionTurn(params: {
   readonly sessionId?: LocalSessionId;
 }): Promise<{ readonly turnId: string; readonly ack: StartSessionAck | null }> {
   const turnId = newTurnId();
-  const role = params.input.kind === "planner-message" ? "planner" : "worker";
+  const role = params.input.kind === "worker-task" ? "worker" : "planner";
   const store = useSessionStore.getState();
   store.startLocalTurn(turnId, role);
 

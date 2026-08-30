@@ -25,6 +25,32 @@ export interface PlanDraftChanges {
 /** 可作为新草案底稿的状态：仅活跃版本（取舍见 createNextDraft 注释）。 */
 const NEXT_DRAFT_BASE_STATUSES: readonly PlanStatus[] = ["draft", "approved"];
 
+/** 计划创世版本号。 */
+const INITIAL_PLAN_VERSION = 1 as PlanVersion;
+
+/**
+ * 无底稿时造 v1 draft（§12：项目首次由 Planner 产出计划）。createNextDraft 要求已有底稿、
+ * 只能 version+1，无法凭空造 v1，故创世单列此函数。缺省字段一律空数组/空串（合同可逐步补全）。
+ * 所有任务合同的 planVersion 重绑为 1。
+ */
+export function createInitialDraft(changes: PlanDraftChanges): Plan {
+  const tasks = (changes.tasks ?? []).map((task) => ({
+    ...task,
+    planVersion: INITIAL_PLAN_VERSION,
+  }));
+  return {
+    version: INITIAL_PLAN_VERSION,
+    status: "draft",
+    goal: changes.goal ?? "",
+    scope: changes.scope ?? [],
+    nonGoals: changes.nonGoals ?? [],
+    constraints: changes.constraints ?? [],
+    decisions: changes.decisions ?? [],
+    tasks,
+    acceptance: changes.acceptance ?? [],
+  };
+}
+
 /**
  * 以 basePlan 为底稿产生 version+1 的新 draft。旧计划不动（调用方随后 supersede）。
  *

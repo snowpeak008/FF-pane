@@ -30,14 +30,19 @@ import {
   assemblePrompt,
   assembleRebuildContext,
   assembleRunEnvelope,
+  createInitialDraft,
+  createNextDraft,
   decideResumeKind,
   dispatchTask,
   endRun,
   failTask,
   intersectEnvelopes,
+  PLAN_OUTPUT_CONTRACT,
   PLANNER_DEFAULT_ENVELOPE,
+  parsePlannerPlanDraft,
   settleTaskAfterRun,
   startRun,
+  supersedePlan,
   toRunEnvelope,
 } from "@ff-pane/core";
 import type {
@@ -52,6 +57,7 @@ import type {
   ModelId,
   NativeSessionBinding,
   Plan,
+  PlanVersion,
   Provider,
   Role,
   Run,
@@ -113,6 +119,8 @@ export interface SessionOrchestratorDeps {
   ) => Promise<SessionRecord | undefined>;
   /** 落位一条会话登记（按 id upsert）。 */
   readonly saveSession: (layout: ProjectLayout, record: SessionRecord) => Promise<void>;
+  /** 落库一份计划（T4.6 计划生成轮：创世 draft / 续版 draft / 旧版 supersede 均经此）。 */
+  readonly savePlan: (layout: ProjectLayout, plan: Plan) => Promise<void>;
   /** 落库一条已结束 Run（run.json + raw.log + changes.diff）。 */
   readonly persistRun: (
     layout: ProjectLayout,
@@ -151,6 +159,11 @@ interface WorkerContext {
   readonly runningTask: Task;
   readonly profileId: AgentProfile["id"];
   readonly startedAt: number;
+}
+
+/** 计划生成轮（planner-plan）落库所需的上下文（普通 Planner 讨论轮为 undefined）。 */
+interface PlanTurnContext {
+  readonly layout: ProjectLayout;
 }
 
 export function createSessionOrchestrator(deps: SessionOrchestratorDeps): SessionOrchestrator {
@@ -218,7 +231,7 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         return { accepted: false, reason: "Provider 不存在" };
       }
 
-      const role: Role = request.input.kind === "planner-message" ? "planner" : "worker";
+      const role: Role = request.input.kind === "worker-task" ? "worker" : "planner";
       const layout = deps.resolveLayout(request.projectRoot);
       const [memory, config] = await Promise.all([
         deps.loadActiveMemory(layout),
@@ -267,6 +280,7 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
       let prompt: string;
       let guardCtx: GuardTurnContext;
       let workerCtx: WorkerContext | undefined;
+      let planCtx: PlanTurnContext | undefined;
 
       if (request.input.kind === "worker-task") {
         const task = await deps.loadTask(layout, request.input.taskId);
@@ -302,13 +316,23 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         };
       } else {
         const stateSnapshot = await deps.loadStateSnapshot(layout);
+        // planner-plan（计划生成轮）：text 可选，缺省给一句默认指令；否则用讨论消息原文
+        const messageText =
+          request.input.kind === "planner-plan"
+            ? (request.input.text ?? "请基于以上讨论产出结构化计划。")
+            : request.input.text;
         prompt = assemblePrompt({
           role: "planner",
-          input: { kind: "message", text: request.input.text },
+          input: { kind: "message", text: messageText },
           projectMemory: memory,
           outputLanguage,
           ...(stateSnapshot !== undefined ? { stateSnapshot } : {}),
         });
+        // 计划生成轮：追加结构化输出合同（放最末 = 最新指令），并登记 planCtx 供收尾解析落盘
+        if (request.input.kind === "planner-plan") {
+          prompt = `${prompt}\n\n${PLAN_OUTPUT_CONTRACT}`;
+          planCtx = { layout };
+        }
         // Planner 只读：角色默认 ∩ Profile 预设
         const plannerEnvelope = toRunEnvelope(
           intersectEnvelopes(PLANNER_DEFAULT_ENVELOPE, profile.permissionPreset),
@@ -359,7 +383,7 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
       });
 
       // 事件流消费独立于受理应答（fire-and-forget，结束时清理登记）
-      void drain(request.turnId, guarded, workerCtx, sessionCtx).finally(() => {
+      void drain(request.turnId, guarded, workerCtx, planCtx, sessionCtx).finally(() => {
         active.delete(request.turnId);
       });
 
@@ -375,6 +399,7 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
     turnId: string,
     guarded: GuardedTurn,
     workerCtx: WorkerContext | undefined,
+    planCtx: PlanTurnContext | undefined,
     sessionCtx: SessionContext,
   ): Promise<void> {
     let answerText = "";
@@ -384,7 +409,7 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
     try {
       for await (const event of guarded.events) {
         if (event.kind === "end") {
-          await finalize(turnId, guarded, workerCtx, {
+          await finalize(turnId, guarded, workerCtx, planCtx, {
             reason: event.reason,
             ...(event.message !== undefined ? { message: event.message } : {}),
             report: answerText,
@@ -421,14 +446,14 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         }
       }
       // 事件流保证以 end 收尾；未见 end 视作崩溃兜底
-      await finalize(turnId, guarded, workerCtx, {
+      await finalize(turnId, guarded, workerCtx, planCtx, {
         reason: "crashed",
         message: "事件流未以 end 收尾",
         report: answerText,
       });
     } catch (thrown) {
       const message = thrown instanceof Error ? thrown.message : String(thrown);
-      await finalize(turnId, guarded, workerCtx, {
+      await finalize(turnId, guarded, workerCtx, planCtx, {
         reason: "crashed",
         message,
         report: answerText,
@@ -436,11 +461,33 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
     }
   }
 
-  /** 收尾：Worker 轮落 Run + 推进任务；两类轮次都推 end 事件。 */
+  /**
+   * 落一份计划草案（T4.6）：无活跃计划 → 创世 v1；有活跃计划（draft/approved）→ 续版 draft
+   * 并把旧版转 superseded（§6.1 只增不改）。返回新草案版本号。
+   * createNextDraft 对终态/superseded 底稿抛错，由调用方 catch 转为面向用户的失败原因。
+   */
+  async function persistPlanDraft(
+    layout: ProjectLayout,
+    changes: Parameters<typeof createInitialDraft>[0],
+  ): Promise<PlanVersion> {
+    const latest = await deps.loadLatestPlan(layout);
+    let draft: Plan;
+    if (latest === undefined) {
+      draft = createInitialDraft(changes);
+    } else {
+      draft = createNextDraft(latest, changes);
+      await deps.savePlan(layout, supersedePlan(latest));
+    }
+    await deps.savePlan(layout, draft);
+    return draft.version;
+  }
+
+  /** 收尾：Worker 轮落 Run + 推进任务；Planner/计划生成轮据 planCtx 落计划；三类都推 end 事件。 */
   async function finalize(
     turnId: string,
     guarded: GuardedTurn,
     workerCtx: WorkerContext | undefined,
+    planCtx: PlanTurnContext | undefined,
     outcome: {
       readonly reason: Run["endReason"] & string;
       readonly message?: string;
@@ -449,11 +496,27 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
     },
   ): Promise<void> {
     if (workerCtx === undefined) {
+      // 计划生成轮：轮成功则解析答复中的计划块并落盘；失败原因经 end.message 回传（不写盘）
+      let planVersion: PlanVersion | undefined;
+      let endMessage = outcome.message;
+      if (planCtx !== undefined && outcome.reason === "completed") {
+        const parsed = parsePlannerPlanDraft(outcome.report);
+        if (!parsed.ok) {
+          endMessage = `计划生成失败：${parsed.error}`;
+        } else {
+          try {
+            planVersion = await persistPlanDraft(planCtx.layout, parsed.changes);
+          } catch (thrown) {
+            endMessage = `计划落盘失败：${thrown instanceof Error ? thrown.message : String(thrown)}`;
+          }
+        }
+      }
       deps.publish({
         turnId,
         kind: "end",
         reason: outcome.reason,
-        ...(outcome.message !== undefined ? { message: outcome.message } : {}),
+        ...(endMessage !== undefined ? { message: endMessage } : {}),
+        ...(planVersion !== undefined ? { planVersion } : {}),
       });
       return;
     }

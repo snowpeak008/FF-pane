@@ -89,40 +89,41 @@ function pick<TKind extends AgentEvent["kind"]>(
 }
 
 describe("buildCodexArgs（命令行组装）", () => {
-  it("首轮：--json / -C / --skip-git-repo-check / bypass 沙箱 + 提示词在 -- 之后", () => {
-    expect(buildCodexArgs({ cwd: "D:\\proj", prompt: "做事", model: "gpt-5-codex" })).toStrictEqual(
-      [
-        "exec",
-        "--json",
-        "--skip-git-repo-check",
-        "-C",
-        "D:\\proj",
-        "--dangerously-bypass-approvals-and-sandbox",
-        "-m",
-        "gpt-5-codex",
-        "--",
-        "做事",
-      ],
-    );
+  it("首轮：--json / -C / --skip-git-repo-check / bypass 沙箱；提示词走 stdin 故无位置参数", () => {
+    expect(buildCodexArgs({ cwd: "D:\\proj", model: "gpt-5-codex" })).toStrictEqual([
+      "exec",
+      "--json",
+      "--skip-git-repo-check",
+      "-C",
+      "D:\\proj",
+      "--dangerously-bypass-approvals-and-sandbox",
+      "-m",
+      "gpt-5-codex",
+    ]);
   });
 
-  it("resume 轮：exec resume <thread_id> 且**不带 -C**（0.147.0 无此参数，工作根靠子进程 cwd）", () => {
+  it("resume 轮：exec resume <thread_id> 且**不带 -C**；PROMPT 位置参数为 `-`（从 stdin 读）", () => {
     const args = buildCodexArgs({
       cwd: "D:\\proj",
-      prompt: "继续",
       resume: { nativeSessionId: BASIC_THREAD_ID as NativeSessionId, cwd: "D:\\proj" },
     });
     expect(args.slice(0, 3)).toStrictEqual(["exec", "resume", BASIC_THREAD_ID]);
     expect(args).not.toContain("-C");
-    expect(args.at(-2)).toBe("--");
-    expect(args.at(-1)).toBe("继续");
+    // 提示词经 stdin：不再有 `--` 分隔的位置参数，末位是 `-`
+    expect(args).not.toContain("--");
+    expect(args.at(-1)).toBe("-");
+  });
+
+  it("首轮不带 `-` 位置参数（无 PROMPT 即从 stdin 读）", () => {
+    const args = buildCodexArgs({ cwd: "/p" });
+    expect(args).not.toContain("-");
+    expect(args).not.toContain("--");
   });
 
   it("非 bypass 沙箱：首轮走 -s，resume 轮只能走 -c sandbox_mode（不继承命令行）", () => {
-    expect(buildCodexArgs({ cwd: "/p", prompt: "x", sandbox: "workspace-write" })).toContain("-s");
+    expect(buildCodexArgs({ cwd: "/p", sandbox: "workspace-write" })).toContain("-s");
     const resumed = buildCodexArgs({
       cwd: "/p",
-      prompt: "x",
       sandbox: "workspace-write",
       resume: { nativeSessionId: "t" as NativeSessionId, cwd: "/p" },
     });
@@ -133,7 +134,6 @@ describe("buildCodexArgs（命令行组装）", () => {
   it("配置覆盖与额外可写目录：-c key=value 逐条展开，--add-dir 仅首轮", () => {
     const args = buildCodexArgs({
       cwd: "/p",
-      prompt: "x",
       configOverrides: { model_reasoning_effort: '"low"' },
       addDirs: ["/p/extra"],
     });
@@ -141,7 +141,6 @@ describe("buildCodexArgs（命令行组装）", () => {
     expect(args).toContain("--add-dir");
     const resumed = buildCodexArgs({
       cwd: "/p",
-      prompt: "x",
       addDirs: ["/p/extra"],
       resume: { nativeSessionId: "t" as NativeSessionId, cwd: "/p" },
     });

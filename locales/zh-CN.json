@@ -509,7 +509,10 @@
         "native": "原生恢复",
         "context_rebuild": "上下文重建"
       }
-    }
+    },
+    "generatePlan": "生成计划",
+    "planGenerated": "已生成计划 v{{version}}",
+    "viewPlan": "查看计划"
   },
   "shortcut": {
     "scope": {

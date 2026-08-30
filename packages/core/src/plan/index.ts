@@ -5,4 +5,5 @@
 
 export * from "./errors.js";
 export * from "./next-draft.js";
+export * from "./plan-output.js";
 export * from "./transitions.js";

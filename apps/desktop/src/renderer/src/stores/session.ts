@@ -13,6 +13,7 @@
 import type {
   LocalSessionId,
   ModelId,
+  PlanVersion,
   Role,
   RunEndReason,
   RunId,
@@ -54,6 +55,8 @@ export interface EndedTurnMarker {
   readonly turnId: string;
   readonly reason: RunEndReason;
   readonly runId?: RunId;
+  /** 计划生成轮（T4.6）落盘的计划版本；供会话页 toast + 跳计划页。 */
+  readonly planVersion?: PlanVersion;
 }
 
 export interface SessionUiState {
@@ -236,6 +239,7 @@ export const useSessionStore = create<SessionStore>()((set) => ({
               turnId: event.turnId,
               reason: event.reason,
               ...(event.runId !== undefined ? { runId: event.runId } : {}),
+              ...(event.planVersion !== undefined ? { planVersion: event.planVersion } : {}),
             },
           };
         default:

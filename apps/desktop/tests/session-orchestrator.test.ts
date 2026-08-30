@@ -115,6 +115,7 @@ interface Harness {
   readonly savedTasks: Task[];
   readonly persistedRuns: Run[];
   readonly savedSessions: SessionRecord[];
+  readonly savedPlans: Plan[];
   readonly sessions: Map<string, SessionRecord>;
   readonly captured: CapturedTurn[];
 }
@@ -140,6 +141,7 @@ function makeHarness(
   const savedTasks: Task[] = [];
   const persistedRuns: Run[] = [];
   const savedSessions: SessionRecord[] = [];
+  const savedPlans: Plan[] = [];
   const captured: CapturedTurn[] = [];
   const sessions = new Map<string, SessionRecord>();
   if (opts.existingSession !== undefined) {
@@ -178,6 +180,9 @@ function makeHarness(
       sessions.set(record.id, record);
       savedSessions.push(record);
     },
+    savePlan: async (_l, plan) => {
+      savedPlans.push(plan);
+    },
     persistRun: async (_l, run) => {
       persistedRuns.push(run);
     },
@@ -185,7 +190,16 @@ function makeHarness(
     newRunId: () => "run-1" as unknown as Run["id"],
     newLocalSessionId: () => "sess-new" as unknown as LocalSessionId,
   };
-  return { deps, published, savedTasks, persistedRuns, savedSessions, sessions, captured };
+  return {
+    deps,
+    published,
+    savedTasks,
+    persistedRuns,
+    savedSessions,
+    savedPlans,
+    sessions,
+    captured,
+  };
 }
 
 async function flushUntilEnd(published: readonly SessionStreamEvent[]): Promise<void> {
@@ -264,6 +278,111 @@ describe("createSessionOrchestrator", () => {
       "model_providers.ffpane.base_url": '"https://api.deepseek.com/v1"',
       "model_providers.ffpane.env_key": '"OPENAI_API_KEY"',
     });
+  });
+
+  it("planner-plan 轮（无底稿）：解析计划块 → 落 v1 draft，end 带 planVersion=1（T4.6）", async () => {
+    const planJson = JSON.stringify({
+      goal: "加个工具函数",
+      scope: ["实现 sum"],
+      tasks: [{ id: "t1", goal: "实现 sum", writeScope: ["src/**"], acceptance: ["导出 sum"] }],
+    });
+    const events: AgentEvent[] = [
+      { kind: "session_start" },
+      {
+        kind: "text",
+        content: `好的：\n\`\`\`json\n${planJson}\n\`\`\``,
+        final: true,
+        channel: "answer",
+      },
+      { kind: "end", reason: "completed" },
+    ];
+    const h = makeHarness(events, { profile: profile({ defaultRole: "planner" }) });
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start({
+      turnId: "tp",
+      projectRoot: "/proj",
+      profileId: "prof-1" as unknown as ProfileId,
+      input: { kind: "planner-plan" },
+    });
+    await flushUntilEnd(h.published);
+
+    expect(h.savedPlans).toHaveLength(1);
+    expect(h.savedPlans[0]).toMatchObject({ version: 1, status: "draft", goal: "加个工具函数" });
+    expect(h.savedPlans[0]?.tasks[0]).toMatchObject({ id: "t1", planVersion: 1 });
+    expect(h.published.find((e) => e.kind === "end")).toMatchObject({
+      reason: "completed",
+      planVersion: 1,
+    });
+  });
+
+  it("planner-plan 轮（有活跃底稿）：产 v2 draft 且旧版转 superseded", async () => {
+    const base = {
+      version: 1,
+      status: "draft",
+      goal: "旧目标",
+      scope: [],
+      nonGoals: [],
+      constraints: [],
+      decisions: [],
+      tasks: [],
+      acceptance: [],
+    } as unknown as Plan;
+    const planJson = JSON.stringify({
+      goal: "新目标",
+      tasks: [{ id: "t1", goal: "做事" }],
+    });
+    const events: AgentEvent[] = [
+      { kind: "session_start" },
+      { kind: "text", content: `\`\`\`json\n${planJson}\n\`\`\``, final: true, channel: "answer" },
+      { kind: "end", reason: "completed" },
+    ];
+    const h = makeHarness(events, {
+      profile: profile({ defaultRole: "planner" }),
+      latestPlan: base,
+    });
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start({
+      turnId: "tp2",
+      projectRoot: "/proj",
+      profileId: "prof-1" as unknown as ProfileId,
+      input: { kind: "planner-plan" },
+    });
+    await flushUntilEnd(h.published);
+
+    // 两次落盘：旧版 supersede + 新版 v2 draft
+    expect(h.savedPlans).toHaveLength(2);
+    expect(h.savedPlans.find((p) => p.version === 1)?.status).toBe("superseded");
+    expect(h.savedPlans.find((p) => p.version === 2)).toMatchObject({
+      status: "draft",
+      goal: "新目标",
+    });
+    expect(h.published.find((e) => e.kind === "end")).toMatchObject({ planVersion: 2 });
+  });
+
+  it("planner-plan 轮：答复无计划块 → 不落盘，end 带失败原因", async () => {
+    const events: AgentEvent[] = [
+      { kind: "session_start" },
+      { kind: "text", content: "我先聊聊思路，没有给 json。", final: true, channel: "answer" },
+      { kind: "end", reason: "completed" },
+    ];
+    const h = makeHarness(events, { profile: profile({ defaultRole: "planner" }) });
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start({
+      turnId: "tp3",
+      projectRoot: "/proj",
+      profileId: "prof-1" as unknown as ProfileId,
+      input: { kind: "planner-plan" },
+    });
+    await flushUntilEnd(h.published);
+
+    expect(h.savedPlans).toHaveLength(0);
+    const end = h.published.find((e) => e.kind === "end");
+    expect(end).toMatchObject({ reason: "completed" });
+    expect(end?.kind === "end" && end.message).toContain("计划生成失败");
+    expect(end?.kind === "end" && end.planVersion).toBeUndefined();
   });
 
   it("Worker 轮：派发 → 落 Run → completeTask（done），推 end 带 runId", async () => {

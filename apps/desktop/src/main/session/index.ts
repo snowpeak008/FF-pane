@@ -25,6 +25,7 @@ import {
   loadTask,
   type ProjectLayout,
   resolveProjectLayout,
+  savePlan,
   saveRun,
   saveTask,
   writeRunChangesDiff,
@@ -120,6 +121,9 @@ export async function createSessionHandlers(
       createSessionStore(projectLayout.sessionsFile).getSession(id),
     saveSession: (projectLayout, record) =>
       createSessionStore(projectLayout.sessionsFile).saveSession(record),
+    savePlan: async (projectLayout, plan) => {
+      await savePlan(projectLayout, plan);
+    },
     persistRun: async (projectLayout, run, rawLog, changesDiff) => {
       await saveRun(projectLayout, run);
       await writeRunRawLog(projectLayout, run.id, rawLog);

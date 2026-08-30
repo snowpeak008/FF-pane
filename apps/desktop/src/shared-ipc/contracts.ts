@@ -226,6 +226,11 @@ export interface ApprovePlanRequest extends ProjectScopedRequest {
  */
 export type SessionInput =
   | { readonly kind: "planner-message"; readonly text: string }
+  /**
+   * 生成/更新结构化计划（T4.6，§12 步骤"出计划"）：Planner 角色，提示词追加结构化输出合同，
+   * 轮结束时主进程解析答复中的计划块 → 落 draft 计划。text 为可选补充指令（缺省即"据讨论出计划"）。
+   */
+  | { readonly kind: "planner-plan"; readonly text?: string }
   | { readonly kind: "worker-task"; readonly taskId: TaskId };
 
 /**
@@ -325,6 +330,11 @@ export type SessionStreamEvent =
       readonly reason: RunEndReason;
       readonly message?: string;
       readonly runId?: RunId;
+      /**
+       * 本轮（planner-plan）生成的计划版本号（T4.6）。仅计划生成轮且成功落盘时出现，
+       * 供渲染层 toast「已生成计划 vN」并刷新/跳转计划页。
+       */
+      readonly planVersion?: PlanVersion;
     };
 
 /** invoke（请求/响应）通道契约表。 */

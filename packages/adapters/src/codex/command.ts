@@ -14,9 +14,12 @@
  * - 沙箱策略不继承首轮命令行（codex.md §3），须用 `-c sandbox_mode=...` 重给；
  * - `--add-dir` 无对应 `-c` 开关，resume 轮只能省略（默认 bypass 策略下无影响）。
  *
- * 提示词一律走 `--` 之后的位置参数：本机实测 `codex exec ... -- "<prompt>"`
- * 解析正常，这样以 `-` 开头的提示词（`-` 本身还意味着"从 stdin 读"，§1.1）
- * 不会被当成选项。
+ * 提示词一律经 **stdin** 下发，不走位置参数：
+ * - 首轮 `codex exec`：省略 PROMPT 位置参数 → codex「instructions are read from stdin」；
+ * - resume `codex exec resume <id> -`：PROMPT 用 `-` → codex 从 stdin 读。
+ * 动机（本机 Windows 11 实测）：npm 全局 codex 落地为 codex.cmd 垫片，经 cmd.exe 启动，
+ * 多行位置参数会被 cmd.exe 在第一个换行处截断（见 process/windows-command.ts）；stdin
+ * 不经 cmd.exe 解析，多行提示词完整送达。提示词内容由 adapter 写入子进程 stdin 后 end。
  */
 
 import type { ModelId, NativeSessionBinding, RuntimeId } from "@ff-pane/shared";
@@ -55,8 +58,6 @@ export const DEFAULT_CODEX_SANDBOX_POLICY: CodexSandboxPolicy = "bypass";
 export interface CodexArgsInput {
   /** Agent 工作根。首轮经 `-C` 下发；resume 轮只能靠子进程 cwd。 */
   readonly cwd: string;
-  /** 本轮提示词（`--` 之后的位置参数）。 */
-  readonly prompt: string;
   /** 指定模型（`-m`）；缺席用 Runtime/Profile 默认。 */
   readonly model?: ModelId | undefined;
   /** 原生会话绑定；缺席 = 开新会话。 */
@@ -106,6 +107,10 @@ export function buildCodexArgs(input: CodexArgsInput): string[] {
     }
   }
   args.push(...(input.extraArgs ?? []));
-  args.push("--", input.prompt);
+  // 提示词经 stdin 下发（见模块头）：resume 用 `-` 位置参数触发 stdin 读取；
+  // 首轮省略位置参数，codex exec 无 PROMPT 时即从 stdin 读。
+  if (resuming) {
+    args.push("-");
+  }
   return args;
 }
