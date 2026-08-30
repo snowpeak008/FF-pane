@@ -73,14 +73,15 @@ export function SessionPage(): ReactElement {
 
   const busy = turnStatus === "running" || turnStatus === "awaiting-permission";
 
-  const onSend = (text: string): void => {
+  const onSend = (text: string, directExecute: boolean): void => {
     if (entry === null || plannerProfile === null) {
       return;
     }
     void startSessionTurn({
       projectRoot: entry.rootPath,
       profileId: plannerProfile.id,
-      input: { kind: "planner-message", text },
+      // directExecute（T5.3）：本轮「直接做」跳过习惯整形；缺省不带该字段
+      input: { kind: "planner-message", text, ...(directExecute ? { directExecute: true } : {}) },
       // 有当前会话 = 续接（原生恢复 / 上下文重建）；无 = 开新会话（T4.3）
       ...(activeSessionId !== null ? { sessionId: activeSessionId } : {}),
     });

@@ -234,6 +234,36 @@ function workerRequest(): StartSessionRequest {
   };
 }
 
+/** 习惯条目工厂（Prompt 第 2 层 / 习惯先行测试用）；默认一条 active+enabled 的 workflow 习惯。 */
+function habitEntry(o: Partial<HabitEntry> = {}): HabitEntry {
+  return {
+    id: "hab-x" as HabitEntryId,
+    category: "workflow",
+    content: "先跑测试再改代码",
+    status: "active",
+    enabled: true,
+    source: { kind: "user_manual" },
+    importance: 50,
+    createdAt: 1,
+    updatedAt: 1,
+    ...o,
+  } as HabitEntry;
+}
+
+/** 构造一条 planner-message 请求（可带 directExecute）。 */
+function plannerMessageRequest(text: string, directExecute?: boolean): StartSessionRequest {
+  return {
+    turnId: "t1",
+    projectRoot: "/proj",
+    profileId: "prof-1" as unknown as ProfileId,
+    input: {
+      kind: "planner-message",
+      text,
+      ...(directExecute === true ? { directExecute: true } : {}),
+    },
+  };
+}
+
 describe("createSessionOrchestrator", () => {
   it("Planner 轮：推 started → text → end，不触碰任务", async () => {
     const events: AgentEvent[] = [
@@ -293,6 +323,84 @@ describe("createSessionOrchestrator", () => {
     expect(prompt).toContain("流程约束（执行前必须遵守）");
     expect(prompt).not.toContain("停用项");
     expect(prompt).not.toContain("候选项");
+  });
+
+  describe("习惯先行（T5.3，§8.2.3）", () => {
+    const events: AgentEvent[] = [
+      { kind: "session_start" },
+      { kind: "text", content: "ok", final: true, channel: "answer" },
+      { kind: "end", reason: "completed" },
+    ];
+    const MARKER = "【习惯先行】";
+
+    it("planner-message + workflow 习惯 → 追加整形指令", async () => {
+      const h = makeHarness(events, {
+        profile: profile({ defaultRole: "planner" }),
+        habits: [habitEntry({})],
+      });
+      await createSessionOrchestrator(h.deps).start(plannerMessageRequest("帮我做个登录页"));
+      await flushUntilEnd(h.published);
+      expect(h.captured[0]?.prompt).toContain(MARKER);
+    });
+
+    it("本轮 directExecute=true → 不追加（单次跳过）", async () => {
+      const h = makeHarness(events, {
+        profile: profile({ defaultRole: "planner" }),
+        habits: [habitEntry({})],
+      });
+      await createSessionOrchestrator(h.deps).start(plannerMessageRequest("帮我做个登录页", true));
+      await flushUntilEnd(h.published);
+      expect(h.captured[0]?.prompt).not.toContain(MARKER);
+    });
+
+    it("消息以「直接做」开头 → 不追加", async () => {
+      const h = makeHarness(events, {
+        profile: profile({ defaultRole: "planner" }),
+        habits: [habitEntry({})],
+      });
+      await createSessionOrchestrator(h.deps).start(plannerMessageRequest("直接做，别问了"));
+      await flushUntilEnd(h.published);
+      expect(h.captured[0]?.prompt).not.toContain(MARKER);
+    });
+
+    it("只有非 workflow 习惯 → 不追加", async () => {
+      const h = makeHarness(events, {
+        profile: profile({ defaultRole: "planner" }),
+        habits: [habitEntry({ category: "tech", content: "优先 TypeScript" })],
+      });
+      await createSessionOrchestrator(h.deps).start(plannerMessageRequest("帮我做个登录页"));
+      await flushUntilEnd(h.published);
+      expect(h.captured[0]?.prompt).not.toContain(MARKER);
+    });
+
+    it("planner-plan 轮 + workflow 习惯 → 不追加（计划轮本就是先提方案）", async () => {
+      const planJson = JSON.stringify({
+        goal: "g",
+        tasks: [{ id: "t1", goal: "x", writeScope: ["src/**"], acceptance: ["a"] }],
+      });
+      const planEvents: AgentEvent[] = [
+        { kind: "session_start" },
+        {
+          kind: "text",
+          content: `\`\`\`json\n${planJson}\n\`\`\``,
+          final: true,
+          channel: "answer",
+        },
+        { kind: "end", reason: "completed" },
+      ];
+      const h = makeHarness(planEvents, {
+        profile: profile({ defaultRole: "planner" }),
+        habits: [habitEntry({})],
+      });
+      await createSessionOrchestrator(h.deps).start({
+        turnId: "t1",
+        projectRoot: "/proj",
+        profileId: "prof-1" as unknown as ProfileId,
+        input: { kind: "planner-plan" },
+      });
+      await flushUntilEnd(h.published);
+      expect(h.captured[0]?.prompt).not.toContain(MARKER);
+    });
   });
 
   it("codex + openai_compatible：把 model_provider 路由经 configOverrides 透传给适配器（方案 A）", async () => {

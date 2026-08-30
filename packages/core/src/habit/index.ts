@@ -6,3 +6,4 @@
 
 export * from "./compile.js";
 export * from "./conflict.js";
+export * from "./habit-first.js";

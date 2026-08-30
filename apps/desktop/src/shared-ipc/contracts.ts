@@ -267,7 +267,15 @@ export interface CheckHabitConflictsRequest {
  * role 由输入类别隐含：planner-message → planner；worker-task → worker。
  */
 export type SessionInput =
-  | { readonly kind: "planner-message"; readonly text: string }
+  | {
+      readonly kind: "planner-message";
+      readonly text: string;
+      /**
+       * 习惯先行（T5.3，§8.2.3）：本轮请求「直接做」，跳过据 workflow 流程约束的整形。
+       * 单次生效，不影响习惯档案。缺省 = 不跳过（有 workflow 习惯时 Planner 先给整形方案）。
+       */
+      readonly directExecute?: boolean;
+    }
   /**
    * 生成/更新结构化计划（T4.6，§12 步骤"出计划"）：Planner 角色，提示词追加结构化输出合同，
    * 轮结束时主进程解析答复中的计划块 → 落 draft 计划。text 为可选补充指令（缺省即"据讨论出计划"）。

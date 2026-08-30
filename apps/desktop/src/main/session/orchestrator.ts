@@ -37,7 +37,10 @@ import {
   dispatchTask,
   endRun,
   failTask,
+  HABIT_FIRST_INSTRUCTION,
+  hasActiveWorkflowHabit,
   intersectEnvelopes,
+  isDirectExecuteRequest,
   PLAN_OUTPUT_CONTRACT,
   PLANNER_DEFAULT_ENVELOPE,
   parsePlannerPlanDraft,
@@ -344,6 +347,14 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         if (request.input.kind === "planner-plan") {
           prompt = `${prompt}\n\n${PLAN_OUTPUT_CONTRACT}`;
           planCtx = { layout };
+        } else if (
+          // 习惯先行（T5.3，§8.2.3）：讨论轮存在 workflow 流程约束且本轮未请求「直接做」→
+          // 追加整形指令，让 Planner 先给分步方案再执行。planner-plan 已是"先提方案"，不叠加。
+          request.input.directExecute !== true &&
+          !isDirectExecuteRequest(request.input.text) &&
+          hasActiveWorkflowHabit(habits)
+        ) {
+          prompt = `${prompt}\n\n${HABIT_FIRST_INSTRUCTION}`;
         }
         // Planner 只读：角色默认 ∩ Profile 预设
         const plannerEnvelope = toRunEnvelope(

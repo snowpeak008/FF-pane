@@ -512,7 +512,9 @@
     },
     "generatePlan": "Generate plan",
     "planGenerated": "Plan v{{version}} generated",
-    "viewPlan": "View plan"
+    "viewPlan": "View plan",
+    "directExecute": "Just do it",
+    "directExecuteHint": "Skip habit-based shaping for this turn and act directly (habits stay intact)."
   },
   "shortcut": {
     "scope": {

@@ -512,7 +512,9 @@
     },
     "generatePlan": "生成计划",
     "planGenerated": "已生成计划 v{{version}}",
-    "viewPlan": "查看计划"
+    "viewPlan": "查看计划",
+    "directExecute": "直接做",
+    "directExecuteHint": "本轮跳过据流程习惯的整形，直接执行（不影响习惯档案）。"
   },
   "shortcut": {
     "scope": {

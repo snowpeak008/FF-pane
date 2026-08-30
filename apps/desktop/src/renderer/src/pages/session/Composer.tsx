@@ -1,4 +1,4 @@
-import type { KeyboardEvent, ReactElement } from "react";
+import { type KeyboardEvent, type ReactElement, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../components/ui/Button";
 import { Textarea } from "../../components/ui/Input";
@@ -6,8 +6,11 @@ import { Tooltip } from "../../components/ui/Tooltip";
 import { useSessionStore } from "../../stores/session";
 
 export interface ComposerProps {
-  /** 发送草稿（非空时调用；发送后由本组件清空草稿）。 */
-  readonly onSend: (text: string) => void;
+  /**
+   * 发送草稿（非空时调用；发送后由本组件清空草稿）。
+   * directExecute（T5.3 习惯先行，§8.2.3）：本轮「直接做」，跳过据 workflow 流程约束的整形。
+   */
+  readonly onSend: (text: string, directExecute: boolean) => void;
   /**
    * 生成计划（T4.6，§12「出计划」）：据当前讨论让 Planner 产出结构化计划草案。
    * 不依赖草稿（用会话上下文）；提供则渲染次按钮。
@@ -34,6 +37,8 @@ export function Composer({
   const draft = useSessionStore((s) => s.composerDraft);
   const setDraft = useSessionStore((s) => s.setComposerDraft);
   const clearDraft = useSessionStore((s) => s.clearComposerDraft);
+  // 习惯先行「直接做」是单次意图，随发送重置——存本地 UI 态即可（不进 store）。
+  const [directExecute, setDirectExecute] = useState(false);
 
   const canSend = !disabled && draft.trim().length > 0;
 
@@ -41,8 +46,9 @@ export function Composer({
     if (!canSend) {
       return;
     }
-    onSend(draft.trim());
+    onSend(draft.trim(), directExecute);
     clearDraft();
+    setDirectExecute(false);
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -60,6 +66,18 @@ export function Composer({
 
   return (
     <div className="shrink-0 border-t border-border p-3">
+      <div className="mx-auto mb-1.5 flex max-w-3xl items-center">
+        <Tooltip content={t("session.directExecuteHint")} wrapTrigger>
+          <label className="flex cursor-pointer items-center gap-1.5 text-2xs text-fg-muted">
+            <input
+              type="checkbox"
+              checked={directExecute}
+              onChange={(e) => setDirectExecute(e.target.checked)}
+            />
+            {t("session.directExecute")}
+          </label>
+        </Tooltip>
+      </div>
       <div className="mx-auto flex max-w-3xl items-end gap-2">
         <Textarea
           value={draft}
