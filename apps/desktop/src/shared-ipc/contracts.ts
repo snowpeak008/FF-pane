@@ -198,6 +198,13 @@ export interface TaskActionRequest extends ProjectScopedRequest {
   readonly id: TaskId;
 }
 
+/** 接受任务的结果（T4.4）：迁移后的任务 + 本次派生的记忆候选条数。 */
+export interface AcceptTaskResult {
+  readonly task: Task;
+  /** 本次从任务沉淀派生的记忆候选数（0 = 无 Run 报告可沉淀）。 */
+  readonly candidateCount: number;
+}
+
 /** 记忆条目操作请求（通过 / 拒绝）：项目根 + 条目 ID。 */
 export interface MemoryActionRequest extends ProjectScopedRequest {
   readonly id: MemoryEntryId;
@@ -368,8 +375,11 @@ export interface IpcInvokeContracts {
   "profiles:remove": { request: RemoveProfileRequest; response: { readonly removed: true } };
   /** 列出当前项目的全部任务（§11.4 任务看板）。 */
   "tasks:list": { request: ProjectScopedRequest; response: readonly Task[] };
-  /** 接受任务（done → accepted，走 core 任务状态机）。 */
-  "tasks:accept": { request: TaskActionRequest; response: Task };
+  /**
+   * 接受任务（done → accepted，走 core 任务状态机）。
+   * T4.4：验收即从任务沉淀派生记忆候选，返回本次生成的候选条数（供"去审核"提示）。
+   */
+  "tasks:accept": { request: TaskActionRequest; response: AcceptTaskResult };
   /** 取消任务（→ cancelled 终态）。 */
   "tasks:cancel": { request: TaskActionRequest; response: Task };
   /** 列出当前项目的全部执行记录（§11.5，含 file_changes/commands/verify_result）。 */

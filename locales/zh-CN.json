@@ -548,6 +548,7 @@
     "cancel": "取消",
     "empty": "还没有任务。批准计划后 Planner 会生成任务。",
     "accepted": "任务已接受",
+    "candidatesGenerated": "本任务产生了 {{count}} 条记忆候选，去记忆页审核",
     "cancelled": "任务已取消",
     "actionError": "操作失败",
     "loadError": "读取任务失败",

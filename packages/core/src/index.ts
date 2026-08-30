@@ -12,6 +12,8 @@ export function assertNever(value: never, context = "assertNever"): never {
   throw new Error(`${context}: unexpected value ${JSON.stringify(value)}`);
 }
 
+export * from "./memory/index.js";
+
 export * from "./permission/index.js";
 
 /** Plan 状态机（W1.4a）：迁移表、迁移函数、版本演进、typed error。 */

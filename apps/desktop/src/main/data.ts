@@ -10,18 +10,20 @@
  * - 移除项目 = 仅出注册表，不删磁盘（故 remove 返回被移条目、支持 restore 撤销）。
  */
 
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import {
   acceptTask,
   approvePlan,
   cancelTask,
+  deriveAcceptanceCandidates,
   fetchModels,
   ProfileValidationError,
   testConnection,
   validateProfileDraft,
 } from "@ff-pane/core";
-import type { ApiKeyRef, Plan, PlanVersion } from "@ff-pane/shared";
+import type { ApiKeyRef, MemoryEntryId, Plan, PlanVersion } from "@ff-pane/shared";
 import {
   createConfigStore,
   createProfileStore,
@@ -262,7 +264,26 @@ export async function createDataHandlers(
       }
       const accepted = acceptTask(loaded.value, "user");
       await saveTask(layout, accepted);
-      return accepted;
+      // T4.4：验收即从任务沉淀派生记忆候选（§8.1）。落库失败不回滚验收——任务已 accepted
+      // 是事实，候选缺失可由用户后续手写补，不该让记忆派生阻断验收终态。
+      let candidateCount = 0;
+      try {
+        const runsResult = await listRuns(layout);
+        const runs = runsResult.ok ? runsResult.value : [];
+        const candidates = deriveAcceptanceCandidates({
+          task: accepted,
+          runs,
+          now: Date.now(),
+          newId: () => `mem-${randomUUID()}` as MemoryEntryId,
+        });
+        for (const candidate of candidates) {
+          await saveEntry(layout, candidate);
+        }
+        candidateCount = candidates.length;
+      } catch {
+        candidateCount = 0;
+      }
+      return { task: accepted, candidateCount };
     },
 
     "tasks:cancel": async (request) => {

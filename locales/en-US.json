@@ -548,6 +548,7 @@
     "cancel": "Cancel",
     "empty": "No tasks yet. The Planner generates them once a plan is approved.",
     "accepted": "Task accepted",
+    "candidatesGenerated": "This task produced {{count}} memory candidate(s) — review them on the Memory page",
     "cancelled": "Task cancelled",
     "actionError": "Action failed",
     "loadError": "Failed to load tasks",

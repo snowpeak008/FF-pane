@@ -45,7 +45,15 @@ function TaskBoard({ projectRoot }: { readonly projectRoot: string }): ReactElem
         return;
       }
       refetch();
-      toast.success(channel === "tasks:accept" ? t("tasks.accepted") : t("tasks.cancelled"));
+      if (channel === "tasks:cancel") {
+        toast.success(t("tasks.cancelled"));
+        return;
+      }
+      // T4.4：验收提示带记忆候选汇总（不弹窗打断，候选角标见记忆页候选标签）。
+      const count = "candidateCount" in settled.data ? settled.data.candidateCount : 0;
+      toast.success(t("tasks.accepted"), {
+        ...(count > 0 ? { description: t("tasks.candidatesGenerated", { count }) } : {}),
+      });
     },
     [projectRoot, refetch, t],
   );
