@@ -13,6 +13,8 @@
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import {
+  acceptTask,
+  cancelTask,
   fetchModels,
   ProfileValidationError,
   testConnection,
@@ -27,9 +29,13 @@ import {
   GLOBAL_ROOT_DIR_NAME,
   initGlobalLayout,
   initProjectLayout,
+  listTasks,
+  loadTask,
   type ProfileDraftValidator,
   type ProviderDraft,
   profileReferencesProvider,
+  resolveProjectLayout,
+  saveTask,
 } from "@ff-pane/storage";
 import { type BrowserWindow, dialog, type OpenDialogOptions } from "electron";
 import type { InvokeHandlers } from "../shared-ipc/server";
@@ -54,7 +60,10 @@ type DataChannel =
   | "profiles:list"
   | "profiles:create"
   | "profiles:update"
-  | "profiles:remove";
+  | "profiles:remove"
+  | "tasks:list"
+  | "tasks:accept"
+  | "tasks:cancel";
 
 /** 目录选择器挂靠的父窗口取值器（窗口在数据层装配后才创建，故惰性取用）。 */
 export type MainWindowGetter = () => BrowserWindow | null;
@@ -213,6 +222,41 @@ export async function createDataHandlers(
     "profiles:remove": async (request) => {
       await profiles.deleteProfile(request.id);
       return { removed: true } as const;
+    },
+
+    "tasks:list": async (request) => {
+      const layout = resolveProjectLayout(request.projectRoot);
+      const result = await listTasks(layout);
+      if (!result.ok) {
+        // tasks 目录缺失（未初始化的项目）视为空集，其余读错误上抛
+        if (result.error.code === "not-found") {
+          return [];
+        }
+        throw result.error;
+      }
+      return result.value;
+    },
+
+    "tasks:accept": async (request) => {
+      const layout = resolveProjectLayout(request.projectRoot);
+      const loaded = await loadTask(layout, request.id);
+      if (!loaded.ok) {
+        throw loaded.error;
+      }
+      const accepted = acceptTask(loaded.value, "user");
+      await saveTask(layout, accepted);
+      return accepted;
+    },
+
+    "tasks:cancel": async (request) => {
+      const layout = resolveProjectLayout(request.projectRoot);
+      const loaded = await loadTask(layout, request.id);
+      if (!loaded.ok) {
+        throw loaded.error;
+      }
+      const cancelled = cancelTask(loaded.value);
+      await saveTask(layout, cancelled);
+      return cancelled;
     },
   };
 }

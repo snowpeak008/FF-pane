@@ -6,6 +6,7 @@ import { PlaceholderPage } from "./PlaceholderPage";
 import { ProjectsPage } from "./projects";
 import { SessionPage } from "./session";
 import { SettingsPage } from "./settings";
+import { TasksPage } from "./tasks";
 
 /**
  * 路由表（react-router-dom v7）。
@@ -19,6 +20,7 @@ const PAGE_ELEMENTS: Partial<Record<string, ReactElement>> = {
   projects: <ProjectsPage />,
   session: <SessionPage />,
   settings: <SettingsPage />,
+  tasks: <TasksPage />,
 };
 
 export function AppRoutes(): ReactElement {

@@ -204,6 +204,10 @@
       "action": "Back to projects"
     }
   },
+  "project": {
+    "noneSelected": "No project selected yet. Pick one from the project list first.",
+    "goToList": "Go to projects"
+  },
   "projects": {
     "new": "New project",
     "empty": "No project yet. Pick a directory to create your first one.",
@@ -416,6 +420,15 @@
       "memory-approve": "Memory candidate: approve",
       "memory-reject": "Memory candidate: reject"
     }
+  },
+  "tasks": {
+    "accept": "Accept",
+    "cancel": "Cancel",
+    "empty": "No tasks yet. The Planner generates them once a plan is approved.",
+    "accepted": "Task accepted",
+    "cancelled": "Task cancelled",
+    "actionError": "Action failed",
+    "loadError": "Failed to load tasks"
   },
   "task": {
     "status": {

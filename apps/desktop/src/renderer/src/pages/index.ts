@@ -5,3 +5,4 @@ export { PlaceholderPage, type PlaceholderPageProps } from "./PlaceholderPage";
 export { ProjectsPage } from "./projects";
 export { SessionPage } from "./session";
 export { SettingsPage } from "./settings";
+export { TasksPage } from "./tasks";

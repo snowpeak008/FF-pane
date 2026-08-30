@@ -22,7 +22,14 @@ import type {
   ProjectRegistryEntry,
   Provider,
   ProviderId,
+  Task,
+  TaskId,
 } from "@ff-pane/shared";
+
+/** 项目级请求基：一律携带项目根路径，主进程据此 resolveProjectLayout。 */
+export interface ProjectScopedRequest {
+  readonly projectRoot: string;
+}
 
 /**
  * Provider 创建 / 更新草稿：除 id（由 store 生成）外的全部字段。
@@ -175,6 +182,11 @@ export interface RemoveProfileRequest {
   readonly id: ProfileId;
 }
 
+/** 任务操作请求（接受 / 取消）：项目根 + 任务 ID。 */
+export interface TaskActionRequest extends ProjectScopedRequest {
+  readonly id: TaskId;
+}
+
 /** invoke（请求/响应）通道契约表。 */
 export interface IpcInvokeContracts {
   "app:get-info": { request: undefined; response: AppInfo };
@@ -221,6 +233,12 @@ export interface IpcInvokeContracts {
   "profiles:update": { request: UpdateProfileRequest; response: AgentProfile };
   /** 删除 Profile。 */
   "profiles:remove": { request: RemoveProfileRequest; response: { readonly removed: true } };
+  /** 列出当前项目的全部任务（§11.4 任务看板）。 */
+  "tasks:list": { request: ProjectScopedRequest; response: readonly Task[] };
+  /** 接受任务（done → accepted，走 core 任务状态机）。 */
+  "tasks:accept": { request: TaskActionRequest; response: Task };
+  /** 取消任务（→ cancelled 终态）。 */
+  "tasks:cancel": { request: TaskActionRequest; response: Task };
   /** 仅冒烟模式注册：请求主进程向本窗口推送一条 smoke:event。 */
   "smoke:emit-event": { request: { readonly seq: number }; response: { readonly emitted: true } };
   /** 仅冒烟模式注册：上报渲染层检查结果，主进程据此决定退出码。 */
@@ -271,6 +289,9 @@ export const INVOKE_CHANNELS = [
   "profiles:create",
   "profiles:update",
   "profiles:remove",
+  "tasks:list",
+  "tasks:accept",
+  "tasks:cancel",
   "smoke:emit-event",
   "smoke:report",
 ] as const satisfies readonly InvokeChannel[];
