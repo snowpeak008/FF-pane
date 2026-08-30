@@ -4,6 +4,7 @@ import { ALL_NAV_ITEMS, DEFAULT_ROUTE_PATH } from "../layout/nav";
 import { MemoryPage } from "./memory";
 import { NotFoundPage } from "./NotFoundPage";
 import { PlaceholderPage } from "./PlaceholderPage";
+import { PlanPage } from "./plan";
 import { ProjectsPage } from "./projects";
 import { RunsPage } from "./runs";
 import { SessionPage } from "./session";
@@ -20,6 +21,7 @@ import { TasksPage } from "./tasks";
  */
 const PAGE_ELEMENTS: Partial<Record<string, ReactElement>> = {
   memory: <MemoryPage />,
+  plan: <PlanPage />,
   projects: <ProjectsPage />,
   runs: <RunsPage />,
   session: <SessionPage />,

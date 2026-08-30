@@ -14,13 +14,14 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import {
   acceptTask,
+  approvePlan,
   cancelTask,
   fetchModels,
   ProfileValidationError,
   testConnection,
   validateProfileDraft,
 } from "@ff-pane/core";
-import type { ApiKeyRef } from "@ff-pane/shared";
+import type { ApiKeyRef, Plan, PlanVersion } from "@ff-pane/shared";
 import {
   createConfigStore,
   createProfileStore,
@@ -33,12 +34,14 @@ import {
   listEntries,
   listRuns,
   listTasks,
+  loadPlan,
   loadTask,
   type ProfileDraftValidator,
   type ProviderDraft,
   profileReferencesProvider,
   resolveProjectLayout,
   saveEntry,
+  savePlan,
   saveTask,
   updateEntryStatus,
 } from "@ff-pane/storage";
@@ -73,7 +76,9 @@ type DataChannel =
   | "memory:list"
   | "memory:approve"
   | "memory:reject"
-  | "memory:update";
+  | "memory:update"
+  | "plans:list"
+  | "plans:approve";
 
 /** 目录选择器挂靠的父窗口取值器（窗口在数据层装配后才创建，故惰性取用）。 */
 export type MainWindowGetter = () => BrowserWindow | null;
@@ -308,6 +313,35 @@ export async function createDataHandlers(
       // saveEntry 按 status 落位并自愈旧址副本（编辑后通过：内容 + 状态一并写回）
       await saveEntry(layout, request.entry);
       return request.entry;
+    },
+
+    "plans:list": async (request) => {
+      const layout = resolveProjectLayout(request.projectRoot);
+      // 版本 v1..vN 连续（每次修改产出下一版），逐版加载到 not-found 为止
+      const plans: Plan[] = [];
+      for (let v = 1; ; v += 1) {
+        const result = await loadPlan(layout, v as PlanVersion);
+        if (!result.ok) {
+          if (result.error.code === "not-found") {
+            break;
+          }
+          throw result.error;
+        }
+        plans.push(result.value.plan);
+      }
+      return plans;
+    },
+
+    "plans:approve": async (request) => {
+      const layout = resolveProjectLayout(request.projectRoot);
+      const loaded = await loadPlan(layout, request.version);
+      if (!loaded.ok) {
+        throw loaded.error;
+      }
+      // 批准只能由用户触发；core 运行时强制 approval.by === "user"
+      const approved = approvePlan(loaded.value.plan, { by: "user", at: Date.now() });
+      await savePlan(layout, approved);
+      return approved;
     },
   };
 }

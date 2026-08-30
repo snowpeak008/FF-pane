@@ -208,6 +208,31 @@
     "noneSelected": "No project selected yet. Pick one from the project list first.",
     "goToList": "Go to projects"
   },
+  "plan": {
+    "empty": "This project has no plan yet. Ask the Planner to draft one.",
+    "loadError": "Failed to load plans",
+    "approve": "Approve",
+    "approved": "Approved v{{n}}",
+    "approveError": "Failed to approve",
+    "version": "v{{n}}",
+    "none": "(none)",
+    "status": {
+      "draft": "Draft",
+      "approved": "Approved",
+      "superseded": "Superseded",
+      "completed": "Completed",
+      "cancelled": "Cancelled"
+    },
+    "section": {
+      "goal": "Goal",
+      "scope": "Scope",
+      "nonGoals": "Non-goals",
+      "constraints": "Constraints",
+      "decisions": "Decisions",
+      "tasks": "Tasks",
+      "acceptance": "Acceptance"
+    }
+  },
   "projects": {
     "new": "New project",
     "empty": "No project yet. Pick a directory to create your first one.",

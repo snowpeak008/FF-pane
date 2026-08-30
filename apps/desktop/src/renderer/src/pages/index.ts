@@ -3,6 +3,7 @@ export { AppRoutes } from "./AppRoutes";
 export { MemoryPage } from "./memory";
 export { NotFoundPage } from "./NotFoundPage";
 export { PlaceholderPage, type PlaceholderPageProps } from "./PlaceholderPage";
+export { PlanPage } from "./plan";
 export { ProjectsPage } from "./projects";
 export { RunsPage } from "./runs";
 export { SessionPage } from "./session";

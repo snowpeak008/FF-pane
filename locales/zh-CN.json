@@ -208,6 +208,31 @@
     "noneSelected": "还没有选择项目。到项目列表选一个再来。",
     "goToList": "去项目列表"
   },
+  "plan": {
+    "empty": "这个项目还没有计划。让 Planner 出一版。",
+    "loadError": "读取计划失败",
+    "approve": "批准",
+    "approved": "已批准 v{{n}}",
+    "approveError": "批准失败",
+    "version": "v{{n}}",
+    "none": "（无）",
+    "status": {
+      "draft": "草稿",
+      "approved": "已批准",
+      "superseded": "已被替代",
+      "completed": "已完成",
+      "cancelled": "已取消"
+    },
+    "section": {
+      "goal": "目标",
+      "scope": "范围",
+      "nonGoals": "非目标",
+      "constraints": "约束",
+      "decisions": "决定",
+      "tasks": "任务",
+      "acceptance": "验收标准"
+    }
+  },
   "projects": {
     "new": "新建项目",
     "empty": "还没有项目。选一个目录，创建第一个项目。",

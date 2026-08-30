@@ -19,6 +19,8 @@ import type {
   MemoryEntry,
   MemoryEntryId,
   ModelId,
+  Plan,
+  PlanVersion,
   ProfileId,
   ProjectId,
   ProjectRegistryEntry,
@@ -200,6 +202,11 @@ export interface UpdateMemoryRequest extends ProjectScopedRequest {
   readonly entry: MemoryEntry;
 }
 
+/** 计划批准请求：项目根 + 版本号（批准只能由用户触发）。 */
+export interface ApprovePlanRequest extends ProjectScopedRequest {
+  readonly version: PlanVersion;
+}
+
 /** invoke（请求/响应）通道契约表。 */
 export interface IpcInvokeContracts {
   "app:get-info": { request: undefined; response: AppInfo };
@@ -262,6 +269,10 @@ export interface IpcInvokeContracts {
   "memory:reject": { request: MemoryActionRequest; response: { readonly removed: boolean } };
   /** 整条写回（编辑后通过：内容 + 状态一并保存）。 */
   "memory:update": { request: UpdateMemoryRequest; response: MemoryEntry };
+  /** 列出当前项目的全部计划版本（§11.3，按版本升序）。 */
+  "plans:list": { request: ProjectScopedRequest; response: readonly Plan[] };
+  /** 批准计划（draft → approved，只能由用户触发，走 core 计划状态机）。 */
+  "plans:approve": { request: ApprovePlanRequest; response: Plan };
   /** 仅冒烟模式注册：请求主进程向本窗口推送一条 smoke:event。 */
   "smoke:emit-event": { request: { readonly seq: number }; response: { readonly emitted: true } };
   /** 仅冒烟模式注册：上报渲染层检查结果，主进程据此决定退出码。 */
@@ -320,6 +331,8 @@ export const INVOKE_CHANNELS = [
   "memory:approve",
   "memory:reject",
   "memory:update",
+  "plans:list",
+  "plans:approve",
   "smoke:emit-event",
   "smoke:report",
 ] as const satisfies readonly InvokeChannel[];
