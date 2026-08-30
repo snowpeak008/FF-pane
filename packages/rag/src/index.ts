@@ -4,6 +4,8 @@
  */
 export const PACKAGE_NAME = "@ff-pane/rag";
 
+/** 分块层（T6.2）：结构感知分块，产出带出处的 ChunkDraft 供嵌入与索引消费。 */
+export * from "./chunk/index.js";
 /** 解析层（T6.1）：按扩展名分发的解析器注册表，产出 ParsedDocument 供分块器消费。 */
 export * from "./parse/index.js";
 

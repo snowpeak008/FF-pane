@@ -1,0 +1,123 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`各格式分块快照（解析 → 分块 端到端） > sample.docx 的分块结构稳定 1`] = `
+[
+  {
+    "firstLine": "知识库验收记录",
+    "provenance": {
+      "filePath": "sample.docx",
+    },
+    "seq": 0,
+    "tokens": 89,
+  },
+]
+`;
+
+exports[`各格式分块快照（解析 → 分块 端到端） > sample.html 的分块结构稳定 1`] = `
+[
+  {
+    "firstLine": "混合检索",
+    "provenance": {
+      "filePath": "sample.html",
+    },
+    "seq": 0,
+    "tokens": 95,
+  },
+]
+`;
+
+exports[`各格式分块快照（解析 → 分块 端到端） > sample.md 的分块结构稳定 1`] = `
+[
+  {
+    "firstLine": "# 知识库使用指南",
+    "provenance": {
+      "filePath": "sample.md",
+      "headingPath": [
+        "知识库使用指南",
+      ],
+    },
+    "seq": 0,
+    "tokens": 54,
+  },
+  {
+    "firstLine": "## 安装",
+    "provenance": {
+      "filePath": "sample.md",
+      "headingPath": [
+        "知识库使用指南",
+        "安装",
+      ],
+    },
+    "seq": 1,
+    "tokens": 50,
+  },
+  {
+    "firstLine": "## 常见问题",
+    "provenance": {
+      "filePath": "sample.md",
+      "headingPath": [
+        "知识库使用指南",
+        "常见问题",
+      ],
+    },
+    "seq": 2,
+    "tokens": 51,
+  },
+]
+`;
+
+exports[`各格式分块快照（解析 → 分块 端到端） > sample.pdf 的分块结构稳定 1`] = `
+[
+  {
+    "firstLine": "Hybrid Retrieval Notes",
+    "provenance": {
+      "filePath": "sample.pdf",
+      "page": 1,
+    },
+    "seq": 0,
+    "tokens": 39,
+  },
+]
+`;
+
+exports[`各格式分块快照（解析 → 分块 端到端） > sample.ts 的分块结构稳定 1`] = `
+[
+  {
+    "firstLine": "/** 源码解析 fixture：T6.2 将按函数/类边界分块，故此处保留多个",
+    "provenance": {
+      "filePath": "sample.ts",
+    },
+    "seq": 0,
+    "tokens": 51,
+  },
+  {
+    "firstLine": "/** 倒数排名融合：把 BM25 与向量两路排名合成一个分数。 */",
+    "provenance": {
+      "filePath": "sample.ts",
+    },
+    "seq": 1,
+    "tokens": 90,
+  },
+  {
+    "firstLine": "  }",
+    "provenance": {
+      "filePath": "sample.ts",
+    },
+    "seq": 2,
+    "tokens": 76,
+  },
+]
+`;
+
+exports[`各格式分块快照（解析 → 分块 端到端） > sample.txt 的分块结构稳定 1`] = `
+[
+  {
+    "firstLine": "检索质量评测记录",
+    "provenance": {
+      "filePath": "sample.txt",
+    },
+    "seq": 0,
+    "tokens": 79,
+  },
+]
+`;
