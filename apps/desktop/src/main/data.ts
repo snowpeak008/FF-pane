@@ -29,6 +29,7 @@ import {
   GLOBAL_ROOT_DIR_NAME,
   initGlobalLayout,
   initProjectLayout,
+  listRuns,
   listTasks,
   loadTask,
   type ProfileDraftValidator,
@@ -63,7 +64,8 @@ type DataChannel =
   | "profiles:remove"
   | "tasks:list"
   | "tasks:accept"
-  | "tasks:cancel";
+  | "tasks:cancel"
+  | "runs:list";
 
 /** 目录选择器挂靠的父窗口取值器（窗口在数据层装配后才创建，故惰性取用）。 */
 export type MainWindowGetter = () => BrowserWindow | null;
@@ -257,6 +259,18 @@ export async function createDataHandlers(
       const cancelled = cancelTask(loaded.value);
       await saveTask(layout, cancelled);
       return cancelled;
+    },
+
+    "runs:list": async (request) => {
+      const layout = resolveProjectLayout(request.projectRoot);
+      const result = await listRuns(layout);
+      if (!result.ok) {
+        if (result.error.code === "not-found") {
+          return [];
+        }
+        throw result.error;
+      }
+      return result.value;
     },
   };
 }

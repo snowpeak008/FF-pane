@@ -379,6 +379,26 @@
       }
     }
   },
+  "runs": {
+    "empty": "还没有执行记录。派发任务后这里会出现 AI 的每次改动。",
+    "loadError": "读取执行记录失败",
+    "attempt": "第 {{n}} 次尝试",
+    "commands": "命令",
+    "verify": "验证",
+    "verifyPassed": "验证通过",
+    "verifyFailed": "验证失败",
+    "fileChanges": "文件改动",
+    "noChanges": "本次没有文件改动。",
+    "none": "无",
+    "exitCode": "退出码 {{code}}",
+    "endReason": {
+      "completed": "已完成",
+      "failed": "失败",
+      "cancelled": "已取消",
+      "crashed": "崩溃",
+      "running": "执行中"
+    }
+  },
   "session": {
     "empty": "还没有进行中的会话。到项目里让 Planner 开始讨论。",
     "role": {

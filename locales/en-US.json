@@ -379,6 +379,26 @@
       }
     }
   },
+  "runs": {
+    "empty": "No run records yet. Every AI change shows up here after a task is dispatched.",
+    "loadError": "Failed to load run records",
+    "attempt": "Attempt {{n}}",
+    "commands": "Commands",
+    "verify": "Verify",
+    "verifyPassed": "Verify passed",
+    "verifyFailed": "Verify failed",
+    "fileChanges": "File changes",
+    "noChanges": "No file changes in this run.",
+    "none": "None",
+    "exitCode": "exit {{code}}",
+    "endReason": {
+      "completed": "Completed",
+      "failed": "Failed",
+      "cancelled": "Cancelled",
+      "crashed": "Crashed",
+      "running": "Running"
+    }
+  },
   "session": {
     "empty": "No conversation in progress. Start one with the Planner from a project.",
     "role": {

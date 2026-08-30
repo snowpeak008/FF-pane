@@ -22,6 +22,7 @@ import type {
   ProjectRegistryEntry,
   Provider,
   ProviderId,
+  Run,
   Task,
   TaskId,
 } from "@ff-pane/shared";
@@ -239,6 +240,8 @@ export interface IpcInvokeContracts {
   "tasks:accept": { request: TaskActionRequest; response: Task };
   /** 取消任务（→ cancelled 终态）。 */
   "tasks:cancel": { request: TaskActionRequest; response: Task };
+  /** 列出当前项目的全部执行记录（§11.5，含 file_changes/commands/verify_result）。 */
+  "runs:list": { request: ProjectScopedRequest; response: readonly Run[] };
   /** 仅冒烟模式注册：请求主进程向本窗口推送一条 smoke:event。 */
   "smoke:emit-event": { request: { readonly seq: number }; response: { readonly emitted: true } };
   /** 仅冒烟模式注册：上报渲染层检查结果，主进程据此决定退出码。 */
@@ -292,6 +295,7 @@ export const INVOKE_CHANNELS = [
   "tasks:list",
   "tasks:accept",
   "tasks:cancel",
+  "runs:list",
   "smoke:emit-event",
   "smoke:report",
 ] as const satisfies readonly InvokeChannel[];
