@@ -11,11 +11,19 @@
  * 领域类型从 @ff-pane/shared 引入（非 Electron / Node），保持线上形状与领域一致。
  */
 
-import type { ConnectionTestResult, FetchModelsResult, ProbeProviderInput } from "@ff-pane/core";
+import type {
+  ConnectionTestResult,
+  FetchModelsResult,
+  HabitConflict,
+  ProbeProviderInput,
+} from "@ff-pane/core";
 import type {
   AgentProfile,
   ApiKeyRef,
   GlobalConfig,
+  HabitCategory,
+  HabitEntry,
+  HabitEntryId,
   LocalSessionId,
   MemoryEntry,
   MemoryEntryId,
@@ -221,6 +229,40 @@ export interface ApprovePlanRequest extends ProjectScopedRequest {
 }
 
 /**
+ * 习惯（共享记忆）草稿（§8.2）：除 id 与时间戳（主进程生成）外的全部字段。
+ * 习惯是全局共享记忆（跨项目），故其请求不携带 projectRoot。
+ */
+export type HabitDraftWire = Omit<HabitEntry, "id" | "createdAt" | "updatedAt">;
+
+/** habits:create 请求：提交一条习惯草稿（来源一手写默认 status=active）。 */
+export interface CreateHabitRequest {
+  readonly draft: HabitDraftWire;
+}
+
+/** habits:update 请求：整条写回（id 不变，时间戳由主进程刷新）。 */
+export interface UpdateHabitRequest {
+  readonly entry: HabitEntry;
+}
+
+/** 习惯条目操作请求（通过 / 拒绝）：条目 ID（全局，无项目根）。 */
+export interface HabitActionRequest {
+  readonly id: HabitEntryId;
+}
+
+/** habits:set-enabled 请求：单条启用 / 停用（§8.2.4「可单条停用」）。 */
+export interface SetHabitEnabledRequest {
+  readonly id: HabitEntryId;
+  readonly enabled: boolean;
+}
+
+/** habits:check-conflicts 请求：入库前查相近条目（§8.2.5），编辑时排除自身。 */
+export interface CheckHabitConflictsRequest {
+  readonly category: HabitCategory;
+  readonly content: string;
+  readonly excludeId?: HabitEntryId;
+}
+
+/**
  * 会话执行输入（§12 十步流程）：Planner 讨论消息 或 Worker 任务派发。
  * role 由输入类别隐含：planner-message → planner；worker-task → worker。
  */
@@ -402,6 +444,23 @@ export interface IpcInvokeContracts {
   "memory:reject": { request: MemoryActionRequest; response: { readonly removed: boolean } };
   /** 整条写回（编辑后通过：内容 + 状态一并保存）。 */
   "memory:update": { request: UpdateMemoryRequest; response: MemoryEntry };
+  /** 列出全部习惯条目（§8.2 共享记忆，全局；含 active / candidate / archived）。 */
+  "habits:list": { request: undefined; response: readonly HabitEntry[] };
+  /** 新建习惯（草稿校验后落盘；手写来源默认 active）。 */
+  "habits:create": { request: CreateHabitRequest; response: HabitEntry };
+  /** 整条更新习惯（编辑内容 / 重要度 / 分类）。 */
+  "habits:update": { request: UpdateHabitRequest; response: HabitEntry };
+  /** 通过习惯候选（candidate → active，来源二/三须经用户确认，§8.2.4）。 */
+  "habits:approve": { request: HabitActionRequest; response: HabitEntry };
+  /** 拒绝 / 删除习惯（直接删除）。 */
+  "habits:reject": { request: HabitActionRequest; response: { readonly removed: boolean } };
+  /** 单条启用 / 停用（保留条目但不参与 Prompt 组装，§8.2.4）。 */
+  "habits:set-enabled": { request: SetHabitEnabledRequest; response: HabitEntry };
+  /** 入库前查相近条目（§8.2.5 并排展示，用户选合并/替代/都保留）。 */
+  "habits:check-conflicts": {
+    request: CheckHabitConflictsRequest;
+    response: readonly HabitConflict[];
+  };
   /** 列出当前项目的全部计划版本（§11.3，按版本升序）。 */
   "plans:list": { request: ProjectScopedRequest; response: readonly Plan[] };
   /** 批准计划（draft → approved，只能由用户触发，走 core 计划状态机）。 */
@@ -474,6 +533,13 @@ export const INVOKE_CHANNELS = [
   "memory:approve",
   "memory:reject",
   "memory:update",
+  "habits:list",
+  "habits:create",
+  "habits:update",
+  "habits:approve",
+  "habits:reject",
+  "habits:set-enabled",
+  "habits:check-conflicts",
   "plans:list",
   "plans:approve",
   "sessions:list",

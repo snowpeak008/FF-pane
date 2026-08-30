@@ -13,6 +13,7 @@ export function toPosixPath(path: string): string {
 
 export * from "./config/index.js";
 export * from "./fs/index.js";
+export * from "./habits/index.js";
 export * from "./memory/index.js";
 export * from "./profiles/index.js";
 export * from "./projects/index.js";

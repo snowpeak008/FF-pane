@@ -570,5 +570,55 @@
       "accepted": "Accepted",
       "cancelled": "Cancelled"
     }
+  },
+  "habit": {
+    "intro": "Cross-project working habits, injected into every session prompt.",
+    "add": "Add habit",
+    "create": "Add",
+    "edit": "Edit",
+    "delete": "Delete",
+    "disable": "Disable",
+    "enable": "Enable",
+    "disabled": "Disabled",
+    "approve": "Approve",
+    "empty": "No shared habits yet. Click “Add habit” to record how you like to work.",
+    "loadError": "Failed to load habits",
+    "toggleError": "Failed to toggle",
+    "approveError": "Approve failed",
+    "deleteError": "Delete failed",
+    "approved": "Habit approved",
+    "deleted": "Habit deleted",
+    "nearLimit": "{{count}} habits — close to the limit (80). Consider merging or archiving; nothing is auto-evicted.",
+    "candidatesHeading": "Pending candidates",
+    "importanceLabel": "Importance {{value}}",
+    "category": {
+      "workflow": "Workflow",
+      "tech": "Tech",
+      "communication": "Communication",
+      "environment": "Environment"
+    },
+    "source": {
+      "user_manual": "Manual",
+      "distilled": "Distilled",
+      "observed": "Observed"
+    },
+    "editDialog": {
+      "createTitle": "Add habit",
+      "editTitle": "Edit habit",
+      "description": "Habits inject into prompts across all projects — phrase them as one general, lasting rule."
+    },
+    "field": {
+      "category": "Category",
+      "content": "Habit",
+      "contentHint": "One sentence, general and reusable (e.g. “Run existing tests before changes”).",
+      "importance": "Importance (0–100)"
+    },
+    "conflict": {
+      "description": "Found similar existing habits. Replace one, or keep both.",
+      "similarity": "{{percent}}% similar",
+      "replace": "Replace",
+      "back": "Back",
+      "keepBoth": "Keep both & add"
+    }
   }
 }

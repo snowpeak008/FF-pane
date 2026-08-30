@@ -17,12 +17,20 @@ import {
   approvePlan,
   cancelTask,
   deriveAcceptanceCandidates,
+  detectHabitConflicts,
   fetchModels,
   ProfileValidationError,
   testConnection,
   validateProfileDraft,
 } from "@ff-pane/core";
-import type { ApiKeyRef, MemoryEntryId, Plan, PlanVersion } from "@ff-pane/shared";
+import type {
+  ApiKeyRef,
+  HabitEntry,
+  HabitEntryId,
+  MemoryEntryId,
+  Plan,
+  PlanVersion,
+} from "@ff-pane/shared";
 import {
   createConfigStore,
   createProfileStore,
@@ -30,9 +38,11 @@ import {
   createProviderStore,
   createSessionStore,
   deleteEntry,
+  deleteHabit,
   initGlobalLayout,
   initProjectLayout,
   listEntries,
+  listHabits,
   listRuns,
   listTasks,
   loadPlan,
@@ -42,9 +52,13 @@ import {
   profileReferencesProvider,
   resolveProjectLayout,
   saveEntry,
+  saveHabit,
   savePlan,
   saveTask,
+  setHabitEnabled,
   updateEntryStatus,
+  updateHabitStatus,
+  validateHabitDraft,
 } from "@ff-pane/storage";
 import { type BrowserWindow, dialog, type OpenDialogOptions } from "electron";
 import type { InvokeHandlers } from "../shared-ipc/server";
@@ -79,6 +93,13 @@ type DataChannel =
   | "memory:approve"
   | "memory:reject"
   | "memory:update"
+  | "habits:list"
+  | "habits:create"
+  | "habits:update"
+  | "habits:approve"
+  | "habits:reject"
+  | "habits:set-enabled"
+  | "habits:check-conflicts"
   | "plans:list"
   | "plans:approve"
   | "sessions:list";
@@ -335,6 +356,71 @@ export async function createDataHandlers(
       // saveEntry 按 status 落位并自愈旧址副本（编辑后通过：内容 + 状态一并写回）
       await saveEntry(layout, request.entry);
       return request.entry;
+    },
+
+    // ── 习惯（共享记忆，§8.2）：全局作用域，绑定 GlobalLayout（无 projectRoot）──
+
+    "habits:list": async () => {
+      // listHabits 内部对缺目录容错（ENOENT 跳过），损坏文件进 issues 不阻断
+      const { entries } = await listHabits(layout);
+      return entries;
+    },
+
+    "habits:create": async (request) => {
+      validateHabitDraft(request.draft);
+      const now = Date.now();
+      const entry: HabitEntry = {
+        ...request.draft,
+        id: `hab-${randomUUID()}` as HabitEntryId,
+        createdAt: now,
+        updatedAt: now,
+      };
+      await saveHabit(layout, entry);
+      return entry;
+    },
+
+    "habits:update": async (request) => {
+      // 整条写回：刷新 updatedAt，触发习惯档案下次重编译（§8.2.2）
+      const entry: HabitEntry = { ...request.entry, updatedAt: Date.now() };
+      validateHabitDraft(entry);
+      await saveHabit(layout, entry);
+      return entry;
+    },
+
+    "habits:approve": async (request) => {
+      // 候选（来源二/三）→ active，唯一入 active 途径是用户确认（§8.2.4）
+      const result = await updateHabitStatus(layout, request.id, "active");
+      if (!result.ok) {
+        throw result.error;
+      }
+      return result.value;
+    },
+
+    "habits:reject": async (request) => {
+      const removed = await deleteHabit(layout, request.id);
+      return { removed };
+    },
+
+    "habits:set-enabled": async (request) => {
+      const result = await setHabitEnabled(layout, request.id, request.enabled);
+      if (!result.ok) {
+        throw result.error;
+      }
+      return result.value;
+    },
+
+    "habits:check-conflicts": async (request) => {
+      // 入库前查相近条目（§8.2.5）：只比 active + candidate（archived 已退出，不干扰）
+      const { entries } = await listHabits(layout);
+      const relevant = entries.filter((entry) => entry.status !== "archived");
+      return detectHabitConflicts(
+        {
+          category: request.category,
+          content: request.content,
+          ...(request.excludeId !== undefined ? { excludeId: request.excludeId } : {}),
+        },
+        relevant,
+      );
     },
 
     "sessions:list": async (request) => {

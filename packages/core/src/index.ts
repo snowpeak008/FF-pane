@@ -12,6 +12,9 @@ export function assertNever(value: never, context = "assertNever"): never {
   throw new Error(`${context}: unexpected value ${JSON.stringify(value)}`);
 }
 
+/** 习惯（共享记忆）领域逻辑（Phase 5）：相近条目检测、习惯档案编译。 */
+export * from "./habit/index.js";
+
 export * from "./memory/index.js";
 
 export * from "./permission/index.js";

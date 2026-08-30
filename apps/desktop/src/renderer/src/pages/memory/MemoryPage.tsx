@@ -14,6 +14,7 @@ import { useInvokeQuery } from "../../ipc/useInvokeQuery";
 import { PageHeader } from "../../layout/PageHeader";
 import { NoActiveProject } from "../NoActiveProject";
 import { EditCandidateDialog } from "./EditCandidateDialog";
+import { HabitsPanel } from "./HabitsPanel";
 import { MemoryEntryCard } from "./MemoryEntryCard";
 import { groupByCategory, MEMORY_CATEGORY_ORDER, matchesMemorySearch } from "./memory-view";
 
@@ -144,7 +145,7 @@ function MemoryView({ projectRoot }: { readonly projectRoot: string }): ReactEle
         </TabsContent>
 
         <TabsContent value="shared" className="min-h-0 flex-1 overflow-y-auto">
-          <EmptyState className="min-h-0 flex-1" message={t("memory.sharedPlaceholder")} />
+          <HabitsPanel search={search} />
         </TabsContent>
 
         <TabsContent value="candidates" className="min-h-0 flex-1 overflow-y-auto">

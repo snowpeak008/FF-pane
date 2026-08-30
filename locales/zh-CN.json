@@ -570,5 +570,55 @@
       "accepted": "已接受",
       "cancelled": "已取消"
     }
+  },
+  "habit": {
+    "intro": "跨项目生效的做事习惯，会注入每次会话的系统提示。",
+    "add": "新增习惯",
+    "create": "新增",
+    "edit": "编辑",
+    "delete": "删除",
+    "disable": "停用",
+    "enable": "启用",
+    "disabled": "已停用",
+    "approve": "通过",
+    "empty": "还没有共享习惯。点「新增习惯」记录你的做事偏好。",
+    "loadError": "读取习惯失败",
+    "toggleError": "切换启用状态失败",
+    "approveError": "通过失败",
+    "deleteError": "删除失败",
+    "approved": "已通过习惯",
+    "deleted": "已删除习惯",
+    "nearLimit": "习惯已达 {{count}} 条，接近上限（80）。建议合并或归档，不会自动淘汰。",
+    "candidatesHeading": "待审核候选",
+    "importanceLabel": "重要度 {{value}}",
+    "category": {
+      "workflow": "流程",
+      "tech": "技术偏好",
+      "communication": "沟通偏好",
+      "environment": "环境经验"
+    },
+    "source": {
+      "user_manual": "手写",
+      "distilled": "提炼",
+      "observed": "观察"
+    },
+    "editDialog": {
+      "createTitle": "新增习惯",
+      "editTitle": "编辑习惯",
+      "description": "习惯会跨项目注入系统提示，请写成通用、可长期遵守的一句话。"
+    },
+    "field": {
+      "category": "分类",
+      "content": "习惯内容",
+      "contentHint": "一句话，通用可复用（如「改动前先跑现有测试」）。",
+      "importance": "重要度（0–100）"
+    },
+    "conflict": {
+      "description": "发现相近的既有习惯，请选择替代其一，或都保留。",
+      "similarity": "相似度 {{percent}}%",
+      "replace": "替代此条",
+      "back": "返回编辑",
+      "keepBoth": "都保留并新增"
+    }
   }
 }
