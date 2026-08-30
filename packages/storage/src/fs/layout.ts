@@ -39,6 +39,8 @@ export interface GlobalLayout {
   readonly rootDir: string;
   /** config.json —— 全局设置：界面语言、AI 输出语言、默认权限预设。 */
   readonly configFile: string;
+  /** projects.json —— 工作台已登记项目注册表（§11.1 项目列表页数据源）。 */
+  readonly projectsFile: string;
   /** providers.json —— Provider 列表（密钥只存引用，本体在系统密钥库）。写入归 W1.5a。 */
   readonly providersFile: string;
   /** profiles.json —— Agent Profile 列表。 */
@@ -95,6 +97,7 @@ export function resolveGlobalLayout(rootDir: string): GlobalLayout {
   return {
     rootDir,
     configFile: join(rootDir, "config.json"),
+    projectsFile: join(rootDir, "projects.json"),
     providersFile: join(rootDir, "providers.json"),
     profilesFile: join(rootDir, "profiles.json"),
     habitsDir,

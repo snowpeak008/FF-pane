@@ -11,10 +11,11 @@ export function toPosixPath(path: string): string {
   return path.replaceAll("\\", "/");
 }
 
+export * from "./config/index.js";
 export * from "./fs/index.js";
-
 export * from "./memory/index.js";
 export * from "./profiles/index.js";
+export * from "./projects/index.js";
 export * from "./providers/index.js";
 
 export * from "./records/index.js";

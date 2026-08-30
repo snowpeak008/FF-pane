@@ -1,0 +1,367 @@
+/**
+ * FF-pane 主题入口（W3.1a）。规范正文见 docs/设计系统.md，两者的 token 名一一对应。
+ *
+ * 分层约定：
+ *   1. `--ff-*`  —— 原始双主题变量，:root（亮）/ .dark（暗）各一份，是唯一改色值的地方。
+ *   2. `@theme inline` —— 把 `--ff-*` 映射为 Tailwind 的 `--color-*` 等命名空间，
+ *      inline 使工具类直接内联 `var(--ff-*)`，因此 .dark 挂在任意祖先都能正确切换。
+ *   3. `@theme` —— 与主题无关的静态阶梯（字号/圆角/字体族/间距基数）。
+ *
+ * `--color-*: initial` 清空了 Tailwind 默认调色板：bg-red-500 一类"自造颜色"会直接失效，
+ * 保证 Phase 3 各页面工单只能引用本文件定义的语义 token（开发计划 §1.5 设计系统先行）。
+ */
+@import "tailwindcss";
+
+/* Tailwind v4 的自动源扫描以 vite root（electron-vite 下为 src/renderer）为基准；
+   显式声明扫描范围，避免 root 调整时类名被静默裁剪 */
+@source "../**/*.{ts,tsx}";
+
+/* dark 走 class 策略（html.dark）而非 prefers-color-scheme：
+   ThemeProvider 必须支持"手动覆盖系统"（开发计划 §1.5 第 6 条） */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ── 亮色主题（默认） ─────────────────────────────────────────────── */
+:root {
+  color-scheme: light;
+
+  /* 层级：canvas（应用底）< surface（卡片/面板）< surface-raised（浮层） */
+  --ff-canvas: #f6f7f9;
+  --ff-surface: #ffffff;
+  --ff-surface-raised: #ffffff;
+  --ff-surface-sunken: #eef0f3;
+  --ff-surface-hover: #f0f2f5;
+  --ff-surface-active: #e4e8ee;
+  --ff-border: #dcdfe4;
+  --ff-border-strong: #828995;
+  --ff-ring: #2563eb;
+  --ff-overlay: rgb(15 18 23 / 0.45);
+  --ff-selection: #d3e2fd;
+
+  --ff-fg: #14181d;
+  --ff-fg-muted: #515a67;
+  --ff-fg-subtle: #68717e;
+  --ff-fg-inverted: #ffffff;
+
+  --ff-primary: #2563eb;
+  --ff-primary-hover: #1d4ed8;
+  --ff-primary-fg: #ffffff;
+  --ff-primary-surface: #e5edfd;
+  --ff-primary-border: #b7cdfa;
+  --ff-primary-text: #1a4fbe;
+
+  --ff-danger: #c9291d;
+  --ff-danger-hover: #a81f15;
+  --ff-danger-fg: #ffffff;
+  --ff-danger-surface: #fdeae8;
+  --ff-danger-border: #f4c0ba;
+  --ff-danger-text: #a81f15;
+
+  --ff-warning: #9a4a05;
+  --ff-warning-hover: #7d3c04;
+  --ff-warning-fg: #ffffff;
+  --ff-warning-surface: #fdf3e2;
+  --ff-warning-border: #f0d29b;
+  --ff-warning-text: #7d3c04;
+
+  --ff-success: #06703f;
+  --ff-success-hover: #045a33;
+  --ff-success-fg: #ffffff;
+  --ff-success-surface: #e6f5ee;
+  --ff-success-border: #aedcc5;
+  --ff-success-text: #045a33;
+
+  /* 任务 7 态（项目设计计划 §6.3）：accent 用于圆点/左边条，surface+text 组成徽章 */
+  --ff-status-pending: #66707d;
+  --ff-status-pending-surface: #eef0f3;
+  --ff-status-pending-text: #515a67;
+  --ff-status-running: #2563eb;
+  --ff-status-running-surface: #e5edfd;
+  --ff-status-running-text: #1a4fbe;
+  --ff-status-blocked: #9a4a05;
+  --ff-status-blocked-surface: #fdf3e2;
+  --ff-status-blocked-text: #7d3c04;
+  --ff-status-failed: #c9291d;
+  --ff-status-failed-surface: #fdeae8;
+  --ff-status-failed-text: #a81f15;
+  --ff-status-done: #0d6d64;
+  --ff-status-done-surface: #ddf2ef;
+  --ff-status-done-text: #0a5b53;
+  --ff-status-accepted: #06703f;
+  --ff-status-accepted-surface: #e6f5ee;
+  --ff-status-accepted-text: #045a33;
+  --ff-status-cancelled: #8a919c;
+  --ff-status-cancelled-surface: #f1f2f4;
+  --ff-status-cancelled-text: #5c6572;
+
+  /* diff 视图（执行记录页 W3.7b）：bg 为整行底色，emphasis 为词级高亮 */
+  --ff-diff-added-bg: #e6f5ea;
+  --ff-diff-added-emphasis: #bfe8cc;
+  --ff-diff-added-text: #045a33;
+  --ff-diff-removed-bg: #fdeceb;
+  --ff-diff-removed-emphasis: #f8cdca;
+  --ff-diff-removed-text: #a81f15;
+  --ff-diff-hunk-bg: #eef0f3;
+  --ff-diff-hunk-text: #515a67;
+
+  /* 阴影仅用于浮层，见 docs/设计系统.md §5 */
+  --ff-shadow-raised: 0 1px 2px rgb(15 18 23 / 0.06), 0 2px 6px rgb(15 18 23 / 0.08);
+  --ff-shadow-overlay: 0 4px 12px rgb(15 18 23 / 0.1), 0 12px 32px rgb(15 18 23 / 0.14);
+}
+
+/* ── 暗色主题 ─────────────────────────────────────────────────────── */
+.dark {
+  color-scheme: dark;
+
+  --ff-canvas: #0e1116;
+  --ff-surface: #151920;
+  --ff-surface-raised: #1b2028;
+  --ff-surface-sunken: #0a0d11;
+  --ff-surface-hover: #1c222b;
+  --ff-surface-active: #232a34;
+  --ff-border: #262d38;
+  --ff-border-strong: #626b7b;
+  --ff-ring: #5c9dff;
+  --ff-overlay: rgb(0 0 0 / 0.6);
+  --ff-selection: #22406b;
+
+  --ff-fg: #e7eaf0;
+  --ff-fg-muted: #a4adbb;
+  --ff-fg-subtle: #8b94a3;
+  --ff-fg-inverted: #0b0f14;
+
+  /* 暗色主题的实心填充用"亮底 + 深字"，避免深底上白字达不到 4.5:1 */
+  --ff-primary: #5c9dff;
+  --ff-primary-hover: #7db3ff;
+  --ff-primary-fg: #08111f;
+  --ff-primary-surface: #16273f;
+  --ff-primary-border: #2b4874;
+  --ff-primary-text: #8fbcff;
+
+  --ff-danger: #f4776f;
+  --ff-danger-hover: #f79b95;
+  --ff-danger-fg: #1c0a09;
+  --ff-danger-surface: #3a1a18;
+  --ff-danger-border: #6b2b27;
+  --ff-danger-text: #ff9c94;
+
+  --ff-warning: #e8a33d;
+  --ff-warning-hover: #f0b862;
+  --ff-warning-fg: #1c1204;
+  --ff-warning-surface: #3a2a10;
+  --ff-warning-border: #6b4c1c;
+  --ff-warning-text: #f0b95f;
+
+  --ff-success: #3fca7f;
+  --ff-success-hover: #63d798;
+  --ff-success-fg: #05170d;
+  --ff-success-surface: #10301f;
+  --ff-success-border: #1e5c39;
+  --ff-success-text: #6fdc9f;
+
+  --ff-status-pending: #8b94a3;
+  --ff-status-pending-surface: #1a1f27;
+  --ff-status-pending-text: #a4adbb;
+  --ff-status-running: #5c9dff;
+  --ff-status-running-surface: #16273f;
+  --ff-status-running-text: #8fbcff;
+  --ff-status-blocked: #e8a33d;
+  --ff-status-blocked-surface: #3a2a10;
+  --ff-status-blocked-text: #f0b95f;
+  --ff-status-failed: #f4776f;
+  --ff-status-failed-surface: #3a1a18;
+  --ff-status-failed-text: #ff9c94;
+  --ff-status-done: #2dd4bf;
+  --ff-status-done-surface: #0f2f2c;
+  --ff-status-done-text: #6fe3d3;
+  --ff-status-accepted: #3fca7f;
+  --ff-status-accepted-surface: #10301f;
+  --ff-status-accepted-text: #6fdc9f;
+  --ff-status-cancelled: #626b7b;
+  --ff-status-cancelled-surface: #171b22;
+  --ff-status-cancelled-text: #8b94a3;
+
+  --ff-diff-added-bg: #0f2a1b;
+  --ff-diff-added-emphasis: #1c5133;
+  --ff-diff-added-text: #6fdc9f;
+  --ff-diff-removed-bg: #341614;
+  --ff-diff-removed-emphasis: #6b2b27;
+  --ff-diff-removed-text: #ff9c94;
+  --ff-diff-hunk-bg: #171b22;
+  --ff-diff-hunk-text: #a4adbb;
+
+  --ff-shadow-raised: 0 1px 2px rgb(0 0 0 / 0.5), 0 2px 6px rgb(0 0 0 / 0.4);
+  --ff-shadow-overlay: 0 4px 12px rgb(0 0 0 / 0.5), 0 12px 32px rgb(0 0 0 / 0.55);
+}
+
+/* ── Tailwind 命名空间映射（随主题变化的部分） ───────────────────── */
+@theme inline {
+  /* 清空默认调色板：只有下面登记的语义 token 能生成工具类 */
+  --color-*: initial;
+
+  --color-canvas: var(--ff-canvas);
+  --color-surface: var(--ff-surface);
+  --color-surface-raised: var(--ff-surface-raised);
+  --color-surface-sunken: var(--ff-surface-sunken);
+  --color-surface-hover: var(--ff-surface-hover);
+  --color-surface-active: var(--ff-surface-active);
+  --color-border: var(--ff-border);
+  --color-border-strong: var(--ff-border-strong);
+  --color-ring: var(--ff-ring);
+  --color-overlay: var(--ff-overlay);
+
+  --color-fg: var(--ff-fg);
+  --color-fg-muted: var(--ff-fg-muted);
+  --color-fg-subtle: var(--ff-fg-subtle);
+  --color-fg-inverted: var(--ff-fg-inverted);
+
+  --color-primary: var(--ff-primary);
+  --color-primary-hover: var(--ff-primary-hover);
+  --color-primary-fg: var(--ff-primary-fg);
+  --color-primary-surface: var(--ff-primary-surface);
+  --color-primary-border: var(--ff-primary-border);
+  --color-primary-text: var(--ff-primary-text);
+
+  --color-danger: var(--ff-danger);
+  --color-danger-hover: var(--ff-danger-hover);
+  --color-danger-fg: var(--ff-danger-fg);
+  --color-danger-surface: var(--ff-danger-surface);
+  --color-danger-border: var(--ff-danger-border);
+  --color-danger-text: var(--ff-danger-text);
+
+  --color-warning: var(--ff-warning);
+  --color-warning-hover: var(--ff-warning-hover);
+  --color-warning-fg: var(--ff-warning-fg);
+  --color-warning-surface: var(--ff-warning-surface);
+  --color-warning-border: var(--ff-warning-border);
+  --color-warning-text: var(--ff-warning-text);
+
+  --color-success: var(--ff-success);
+  --color-success-hover: var(--ff-success-hover);
+  --color-success-fg: var(--ff-success-fg);
+  --color-success-surface: var(--ff-success-surface);
+  --color-success-border: var(--ff-success-border);
+  --color-success-text: var(--ff-success-text);
+
+  --color-status-pending: var(--ff-status-pending);
+  --color-status-pending-surface: var(--ff-status-pending-surface);
+  --color-status-pending-text: var(--ff-status-pending-text);
+  --color-status-running: var(--ff-status-running);
+  --color-status-running-surface: var(--ff-status-running-surface);
+  --color-status-running-text: var(--ff-status-running-text);
+  --color-status-blocked: var(--ff-status-blocked);
+  --color-status-blocked-surface: var(--ff-status-blocked-surface);
+  --color-status-blocked-text: var(--ff-status-blocked-text);
+  --color-status-failed: var(--ff-status-failed);
+  --color-status-failed-surface: var(--ff-status-failed-surface);
+  --color-status-failed-text: var(--ff-status-failed-text);
+  --color-status-done: var(--ff-status-done);
+  --color-status-done-surface: var(--ff-status-done-surface);
+  --color-status-done-text: var(--ff-status-done-text);
+  --color-status-accepted: var(--ff-status-accepted);
+  --color-status-accepted-surface: var(--ff-status-accepted-surface);
+  --color-status-accepted-text: var(--ff-status-accepted-text);
+  --color-status-cancelled: var(--ff-status-cancelled);
+  --color-status-cancelled-surface: var(--ff-status-cancelled-surface);
+  --color-status-cancelled-text: var(--ff-status-cancelled-text);
+
+  --color-diff-added-bg: var(--ff-diff-added-bg);
+  --color-diff-added-emphasis: var(--ff-diff-added-emphasis);
+  --color-diff-added-text: var(--ff-diff-added-text);
+  --color-diff-removed-bg: var(--ff-diff-removed-bg);
+  --color-diff-removed-emphasis: var(--ff-diff-removed-emphasis);
+  --color-diff-removed-text: var(--ff-diff-removed-text);
+  --color-diff-hunk-bg: var(--ff-diff-hunk-bg);
+  --color-diff-hunk-text: var(--ff-diff-hunk-text);
+
+  --shadow-raised: var(--ff-shadow-raised);
+  --shadow-overlay: var(--ff-shadow-overlay);
+}
+
+/* ── 静态阶梯（不随主题变化） ───────────────────────────────────── */
+@theme {
+  /* 间距基数 4px：所有 p-/m-/gap- 均为 4 的倍数 */
+  --spacing: 0.25rem;
+
+  --font-sans:
+    "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Microsoft YaHei UI",
+    "PingFang SC", "Noto Sans CJK SC", sans-serif;
+  --font-mono:
+    "Cascadia Mono", Consolas, ui-monospace, "SFMono-Regular", Menlo, "Liberation Mono", monospace;
+
+  /* 字号阶梯按"信息密度优先"整体下压一档，正文默认 13px */
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1.125rem;
+  --text-sm: 0.8125rem;
+  --text-sm--line-height: 1.25rem;
+  --text-base: 0.875rem;
+  --text-base--line-height: 1.375rem;
+  --text-lg: 1rem;
+  --text-lg--line-height: 1.5rem;
+  --text-xl: 1.25rem;
+  --text-xl--line-height: 1.75rem;
+  --text-2xl: 1.5rem;
+  --text-2xl--line-height: 2rem;
+
+  --radius-sm: 3px;
+  --radius-md: 5px;
+  --radius-lg: 8px;
+}
+
+@layer base {
+  /* Tailwind v4 Preflight 的默认边框色是 currentColor；统一改为语义边框色 */
+  *,
+  ::before,
+  ::after,
+  ::backdrop {
+    border-color: var(--ff-border);
+  }
+
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    background-color: var(--ff-canvas);
+    color: var(--ff-fg);
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    line-height: var(--text-sm--line-height);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* 键盘可达（开发计划 §1.5 第 4 条）：焦点环全局可见，禁止 outline-none 而不补替代 */
+  :focus-visible {
+    outline: 2px solid var(--ff-ring);
+    outline-offset: 1px;
+  }
+
+  ::selection {
+    background-color: var(--ff-selection);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--ff-border-strong) transparent;
+  }
+
+  /* 无装饰基调 + 无障碍：系统要求减少动效时一律关掉过渡。
+     !important 是唯一手段——utilities 层在 base 层之后，普通声明压不过工具类的
+     transition / animate 工具类；这也是全仓唯一允许出现 !important 的地方。 */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      /* biome-ignore lint/complexity/noImportantStyles: 见上，需压过 utilities 层 */
+      animation-duration: 0.01ms !important;
+      /* biome-ignore lint/complexity/noImportantStyles: 见上，需压过 utilities 层 */
+      animation-iteration-count: 1 !important;
+      /* biome-ignore lint/complexity/noImportantStyles: 见上，需压过 utilities 层 */
+      transition-duration: 0.01ms !important;
+      /* biome-ignore lint/complexity/noImportantStyles: 见上，需压过 utilities 层 */
+      scroll-behavior: auto !important;
+    }
+  }
+}

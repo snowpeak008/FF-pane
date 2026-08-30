@@ -8,7 +8,28 @@
  *
  * 通道命名规则：<域>:<动作>，全小写 kebab-case（CHANNEL_NAME_PATTERN）。
  * 本文件为纯类型与常量，禁止 import 任何 Electron / Node API。
+ * 领域类型从 @ff-pane/shared 引入（非 Electron / Node），保持线上形状与领域一致。
  */
+
+import type { ConnectionTestResult, FetchModelsResult, ProbeProviderInput } from "@ff-pane/core";
+import type {
+  AgentProfile,
+  ApiKeyRef,
+  GlobalConfig,
+  ModelId,
+  ProfileId,
+  ProjectId,
+  ProjectRegistryEntry,
+  Provider,
+  ProviderId,
+} from "@ff-pane/shared";
+
+/**
+ * Provider 创建 / 更新草稿：除 id（由 store 生成）外的全部字段。
+ * 与 storage 层 ProviderDraft 同构，此处按 shared 的 Provider 就地派生，
+ * 避免契约（renderer + main 共享）依赖 node-only 的 @ff-pane/storage。
+ */
+export type ProviderDraftWire = Omit<Provider, "id">;
 
 /** 应用元信息（app:get-info 响应）。 */
 export interface AppInfo {
@@ -57,6 +78,103 @@ export interface SmokeReport {
   readonly checks: readonly SmokeCheck[];
 }
 
+/** projects:create 请求：登记一个新项目（rootPath 已由 dialog:pick-directory 归一）。 */
+export interface CreateProjectRequest {
+  /** 项目根路径（绝对路径）。 */
+  readonly rootPath: string;
+  /** 项目显示名（默认取根目录名，可改）。 */
+  readonly name: string;
+}
+
+/** projects:remove 请求。 */
+export interface RemoveProjectRequest {
+  readonly id: ProjectId;
+}
+
+/** projects:restore 请求：撤销移除，把先前 projects:remove 返回的条目放回。 */
+export interface RestoreProjectRequest {
+  readonly entry: ProjectRegistryEntry;
+}
+
+/**
+ * dialog:pick-directory 响应：用户选定目录返回其绝对路径；取消返回 cancelled。
+ * 判别字段 cancelled，供渲染层穷尽分支（取消不是错误，不走错误信封）。
+ */
+export type PickDirectoryResult =
+  | { readonly cancelled: true }
+  | { readonly cancelled: false; readonly path: string };
+
+/**
+ * providers:create 请求：草稿 + 可选明文密钥。
+ * 密钥红线（§4.3）：renderer 只在此一处、这一瞬把明文经 IPC 交给主进程加密落库，
+ * 主进程存入系统密钥库后把 apiKeyRef 写进草稿；renderer 拿不到、也不持有引用之外的东西。
+ */
+export interface CreateProviderRequest {
+  readonly draft: ProviderDraftWire;
+  /** 明文密钥；主进程加密后置入 apiKeyRef。openai/anthropic 类型必填（否则校验失败）。 */
+  readonly apiKey?: string;
+}
+
+/** providers:update 请求：整表单替换（id 不变）+ 密钥旋转控制。 */
+export interface UpdateProviderRequest {
+  readonly id: ProviderId;
+  readonly draft: ProviderDraftWire;
+  /** 提供则旋转密钥：主进程存新、删旧。 */
+  readonly apiKey?: string;
+  /** 置真则清除密钥（切到 cli_login 等）：主进程删旧、apiKeyRef 置空。 */
+  readonly clearApiKey?: boolean;
+}
+
+/** providers:remove 请求。移除同时删除其密钥（若有）。 */
+export interface RemoveProviderRequest {
+  readonly id: ProviderId;
+}
+
+/** providers:test-connection 请求：草稿态即可测（先测后存）。 */
+export interface TestProviderConnectionRequest {
+  readonly provider: ProbeProviderInput;
+  /** 明文密钥（未保存的表单）。 */
+  readonly apiKey?: string;
+  /** 已保存 Provider 的密钥引用；主进程 revealSecret 取明文构造请求头，用完即弃。 */
+  readonly apiKeyRef?: ApiKeyRef;
+  /** 显式指定探测模型 ID。 */
+  readonly model?: ModelId;
+}
+
+/** providers:fetch-models 请求。 */
+export interface FetchProviderModelsRequest {
+  readonly provider: ProbeProviderInput;
+  readonly apiKey?: string;
+  readonly apiKeyRef?: ApiKeyRef;
+}
+
+/** secrets:masked-tail 请求。 */
+export interface MaskedTailRequest {
+  readonly ref: ApiKeyRef;
+}
+
+/** config:update 请求：部分补丁（浅合并），返回合并后的完整设置。 */
+export type UpdateConfigRequest = Partial<GlobalConfig>;
+
+/** Profile 创建 / 更新草稿：除 id（store 生成）外的全部字段。 */
+export type ProfileDraftWire = Omit<AgentProfile, "id">;
+
+/** profiles:create 请求。 */
+export interface CreateProfileRequest {
+  readonly draft: ProfileDraftWire;
+}
+
+/** profiles:update 请求：整表单替换（id 不变）。 */
+export interface UpdateProfileRequest {
+  readonly id: ProfileId;
+  readonly draft: ProfileDraftWire;
+}
+
+/** profiles:remove 请求。 */
+export interface RemoveProfileRequest {
+  readonly id: ProfileId;
+}
+
 /** invoke（请求/响应）通道契约表。 */
 export interface IpcInvokeContracts {
   "app:get-info": { request: undefined; response: AppInfo };
@@ -64,6 +182,45 @@ export interface IpcInvokeContracts {
   "app:get-locale": { request: undefined; response: LocaleInfo };
   "app:ping": { request: PingRequest; response: PingResponse };
   "diagnostics:check-sqlite": { request: undefined; response: SqliteCheckReport };
+  /** 打开系统目录选择器，返回选定目录的绝对路径（取消经判别字段区分，不走错误）。 */
+  "dialog:pick-directory": { request: undefined; response: PickDirectoryResult };
+  /** 列出工作台已登记的全部项目（§11.1 项目列表页数据源）。 */
+  "projects:list": { request: undefined; response: readonly ProjectRegistryEntry[] };
+  /** 登记新项目：生成 .workbench/ 目录结构并写入注册表，返回登记后的条目。 */
+  "projects:create": { request: CreateProjectRequest; response: ProjectRegistryEntry };
+  /** 从工作台移除项目登记（不删除磁盘文件），返回被移除条目供撤销。 */
+  "projects:remove": { request: RemoveProjectRequest; response: ProjectRegistryEntry };
+  /** 撤销移除：把被移除的条目原样放回注册表。 */
+  "projects:restore": { request: RestoreProjectRequest; response: ProjectRegistryEntry };
+  /** 列出全部 Provider（设置页 §4）。 */
+  "providers:list": { request: undefined; response: readonly Provider[] };
+  /** 新建 Provider（明文密钥加密落库后返回落盘条目）。 */
+  "providers:create": { request: CreateProviderRequest; response: Provider };
+  /** 整表单更新 Provider（含密钥旋转 / 清除）。 */
+  "providers:update": { request: UpdateProviderRequest; response: Provider };
+  /** 删除 Provider（连带删除其密钥）。 */
+  "providers:remove": { request: RemoveProviderRequest; response: { readonly removed: true } };
+  /** 连接测试（§4.2：成功给耗时+方式，失败给阶段+原文）。 */
+  "providers:test-connection": {
+    request: TestProviderConnectionRequest;
+    response: ConnectionTestResult;
+  };
+  /** 拉取模型列表（失败上层回退手动输入）。 */
+  "providers:fetch-models": { request: FetchProviderModelsRequest; response: FetchModelsResult };
+  /** 取密钥明文尾 4 位（§4.3 规则 3，UI 展示用；不足 4 位返回空串）。 */
+  "secrets:masked-tail": { request: MaskedTailRequest; response: { readonly tail: string } };
+  /** 读取全局设置（缺字段补出厂默认，§10.1）。 */
+  "config:get": { request: undefined; response: GlobalConfig };
+  /** 部分更新全局设置（浅合并），返回合并后的完整设置。 */
+  "config:update": { request: UpdateConfigRequest; response: GlobalConfig };
+  /** 列出全部 Agent Profile（§4.4）。 */
+  "profiles:list": { request: undefined; response: readonly AgentProfile[] };
+  /** 新建 Profile（经 core 校验 provider/model/角色/权限）。 */
+  "profiles:create": { request: CreateProfileRequest; response: AgentProfile };
+  /** 整表单更新 Profile。 */
+  "profiles:update": { request: UpdateProfileRequest; response: AgentProfile };
+  /** 删除 Profile。 */
+  "profiles:remove": { request: RemoveProfileRequest; response: { readonly removed: true } };
   /** 仅冒烟模式注册：请求主进程向本窗口推送一条 smoke:event。 */
   "smoke:emit-event": { request: { readonly seq: number }; response: { readonly emitted: true } };
   /** 仅冒烟模式注册：上报渲染层检查结果，主进程据此决定退出码。 */
@@ -96,6 +253,24 @@ export const INVOKE_CHANNELS = [
   "app:get-locale",
   "app:ping",
   "diagnostics:check-sqlite",
+  "dialog:pick-directory",
+  "projects:list",
+  "projects:create",
+  "projects:remove",
+  "projects:restore",
+  "providers:list",
+  "providers:create",
+  "providers:update",
+  "providers:remove",
+  "providers:test-connection",
+  "providers:fetch-models",
+  "secrets:masked-tail",
+  "config:get",
+  "config:update",
+  "profiles:list",
+  "profiles:create",
+  "profiles:update",
+  "profiles:remove",
   "smoke:emit-event",
   "smoke:report",
 ] as const satisfies readonly InvokeChannel[];

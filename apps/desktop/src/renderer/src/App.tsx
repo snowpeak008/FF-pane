@@ -1,92 +1,44 @@
-import { type ReactElement, useEffect, useState } from "react";
-import { useTranslation } from "react-i18next";
-import type { AppInfo } from "../../shared-ipc/contracts";
-import { changeUiLanguage } from "./i18n";
-import { isSupportedLanguage } from "./i18n/resolve";
-import { LANGUAGE_OPTIONS } from "./i18n/resources";
-
-type LoadState =
-  | { readonly phase: "loading" }
-  | { readonly phase: "ready"; readonly info: AppInfo }
-  | { readonly phase: "error"; readonly message: string };
-
-/** 最小语言切换控件（原生 select）；UI 美化是 Phase 3（T3.1）的事。 */
-function LanguagePicker(): ReactElement {
-  const { t, i18n } = useTranslation();
-  return (
-    <p>
-      <label>
-        {t("settings.language.label")}{" "}
-        <select
-          value={i18n.language}
-          onChange={(event) => {
-            const value = event.target.value;
-            if (isSupportedLanguage(value)) {
-              changeUiLanguage(value);
-            }
-          }}
-        >
-          {LANGUAGE_OPTIONS.map((option) => (
-            <option key={option.code} value={option.code}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </label>
-    </p>
-  );
-}
+import type { ReactElement } from "react";
+import { HashRouter } from "react-router-dom";
+import { Toaster } from "sonner";
+import { TooltipProvider } from "./components/ui/Tooltip";
+import { AppLayout } from "./layout/AppLayout";
+import { AppRoutes } from "./pages/AppRoutes";
+import { useTheme } from "./theme";
 
 /**
- * T0.2 首页：仅展示应用名与版本（来自主进程，经 IPC 获取），验证三层链路真实打通。
- * T0.3 起全部文案走语言包（locales/*.json），代码中禁止硬编码 UI 字符串。
- * 界面美化与设计系统是 Phase 3（T3.1）的事。
+ * 应用装配（W3.1b）。
+ *
+ * 层次固定为：ThemeProvider（在 main.tsx，先于 React 挂载即已上色）
+ *   → HashRouter → TooltipProvider → AppLayout → 路由内容。
+ *
+ * 为什么是 HashRouter：生产构建经 `loadFile` 以 file:// 协议加载（见 src/main/index.ts），
+ * BrowserRouter 依赖的 history pushState 在 file:// 下拿不到可用的路径基准；
+ * 且主进程的 will-navigate 守卫会拦下离开应用的导航。hash 路由两边都成立。
  */
+/**
+ * 全局通知（sonner）。§6.3 可撤销操作：立即执行 + toast + 撤销，停留 5s。
+ * 主题跟随当前解析主题（浅/深），保持双主题一致；无装饰（closeButton、纯色）。
+ */
+function AppToaster(): ReactElement {
+  const { resolvedTheme } = useTheme();
+  return <Toaster theme={resolvedTheme} position="bottom-right" duration={5000} closeButton />;
+}
+
 export function App(): ReactElement {
-  const { t } = useTranslation();
-  const [state, setState] = useState<LoadState>({ phase: "loading" });
-
-  useEffect(() => {
-    let cancelled = false;
-    window.ffpane
-      .invoke("app:get-info")
-      .then((info) => {
-        if (!cancelled) {
-          setState({ phase: "ready", info });
-        }
-      })
-      .catch((thrown: unknown) => {
-        if (!cancelled) {
-          setState({
-            phase: "error",
-            message: thrown instanceof Error ? thrown.message : String(thrown),
-          });
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  if (state.phase === "loading") {
-    return <main>{t("app.loading")}</main>;
-  }
-  if (state.phase === "error") {
-    return <main>{t("app.loadError", { message: state.message })}</main>;
-  }
-  const { info } = state;
   return (
-    <main>
-      <h1>{info.name}</h1>
-      <p>{t("app.version", { version: info.version })}</p>
-      <p>
-        {t("app.runtime", {
-          electron: info.runtime.electron,
-          chrome: info.runtime.chrome,
-          node: info.runtime.node,
-        })}
-      </p>
-      <LanguagePicker />
-    </main>
+    <HashRouter>
+      <TooltipProvider>
+        <AppLayout>
+          <AppRoutes />
+        </AppLayout>
+        <AppToaster />
+        {/*
+          命令面板挂载位（W3.1c，待接线）：Ctrl+K 面板与全局快捷键注册器将挂在这里
+          （需在 Router 内以便命令项 navigate）。接线时需先解决 Ctrl+1~7 与 AppLayout
+          既有页面快捷键的重复处理问题，故留待独立一步。
+        */}
+      </TooltipProvider>
+    </HashRouter>
   );
 }

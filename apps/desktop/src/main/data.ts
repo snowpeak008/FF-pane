@@ -1,0 +1,218 @@
+/**
+ * 主进程数据层接线（W3.3）：把 @ff-pane/storage 的存取能力绑定到全局数据根，
+ * 并装配成契约化的 invoke handlers。
+ *
+ * 布局层「根目录一律参数注入」（W1.2a）：全局根在此解析为 <homedir>/.aiworkbench，
+ * 首次启动时幂等补建目录（initGlobalLayout，只建目录不建文件）。
+ *
+ * 目录生成语义（设计系统 §5.5 / §6.3）：
+ * - 新建项目 = initProjectLayout 生成 <项目根>/.workbench/ 全套目录 + 写入注册表；
+ * - 移除项目 = 仅出注册表，不删磁盘（故 remove 返回被移条目、支持 restore 撤销）。
+ */
+
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
+import {
+  fetchModels,
+  ProfileValidationError,
+  testConnection,
+  validateProfileDraft,
+} from "@ff-pane/core";
+import type { ApiKeyRef } from "@ff-pane/shared";
+import {
+  createConfigStore,
+  createProfileStore,
+  createProjectRegistry,
+  createProviderStore,
+  GLOBAL_ROOT_DIR_NAME,
+  initGlobalLayout,
+  initProjectLayout,
+  type ProfileDraftValidator,
+  type ProviderDraft,
+  profileReferencesProvider,
+} from "@ff-pane/storage";
+import { type BrowserWindow, dialog, type OpenDialogOptions } from "electron";
+import type { InvokeHandlers } from "../shared-ipc/server";
+import { createSafeStorageBackend, createSecretStore, resolveSecretsFile } from "./secrets";
+
+/** 本数据层负责的 invoke 通道集合。 */
+type DataChannel =
+  | "dialog:pick-directory"
+  | "projects:list"
+  | "projects:create"
+  | "projects:remove"
+  | "projects:restore"
+  | "providers:list"
+  | "providers:create"
+  | "providers:update"
+  | "providers:remove"
+  | "providers:test-connection"
+  | "providers:fetch-models"
+  | "secrets:masked-tail"
+  | "config:get"
+  | "config:update"
+  | "profiles:list"
+  | "profiles:create"
+  | "profiles:update"
+  | "profiles:remove";
+
+/** 目录选择器挂靠的父窗口取值器（窗口在数据层装配后才创建，故惰性取用）。 */
+export type MainWindowGetter = () => BrowserWindow | null;
+
+/**
+ * 解析全局数据根、幂等初始化布局、绑定项目注册表，返回契约化的 handler 表。
+ * 在 app.whenReady 之后、注册窗口之前调用一次。
+ */
+export async function createDataHandlers(
+  getWindow: MainWindowGetter,
+): Promise<Pick<InvokeHandlers, DataChannel>> {
+  const globalRoot = join(homedir(), GLOBAL_ROOT_DIR_NAME);
+  const layout = await initGlobalLayout(globalRoot);
+  const registry = createProjectRegistry(layout.projectsFile);
+  const providers = createProviderStore(layout.providersFile);
+  const profiles = createProfileStore(layout.profilesFile);
+  const config = createConfigStore(layout.configFile);
+
+  // Profile 落盘前的校验（W1.6）：provider 引用 / 模型 kind / 角色 / 权限预设 vs 角色默认。
+  // 拒绝以抛错表达，violations 随 ProfileValidationError 上行到 IPC / 界面。
+  const validateProfile: ProfileDraftValidator = async (draft) => {
+    const result = await validateProfileDraft(draft, {
+      getProvider: (id) => providers.getProvider(id),
+    });
+    if (!result.ok) {
+      throw new ProfileValidationError(result.violations);
+    }
+  };
+  const secrets = createSecretStore({
+    backend: createSafeStorageBackend(),
+    secretsFile: resolveSecretsFile(layout.rootDir),
+  });
+
+  // 测试连接 / 拉取模型的共用取密逻辑：优先明文（未保存表单），否则用引用解密（已保存）。
+  // 明文用完即弃、不出现在任何返回值（§4.3；探测层输出已 redact 兜底）。
+  async function resolveProbeKey(input: {
+    readonly apiKey?: string;
+    readonly apiKeyRef?: ApiKeyRef;
+  }): Promise<string | undefined> {
+    if (input.apiKey !== undefined && input.apiKey.length > 0) {
+      return input.apiKey;
+    }
+    if (input.apiKeyRef !== undefined) {
+      return secrets.revealSecret(input.apiKeyRef);
+    }
+    return undefined;
+  }
+
+  return {
+    "dialog:pick-directory": async () => {
+      const window = getWindow();
+      const options: OpenDialogOptions = {
+        properties: ["openDirectory", "createDirectory"],
+      };
+      const result =
+        window !== null
+          ? await dialog.showOpenDialog(window, options)
+          : await dialog.showOpenDialog(options);
+      const [picked] = result.filePaths;
+      if (result.canceled || picked === undefined) {
+        return { cancelled: true } as const;
+      }
+      return { cancelled: false, path: picked } as const;
+    },
+
+    "projects:list": () => registry.listProjects(),
+
+    "projects:create": async (request) => {
+      // 归一为绝对路径：注册表以 rootPath 唯一，接线层负责归一（见 registry 模块注释）
+      const rootPath = resolve(request.rootPath);
+      // 幂等生成 .workbench/ 全套目录（已存在即跳过，不动已有内容）
+      await initProjectLayout(rootPath);
+      return registry.addProject({ name: request.name, rootPath });
+    },
+
+    "projects:remove": (request) => registry.removeProject(request.id),
+
+    "projects:restore": (request) => registry.restoreProject(request.entry),
+
+    "providers:list": () => providers.listProviders(),
+
+    "providers:create": async (request) => {
+      // 明文密钥先加密落库，再把引用写进草稿；密钥本体不入 providers.json（§4.3）
+      const draft: ProviderDraft =
+        request.apiKey !== undefined && request.apiKey.length > 0
+          ? { ...request.draft, apiKeyRef: await secrets.storeSecret(request.apiKey) }
+          : request.draft;
+      return providers.createProvider(draft);
+    },
+
+    "providers:update": async (request) => {
+      const existing = await providers.getProvider(request.id);
+      const oldRef = existing?.apiKeyRef;
+      // 决定本次落盘的引用：清除 → 无；换新 → 存新得引用；否则沿用旧引用
+      let nextRef: ApiKeyRef | undefined;
+      if (request.clearApiKey === true) {
+        nextRef = undefined;
+      } else if (request.apiKey !== undefined && request.apiKey.length > 0) {
+        nextRef = await secrets.storeSecret(request.apiKey);
+      } else {
+        nextRef = oldRef;
+      }
+      // exactOptionalPropertyTypes：清除密钥须「省略」apiKeyRef 而非置 undefined
+      const { apiKeyRef: _dropped, ...rest } = request.draft;
+      const draft: ProviderDraft = nextRef !== undefined ? { ...rest, apiKeyRef: nextRef } : rest;
+      const updated = await providers.updateProvider(request.id, draft);
+      // 落盘成功后再清理被替换 / 被清除的旧密文（顺序保证任何失败都不丢可用密钥）
+      if (oldRef !== undefined && oldRef !== nextRef) {
+        await secrets.deleteSecret(oldRef);
+      }
+      return updated;
+    },
+
+    "providers:remove": async (request) => {
+      const existing = await providers.getProvider(request.id);
+      // 在用保护：被任一 Profile 引用时拒删（deleteProvider 抛 ProviderInUseError）
+      await providers.deleteProvider(request.id, async (pid) =>
+        profileReferencesProvider(await profiles.listProfiles(), pid),
+      );
+      if (existing?.apiKeyRef !== undefined) {
+        await secrets.deleteSecret(existing.apiKeyRef);
+      }
+      return { removed: true } as const;
+    },
+
+    "providers:test-connection": async (request) => {
+      const apiKey = await resolveProbeKey(request);
+      return testConnection({
+        provider: request.provider,
+        ...(apiKey !== undefined ? { apiKey } : {}),
+        ...(request.model !== undefined ? { model: request.model } : {}),
+      });
+    },
+
+    "providers:fetch-models": async (request) => {
+      const apiKey = await resolveProbeKey(request);
+      return fetchModels({
+        provider: request.provider,
+        ...(apiKey !== undefined ? { apiKey } : {}),
+      });
+    },
+
+    "secrets:masked-tail": async (request) => ({ tail: await secrets.maskedTail(request.ref) }),
+
+    "config:get": () => config.readConfig(),
+
+    "config:update": (request) => config.updateConfig(request),
+
+    "profiles:list": () => profiles.listProfiles(),
+
+    "profiles:create": (request) => profiles.createProfile(request.draft, validateProfile),
+
+    "profiles:update": (request) =>
+      profiles.updateProfile(request.id, request.draft, validateProfile),
+
+    "profiles:remove": async (request) => {
+      await profiles.deleteProfile(request.id);
+      return { removed: true } as const;
+    },
+  };
+}

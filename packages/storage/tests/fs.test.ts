@@ -167,6 +167,7 @@ describe("目录布局 resolve / init", () => {
     const layout = resolveGlobalLayout(root);
     expect(layout.rootDir).toBe(root);
     expect(layout.configFile).toBe(join(root, "config.json"));
+    expect(layout.projectsFile).toBe(join(root, "projects.json"));
     expect(layout.providersFile).toBe(join(root, "providers.json"));
     expect(layout.profilesFile).toBe(join(root, "profiles.json"));
     expect(layout.habitsDir).toBe(join(root, "habits"));

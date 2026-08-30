@@ -1,3 +1,4 @@
+import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 
@@ -17,6 +18,8 @@ export default defineConfig({
     },
   },
   renderer: {
-    plugins: [react()],
+    // tailwindcss()：Tailwind v4 走 vite 插件，无 postcss/tailwind.config 文件；
+    // 主题 token 与扫描范围均在 src/renderer/src/styles/theme.css 内声明（W3.1a）
+    plugins: [react(), tailwindcss()],
   },
 });

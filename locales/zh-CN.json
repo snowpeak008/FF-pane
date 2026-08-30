@@ -5,10 +5,416 @@
     "version": "版本 {{version}}",
     "runtime": "Electron {{electron}} · Chromium {{chrome}} · Node {{node}}"
   },
+  "capability": {
+    "level": {
+      "yes": "支持",
+      "partial": "部分支持",
+      "no": "不支持"
+    }
+  },
+  "command": {
+    "palette": {
+      "label": "命令面板",
+      "placeholder": "搜索命令、页面、快捷键…",
+      "empty": "没有匹配的命令。换个关键词再试。",
+      "pending": "待接入"
+    },
+    "group": {
+      "navigation": "导航",
+      "action": "操作",
+      "settings": "设置"
+    },
+    "mode": {
+      "commands": "命令",
+      "projects": "项目",
+      "shortcuts": "快捷键"
+    },
+    "projects": {
+      "empty": "还没有项目。到项目列表页新建一个。"
+    },
+    "item": {
+      "palette-open": {
+        "title": "打开命令面板",
+        "keywords": "command palette 命令 面板 搜索"
+      },
+      "palette-projects": {
+        "title": "切换项目",
+        "keywords": "switch project 切换 项目"
+      },
+      "help-shortcuts": {
+        "title": "快捷键帮助",
+        "keywords": "shortcut keys help 快捷键 键位 帮助"
+      },
+      "settings-open": {
+        "title": "打开设置",
+        "keywords": "settings preferences 设置 偏好 配置"
+      },
+      "app-dismiss": {
+        "title": "关闭当前浮层",
+        "keywords": "close dismiss escape 关闭 取消 浮层"
+      },
+      "nav-back": {
+        "title": "后退",
+        "keywords": "back history 后退 返回 历史"
+      },
+      "nav-forward": {
+        "title": "前进",
+        "keywords": "forward history 前进 历史"
+      },
+      "nav-page-by-index": {
+        "title": "按序号切换页面",
+        "keywords": "page index switch 页面 序号 切换"
+      },
+      "nav-projects": {
+        "title": "转到项目列表",
+        "keywords": "projects list home 项目 列表 首页"
+      },
+      "nav-session": {
+        "title": "转到会话页",
+        "keywords": "session chat conversation 会话 对话 聊天"
+      },
+      "nav-plan": {
+        "title": "转到计划页",
+        "keywords": "plan version 计划 版本 方案"
+      },
+      "nav-tasks": {
+        "title": "转到任务页",
+        "keywords": "tasks board 任务 看板 进度"
+      },
+      "nav-runs": {
+        "title": "转到执行记录页",
+        "keywords": "runs diff log 执行 记录 改动 日志"
+      },
+      "nav-memory": {
+        "title": "转到记忆页",
+        "keywords": "memory habits 记忆 习惯 候选"
+      },
+      "nav-knowledge": {
+        "title": "转到知识库页",
+        "keywords": "knowledge base search 知识库 检索 资料"
+      },
+      "page-focus-search": {
+        "title": "聚焦当前页搜索框",
+        "keywords": "focus search filter 聚焦 搜索 过滤"
+      },
+      "list-move-up": {
+        "title": "列表内上移焦点",
+        "keywords": "list up previous 列表 上移 上一条"
+      },
+      "list-move-down": {
+        "title": "列表内下移焦点",
+        "keywords": "list down next 列表 下移 下一条"
+      },
+      "list-open": {
+        "title": "打开焦点项详情",
+        "keywords": "open detail enter 打开 详情"
+      },
+      "session-send": {
+        "title": "会话：发送消息",
+        "keywords": "send message 发送 消息 会话"
+      },
+      "session-insert-knowledge": {
+        "title": "会话：从知识库插入",
+        "keywords": "insert knowledge 插入 知识库 引用"
+      },
+      "session-switch-role": {
+        "title": "会话：切换角色",
+        "keywords": "switch role profile 切换 角色"
+      },
+      "tasks-dispatch": {
+        "title": "任务：派发焦点任务",
+        "keywords": "dispatch task run 派发 任务 执行"
+      },
+      "tasks-accept": {
+        "title": "任务：接受焦点任务",
+        "keywords": "accept task 接受 任务 验收"
+      },
+      "memory-approve": {
+        "title": "记忆候选：通过",
+        "keywords": "approve memory candidate 通过 记忆 候选"
+      },
+      "memory-reject": {
+        "title": "记忆候选：拒绝",
+        "keywords": "reject memory candidate 拒绝 记忆 候选"
+      }
+    }
+  },
+  "common": {
+    "cancel": "取消",
+    "confirm": "确认",
+    "close": "关闭",
+    "retry": "重试",
+    "copy": "复制",
+    "copied": "已复制",
+    "undo": "撤销",
+    "save": "保存",
+    "loading": "加载中…",
+    "errorDetail": {
+      "show": "展开错误原文",
+      "hide": "收起错误原文"
+    },
+    "confirmName": {
+      "label": "输入「{{name}}」以确认",
+      "hint": "名称必须完全一致，否则确认按钮不可用。"
+    }
+  },
+  "nav": {
+    "primary": "主导航",
+    "collapse": "收起侧栏",
+    "expand": "展开侧栏",
+    "projects": {
+      "label": "项目列表",
+      "question": "我有哪些项目，各自到哪了"
+    },
+    "session": {
+      "label": "会话",
+      "question": "我正在和谁讨论什么"
+    },
+    "plan": {
+      "label": "计划",
+      "question": "我们决定做什么"
+    },
+    "tasks": {
+      "label": "任务",
+      "question": "现在做到哪了"
+    },
+    "runs": {
+      "label": "执行记录",
+      "question": "AI 到底改了什么"
+    },
+    "memory": {
+      "label": "记忆",
+      "question": "项目记住了什么"
+    },
+    "knowledge": {
+      "label": "知识库",
+      "question": "我能查到什么资料"
+    },
+    "settings": {
+      "label": "设置",
+      "question": "连接、Profile 与偏好在哪调"
+    }
+  },
+  "page": {
+    "placeholder": {
+      "message": "{{page}}页还没有内容。这一页由工单 {{ticket}} 实现。"
+    },
+    "notFound": {
+      "message": "没有这个页面。回到项目列表继续。",
+      "action": "回到项目列表"
+    }
+  },
+  "projects": {
+    "new": "新建项目",
+    "empty": "还没有项目。选一个目录，创建第一个项目。",
+    "loadError": "读取项目列表失败",
+    "card": {
+      "createdAt": "登记于 {{time}}",
+      "removeLabel": "从工作台移除「{{name}}」"
+    },
+    "remove": {
+      "toast": "已移除「{{name}}」",
+      "error": "移除项目失败",
+      "restored": "已恢复「{{name}}」",
+      "restoreError": "撤销移除失败"
+    },
+    "create": {
+      "title": "新建项目",
+      "description": "选择项目所在目录，工作台会在其中创建 .workbench/ 数据目录。",
+      "pathLabel": "项目目录",
+      "pathPlaceholder": "尚未选择目录",
+      "pickButton": "选择目录…",
+      "changeButton": "更换目录…",
+      "nameLabel": "项目名称",
+      "namePlaceholder": "项目显示名",
+      "submit": "创建",
+      "toast": "已新建项目「{{name}}」"
+    }
+  },
   "settings": {
+    "providers": {
+      "title": "模型来源（Provider）",
+      "subtitle": "配置对话 / 嵌入模型的来源、密钥与默认模型。",
+      "new": "新建 Provider",
+      "empty": "还没有 Provider。新建一个以连接模型来源。",
+      "loadError": "读取 Provider 列表失败",
+      "saved": "已保存「{{name}}」",
+      "removed": "已删除「{{name}}」",
+      "removeError": "删除 Provider 失败",
+      "disabled": "已停用",
+      "modelCount": "对话模型 {{count}}",
+      "editLabel": "编辑「{{name}}」",
+      "removeLabel": "删除「{{name}}」",
+      "addModel": "添加模型",
+      "removeModel": "移除该模型",
+      "fetchModels": "拉取模型",
+      "testConnection": "测试连接",
+      "testOk": "连接成功（{{latency}} ms）",
+      "type": {
+        "openai_compatible": "OpenAI 兼容",
+        "anthropic": "Anthropic",
+        "cli_login": "CLI 登录",
+        "custom": "自定义"
+      },
+      "modelKind": {
+        "chat": "对话",
+        "embedding": "嵌入"
+      },
+      "probeStage": {
+        "unsupported": "该类型不支持连接测试",
+        "invalid-config": "配置无效",
+        "network": "网络错误",
+        "timeout": "连接超时",
+        "http": "HTTP 错误",
+        "invalid-response": "响应无法解析"
+      },
+      "edit": {
+        "title": "编辑 Provider",
+        "description": "修改来源配置；密钥留空表示不改动。"
+      },
+      "field": {
+        "name": "名称",
+        "type": "类型",
+        "baseUrl": "API 地址",
+        "baseUrlHint": "需带版本段，如 https://api.deepseek.com/v1",
+        "apiKey": "API 密钥",
+        "apiKeyHint": "仅加密存入系统密钥库，界面只显示尾 4 位。",
+        "apiKeyKept": "保持不变（尾 {{tail}}）；键入以更换",
+        "apiKeyPlaceholder": "粘贴密钥",
+        "requestTemplate": "请求模板",
+        "models": "模型",
+        "modelsEmpty": "还没有模型。手动添加或点「拉取模型」。",
+        "modelId": "模型 ID",
+        "modelName": "显示名",
+        "defaultModel": "默认对话模型",
+        "embeddingModel": "默认嵌入模型",
+        "none": "（无）",
+        "timeout": "超时（秒）",
+        "enabled": "启用"
+      }
+    },
+    "appearance": {
+      "title": "外观"
+    },
     "language": {
+      "title": "语言",
       "label": "界面语言",
       "displayName": "简体中文"
+    },
+    "languageName": {
+      "zh-CN": "简体中文",
+      "en-US": "English"
+    },
+    "outputLanguage": {
+      "label": "AI 输出语言",
+      "hint": "Agent 回复与产出使用的语言（全局默认，Profile / 项目可覆盖）。",
+      "loadError": "读取失败",
+      "error": "保存 AI 输出语言失败"
+    },
+    "profiles": {
+      "title": "Agent Profile",
+      "subtitle": "把 Runtime + Provider + 模型 + 角色 + 权限组合成可复用的运行配置。",
+      "new": "新建 Profile",
+      "empty": "还没有 Profile。新建一个以绑定角色与模型。",
+      "loadError": "读取 Profile 列表失败",
+      "saved": "已保存「{{name}}」",
+      "removed": "已删除「{{name}}」",
+      "removeError": "删除 Profile 失败",
+      "editLabel": "编辑「{{name}}」",
+      "removeLabel": "删除「{{name}}」",
+      "role": {
+        "planner": "规划者",
+        "worker": "执行者",
+        "reviewer": "审查者"
+      },
+      "edit": {
+        "title": "编辑 Profile",
+        "description": "落盘前会校验 Provider 引用、模型、角色与权限。"
+      },
+      "field": {
+        "name": "名称",
+        "runtime": "Runtime",
+        "selectRuntime": "选择 Runtime",
+        "provider": "Provider",
+        "selectProvider": "选择 Provider",
+        "model": "模型",
+        "modelDefault": "（用 Provider 默认）",
+        "defaultRole": "默认角色",
+        "outputLanguage": "输出语言",
+        "outputFollowGlobal": "跟随全局",
+        "permission": "权限预设"
+      }
+    },
+    "permission": {
+      "readPaths": "可读路径",
+      "writePaths": "可写路径",
+      "pathsHint": "相对项目根的 glob，一行一条；空 = 无该项权限。",
+      "shell": "Shell 命令",
+      "shellPolicy": {
+        "forbidden": "禁止",
+        "allowed": "允许（危险操作除外）",
+        "verify_only": "仅验证命令"
+      },
+      "network": "允许网络",
+      "dangerousOpsNote": "危险操作（删除越界、git push、发布部署等）恒需逐次确认，不可关闭。"
+    },
+    "defaultPermission": {
+      "title": "默认权限预设",
+      "subtitle": "新建 Profile 时预填的权限信封。",
+      "saved": "默认权限预设已保存",
+      "error": "保存默认权限预设失败"
+    },
+    "theme": {
+      "label": "主题",
+      "resolved": "当前生效：{{theme}}",
+      "options": {
+        "system": "跟随系统",
+        "light": "浅色",
+        "dark": "深色"
+      }
+    }
+  },
+  "shortcut": {
+    "scope": {
+      "global": "全局",
+      "page": "页面",
+      "list": "列表",
+      "session": "会话页",
+      "session-input": "会话页输入框",
+      "tasks": "任务页",
+      "memory-review": "记忆审核"
+    },
+    "action": {
+      "palette-open": "命令面板（含项目/页面/操作搜索）",
+      "palette-projects": "切换项目（命令面板的项目模式）",
+      "settings-open": "打开设置页",
+      "help-shortcuts": "快捷键帮助",
+      "app-dismiss": "关闭最上层浮层 / 取消当前编辑",
+      "nav-back": "后退",
+      "nav-forward": "前进",
+      "nav-page-by-index": "切换到第 N 个页面",
+      "page-focus-search": "聚焦当前页搜索框",
+      "list-move-up": "列表内上移焦点",
+      "list-move-down": "列表内下移焦点",
+      "list-open": "打开焦点项详情",
+      "session-send": "会话：发送消息",
+      "session-insert-knowledge": "会话：从知识库插入",
+      "session-switch-role": "会话：切换角色",
+      "tasks-dispatch": "任务：派发焦点任务",
+      "tasks-accept": "任务：接受（通过）",
+      "memory-approve": "记忆候选：通过",
+      "memory-reject": "记忆候选：拒绝"
+    }
+  },
+  "task": {
+    "status": {
+      "pending": "待执行",
+      "running": "执行中",
+      "blocked": "已阻塞",
+      "failed": "已失败",
+      "done": "已完成",
+      "accepted": "已接受",
+      "cancelled": "已取消"
     }
   }
 }

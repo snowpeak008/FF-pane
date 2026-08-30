@@ -5,10 +5,416 @@
     "version": "Version {{version}}",
     "runtime": "Electron {{electron}} · Chromium {{chrome}} · Node {{node}}"
   },
+  "capability": {
+    "level": {
+      "yes": "Supported",
+      "partial": "Partial",
+      "no": "Unsupported"
+    }
+  },
+  "command": {
+    "palette": {
+      "label": "Command palette",
+      "placeholder": "Search commands, pages, shortcuts…",
+      "empty": "No matching command. Try another keyword.",
+      "pending": "not wired yet"
+    },
+    "group": {
+      "navigation": "Navigation",
+      "action": "Actions",
+      "settings": "Settings"
+    },
+    "mode": {
+      "commands": "Commands",
+      "projects": "Projects",
+      "shortcuts": "Shortcuts"
+    },
+    "projects": {
+      "empty": "No project yet. Create one on the projects page."
+    },
+    "item": {
+      "palette-open": {
+        "title": "Open command palette",
+        "keywords": "command palette 命令 面板 搜索"
+      },
+      "palette-projects": {
+        "title": "Switch project",
+        "keywords": "switch project 切换 项目"
+      },
+      "help-shortcuts": {
+        "title": "Keyboard shortcuts",
+        "keywords": "shortcut keys help 快捷键 键位 帮助"
+      },
+      "settings-open": {
+        "title": "Open settings",
+        "keywords": "settings preferences 设置 偏好 配置"
+      },
+      "app-dismiss": {
+        "title": "Dismiss current overlay",
+        "keywords": "close dismiss escape 关闭 取消 浮层"
+      },
+      "nav-back": {
+        "title": "Go back",
+        "keywords": "back history 后退 返回 历史"
+      },
+      "nav-forward": {
+        "title": "Go forward",
+        "keywords": "forward history 前进 历史"
+      },
+      "nav-page-by-index": {
+        "title": "Switch page by number",
+        "keywords": "page index switch 页面 序号 切换"
+      },
+      "nav-projects": {
+        "title": "Go to projects",
+        "keywords": "projects list home 项目 列表 首页"
+      },
+      "nav-session": {
+        "title": "Go to session",
+        "keywords": "session chat conversation 会话 对话 聊天"
+      },
+      "nav-plan": {
+        "title": "Go to plan",
+        "keywords": "plan version 计划 版本 方案"
+      },
+      "nav-tasks": {
+        "title": "Go to tasks",
+        "keywords": "tasks board 任务 看板 进度"
+      },
+      "nav-runs": {
+        "title": "Go to run records",
+        "keywords": "runs diff log 执行 记录 改动 日志"
+      },
+      "nav-memory": {
+        "title": "Go to memory",
+        "keywords": "memory habits 记忆 习惯 候选"
+      },
+      "nav-knowledge": {
+        "title": "Go to knowledge base",
+        "keywords": "knowledge base search 知识库 检索 资料"
+      },
+      "page-focus-search": {
+        "title": "Focus the search box",
+        "keywords": "focus search filter 聚焦 搜索 过滤"
+      },
+      "list-move-up": {
+        "title": "Move focus up in list",
+        "keywords": "list up previous 列表 上移 上一条"
+      },
+      "list-move-down": {
+        "title": "Move focus down in list",
+        "keywords": "list down next 列表 下移 下一条"
+      },
+      "list-open": {
+        "title": "Open focused item",
+        "keywords": "open detail enter 打开 详情"
+      },
+      "session-send": {
+        "title": "Session: send message",
+        "keywords": "send message 发送 消息 会话"
+      },
+      "session-insert-knowledge": {
+        "title": "Session: insert from knowledge base",
+        "keywords": "insert knowledge 插入 知识库 引用"
+      },
+      "session-switch-role": {
+        "title": "Session: switch role",
+        "keywords": "switch role profile 切换 角色"
+      },
+      "tasks-dispatch": {
+        "title": "Tasks: dispatch focused task",
+        "keywords": "dispatch task run 派发 任务 执行"
+      },
+      "tasks-accept": {
+        "title": "Tasks: accept focused task",
+        "keywords": "accept task 接受 任务 验收"
+      },
+      "memory-approve": {
+        "title": "Memory candidate: approve",
+        "keywords": "approve memory candidate 通过 记忆 候选"
+      },
+      "memory-reject": {
+        "title": "Memory candidate: reject",
+        "keywords": "reject memory candidate 拒绝 记忆 候选"
+      }
+    }
+  },
+  "common": {
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "close": "Close",
+    "retry": "Retry",
+    "copy": "Copy",
+    "copied": "Copied",
+    "undo": "Undo",
+    "save": "Save",
+    "loading": "Loading…",
+    "errorDetail": {
+      "show": "Show raw error",
+      "hide": "Hide raw error"
+    },
+    "confirmName": {
+      "label": "Type \"{{name}}\" to confirm",
+      "hint": "The name must match exactly, otherwise the confirm button stays disabled."
+    }
+  },
+  "nav": {
+    "primary": "Primary navigation",
+    "collapse": "Collapse sidebar",
+    "expand": "Expand sidebar",
+    "projects": {
+      "label": "Projects",
+      "question": "Which projects do I have, and where is each one?"
+    },
+    "session": {
+      "label": "Session",
+      "question": "Who am I talking to, and about what?"
+    },
+    "plan": {
+      "label": "Plan",
+      "question": "What did we decide to build?"
+    },
+    "tasks": {
+      "label": "Tasks",
+      "question": "How far along is the work?"
+    },
+    "runs": {
+      "label": "Runs",
+      "question": "What did the AI actually change?"
+    },
+    "memory": {
+      "label": "Memory",
+      "question": "What does the project remember?"
+    },
+    "knowledge": {
+      "label": "Knowledge",
+      "question": "What reference material can I look up?"
+    },
+    "settings": {
+      "label": "Settings",
+      "question": "Where do I configure providers, profiles and preferences?"
+    }
+  },
+  "page": {
+    "placeholder": {
+      "message": "The {{page}} page has no content yet. It is delivered by work order {{ticket}}."
+    },
+    "notFound": {
+      "message": "No such page. Head back to the project list.",
+      "action": "Back to projects"
+    }
+  },
+  "projects": {
+    "new": "New project",
+    "empty": "No project yet. Pick a directory to create your first one.",
+    "loadError": "Failed to load the project list",
+    "card": {
+      "createdAt": "Added {{time}}",
+      "removeLabel": "Remove \"{{name}}\" from the workspace"
+    },
+    "remove": {
+      "toast": "Removed \"{{name}}\"",
+      "error": "Failed to remove the project",
+      "restored": "Restored \"{{name}}\"",
+      "restoreError": "Failed to undo removal"
+    },
+    "create": {
+      "title": "New project",
+      "description": "Pick the project directory; the workbench creates a .workbench/ data folder inside it.",
+      "pathLabel": "Project directory",
+      "pathPlaceholder": "No directory selected",
+      "pickButton": "Choose directory…",
+      "changeButton": "Change…",
+      "nameLabel": "Project name",
+      "namePlaceholder": "Display name",
+      "submit": "Create",
+      "toast": "Created project \"{{name}}\""
+    }
+  },
   "settings": {
+    "providers": {
+      "title": "Model providers",
+      "subtitle": "Configure where chat / embedding models come from, keys and defaults.",
+      "new": "New provider",
+      "empty": "No provider yet. Create one to connect a model source.",
+      "loadError": "Failed to load the provider list",
+      "saved": "Saved \"{{name}}\"",
+      "removed": "Deleted \"{{name}}\"",
+      "removeError": "Failed to delete the provider",
+      "disabled": "Disabled",
+      "modelCount": "Chat models: {{count}}",
+      "editLabel": "Edit \"{{name}}\"",
+      "removeLabel": "Delete \"{{name}}\"",
+      "addModel": "Add model",
+      "removeModel": "Remove this model",
+      "fetchModels": "Fetch models",
+      "testConnection": "Test connection",
+      "testOk": "Connected ({{latency}} ms)",
+      "type": {
+        "openai_compatible": "OpenAI-compatible",
+        "anthropic": "Anthropic",
+        "cli_login": "CLI login",
+        "custom": "Custom"
+      },
+      "modelKind": {
+        "chat": "Chat",
+        "embedding": "Embedding"
+      },
+      "probeStage": {
+        "unsupported": "This type does not support connection testing",
+        "invalid-config": "Invalid configuration",
+        "network": "Network error",
+        "timeout": "Connection timed out",
+        "http": "HTTP error",
+        "invalid-response": "Could not parse the response"
+      },
+      "edit": {
+        "title": "Edit provider",
+        "description": "Update the source configuration; leave the key blank to keep it."
+      },
+      "field": {
+        "name": "Name",
+        "type": "Type",
+        "baseUrl": "API base URL",
+        "baseUrlHint": "Include the version segment, e.g. https://api.deepseek.com/v1",
+        "apiKey": "API key",
+        "apiKeyHint": "Stored encrypted in the OS keychain; only the last 4 chars are shown.",
+        "apiKeyKept": "Kept (ends {{tail}}); type to replace",
+        "apiKeyPlaceholder": "Paste the key",
+        "requestTemplate": "Request template",
+        "models": "Models",
+        "modelsEmpty": "No models yet. Add manually or click \"Fetch models\".",
+        "modelId": "Model ID",
+        "modelName": "Display name",
+        "defaultModel": "Default chat model",
+        "embeddingModel": "Default embedding model",
+        "none": "(none)",
+        "timeout": "Timeout (s)",
+        "enabled": "Enabled"
+      }
+    },
+    "appearance": {
+      "title": "Appearance"
+    },
     "language": {
+      "title": "Language",
       "label": "UI language",
       "displayName": "English"
+    },
+    "languageName": {
+      "zh-CN": "简体中文",
+      "en-US": "English"
+    },
+    "outputLanguage": {
+      "label": "AI output language",
+      "hint": "Language the agent replies and produces in (global default; profile / project can override).",
+      "loadError": "Failed to load",
+      "error": "Failed to save AI output language"
+    },
+    "profiles": {
+      "title": "Agent profiles",
+      "subtitle": "Combine runtime + provider + model + role + permissions into reusable configs.",
+      "new": "New profile",
+      "empty": "No profile yet. Create one to bind a role and model.",
+      "loadError": "Failed to load the profile list",
+      "saved": "Saved \"{{name}}\"",
+      "removed": "Deleted \"{{name}}\"",
+      "removeError": "Failed to delete the profile",
+      "editLabel": "Edit \"{{name}}\"",
+      "removeLabel": "Delete \"{{name}}\"",
+      "role": {
+        "planner": "Planner",
+        "worker": "Worker",
+        "reviewer": "Reviewer"
+      },
+      "edit": {
+        "title": "Edit profile",
+        "description": "Provider reference, model, role and permissions are validated before saving."
+      },
+      "field": {
+        "name": "Name",
+        "runtime": "Runtime",
+        "selectRuntime": "Select a runtime",
+        "provider": "Provider",
+        "selectProvider": "Select a provider",
+        "model": "Model",
+        "modelDefault": "(use provider default)",
+        "defaultRole": "Default role",
+        "outputLanguage": "Output language",
+        "outputFollowGlobal": "Follow global",
+        "permission": "Permission preset"
+      }
+    },
+    "permission": {
+      "readPaths": "Readable paths",
+      "writePaths": "Writable paths",
+      "pathsHint": "Globs relative to project root, one per line; empty = no access.",
+      "shell": "Shell commands",
+      "shellPolicy": {
+        "forbidden": "Forbidden",
+        "allowed": "Allowed (except dangerous ops)",
+        "verify_only": "Verify commands only"
+      },
+      "network": "Allow network",
+      "dangerousOpsNote": "Dangerous ops (delete out of scope, git push, deploy…) always require per-time confirmation and cannot be disabled."
+    },
+    "defaultPermission": {
+      "title": "Default permission preset",
+      "subtitle": "The envelope pre-filled when creating a new profile.",
+      "saved": "Default permission preset saved",
+      "error": "Failed to save the default permission preset"
+    },
+    "theme": {
+      "label": "Theme",
+      "resolved": "In effect: {{theme}}",
+      "options": {
+        "system": "Follow system",
+        "light": "Light",
+        "dark": "Dark"
+      }
+    }
+  },
+  "shortcut": {
+    "scope": {
+      "global": "Global",
+      "page": "Page",
+      "list": "List",
+      "session": "Session page",
+      "session-input": "Session composer",
+      "tasks": "Tasks page",
+      "memory-review": "Memory review"
+    },
+    "action": {
+      "palette-open": "Command palette (projects, pages, actions)",
+      "palette-projects": "Switch project (palette in project mode)",
+      "settings-open": "Open the settings page",
+      "help-shortcuts": "Keyboard shortcut help",
+      "app-dismiss": "Dismiss topmost overlay / cancel editing",
+      "nav-back": "Go back",
+      "nav-forward": "Go forward",
+      "nav-page-by-index": "Switch to the Nth page",
+      "page-focus-search": "Focus the search box on this page",
+      "list-move-up": "Move focus up in list",
+      "list-move-down": "Move focus down in list",
+      "list-open": "Open focused item detail",
+      "session-send": "Session: send message",
+      "session-insert-knowledge": "Session: insert from knowledge base",
+      "session-switch-role": "Session: switch role",
+      "tasks-dispatch": "Tasks: dispatch focused task",
+      "tasks-accept": "Tasks: accept (approve)",
+      "memory-approve": "Memory candidate: approve",
+      "memory-reject": "Memory candidate: reject"
+    }
+  },
+  "task": {
+    "status": {
+      "pending": "Pending",
+      "running": "Running",
+      "blocked": "Blocked",
+      "failed": "Failed",
+      "done": "Done",
+      "accepted": "Accepted",
+      "cancelled": "Cancelled"
     }
   }
 }

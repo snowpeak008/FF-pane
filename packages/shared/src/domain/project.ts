@@ -53,3 +53,22 @@ export interface Project {
   /** 项目在工作台的登记时间（epoch 毫秒）。 */
   readonly createdAt: EpochMillis;
 }
+
+/**
+ * 工作台"已登记项目"的注册表条目（全局 §10.1 projects.json）。
+ *
+ * 与完整 {@link Project}（项目内 §10.2 project.json）区分：注册表只回答项目列表页
+ * （§11.1「我有哪些项目」）需要的最小信息——身份、显示名、根路径、登记时间；
+ * 角色绑定 / 权限策略 / 输出语言等完整配置随后写入项目自身的 project.json，
+ * 依赖 Profile 存在，故不在登记时强求。ProjectRegistryEntry 是 Project 的严格子集。
+ */
+export interface ProjectRegistryEntry {
+  /** 项目内部唯一 ID（与最终 project.json 的 id 一致）。 */
+  readonly id: ProjectId;
+  /** 项目显示名（默认取根目录名，可改）。 */
+  readonly name: string;
+  /** 项目根路径（`.workbench/` 的宿主目录，§10.2）。 */
+  readonly rootPath: string;
+  /** 项目登记进工作台的时间（epoch 毫秒）。 */
+  readonly createdAt: EpochMillis;
+}

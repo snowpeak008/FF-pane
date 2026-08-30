@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, dialog, ipcMain, session, shell } from "electron";
 import { registerInvokeHandlers } from "../shared-ipc/server";
 import { installCsp } from "./csp";
+import { createDataHandlers } from "./data";
 import { startSmokeMode } from "./smoke";
 import { runSqliteCheck } from "./sqlite-check";
 import { loadWindowState, trackWindowState } from "./window-state";
@@ -11,6 +12,9 @@ const moduleDir = dirname(fileURLToPath(import.meta.url));
 const isSmokeMode = process.argv.includes("--smoke");
 /** electron-vite dev 会注入渲染层 dev server 地址；生产/冒烟模式下为空。 */
 const devRendererUrl = process.env["ELECTRON_RENDERER_URL"];
+
+/** 当前主窗口引用（目录选择器等原生弹窗挂靠父窗口时惰性取用）。 */
+let mainWindow: BrowserWindow | null = null;
 
 function createMainWindow(options: { readonly hidden: boolean }): BrowserWindow {
   const state = loadWindowState();
@@ -28,6 +32,11 @@ function createMainWindow(options: { readonly hidden: boolean }): BrowserWindow 
       sandbox: true,
       webSecurity: true,
     },
+  });
+
+  mainWindow = window;
+  window.on("closed", () => {
+    mainWindow = null;
   });
 
   trackWindowState(window);
@@ -88,7 +97,7 @@ function registerAppHandlers(): void {
   });
 }
 
-function bootstrap(): void {
+async function bootstrap(): Promise<void> {
   installCsp(session.defaultSession, devRendererUrl !== undefined);
   registerAppHandlers();
 
@@ -106,6 +115,18 @@ function bootstrap(): void {
     console.error(`[main] ${message}`);
     dialog.showErrorBox("FF-pane：SQLite 自检失败", message);
   }
+
+  // 数据层接线：解析全局根、幂等初始化布局、注册 projects / dialog handlers。
+  // 失败不阻止窗口打开（页面自身的错误态会呈现 IPC 失败原文）。
+  try {
+    const dataHandlers = await createDataHandlers(() => mainWindow);
+    registerInvokeHandlers(ipcMain, dataHandlers);
+  } catch (thrown) {
+    const message = thrown instanceof Error ? thrown.message : String(thrown);
+    console.error(`[main] 数据层初始化失败：${message}`);
+    dialog.showErrorBox("FF-pane：数据目录初始化失败", message);
+  }
+
   createMainWindow({ hidden: false });
 }
 
