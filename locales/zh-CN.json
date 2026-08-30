@@ -374,6 +374,16 @@
       }
     }
   },
+  "session": {
+    "empty": "还没有进行中的会话。到项目里让 Planner 开始讨论。",
+    "role": {
+      "user": "我",
+      "assistant": "Agent"
+    },
+    "code": {
+      "plain": "代码"
+    }
+  },
   "shortcut": {
     "scope": {
       "global": "全局",

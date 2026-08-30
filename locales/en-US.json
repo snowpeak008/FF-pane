@@ -374,6 +374,16 @@
       }
     }
   },
+  "session": {
+    "empty": "No conversation in progress. Start one with the Planner from a project.",
+    "role": {
+      "user": "You",
+      "assistant": "Agent"
+    },
+    "code": {
+      "plain": "code"
+    }
+  },
   "shortcut": {
     "scope": {
       "global": "Global",

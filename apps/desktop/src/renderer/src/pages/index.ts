@@ -3,4 +3,5 @@ export { AppRoutes } from "./AppRoutes";
 export { NotFoundPage } from "./NotFoundPage";
 export { PlaceholderPage, type PlaceholderPageProps } from "./PlaceholderPage";
 export { ProjectsPage } from "./projects";
+export { SessionPage } from "./session";
 export { SettingsPage } from "./settings";
