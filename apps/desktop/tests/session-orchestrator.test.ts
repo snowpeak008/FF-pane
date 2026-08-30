@@ -33,6 +33,7 @@ import type { SessionStreamEvent, StartSessionRequest } from "../src/shared-ipc/
 interface CapturedTurn {
   readonly prompt: string;
   readonly resume?: { readonly nativeSessionId: string; readonly cwd: string };
+  readonly configOverrides?: Readonly<Record<string, string>>;
 }
 
 function fakeAdapter(
@@ -55,6 +56,7 @@ function fakeAdapter(
       opts.captured?.push({
         prompt: ctx.prompt,
         ...(ctx.resume !== undefined ? { resume: ctx.resume } : {}),
+        ...(ctx.configOverrides !== undefined ? { configOverrides: ctx.configOverrides } : {}),
       });
       return {
         events: (async function* () {
@@ -130,6 +132,8 @@ function makeHarness(
     readonly tasks?: readonly Task[];
     readonly runs?: readonly Run[];
     readonly stateSnapshot?: string;
+    /** 注册的 fake 适配器 runtime 键（默认 "fake"，需与 profile.runtime 一致）。 */
+    readonly runtime?: string;
   } = {},
 ): Harness {
   const published: SessionStreamEvent[] = [];
@@ -143,7 +147,7 @@ function makeHarness(
   }
   const registry = createAdapterRegistry();
   registry.register(
-    fakeAdapter("fake", events, {
+    fakeAdapter(opts.runtime ?? "fake", events, {
       ...(opts.nativeResume !== undefined ? { nativeResume: opts.nativeResume } : {}),
       captured,
     }),
@@ -230,6 +234,36 @@ describe("createSessionOrchestrator", () => {
     expect(h.published.find((e) => e.kind === "end")).toMatchObject({ reason: "completed" });
     expect(h.savedTasks).toHaveLength(0);
     expect(orch.activeCount()).toBe(0);
+  });
+
+  it("codex + openai_compatible：把 model_provider 路由经 configOverrides 透传给适配器（方案 A）", async () => {
+    const events: AgentEvent[] = [
+      { kind: "session_start" },
+      { kind: "text", content: "hi", final: true, channel: "answer" },
+      { kind: "end", reason: "completed" },
+    ];
+    const h = makeHarness(events, {
+      runtime: "codex",
+      profile: profile({ defaultRole: "planner", runtime: "codex" }),
+      provider: {
+        id: "prov-1",
+        name: "DeepSeek",
+        type: "openai_compatible",
+        baseUrl: "https://api.deepseek.com/v1",
+        models: [],
+        enabled: true,
+      } as unknown as Provider,
+    });
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start(plannerRequest());
+    await flushUntilEnd(h.published);
+
+    expect(h.captured[0]?.configOverrides).toMatchObject({
+      model_provider: "ffpane",
+      "model_providers.ffpane.base_url": '"https://api.deepseek.com/v1"',
+      "model_providers.ffpane.env_key": '"OPENAI_API_KEY"',
+    });
   });
 
   it("Worker 轮：派发 → 落 Run → completeTask（done），推 end 带 runId", async () => {

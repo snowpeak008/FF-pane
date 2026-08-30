@@ -739,6 +739,33 @@ describe("createCodexAdapter（适配器本体）", () => {
     expect(end.message).toContain("ff-pane-not-a-real-codex");
   });
 
+  it("逐轮 configOverrides 并入命令行，同名键覆盖构造级（per-turn wins）", async () => {
+    const adapter = createCodexAdapter({
+      command: "ff-pane-not-a-real-codex",
+      collectDiff: false,
+      // 构造级：成本控制 + 一个将被逐轮覆盖的键
+      configOverrides: { model_reasoning_effort: '"low"', model_provider: "construct" },
+    });
+    const turn = adapter.startTurn({
+      cwd: workDir,
+      prompt: "x",
+      // 逐轮：openai_compatible → codex model_provider 路由（覆盖同名 model_provider）
+      configOverrides: {
+        model_provider: "ffpane",
+        "model_providers.ffpane.base_url": '"https://api.deepseek.com/v1"',
+      },
+    });
+    const line = turn.commandLine;
+    // 构造级独有键保留
+    expect(line).toContain('model_reasoning_effort="low"');
+    // 逐轮覆盖同名键，且不残留构造级旧值
+    expect(line).toContain("model_provider=ffpane");
+    expect(line).not.toContain("model_provider=construct");
+    // 逐轮独有键并入
+    expect(line).toContain('model_providers.ffpane.base_url="https://api.deepseek.com/v1"');
+    await collect(turn.events);
+  });
+
   it("collectDiff: false 时 diagnostics 明说是关闭而非采集失败", async () => {
     const turn = createCodexAdapter({
       command: "ff-pane-not-a-real-codex",

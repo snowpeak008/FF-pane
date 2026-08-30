@@ -30,6 +30,44 @@ function runtimeBaseUrlEnvVar(runtime: RuntimeId): string | undefined {
   return runtime === "codex" ? "OPENAI_BASE_URL" : undefined;
 }
 
+/** 单 Provider 每轮临时装配的 codex model_provider 槽名（无跨轮共享，故固定即可）。 */
+const CODEX_PROVIDER_SLUG = "ffpane";
+
+/**
+ * 组装本轮运行时配置覆盖（AdapterTurnContext.configOverrides）。
+ *
+ * 目前仅 codex 需要：把一个 openai_compatible Provider 装配成 codex 的自定义
+ * model_provider 路由，使 codex 走 Provider 的 base_url + 由 env_key 指向的 OPENAI_API_KEY，
+ * 而非其内置 openai/ChatGPT 登录（后者会覆盖裸 OPENAI_BASE_URL，实测 §T4.5 验收）。
+ *
+ * 值按 codex `-c` 的 TOML 语义：model_provider 用裸 slug；name/base_url/env_key 为
+ * 基本字符串，用 JSON.stringify 产出合法带引号串（含转义）。cli_login / 非 codex / 非
+ * openai_compatible / 无 baseUrl → 返回空表（无覆盖）。
+ */
+export function resolveRuntimeConfigOverrides(input: {
+  readonly runtime: RuntimeId;
+  readonly provider: Provider;
+}): Record<string, string> {
+  const { runtime, provider } = input;
+  if (
+    runtime !== "codex" ||
+    provider.type !== "openai_compatible" ||
+    provider.baseUrl === undefined ||
+    provider.baseUrl.length === 0
+  ) {
+    return {};
+  }
+  const slug = CODEX_PROVIDER_SLUG;
+  const name = provider.name.length > 0 ? provider.name : slug;
+  return {
+    model_provider: slug,
+    [`model_providers.${slug}.name`]: JSON.stringify(name),
+    [`model_providers.${slug}.base_url`]: JSON.stringify(provider.baseUrl),
+    // env_key 指向 resolveRuntimeEnv 为 codex 注入的密钥变量（下方常量），二者必须一致。
+    [`model_providers.${slug}.env_key`]: JSON.stringify("OPENAI_API_KEY"),
+  };
+}
+
 /**
  * 组装本轮注入环境变量。
  * - cli_login 类型的 Provider 不注入密钥（凭证由 CLI 自管，§4.2）。

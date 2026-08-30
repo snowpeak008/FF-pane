@@ -5,7 +5,11 @@
 
 import type { Provider } from "@ff-pane/shared";
 import { describe, expect, it } from "vitest";
-import { resolveRuntimeEnv, runtimeApiKeyEnvVar } from "../src/main/session/env";
+import {
+  resolveRuntimeConfigOverrides,
+  resolveRuntimeEnv,
+  runtimeApiKeyEnvVar,
+} from "../src/main/session/env";
 
 function provider(overrides: Partial<Record<keyof Provider, unknown>> = {}): Provider {
   return {
@@ -59,5 +63,69 @@ describe("resolveRuntimeEnv", () => {
   it("无明文时该密钥变量缺席（不塞空串）", () => {
     const env = resolveRuntimeEnv({ runtime: "codex", provider: provider() });
     expect(env).toEqual({});
+  });
+});
+
+describe("resolveRuntimeConfigOverrides", () => {
+  it("codex + openai_compatible + baseUrl → 装配 model_provider 路由（TOML 值）", () => {
+    const overrides = resolveRuntimeConfigOverrides({
+      runtime: "codex",
+      provider: provider({
+        type: "openai_compatible",
+        name: "DeepSeek",
+        baseUrl: "https://api.deepseek.com/v1",
+      }),
+    });
+    expect(overrides).toEqual({
+      model_provider: "ffpane",
+      "model_providers.ffpane.name": '"DeepSeek"',
+      "model_providers.ffpane.base_url": '"https://api.deepseek.com/v1"',
+      "model_providers.ffpane.env_key": '"OPENAI_API_KEY"',
+    });
+  });
+
+  it("env_key 指向与 resolveRuntimeEnv 一致的 OPENAI_API_KEY", () => {
+    const overrides = resolveRuntimeConfigOverrides({
+      runtime: "codex",
+      provider: provider({ type: "openai_compatible", baseUrl: "https://x.test" }),
+    });
+    expect(overrides["model_providers.ffpane.env_key"]).toBe(
+      JSON.stringify(runtimeApiKeyEnvVar("codex")),
+    );
+  });
+
+  it("name 缺省退化为 slug，特殊字符经 JSON.stringify 转义为合法 TOML 串", () => {
+    const overrides = resolveRuntimeConfigOverrides({
+      runtime: "codex",
+      provider: provider({ type: "openai_compatible", name: 'A"B', baseUrl: "https://x.test" }),
+    });
+    expect(overrides["model_providers.ffpane.name"]).toBe('"A\\"B"');
+  });
+
+  it("非 codex 运行时不产生覆盖", () => {
+    expect(
+      resolveRuntimeConfigOverrides({
+        runtime: "claude-code",
+        provider: provider({ type: "openai_compatible", baseUrl: "https://x.test" }),
+      }),
+    ).toEqual({});
+  });
+
+  it("codex 但非 openai_compatible（如 cli_login）不产生覆盖", () => {
+    expect(
+      resolveRuntimeConfigOverrides({
+        runtime: "codex",
+        provider: provider({ type: "cli_login" }),
+      }),
+    ).toEqual({});
+  });
+
+  it("openai_compatible 但缺 baseUrl 不产生覆盖（无从路由）", () => {
+    expect(
+      resolveRuntimeConfigOverrides({
+        runtime: "codex",
+        provider: provider({ type: "openai_compatible" }),
+      }),
+    ).toEqual({});
   });
 });

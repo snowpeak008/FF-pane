@@ -56,3 +56,58 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+  # Electron E2E（T4.5）：Playwright 经 _electron 驱动构建产物跑三条冒烟。
+  # 与 ci job 并行（各自独立安装/构建），一平台失败不掩盖另一平台信号。
+  e2e:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    # 不下载 Playwright 浏览器二进制：E2E 直接启动 Electron，不用浏览器 projects。
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup pnpm + Node.js
+        uses: pnpm/setup@v2
+        with:
+          runtime: node@24
+          cache: true
+          install: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Electron 在无头 Linux 需 xvfb + 一组运行库；Windows runner 无需额外系统依赖。
+      - name: Install Electron runtime libs (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libgbm1 libasound2t64 libgtk-3-0
+
+      # workspace 包的 dist/ 是 desktop 构建/运行的前置（跨包 exports 指向 dist）。
+      - name: Build
+        run: pnpm build
+
+      - name: E2E (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a pnpm --filter @ff-pane/desktop exec playwright test
+
+      - name: E2E (Windows)
+        if: runner.os == 'Windows'
+        run: pnpm --filter @ff-pane/desktop exec playwright test
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ matrix.os }}
+          path: |
+            apps/desktop/playwright-report/
+            apps/desktop/test-results/
+          retention-days: 7
+          if-no-files-found: ignore

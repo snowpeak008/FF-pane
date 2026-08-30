@@ -64,6 +64,13 @@ export interface AdapterTurnContext {
   /** 指定模型；缺席 = 用 Runtime/Profile 默认。 */
   readonly model?: ModelId;
   /**
+   * 本轮运行时配置覆盖（键值）。语义由具体 Runtime 定义、其余 Runtime 忽略——
+   * 与 env 同款"通用通道、按 Runtime 解释"的模式（宿主在 desktop 侧按 runtime+provider 解析）。
+   * codex：映射为 `-c key=value`（值按 TOML 解析，字符串需自带引号），用于把
+   * openai_compatible Provider 装配成 codex 的 model_provider 路由（base_url + env_key）。
+   */
+  readonly configOverrides?: Readonly<Record<string, string>>;
+  /**
    * 原生会话恢复绑定；缺席 = 开新会话。
    * cwd 不一致的绑定是非法输入（claude resume 严格绑定 cwd），
    * 适配器应在启动前校验并快速失败，而不是让 CLI 报出难懂的错误。

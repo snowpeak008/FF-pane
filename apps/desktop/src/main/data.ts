@@ -94,7 +94,13 @@ export type MainWindowGetter = () => BrowserWindow | null;
 export async function createDataHandlers(
   getWindow: MainWindowGetter,
 ): Promise<Pick<InvokeHandlers, DataChannel>> {
-  const globalRoot = join(homedir(), GLOBAL_ROOT_DIR_NAME);
+  // 全局数据根默认解析为 <homedir>/.aiworkbench；FF_PANE_DATA_ROOT 环境变量可覆盖，
+  // 供 E2E 隔离到临时目录（不污染真实用户目录）与可移植部署使用。
+  const dataRootOverride = process.env["FF_PANE_DATA_ROOT"];
+  const globalRoot =
+    dataRootOverride !== undefined && dataRootOverride.length > 0
+      ? resolve(dataRootOverride)
+      : join(homedir(), GLOBAL_ROOT_DIR_NAME);
   const layout = await initGlobalLayout(globalRoot);
   const registry = createProjectRegistry(layout.projectsFile);
   const providers = createProviderStore(layout.providersFile);

@@ -70,7 +70,7 @@ import type {
   StartSessionAck,
   StartSessionRequest,
 } from "../../shared-ipc/contracts";
-import { resolveRuntimeEnv } from "./env";
+import { resolveRuntimeConfigOverrides, resolveRuntimeEnv } from "./env";
 import { mapAgentEvent } from "./event-map";
 
 /** 编排器对外接口。 */
@@ -259,6 +259,8 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         provider,
         ...(apiKeyPlaintext !== undefined ? { apiKeyPlaintext } : {}),
       });
+      // 运行时配置覆盖（如 openai_compatible → codex model_provider 路由，§T4.5 方案 A）
+      const configOverrides = resolveRuntimeConfigOverrides({ runtime: profile.runtime, provider });
       const model: ModelId | undefined = profile.model ?? provider.defaultModel;
 
       // 组装 Prompt + 权限信封（Worker 从任务合同派生，Planner 用只读角色默认）
@@ -327,6 +329,7 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         cwd: request.projectRoot,
         prompt,
         ...(Object.keys(env).length > 0 ? { env } : {}),
+        ...(Object.keys(configOverrides).length > 0 ? { configOverrides } : {}),
         ...(model !== undefined ? { model } : {}),
         ...(resumeBinding !== undefined ? { resume: resumeBinding } : {}),
       };

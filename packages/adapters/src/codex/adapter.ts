@@ -182,13 +182,19 @@ export async function attachCodexDiff(
 
 function startCodexTurn(options: CodexAdapterOptions, ctx: AdapterTurnContext): CodexTurn {
   const command = resolveCodexCommand(options.command ?? DEFAULT_CODEX_COMMAND);
+  // 配置覆盖合并：构造级（options，如成本控制）为底，逐轮级（ctx，如 openai_compatible
+  // → model_provider 路由）覆盖同名键。任一为空时不额外分配对象。
+  const mergedConfigOverrides =
+    options.configOverrides !== undefined || ctx.configOverrides !== undefined
+      ? { ...options.configOverrides, ...ctx.configOverrides }
+      : undefined;
   const args = buildCodexArgs({
     cwd: ctx.cwd,
     prompt: ctx.prompt,
     model: ctx.model,
     resume: ctx.resume,
     sandbox: options.sandbox,
-    configOverrides: options.configOverrides,
+    ...(mergedConfigOverrides !== undefined ? { configOverrides: mergedConfigOverrides } : {}),
     addDirs: options.addDirs,
     extraArgs: options.extraArgs,
   });

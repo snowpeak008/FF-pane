@@ -7,6 +7,11 @@ out/
 release/
 *.tsbuildinfo
 
+# Playwright E2E artifacts (T4.5)
+playwright-report/
+test-results/
+blob-report/
+
 # Logs
 *.log
 logs/

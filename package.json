@@ -13,6 +13,7 @@
     "test": "vitest run",
     "build": "pnpm -r run build",
     "smoke": "pnpm --filter @ff-pane/desktop run smoke",
+    "test:e2e": "pnpm --filter @ff-pane/desktop run test:e2e",
     "package": "pnpm --filter @ff-pane/desktop run package"
   },
   "devDependencies": {
