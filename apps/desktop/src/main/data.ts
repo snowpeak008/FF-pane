@@ -11,8 +11,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import {
   acceptTask,
   approvePlan,
@@ -31,7 +30,6 @@ import {
   createProviderStore,
   createSessionStore,
   deleteEntry,
-  GLOBAL_ROOT_DIR_NAME,
   initGlobalLayout,
   initProjectLayout,
   listEntries,
@@ -50,6 +48,7 @@ import {
 } from "@ff-pane/storage";
 import { type BrowserWindow, dialog, type OpenDialogOptions } from "electron";
 import type { InvokeHandlers } from "../shared-ipc/server";
+import { resolveGlobalRoot } from "./data-root";
 import { createSafeStorageBackend, createSecretStore, resolveSecretsFile } from "./secrets";
 
 /** 本数据层负责的 invoke 通道集合。 */
@@ -94,14 +93,8 @@ export type MainWindowGetter = () => BrowserWindow | null;
 export async function createDataHandlers(
   getWindow: MainWindowGetter,
 ): Promise<Pick<InvokeHandlers, DataChannel>> {
-  // 全局数据根默认解析为 <homedir>/.aiworkbench；FF_PANE_DATA_ROOT 环境变量可覆盖，
-  // 供 E2E 隔离到临时目录（不污染真实用户目录）与可移植部署使用。
-  const dataRootOverride = process.env["FF_PANE_DATA_ROOT"];
-  const globalRoot =
-    dataRootOverride !== undefined && dataRootOverride.length > 0
-      ? resolve(dataRootOverride)
-      : join(homedir(), GLOBAL_ROOT_DIR_NAME);
-  const layout = await initGlobalLayout(globalRoot);
+  // 全局数据根经共享解析（FF_PANE_DATA_ROOT 覆盖优先）；session 层必须共用同一解析。
+  const layout = await initGlobalLayout(resolveGlobalRoot());
   const registry = createProjectRegistry(layout.projectsFile);
   const providers = createProviderStore(layout.providersFile);
   const profiles = createProfileStore(layout.profilesFile);

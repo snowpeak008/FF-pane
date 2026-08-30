@@ -7,15 +7,12 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import type { LocalSessionId, Plan, PlanVersion, RunId } from "@ff-pane/shared";
 import {
   createConfigStore,
   createProfileStore,
   createProviderStore,
   createSessionStore,
-  GLOBAL_ROOT_DIR_NAME,
   initGlobalLayout,
   listEntries,
   listRuns,
@@ -32,6 +29,7 @@ import {
   writeRunRawLog,
 } from "@ff-pane/storage";
 import { type InvokeHandlers, publishEvent, type WebContentsLike } from "../../shared-ipc/server";
+import { resolveGlobalRoot } from "../data-root";
 import { createSafeStorageBackend, createSecretStore, resolveSecretsFile } from "../secrets";
 import { createSessionOrchestrator } from "./orchestrator";
 import { createDesktopAdapterRegistry } from "./registry";
@@ -53,8 +51,7 @@ export type SessionWindowGetter = () => { readonly webContents: WebContentsLike 
 export async function createSessionHandlers(
   getWindow: SessionWindowGetter,
 ): Promise<Pick<InvokeHandlers, SessionChannel>> {
-  const globalRoot = join(homedir(), GLOBAL_ROOT_DIR_NAME);
-  const layout = await initGlobalLayout(globalRoot);
+  const layout = await initGlobalLayout(resolveGlobalRoot());
   const providers = createProviderStore(layout.providersFile);
   const profiles = createProfileStore(layout.profilesFile);
   const config = createConfigStore(layout.configFile);
