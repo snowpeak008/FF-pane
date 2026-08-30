@@ -1,4 +1,4 @@
-import type { MemoryEntry } from "@ff-pane/shared";
+import type { MemoryEntry, ProjectId } from "@ff-pane/shared";
 import { type ReactElement, useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -14,16 +14,41 @@ import { useInvokeQuery } from "../../ipc/useInvokeQuery";
 import { PageHeader } from "../../layout/PageHeader";
 import { NoActiveProject } from "../NoActiveProject";
 import { EditCandidateDialog } from "./EditCandidateDialog";
+import { type HabitCreateSeed, HabitEditDialog } from "./HabitEditDialog";
 import { HabitsPanel } from "./HabitsPanel";
 import { MemoryEntryCard } from "./MemoryEntryCard";
 import { groupByCategory, MEMORY_CATEGORY_ORDER, matchesMemorySearch } from "./memory-view";
 
-function MemoryView({ projectRoot }: { readonly projectRoot: string }): ReactElement {
+function MemoryView({
+  projectRoot,
+  projectId,
+}: {
+  readonly projectRoot: string;
+  readonly projectId: ProjectId;
+}): ReactElement {
   const { t } = useTranslation();
   const { state, refetch } = useInvokeQuery("memory:list", { projectRoot });
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<MemoryEntry | null>(null);
+  // 来源二提炼（§8.2.4）：把选中的项目记忆提炼为共享习惯（distilled，带溯源）。
+  const [distilling, setDistilling] = useState<{ readonly seed: HabitCreateSeed } | null>(null);
   const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(new Set());
+
+  const distill = useCallback(
+    (memEntry: MemoryEntry) => {
+      setDistilling({
+        seed: {
+          content: memEntry.title,
+          source: {
+            kind: "distilled",
+            sourceProject: projectId,
+            sourceEntryId: memEntry.id,
+          },
+        },
+      });
+    },
+    [projectId],
+  );
 
   const withBusy = useCallback(
     async (id: string, run: () => Promise<boolean>): Promise<boolean> => {
@@ -136,7 +161,15 @@ function MemoryView({ projectRoot }: { readonly projectRoot: string }): ReactEle
                     {t(`memory.category.${cat}`)}
                   </h3>
                   {groups[cat].map((entry) => (
-                    <MemoryEntryCard key={entry.id} entry={entry} />
+                    <MemoryEntryCard
+                      key={entry.id}
+                      entry={entry}
+                      actions={
+                        <Button variant="ghost" size="sm" onClick={() => distill(entry)}>
+                          {t("habit.distill")}
+                        </Button>
+                      }
+                    />
                   ))}
                 </section>
               ))}
@@ -202,6 +235,16 @@ function MemoryView({ projectRoot }: { readonly projectRoot: string }): ReactEle
         }}
         onSaved={refetch}
       />
+
+      <HabitEditDialog
+        editing={distilling === null ? null : { entry: null, seed: distilling.seed }}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDistilling(null);
+          }
+        }}
+        onSaved={() => toast.success(t("habit.distilled"))}
+      />
     </div>
   );
 }
@@ -221,7 +264,7 @@ export function MemoryPage(): ReactElement {
       ) : entry === null ? (
         <NoActiveProject />
       ) : (
-        <MemoryView projectRoot={entry.rootPath} />
+        <MemoryView projectRoot={entry.rootPath} projectId={entry.id} />
       )}
     </>
   );

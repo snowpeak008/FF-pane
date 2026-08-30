@@ -7,9 +7,18 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { LocalSessionId, Plan, PlanVersion, RunId } from "@ff-pane/shared";
+import { detectHabitConflicts, observeCorrection } from "@ff-pane/core";
+import type {
+  HabitEntry,
+  HabitEntryId,
+  LocalSessionId,
+  Plan,
+  PlanVersion,
+  RunId,
+} from "@ff-pane/shared";
 import {
   createConfigStore,
+  createObservationStore,
   createProfileStore,
   createProviderStore,
   createSessionStore,
@@ -23,6 +32,7 @@ import {
   loadTask,
   type ProjectLayout,
   resolveProjectLayout,
+  saveHabit,
   savePlan,
   saveRun,
   saveTask,
@@ -98,6 +108,62 @@ export async function createSessionHandlers(
     loadHabits: async () => {
       const { entries } = await listHabits(layout);
       return entries;
+    },
+    // 来源三（§8.2.4）：观察讨论消息，跨会话累计纠正 → 达阈值生成 observed 候选并提示。
+    // 尽力而为，任何失败都不影响会话（catch 吞掉）。
+    observeMessage: (message) => {
+      void (async () => {
+        try {
+          const store = createObservationStore(layout.observationsFile);
+          const existing = await store.listObservations();
+          const result = observeCorrection({
+            observations: existing,
+            message,
+            now: Date.now(),
+            newId: () => `obs-${randomUUID()}`,
+          });
+          if (result.changed) {
+            await store.saveObservations(result.observations);
+          }
+          if (result.suggestion === undefined) {
+            return;
+          }
+          // 去重：已有相近的 active/candidate 习惯则不再打扰
+          const { entries } = await listHabits(layout);
+          const relevant = entries.filter((entry) => entry.status !== "archived");
+          const near = detectHabitConflicts(
+            { category: "workflow", content: result.suggestion.content },
+            relevant,
+            { threshold: 0.5 },
+          );
+          if (near.length > 0) {
+            return;
+          }
+          const now = Date.now();
+          const candidate: HabitEntry = {
+            id: `hab-${randomUUID()}` as HabitEntryId,
+            category: "workflow",
+            content: result.suggestion.content,
+            status: "candidate",
+            enabled: true,
+            source: { kind: "observed" },
+            importance: 50,
+            createdAt: now,
+            updatedAt: now,
+          };
+          await saveHabit(layout, candidate);
+          const window = getWindow();
+          if (window !== null) {
+            publishEvent(window.webContents, "habits:suggestion", {
+              habitId: candidate.id,
+              content: candidate.content,
+              count: result.suggestion.count,
+            });
+          }
+        } catch {
+          // 观察是尽力而为的后台行为，失败静默——绝不影响正在进行的会话
+        }
+      })();
     },
     loadStateSnapshot: async (projectLayout) => {
       const result = await loadStateSnapshot(projectLayout);

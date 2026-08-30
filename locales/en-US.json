@@ -607,13 +607,16 @@
     "editDialog": {
       "createTitle": "Add habit",
       "editTitle": "Edit habit",
-      "description": "Habits inject into prompts across all projects — phrase them as one general, lasting rule."
+      "description": "Habits inject into prompts across all projects — phrase them as one general, lasting rule.",
+      "distillTitle": "Distill into a habit",
+      "distillDescription": "Turn this project memory into a cross-project habit — strip project-specific details, then confirm."
     },
     "field": {
       "category": "Category",
       "content": "Habit",
       "contentHint": "One sentence, general and reusable (e.g. “Run existing tests before changes”).",
-      "importance": "Importance (0–100)"
+      "importance": "Importance (0–100)",
+      "distillHint": "Remove project names / paths / module names — make it one general, reusable rule."
     },
     "conflict": {
       "description": "Found similar existing habits. Replace one, or keep both.",
@@ -621,6 +624,12 @@
       "replace": "Replace",
       "back": "Back",
       "keepBoth": "Keep both & add"
+    },
+    "distill": "Distill to shared",
+    "distilled": "Distilled to shared memory (see the Shared tab)",
+    "observed": {
+      "toast": "You’ve said “{{content}}” {{count}} times — make it a lasting habit?",
+      "review": "Review"
     }
   }
 }

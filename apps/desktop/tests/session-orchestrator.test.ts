@@ -120,6 +120,7 @@ interface Harness {
   readonly savedPlans: Plan[];
   readonly sessions: Map<string, SessionRecord>;
   readonly captured: CapturedTurn[];
+  readonly observedMessages: string[];
 }
 
 function makeHarness(
@@ -147,6 +148,7 @@ function makeHarness(
   const savedSessions: SessionRecord[] = [];
   const savedPlans: Plan[] = [];
   const captured: CapturedTurn[] = [];
+  const observedMessages: string[] = [];
   const sessions = new Map<string, SessionRecord>();
   if (opts.existingSession !== undefined) {
     sessions.set(opts.existingSession.id, opts.existingSession);
@@ -171,6 +173,9 @@ function makeHarness(
     resolveLayout: () => layout,
     loadActiveMemory: async () => [],
     loadHabits: async () => opts.habits ?? [],
+    observeMessage: (m) => {
+      observedMessages.push(m);
+    },
     loadStateSnapshot: async () => opts.stateSnapshot,
     loadGlobalConfig: async () => CONFIG,
     loadTask: async () => (opts.task === null ? undefined : (opts.task ?? task())),
@@ -204,6 +209,7 @@ function makeHarness(
     savedPlans,
     sessions,
     captured,
+    observedMessages,
   };
 }
 
@@ -400,6 +406,54 @@ describe("createSessionOrchestrator", () => {
       });
       await flushUntilEnd(h.published);
       expect(h.captured[0]?.prompt).not.toContain(MARKER);
+    });
+  });
+
+  describe("来源三观察钩子（T5.4，§8.2.4）", () => {
+    const events: AgentEvent[] = [
+      { kind: "session_start" },
+      { kind: "text", content: "ok", final: true, channel: "answer" },
+      { kind: "end", reason: "completed" },
+    ];
+
+    it("planner-message 轮：以消息原文调用 observeMessage", async () => {
+      const h = makeHarness(events, { profile: profile({ defaultRole: "planner" }) });
+      await createSessionOrchestrator(h.deps).start(plannerMessageRequest("先说思路再写代码"));
+      await flushUntilEnd(h.published);
+      expect(h.observedMessages).toEqual(["先说思路再写代码"]);
+    });
+
+    it("worker-task 轮：不观察", async () => {
+      const h = makeHarness(events, { profile: profile({ defaultRole: "worker" }) });
+      await createSessionOrchestrator(h.deps).start(workerRequest());
+      await flushUntilEnd(h.published);
+      expect(h.observedMessages).toEqual([]);
+    });
+
+    it("planner-plan 轮：不观察（计划生成非讨论纠正）", async () => {
+      const planJson = JSON.stringify({
+        goal: "g",
+        tasks: [{ id: "t1", goal: "x", writeScope: ["src/**"], acceptance: ["a"] }],
+      });
+      const planEvents: AgentEvent[] = [
+        { kind: "session_start" },
+        {
+          kind: "text",
+          content: `\`\`\`json\n${planJson}\n\`\`\``,
+          final: true,
+          channel: "answer",
+        },
+        { kind: "end", reason: "completed" },
+      ];
+      const h = makeHarness(planEvents, { profile: profile({ defaultRole: "planner" }) });
+      await createSessionOrchestrator(h.deps).start({
+        turnId: "t1",
+        projectRoot: "/proj",
+        profileId: "prof-1" as unknown as ProfileId,
+        input: { kind: "planner-plan" },
+      });
+      await flushUntilEnd(h.published);
+      expect(h.observedMessages).toEqual([]);
     });
   });
 

@@ -169,3 +169,23 @@ export interface HabitEntry {
   /** 更新时间（epoch 毫秒；变更触发习惯档案自动重编译，§8.2.2）。 */
   readonly updatedAt: EpochMillis;
 }
+
+/**
+ * 设计文档 §8.2.4 来源三 —— 跨会话「纠正观察」记录（系统观察建议的累计依据）。
+ * 用户在会话中反复用同类的话纠正 AI 时，把每次纠正归并到一条观察并累加 count；
+ * 达到阈值即生成一条 observed 习惯候选（绝不自动 active）。全局持久（跨项目、跨会话）。
+ */
+export interface HabitObservation {
+  /** 内部唯一 ID。 */
+  readonly id: string;
+  /** 代表性纠正文本（首次出现时记录，用于相似归并与候选正文）。 */
+  readonly content: string;
+  /** 累计出现次数（同类纠正相似归并后累加）。 */
+  readonly count: number;
+  /** 首次出现时间（epoch 毫秒）。 */
+  readonly firstSeenAt: EpochMillis;
+  /** 最近出现时间（epoch 毫秒）。 */
+  readonly lastSeenAt: EpochMillis;
+  /** 是否已据此生成过候选（生成后置真，避免每轮重复打扰）。 */
+  readonly suggested: boolean;
+}

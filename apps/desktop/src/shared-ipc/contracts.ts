@@ -487,12 +487,24 @@ export interface IpcInvokeContracts {
   "smoke:report": { request: SmokeReport; response: { readonly acknowledged: true } };
 }
 
+/** habits:suggestion 事件载荷（来源三，§8.2.4）：系统据反复纠正生成的 observed 候选。 */
+export interface HabitSuggestionEvent {
+  /** 已落库的 observed 候选 ID（供渲染层跳转/高亮）。 */
+  readonly habitId: HabitEntryId;
+  /** 候选正文（提示文案用）。 */
+  readonly content: string;
+  /** 触发建议时的累计纠正次数。 */
+  readonly count: number;
+}
+
 /** 事件（main → renderer 推送）通道契约表。 */
 export interface IpcEventContracts {
   /** 仅冒烟模式使用：验证订阅链路的回声事件。 */
   "smoke:event": { payload: { readonly seq: number; readonly emittedAt: number } };
   /** 会话执行流式事件（一轮的 started / text / file-change / command / permission / end）。 */
   "session:event": { payload: SessionStreamEvent };
+  /** 系统观察建议（来源三，§8.2.4）：据反复纠正生成的 observed 习惯候选，非阻塞提示。 */
+  "habits:suggestion": { payload: HabitSuggestionEvent };
 }
 
 export type InvokeChannel = keyof IpcInvokeContracts;
@@ -562,6 +574,7 @@ export const INVOKE_CHANNELS = [
 export const EVENT_CHANNELS = [
   "smoke:event",
   "session:event",
+  "habits:suggestion",
 ] as const satisfies readonly EventChannel[];
 
 type AssertNever<T extends never> = T;

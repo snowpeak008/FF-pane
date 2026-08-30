@@ -1,5 +1,5 @@
 import type { HabitConflict } from "@ff-pane/core";
-import type { HabitCategory, HabitEntry } from "@ff-pane/shared";
+import type { HabitCategory, HabitEntry, HabitSource } from "@ff-pane/shared";
 import { HABIT_CATEGORIES } from "@ff-pane/shared";
 import { type ReactElement, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -14,10 +14,18 @@ import {
 import { Field, Input, Textarea } from "../../components/ui/Input";
 import { invokeQuery } from "../../ipc/query";
 
-/** 新建 / 编辑习惯对话框（T5.1，§8.2.4 来源一手写 + §8.2.5 入库前相近检测）。 */
+/** 新建时的预填种子（来源二提炼用：预填正文/分类，并携带 distilled 溯源）。 */
+export interface HabitCreateSeed {
+  readonly category?: HabitCategory;
+  readonly content?: string;
+  /** 来源（缺省 user_manual；来源二传 distilled 溯源）。 */
+  readonly source?: HabitSource;
+}
+
+/** 新建 / 编辑习惯对话框（T5.1 手写 + T5.4 来源二提炼；§8.2.4 / §8.2.5）。 */
 export interface HabitEditDialogProps {
-  /** null = 关闭；{entry: null} = 新建；{entry} = 编辑既有条目。 */
-  readonly editing: { readonly entry: HabitEntry | null } | null;
+  /** null = 关闭；{entry: null} = 新建（可带 seed 预填）；{entry} = 编辑既有条目。 */
+  readonly editing: { readonly entry: HabitEntry | null; readonly seed?: HabitCreateSeed } | null;
   readonly onOpenChange: (open: boolean) => void;
   readonly onSaved: () => void;
 }
@@ -43,8 +51,8 @@ export function HabitEditDialog({
 
   useEffect(() => {
     if (editing !== null) {
-      setCategory(existing?.category ?? "workflow");
-      setContent(existing?.content ?? "");
+      setCategory(existing?.category ?? editing.seed?.category ?? "workflow");
+      setContent(existing?.content ?? editing.seed?.content ?? "");
       setImportance(existing?.importance ?? DEFAULT_IMPORTANCE);
       setError(undefined);
       setSaving(false);
@@ -52,6 +60,9 @@ export function HabitEditDialog({
     }
   }, [editing, existing]);
 
+  // 新建来源：来源二提炼传 distilled 溯源，否则手写 user_manual。
+  const createSource: HabitSource = editing?.seed?.source ?? { kind: "user_manual" };
+  const isDistill = createSource.kind === "distilled";
   const trimmed = content.trim();
 
   const doCreate = async (): Promise<void> => {
@@ -63,7 +74,7 @@ export function HabitEditDialog({
         content: trimmed,
         status: "active",
         enabled: true,
-        source: { kind: "user_manual" },
+        source: createSource,
         importance,
       },
     });
@@ -121,9 +132,19 @@ export function HabitEditDialog({
     <Dialog open={editing !== null} onOpenChange={onOpenChange}>
       <DialogContent size="form">
         <DialogHeader
-          title={isEdit ? t("habit.editDialog.editTitle") : t("habit.editDialog.createTitle")}
+          title={
+            isEdit
+              ? t("habit.editDialog.editTitle")
+              : isDistill
+                ? t("habit.editDialog.distillTitle")
+                : t("habit.editDialog.createTitle")
+          }
           description={
-            showConflicts ? t("habit.conflict.description") : t("habit.editDialog.description")
+            showConflicts
+              ? t("habit.conflict.description")
+              : isDistill
+                ? t("habit.editDialog.distillDescription")
+                : t("habit.editDialog.description")
           }
         />
         {showConflicts ? (
@@ -195,7 +216,7 @@ export function HabitEditDialog({
                 htmlFor="habit-content"
                 label={t("habit.field.content")}
                 required
-                hint={t("habit.field.contentHint")}
+                hint={isDistill ? t("habit.field.distillHint") : t("habit.field.contentHint")}
               >
                 <Textarea
                   id="habit-content"

@@ -112,6 +112,11 @@ export interface SessionOrchestratorDeps {
    * 习惯跨项目生效，故不接受 layout。
    */
   readonly loadHabits: () => Promise<readonly HabitEntry[]>;
+  /**
+   * 观察一条用户讨论消息（来源三，§8.2.4）：跨会话累计同类纠正，达阈值生成 observed
+   * 候选并提示。可选、fire-and-forget（不阻塞本轮、失败不影响会话）；仅 planner-message 轮调用。
+   */
+  readonly observeMessage?: (message: string) => void;
   /** memory/state.md 快照文本（Planner 注入；缺省 undefined）。 */
   readonly loadStateSnapshot: (layout: ProjectLayout) => Promise<string | undefined>;
   readonly loadGlobalConfig: () => Promise<GlobalConfig>;
@@ -355,6 +360,11 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
           hasActiveWorkflowHabit(habits)
         ) {
           prompt = `${prompt}\n\n${HABIT_FIRST_INSTRUCTION}`;
+        }
+        // 来源三（§8.2.4）：观察本条讨论消息（跨会话累计纠正 → 达阈值生成 observed 候选）。
+        // fire-and-forget，不阻塞本轮、失败不影响会话。仅普通讨论轮（非计划生成轮）。
+        if (request.input.kind === "planner-message") {
+          deps.observeMessage?.(request.input.text);
         }
         // Planner 只读：角色默认 ∩ Profile 预设
         const plannerEnvelope = toRunEnvelope(

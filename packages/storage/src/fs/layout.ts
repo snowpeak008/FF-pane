@@ -49,6 +49,8 @@ export interface GlobalLayout {
   readonly habitsDir: string;
   /** habits/ 下的四分类子目录（workflow / tech / communication / environment）。 */
   readonly habitCategoryDirs: Readonly<Record<HabitCategory, string>>;
+  /** observations.json —— 跨会话「纠正观察」记录（来源三累计依据，§8.2.4）。 */
+  readonly observationsFile: string;
   /** knowledge/ —— 知识库根目录。 */
   readonly knowledgeDir: string;
   /** knowledge/sources/ —— 导入的原文件（保留导入时的目录结构）。 */
@@ -104,6 +106,7 @@ export function resolveGlobalLayout(rootDir: string): GlobalLayout {
     profilesFile: join(rootDir, "profiles.json"),
     habitsDir,
     habitCategoryDirs,
+    observationsFile: join(rootDir, "observations.json"),
     knowledgeDir,
     knowledgeSourcesDir: join(knowledgeDir, "sources"),
     knowledgeNotesDir: join(knowledgeDir, "notes"),

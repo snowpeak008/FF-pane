@@ -4,6 +4,7 @@ import { Toaster } from "sonner";
 import { TooltipProvider } from "./components/ui/Tooltip";
 import { AppLayout } from "./layout/AppLayout";
 import { AppRoutes } from "./pages/AppRoutes";
+import { HabitSuggestionBridge } from "./pages/session/HabitSuggestionBridge";
 import { SessionEventBridge } from "./pages/session/SessionEventBridge";
 import { useTheme } from "./theme";
 
@@ -35,6 +36,8 @@ export function App(): ReactElement {
         </AppLayout>
         {/* 会话流式事件全局订阅桥（T4.2）：唯一订阅 session:event，归并进 store。 */}
         <SessionEventBridge />
+        {/* 系统观察建议全局桥（T5.4 来源三）：唯一订阅 habits:suggestion，提示 observed 候选。 */}
+        <HabitSuggestionBridge />
         <AppToaster />
         {/*
           命令面板挂载位（W3.1c，待接线）：Ctrl+K 面板与全局快捷键注册器将挂在这里

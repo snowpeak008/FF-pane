@@ -607,13 +607,16 @@
     "editDialog": {
       "createTitle": "新增习惯",
       "editTitle": "编辑习惯",
-      "description": "习惯会跨项目注入系统提示，请写成通用、可长期遵守的一句话。"
+      "description": "习惯会跨项目注入系统提示，请写成通用、可长期遵守的一句话。",
+      "distillTitle": "提炼为共享习惯",
+      "distillDescription": "把这条项目记忆提炼成跨项目通用的习惯，请去掉项目专有信息后确认。"
     },
     "field": {
       "category": "分类",
       "content": "习惯内容",
       "contentHint": "一句话，通用可复用（如「改动前先跑现有测试」）。",
-      "importance": "重要度（0–100）"
+      "importance": "重要度（0–100）",
+      "distillHint": "去掉项目名 / 路径 / 模块名等专有信息，写成通用可复用的一句话。"
     },
     "conflict": {
       "description": "发现相近的既有习惯，请选择替代其一，或都保留。",
@@ -621,6 +624,12 @@
       "replace": "替代此条",
       "back": "返回编辑",
       "keepBoth": "都保留并新增"
+    },
+    "distill": "提炼到共享记忆",
+    "distilled": "已提炼到共享记忆（去共享记忆标签查看）",
+    "observed": {
+      "toast": "检测到你多次（{{count}} 次）提到「{{content}}」，要固化成长期习惯吗？",
+      "review": "去确认"
     }
   }
 }

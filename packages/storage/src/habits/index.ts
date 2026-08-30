@@ -6,5 +6,6 @@
 
 export * from "./errors.js";
 export * from "./habit-file.js";
+export * from "./observations.js";
 export * from "./store.js";
 export * from "./validate.js";
