@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>混合检索说明</title>
+  <style>body { color: #333; font-family: sans-serif; }</style>
+  <script>window.analytics = { track(){ /* 5 > 3 && 2 < 4 */ } };</script>
+</head>
+<body>
+  <nav><a href="/">首页</a> <a href="/docs">文档</a></nav>
+  <main>
+    <h1>混合检索</h1>
+    <p>FTS5 的 BM25 与向量相似度<strong>双路召回</strong>，再经 RRF 融合排序。</p>
+    <p>未配置嵌入模型时降级为纯全文检索&nbsp;&mdash;&nbsp;功能不缺失。</p>
+    <table>
+      <tr><th>路径</th><th>依赖</th></tr>
+      <tr><td>BM25</td><td>永远可用</td></tr>
+      <tr><td>向量</td><td>需嵌入模型</td></tr>
+    </table>
+    <pre><code>SELECT rowid, bm25(chunk_fts)
+FROM chunk_fts
+WHERE chunk_fts MATCH ?;</code></pre>
+    <p>参数 k 取 60 时，&#x7B2C;一名得分为 1/61 &lt; 1/60。</p>
+  </main>
+  <footer><p>版权所有 &copy; 2026</p></footer>
+</body>
+</html>

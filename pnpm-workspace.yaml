@@ -24,3 +24,10 @@ allowBuilds:
   # electron-builder 依赖链（T0.5）：Squirrel 安装器的 vendor 二进制就位脚本。
   # 我们目标是 NSIS，但放行以保证依赖树完整、避免打包工具静默缺失。
   electron-winstaller: true
+
+# 跳过的可选依赖（T6.1）：
+#   @napi-rs/canvas —— pdfjs-dist 的可选原生依赖，只服务于「把 PDF 渲染成位图」。
+#                      本产品对 PDF 只做 getTextContent() 文本+页码抽取（技术选型 §8），
+#                      永不渲染，故该原生包纯属净负担（十余 MB + 平台二进制 + 打包体积）。
+ignoredOptionalDependencies:
+  - "@napi-rs/canvas"

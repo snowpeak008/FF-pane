@@ -2,7 +2,12 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "dist",
-    "rootDir": "src"
+    "rootDir": "src",
+    // T6.1 起本包直接使用 Node API（fs/promises 读盘、Buffer 交给 mammoth）。
+    // 显式声明而不依赖自动包含：其他包是经 @types/better-sqlite3 的
+    // `/// <reference types="node" />` 顺带拿到 node 类型的，rag 无此传递来源。
+    // 与 apps/desktop/tsconfig.node.json 的写法保持一致。
+    "types": ["node"]
   },
   "include": ["src"]
 }

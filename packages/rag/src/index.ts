@@ -4,6 +4,9 @@
  */
 export const PACKAGE_NAME = "@ff-pane/rag";
 
+/** 解析层（T6.1）：按扩展名分发的解析器注册表，产出 ParsedDocument 供分块器消费。 */
+export * from "./parse/index.js";
+
 /**
  * Reciprocal Rank Fusion 单路得分：1 / (k + rank)。
  * 用于 BM25 与向量双路召回的融合排序（技术选型 §5），rank 从 1 起。

@@ -12,3 +12,6 @@
 *.ico binary
 *.pdf binary
 *.sqlite binary
+# docx 是 ZIP 包：不显式标记就会落到上面的 text=auto，
+# 一旦其二进制头里出现 CR LF 字节序列就会被行尾归一化改坏（T6.1 解析 fixture 依赖它逐字节完好）
+*.docx binary

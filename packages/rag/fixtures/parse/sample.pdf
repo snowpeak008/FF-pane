@@ -1,0 +1,58 @@
+%PDF-1.7
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 7 0 R >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 169 >>
+stream
+BT
+/F1 14 Tf
+72 720 Td
+(Hybrid Retrieval Notes) Tj
+0 -20 Td (BM25 and vector recall run in parallel.) Tj
+0 -20 Td (Results are fused with reciprocal rank fusion.) Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 7 0 R >> >> /Contents 6 0 R >>
+endobj
+6 0 obj
+<< /Length 120 >>
+stream
+BT
+/F1 14 Tf
+72 720 Td
+(Page two covers provenance.) Tj
+0 -20 Td (Every chunk records file path and page number.) Tj
+ET
+endstream
+endobj
+7 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+8 0 obj
+<< /Title (Hybrid Retrieval Notes) /Producer (FF-pane fixture generator) >>
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000121 00000 n 
+0000000247 00000 n 
+0000000466 00000 n 
+0000000592 00000 n 
+0000000762 00000 n 
+0000000859 00000 n 
+trailer
+<< /Size 9 /Root 1 0 R /Info 8 0 R >>
+startxref
+950
+%%EOF
