@@ -61,6 +61,7 @@ export {
   type SessionUiActions,
   type SessionUiState,
   type StreamingTurn,
+  useSessionStore,
 } from "./session";
 export {
   INITIAL_TASKS_UI_STATE,

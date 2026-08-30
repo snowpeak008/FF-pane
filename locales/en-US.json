@@ -468,6 +468,11 @@
   },
   "session": {
     "empty": "No conversation in progress. Start one with the Planner from a project.",
+    "noActiveSession": "No active session (session execution lands in Phase 4)",
+    "send": "Send",
+    "sendDisabledHint": "Session execution is wired in Phase 4; sending is disabled for now.",
+    "composerLabel": "Message composer",
+    "composerPlaceholder": "Type a message… (Ctrl+Enter to send)",
     "role": {
       "user": "You",
       "assistant": "Agent"

@@ -14,6 +14,7 @@
  * 本 store 不持久化：草稿与流式缓存跨会话保留没有意义，重启即清空。
  */
 import type { LocalSessionId } from "@ff-pane/shared";
+import { create } from "zustand";
 
 /** 右侧可折叠栏的标签（§11.2：当前计划概要 + 进行中任务）。 */
 export type SessionSidePanelTab = "plan" | "tasks";
@@ -71,3 +72,46 @@ export const INITIAL_SESSION_UI_STATE: SessionUiState = {
   focusedMessageId: null,
   streamingTurn: null,
 };
+
+/**
+ * 会话页 UI 状态 store（W3.4b 实现）。不持久化：草稿与流式缓存跨会话保留没有意义。
+ * 流式增量 append：仅当 turnId 匹配当前在飞轮次时追加，防止过期回调污染。
+ */
+export const useSessionStore = create<SessionStore>()((set) => ({
+  ...INITIAL_SESSION_UI_STATE,
+  setActiveSessionId: (sessionId) => {
+    set({ activeSessionId: sessionId });
+  },
+  setComposerDraft: (draft) => {
+    set({ composerDraft: draft });
+  },
+  clearComposerDraft: () => {
+    set({ composerDraft: "" });
+  },
+  setSidePanelTab: (tab) => {
+    set({ sidePanelTab: tab });
+  },
+  setFocusedMessageId: (messageId) => {
+    set({ focusedMessageId: messageId });
+  },
+  beginStreamingTurn: (turnId) => {
+    set({ streamingTurn: { turnId, text: "", done: false } });
+  },
+  appendStreamingText: (turnId, delta) => {
+    set((state) =>
+      state.streamingTurn !== null && state.streamingTurn.turnId === turnId
+        ? { streamingTurn: { ...state.streamingTurn, text: state.streamingTurn.text + delta } }
+        : state,
+    );
+  },
+  finishStreamingTurn: (turnId) => {
+    set((state) =>
+      state.streamingTurn !== null && state.streamingTurn.turnId === turnId
+        ? { streamingTurn: { ...state.streamingTurn, done: true } }
+        : state,
+    );
+  },
+  resetSessionUi: () => {
+    set(INITIAL_SESSION_UI_STATE);
+  },
+}));

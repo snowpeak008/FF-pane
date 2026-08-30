@@ -468,6 +468,11 @@
   },
   "session": {
     "empty": "还没有进行中的会话。到项目里让 Planner 开始讨论。",
+    "noActiveSession": "无进行中会话（会话执行在 Phase 4 接通）",
+    "send": "发送",
+    "sendDisabledHint": "会话执行链路在 Phase 4 接通，暂不能发送。",
+    "composerLabel": "会话输入",
+    "composerPlaceholder": "输入消息…（Ctrl+Enter 发送）",
     "role": {
       "user": "我",
       "assistant": "Agent"

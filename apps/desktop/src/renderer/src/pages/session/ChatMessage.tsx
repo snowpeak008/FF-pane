@@ -1,6 +1,7 @@
 import { Check, Copy } from "lucide-react";
 import { type ReactElement, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { Button } from "../../components/ui/Button";
 import { cn } from "../../lib/cn";
 import { type ChatSegment, parseChatSegments } from "./chat-segments";
@@ -71,16 +72,34 @@ export interface ChatMessageProps {
 export function ChatMessage({ message }: ChatMessageProps): ReactElement {
   const { t } = useTranslation();
   const segments = parseChatSegments(message.text);
+  const copyMessage = (): void => {
+    void navigator.clipboard.writeText(message.text).then(() => {
+      toast.success(t("common.copied"));
+    });
+  };
   return (
-    <div className="flex flex-col gap-1.5">
-      <span
-        className={cn(
-          "text-xs font-medium",
-          message.role === "user" ? "text-fg-muted" : "text-primary-text",
-        )}
-      >
-        {t(`session.role.${message.role}`)}
-      </span>
+    <div className="group flex flex-col gap-1.5">
+      <div className="flex items-center justify-between">
+        <span
+          className={cn(
+            "text-xs font-medium",
+            message.role === "user" ? "text-fg-muted" : "text-primary-text",
+          )}
+        >
+          {t(`session.role.${message.role}`)}
+        </span>
+        <Button
+          variant="ghost"
+          size="sm"
+          iconOnly
+          className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+          aria-label={t("common.copy")}
+          title={t("common.copy")}
+          onClick={copyMessage}
+        >
+          <Copy aria-hidden size={14} />
+        </Button>
+      </div>
       <div className="flex flex-col gap-2">
         {segments.map((segment, index) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: 段由内容派生、无稳定 id，随文本整体重渲染
