@@ -15,6 +15,7 @@ import {
   createSessionStore,
   initGlobalLayout,
   listEntries,
+  listHabits,
   listRuns,
   listTasks,
   loadPlan,
@@ -91,6 +92,11 @@ export async function createSessionHandlers(
     resolveLayout: (root) => resolveProjectLayout(root),
     loadActiveMemory: async (projectLayout) => {
       const { entries } = await listEntries(projectLayout, { status: "active" });
+      return entries;
+    },
+    // 习惯是共享记忆（全局，§8.2）：绑定 GlobalLayout，编译器筛 active + enabled 进 Prompt 第 2 层。
+    loadHabits: async () => {
+      const { entries } = await listHabits(layout);
       return entries;
     },
     loadStateSnapshot: async (projectLayout) => {

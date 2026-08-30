@@ -30,6 +30,7 @@ import {
   assemblePrompt,
   assembleRebuildContext,
   assembleRunEnvelope,
+  compileHabitProfile,
   createInitialDraft,
   createNextDraft,
   decideResumeKind,
@@ -52,6 +53,7 @@ import type {
   CommandRecord,
   FileChange,
   GlobalConfig,
+  HabitEntry,
   LocalSessionId,
   MemoryEntry,
   ModelId,
@@ -102,6 +104,11 @@ export interface SessionOrchestratorDeps {
   readonly resolveLayout: (projectRoot: string) => ProjectLayout;
   /** 项目 active 记忆条目（供 Prompt 注入）。 */
   readonly loadActiveMemory: (layout: ProjectLayout) => Promise<readonly MemoryEntry[]>;
+  /**
+   * 全部习惯条目（共享记忆，全局，§8.2）。编译器只取 active + enabled 进 Prompt 第 2 层。
+   * 习惯跨项目生效，故不接受 layout。
+   */
+  readonly loadHabits: () => Promise<readonly HabitEntry[]>;
   /** memory/state.md 快照文本（Planner 注入；缺省 undefined）。 */
   readonly loadStateSnapshot: (layout: ProjectLayout) => Promise<string | undefined>;
   readonly loadGlobalConfig: () => Promise<GlobalConfig>;
@@ -233,11 +240,14 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
 
       const role: Role = request.input.kind === "worker-task" ? "worker" : "planner";
       const layout = deps.resolveLayout(request.projectRoot);
-      const [memory, config] = await Promise.all([
+      const [memory, config, habits] = await Promise.all([
         deps.loadActiveMemory(layout),
         deps.loadGlobalConfig(),
+        deps.loadHabits(),
       ]);
       const outputLanguage = outputLanguageSettings(config, profile);
+      // 习惯档案（§8.2.2）：编译 active + enabled 习惯为 Prompt 第 2 层文本（跨项目、跨角色生效）。
+      const habitProfile = compileHabitProfile(habits);
 
       // 会话恢复（T4.3）：判定本轮所属会话与恢复方式。
       // 首轮（无 sessionId 或该会话未登记）= 全新会话；续接轮据登记的原生绑定 + cwd +
@@ -297,6 +307,7 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
           input: { kind: "task", contract: task },
           projectMemory: memory,
           outputLanguage,
+          ...(habitProfile !== undefined ? { habitProfile } : {}),
         });
         // 派发：pending|failed → running（非法态由状态机抛错，落入下方 catch）
         const runningTask = dispatchTask(task);
@@ -327,6 +338,7 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
           projectMemory: memory,
           outputLanguage,
           ...(stateSnapshot !== undefined ? { stateSnapshot } : {}),
+          ...(habitProfile !== undefined ? { habitProfile } : {}),
         });
         // 计划生成轮：追加结构化输出合同（放最末 = 最新指令），并登记 planCtx 供收尾解析落盘
         if (request.input.kind === "planner-plan") {

@@ -11,6 +11,8 @@ import { WORKER_DEFAULT_ENVELOPE } from "@ff-pane/core";
 import type {
   AgentProfile,
   GlobalConfig,
+  HabitEntry,
+  HabitEntryId,
   LocalSessionId,
   NativeSessionId,
   Plan,
@@ -133,6 +135,8 @@ function makeHarness(
     readonly tasks?: readonly Task[];
     readonly runs?: readonly Run[];
     readonly stateSnapshot?: string;
+    /** 预置习惯条目（Prompt 第 2 层编译测试用；默认空）。 */
+    readonly habits?: readonly HabitEntry[];
     /** 注册的 fake 适配器 runtime 键（默认 "fake"，需与 profile.runtime 一致）。 */
     readonly runtime?: string;
   } = {},
@@ -166,6 +170,7 @@ function makeHarness(
     revealSecret: async () => undefined,
     resolveLayout: () => layout,
     loadActiveMemory: async () => [],
+    loadHabits: async () => opts.habits ?? [],
     loadStateSnapshot: async () => opts.stateSnapshot,
     loadGlobalConfig: async () => CONFIG,
     loadTask: async () => (opts.task === null ? undefined : (opts.task ?? task())),
@@ -248,6 +253,46 @@ describe("createSessionOrchestrator", () => {
     expect(h.published.find((e) => e.kind === "end")).toMatchObject({ reason: "completed" });
     expect(h.savedTasks).toHaveLength(0);
     expect(orch.activeCount()).toBe(0);
+  });
+
+  it("习惯档案：active+enabled 习惯编入 Prompt 第 2 层，停用/候选被排除（T5.2）", async () => {
+    const events: AgentEvent[] = [
+      { kind: "session_start" },
+      { kind: "text", content: "ok", final: true, channel: "answer" },
+      { kind: "end", reason: "completed" },
+    ];
+    const mkHabit = (o: Partial<HabitEntry>): HabitEntry =>
+      ({
+        id: "hab-x" as HabitEntryId,
+        category: "workflow",
+        content: "先跑测试再改代码",
+        status: "active",
+        enabled: true,
+        source: { kind: "user_manual" },
+        importance: 50,
+        createdAt: 1,
+        updatedAt: 1,
+        ...o,
+      }) as HabitEntry;
+    const h = makeHarness(events, {
+      profile: profile({ defaultRole: "planner" }),
+      habits: [
+        mkHabit({ id: "hab-1" as HabitEntryId, content: "先跑测试再改代码" }),
+        mkHabit({ id: "hab-2" as HabitEntryId, content: "停用项", enabled: false }),
+        mkHabit({ id: "hab-3" as HabitEntryId, content: "候选项", status: "candidate" }),
+      ],
+    });
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start(plannerRequest());
+    await flushUntilEnd(h.published);
+
+    const prompt = h.captured[0]?.prompt ?? "";
+    expect(prompt).toContain("# 用户习惯");
+    expect(prompt).toContain("先跑测试再改代码");
+    expect(prompt).toContain("流程约束（执行前必须遵守）");
+    expect(prompt).not.toContain("停用项");
+    expect(prompt).not.toContain("候选项");
   });
 
   it("codex + openai_compatible：把 model_provider 路由经 configOverrides 透传给适配器（方案 A）", async () => {
