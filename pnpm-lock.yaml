@@ -20,6 +20,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@ff-pane/adapters':
+        specifier: workspace:*
+        version: link:../../packages/adapters
       '@ff-pane/core':
         specifier: workspace:*
         version: link:../../packages/core

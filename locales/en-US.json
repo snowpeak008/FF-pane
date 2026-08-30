@@ -468,17 +468,33 @@
   },
   "session": {
     "empty": "No conversation in progress. Start one with the Planner from a project.",
-    "noActiveSession": "No active session (session execution lands in Phase 4)",
+    "noActiveSession": "No active session",
     "send": "Send",
     "sendDisabledHint": "Session execution is wired in Phase 4; sending is disabled for now.",
     "composerLabel": "Message composer",
     "composerPlaceholder": "Type a message… (Ctrl+Enter to send)",
     "role": {
       "user": "You",
-      "assistant": "Agent"
+      "assistant": "Agent",
+      "planner": "Planner",
+      "worker": "Worker",
+      "reviewer": "Reviewer"
     },
     "code": {
       "plain": "code"
+    },
+    "turnFailed": "Turn failed",
+    "turnInProgress": "A turn is already in progress.",
+    "noPlannerProfile": "No Planner profile configured. Add one in Settings.",
+    "cancelTurn": "Cancel",
+    "permissionTitle": "Permission requested",
+    "permissionAllow": "Allow",
+    "permissionDeny": "Deny",
+    "turnStatus": {
+      "idle": "Idle",
+      "running": "Running",
+      "awaiting-permission": "Awaiting approval",
+      "ended": "Ended"
     }
   },
   "shortcut": {
@@ -520,7 +536,11 @@
     "accepted": "Task accepted",
     "cancelled": "Task cancelled",
     "actionError": "Action failed",
-    "loadError": "Failed to load tasks"
+    "loadError": "Failed to load tasks",
+    "dispatch": "Dispatch",
+    "retry": "Retry",
+    "noWorkerProfile": "No Worker profile configured. Add one in Settings.",
+    "dispatchError": "Dispatch failed"
   },
   "task": {
     "status": {

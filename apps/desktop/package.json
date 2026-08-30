@@ -14,6 +14,7 @@
     "package": "electron-vite build && electron-builder --win nsis"
   },
   "dependencies": {
+    "@ff-pane/adapters": "workspace:*",
     "@ff-pane/core": "workspace:*",
     "@ff-pane/shared": "workspace:*",
     "@ff-pane/storage": "workspace:*",

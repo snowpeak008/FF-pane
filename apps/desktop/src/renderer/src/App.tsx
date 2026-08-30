@@ -4,6 +4,7 @@ import { Toaster } from "sonner";
 import { TooltipProvider } from "./components/ui/Tooltip";
 import { AppLayout } from "./layout/AppLayout";
 import { AppRoutes } from "./pages/AppRoutes";
+import { SessionEventBridge } from "./pages/session/SessionEventBridge";
 import { useTheme } from "./theme";
 
 /**
@@ -32,6 +33,8 @@ export function App(): ReactElement {
         <AppLayout>
           <AppRoutes />
         </AppLayout>
+        {/* 会话流式事件全局订阅桥（T4.2）：唯一订阅 session:event，归并进 store。 */}
+        <SessionEventBridge />
         <AppToaster />
         {/*
           命令面板挂载位（W3.1c，待接线）：Ctrl+K 面板与全局快捷键注册器将挂在这里

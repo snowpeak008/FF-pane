@@ -4,6 +4,7 @@ import { app, BrowserWindow, dialog, ipcMain, session, shell } from "electron";
 import { registerInvokeHandlers } from "../shared-ipc/server";
 import { installCsp } from "./csp";
 import { createDataHandlers } from "./data";
+import { createSessionHandlers } from "./session";
 import { startSmokeMode } from "./smoke";
 import { runSqliteCheck } from "./sqlite-check";
 import { loadWindowState, trackWindowState } from "./window-state";
@@ -125,6 +126,16 @@ async function bootstrap(): Promise<void> {
     const message = thrown instanceof Error ? thrown.message : String(thrown);
     console.error(`[main] 数据层初始化失败：${message}`);
     dialog.showErrorBox("FF-pane：数据目录初始化失败", message);
+  }
+
+  // 会话执行层接线（T4.2）：适配器注册表 + 编排器 + 流式事件推送。
+  // 独立 try：装配失败只让会话执行不可用，不牵连数据层与窗口。
+  try {
+    const sessionHandlers = await createSessionHandlers(() => mainWindow);
+    registerInvokeHandlers(ipcMain, sessionHandlers);
+  } catch (thrown) {
+    const message = thrown instanceof Error ? thrown.message : String(thrown);
+    console.error(`[main] session layer init failed: ${message}`);
   }
 
   createMainWindow({ hidden: false });

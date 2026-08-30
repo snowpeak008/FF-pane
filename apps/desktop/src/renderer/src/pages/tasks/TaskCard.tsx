@@ -9,17 +9,27 @@ export interface TaskCardProps {
   readonly task: Task;
   readonly onAccept: (task: Task) => void;
   readonly onCancel: (task: Task) => void;
+  /** 派发 Worker 执行（pending = 派发，failed = 重试）。 */
+  readonly onDispatch: (task: Task) => void;
   readonly busy: boolean;
 }
 
 /**
- * 任务卡片（W3.6 / 设计系统 §5.3）。
+ * 任务卡片（W3.6 / 设计系统 §5.3 → T4.2 接通派发）。
  * 内容顺序：状态徽章 + 目标（两行截断）→ write_scope（font-mono）→ 操作按钮组。
- * accept 仅 done 态可用；cancel 仅未派发/阻塞/失败态可用；dispatch/retry 归 Phase 4。
+ * dispatch 仅 pending/failed 可用（failed 显示为重试）；accept 仅 done 态；
+ * cancel 仅未派发/阻塞/失败态。
  */
-export function TaskCard({ task, onAccept, onCancel, busy }: TaskCardProps): ReactElement {
+export function TaskCard({
+  task,
+  onAccept,
+  onCancel,
+  onDispatch,
+  busy,
+}: TaskCardProps): ReactElement {
   const { t } = useTranslation();
   const canAccept = task.status === "done";
+  const canDispatch = task.status === "pending" || task.status === "failed";
   const canCancel =
     task.status === "pending" || task.status === "blocked" || task.status === "failed";
 
@@ -34,8 +44,13 @@ export function TaskCard({ task, onAccept, onCancel, busy }: TaskCardProps): Rea
           {task.writeScope.join(", ")}
         </p>
       ) : null}
-      {canAccept || canCancel ? (
+      {canAccept || canCancel || canDispatch ? (
         <div className="flex items-center gap-1 pt-0.5">
+          {canDispatch ? (
+            <Button variant="primary" size="sm" disabled={busy} onClick={() => onDispatch(task)}>
+              {task.status === "failed" ? t("tasks.retry") : t("tasks.dispatch")}
+            </Button>
+          ) : null}
           {canAccept ? (
             <Button variant="primary" size="sm" disabled={busy} onClick={() => onAccept(task)}>
               {t("tasks.accept")}

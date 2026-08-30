@@ -341,6 +341,18 @@ export async function createDataHandlers(
       // 批准只能由用户触发；core 运行时强制 approval.by === "user"
       const approved = approvePlan(loaded.value.plan, { by: "user", at: Date.now() });
       await savePlan(layout, approved);
+      // §12 步骤 5：批准后把计划内的任务合同物化为 pending 任务记录（幂等：已存在的跳过，
+      // 不覆盖其运行态）。任务看板据此有可派发的条目。
+      for (const contract of approved.tasks) {
+        const existing = await loadTask(layout, contract.id);
+        if (existing.ok) {
+          continue;
+        }
+        if (existing.error.code !== "not-found") {
+          throw existing.error;
+        }
+        await saveTask(layout, { ...contract, status: "pending" });
+      }
       return approved;
     },
   };

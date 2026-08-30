@@ -468,17 +468,33 @@
   },
   "session": {
     "empty": "还没有进行中的会话。到项目里让 Planner 开始讨论。",
-    "noActiveSession": "无进行中会话（会话执行在 Phase 4 接通）",
+    "noActiveSession": "无进行中会话",
     "send": "发送",
     "sendDisabledHint": "会话执行链路在 Phase 4 接通，暂不能发送。",
     "composerLabel": "会话输入",
     "composerPlaceholder": "输入消息…（Ctrl+Enter 发送）",
     "role": {
       "user": "我",
-      "assistant": "Agent"
+      "assistant": "Agent",
+      "planner": "规划者",
+      "worker": "执行者",
+      "reviewer": "审查者"
     },
     "code": {
       "plain": "代码"
+    },
+    "turnFailed": "本轮失败",
+    "turnInProgress": "已有正在执行的轮次。",
+    "noPlannerProfile": "未配置 Planner Profile，请到设置中新建。",
+    "cancelTurn": "取消",
+    "permissionTitle": "权限请求",
+    "permissionAllow": "允许",
+    "permissionDeny": "拒绝",
+    "turnStatus": {
+      "idle": "空闲",
+      "running": "执行中",
+      "awaiting-permission": "待审批",
+      "ended": "已结束"
     }
   },
   "shortcut": {
@@ -520,7 +536,11 @@
     "accepted": "任务已接受",
     "cancelled": "任务已取消",
     "actionError": "操作失败",
-    "loadError": "读取任务失败"
+    "loadError": "读取任务失败",
+    "dispatch": "派发",
+    "retry": "重试",
+    "noWorkerProfile": "未配置 Worker Profile，请到设置中新建。",
+    "dispatchError": "派发失败"
   },
   "task": {
     "status": {

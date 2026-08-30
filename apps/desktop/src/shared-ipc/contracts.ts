@@ -26,7 +26,10 @@ import type {
   ProjectRegistryEntry,
   Provider,
   ProviderId,
+  Role,
   Run,
+  RunEndReason,
+  RunId,
   Task,
   TaskId,
 } from "@ff-pane/shared";
@@ -207,6 +210,96 @@ export interface ApprovePlanRequest extends ProjectScopedRequest {
   readonly version: PlanVersion;
 }
 
+/**
+ * 会话执行输入（§12 十步流程）：Planner 讨论消息 或 Worker 任务派发。
+ * role 由输入类别隐含：planner-message → planner；worker-task → worker。
+ */
+export type SessionInput =
+  | { readonly kind: "planner-message"; readonly text: string }
+  | { readonly kind: "worker-task"; readonly taskId: TaskId };
+
+/**
+ * session:start 请求：启动一轮会话执行。结果与增量内容不走应答，
+ * 一律经 session:event 事件流推送（turnId 关联）。
+ */
+export interface StartSessionRequest extends ProjectScopedRequest {
+  /** 渲染层生成的关联 ID，贯穿本轮全部 session:event。 */
+  readonly turnId: string;
+  /** 用哪个 Agent Profile 执行（决定 runtime / provider / 模型 / 权限预设）。 */
+  readonly profileId: ProfileId;
+  readonly input: SessionInput;
+}
+
+/** session:start 应答：仅表示已受理（true）或拒绝受理（false + reason）。 */
+export type StartSessionAck =
+  | { readonly accepted: true; readonly turnId: string }
+  | { readonly accepted: false; readonly reason: string };
+
+/** session:respond-permission 请求：回执一条上浮的权限请求（§7 用户二选一）。 */
+export interface RespondPermissionRequest {
+  readonly turnId: string;
+  readonly requestId: string;
+  readonly decision: "allow" | "deny";
+}
+
+/** session:cancel 请求：取消在飞的一轮。 */
+export interface CancelSessionRequest {
+  readonly turnId: string;
+}
+
+/** 会话动作应答（回执权限 / 取消）：ok=false 表示未找到该在飞轮次。 */
+export interface SessionActionAck {
+  readonly ok: boolean;
+}
+
+/**
+ * 会话流式事件（main → renderer，§11.2 会话页 + §7 权限交互）。
+ * 扁平判别联合：渲染层直接按 kind 分支，无需理解适配器 AgentEvent 内部形态。
+ */
+export type SessionStreamEvent =
+  | {
+      readonly turnId: string;
+      readonly kind: "started";
+      readonly role: Role;
+      readonly model?: ModelId;
+    }
+  | {
+      readonly turnId: string;
+      readonly kind: "text";
+      readonly channel: "answer" | "reasoning";
+      readonly delta: string;
+      readonly final: boolean;
+    }
+  | {
+      readonly turnId: string;
+      readonly kind: "file-change";
+      readonly path: string;
+      readonly changeKind: "add" | "update" | "delete";
+      readonly status: "started" | "completed" | "failed" | "denied";
+    }
+  | {
+      readonly turnId: string;
+      readonly kind: "command";
+      readonly command: string;
+      readonly status: "started" | "completed" | "failed" | "denied";
+      readonly exitCode?: number;
+    }
+  | {
+      readonly turnId: string;
+      readonly kind: "permission-request";
+      readonly requestId: string;
+      readonly summary: string;
+      readonly detail?: string;
+      readonly diff?: string;
+    }
+  | {
+      readonly turnId: string;
+      readonly kind: "end";
+      readonly reason: RunEndReason;
+      readonly message?: string;
+      readonly runId?: RunId;
+    };
+
 /** invoke（请求/响应）通道契约表。 */
 export interface IpcInvokeContracts {
   "app:get-info": { request: undefined; response: AppInfo };
@@ -273,6 +366,12 @@ export interface IpcInvokeContracts {
   "plans:list": { request: ProjectScopedRequest; response: readonly Plan[] };
   /** 批准计划（draft → approved，只能由用户触发，走 core 计划状态机）。 */
   "plans:approve": { request: ApprovePlanRequest; response: Plan };
+  /** 启动一轮会话执行（Planner 讨论 / Worker 派发）；增量经 session:event 推送。 */
+  "session:start": { request: StartSessionRequest; response: StartSessionAck };
+  /** 回执一条上浮的权限请求（§7）。 */
+  "session:respond-permission": { request: RespondPermissionRequest; response: SessionActionAck };
+  /** 取消在飞的一轮。 */
+  "session:cancel": { request: CancelSessionRequest; response: SessionActionAck };
   /** 仅冒烟模式注册：请求主进程向本窗口推送一条 smoke:event。 */
   "smoke:emit-event": { request: { readonly seq: number }; response: { readonly emitted: true } };
   /** 仅冒烟模式注册：上报渲染层检查结果，主进程据此决定退出码。 */
@@ -283,6 +382,8 @@ export interface IpcInvokeContracts {
 export interface IpcEventContracts {
   /** 仅冒烟模式使用：验证订阅链路的回声事件。 */
   "smoke:event": { payload: { readonly seq: number; readonly emittedAt: number } };
+  /** 会话执行流式事件（一轮的 started / text / file-change / command / permission / end）。 */
+  "session:event": { payload: SessionStreamEvent };
 }
 
 export type InvokeChannel = keyof IpcInvokeContracts;
@@ -333,12 +434,18 @@ export const INVOKE_CHANNELS = [
   "memory:update",
   "plans:list",
   "plans:approve",
+  "session:start",
+  "session:respond-permission",
+  "session:cancel",
   "smoke:emit-event",
   "smoke:report",
 ] as const satisfies readonly InvokeChannel[];
 
 /** 事件通道运行时允许清单。 */
-export const EVENT_CHANNELS = ["smoke:event"] as const satisfies readonly EventChannel[];
+export const EVENT_CHANNELS = [
+  "smoke:event",
+  "session:event",
+] as const satisfies readonly EventChannel[];
 
 type AssertNever<T extends never> = T;
 
