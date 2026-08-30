@@ -11,6 +11,7 @@ import { invokeQuery } from "../../ipc/query";
 import { useInvokeQuery } from "../../ipc/useInvokeQuery";
 import { NAV_ICONS } from "../../layout/nav-icons";
 import { PageHeader } from "../../layout/PageHeader";
+import { useUiStore } from "../../stores/ui";
 import { CreateProjectDialog } from "./CreateProjectDialog";
 import { ProjectCard } from "./ProjectCard";
 
@@ -27,8 +28,18 @@ export function ProjectsPage(): ReactElement {
   const [createOpen, setCreateOpen] = useState(false);
   // 正在移除的项目 id 集合：禁用对应卡片的按钮，防重复触发
   const [removingIds, setRemovingIds] = useState<ReadonlySet<string>>(new Set());
+  const activeProjectId = useUiStore((s) => s.activeProjectId);
+  const setActiveProjectId = useUiStore((s) => s.setActiveProjectId);
 
   const openCreate = useCallback(() => setCreateOpen(true), []);
+
+  const handleOpen = useCallback(
+    (entry: ProjectRegistryEntry) => {
+      setActiveProjectId(entry.id);
+      toast.success(t("projects.opened", { name: entry.name }));
+    },
+    [setActiveProjectId, t],
+  );
 
   const handleCreated = useCallback(
     (entry: ProjectRegistryEntry) => {
@@ -119,7 +130,9 @@ export function ProjectsPage(): ReactElement {
               <ProjectCard
                 key={project.id}
                 project={project}
+                active={project.id === activeProjectId}
                 removing={removingIds.has(project.id)}
+                onOpen={handleOpen}
                 onRemove={(entry) => void handleRemove(entry)}
               />
             ))}

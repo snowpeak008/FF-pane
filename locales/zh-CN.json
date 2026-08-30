@@ -208,6 +208,7 @@
     "new": "新建项目",
     "empty": "还没有项目。选一个目录，创建第一个项目。",
     "loadError": "读取项目列表失败",
+    "opened": "已切换到项目「{{name}}」",
     "card": {
       "createdAt": "登记于 {{time}}",
       "removeLabel": "从工作台移除「{{name}}」"

@@ -208,6 +208,7 @@
     "new": "New project",
     "empty": "No project yet. Pick a directory to create your first one.",
     "loadError": "Failed to load the project list",
+    "opened": "Switched to project \"{{name}}\"",
     "card": {
       "createdAt": "Added {{time}}",
       "removeLabel": "Remove \"{{name}}\" from the workspace"
