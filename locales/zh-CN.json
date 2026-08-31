@@ -490,6 +490,18 @@
       "hitCount": "{{n}} 条命中",
       "duration": "{{ms}} ms",
       "failed": "调用失败：{{reason}}"
+    },
+    "review": {
+      "title": "审查结论",
+      "by": "审查者 Profile：{{profile}}",
+      "commands": "审查期间执行的命令",
+      "noCommands": "本次审查没有执行任何命令（仅凭材料判断）。",
+      "notAcceptance": "审查结论不构成验收：任务是否接受始终由你决定。",
+      "verdict": {
+        "pass": "通过",
+        "fail": "未通过",
+        "inconclusive": "无结论"
+      }
     }
   },
   "session": {
@@ -605,7 +617,34 @@
     "dispatch": "派发",
     "retry": "重试",
     "noWorkerProfile": "未配置 Worker Profile，请到设置中新建。",
-    "dispatchError": "派发失败"
+    "dispatchError": "派发失败",
+    "review": {
+      "start": "审查",
+      "again": "重新审查",
+      "noRun": "该任务还没有可审查的执行记录",
+      "startError": "发起审查失败",
+      "failNote": "审查未通过。这只是参考意见，是否接受仍由你决定。",
+      "verdict": {
+        "pass": "审查通过",
+        "fail": "审查未通过",
+        "inconclusive": "审查无结论"
+      },
+      "verdictHint": {
+        "pass": "Reviewer 认为验收标准已全部满足。结论不构成验收，仍需你确认。",
+        "fail": "Reviewer 认为有验收标准未满足。到执行记录页看理由。",
+        "inconclusive": "Reviewer 没有给出可解析的结论。到执行记录页看原文。"
+      }
+    },
+    "reviewer": {
+      "label": "启用 Reviewer 审查",
+      "bindingLabel": "审查者 Profile",
+      "hint": "Worker 完成后可对照验收标准发起审查；审查者只读，只能跑任务的验证命令。",
+      "offHint": "可选角色，默认关闭。开启后 done 的任务上会多一个「审查」按钮。",
+      "pick": "选择一个 Profile",
+      "noProfiles": "还没有 Profile，请先到设置页新建。",
+      "needBinding": "请先选择审查者 Profile。",
+      "saveError": "保存 Reviewer 设置失败"
+    }
   },
   "task": {
     "status": {

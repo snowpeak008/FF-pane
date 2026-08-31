@@ -1,4 +1,4 @@
-import type { KnowledgeQueryRecord, Run, RunEndReason } from "@ff-pane/shared";
+import type { KnowledgeQueryRecord, ReviewVerdict, Run, RunEndReason } from "@ff-pane/shared";
 import { type ReactElement, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { EmptyState } from "../../components/states/EmptyState";
@@ -132,6 +132,77 @@ function KnowledgeQueries({
   );
 }
 
+/** 结论 → 徽章配色（与任务卡片同源；inconclusive 中性，它不是坏消息）。 */
+const VERDICT_CLASS: Readonly<Record<ReviewVerdict, string>> = {
+  pass: "bg-success-surface text-success-text",
+  fail: "bg-danger-surface text-danger-text",
+  inconclusive: "bg-surface-sunken text-fg-muted",
+};
+
+/**
+ * 审查结论区（T7.2，§3.1）。未审查过时整区不显示——大多数 Run 没有审查，
+ * 给每条都挂一个"（未审查）"只会稀释这一页真正要说的事。
+ *
+ * 明写"不构成验收"：§6.3 的 done ≠ accepted 在界面上必须看得见，否则一个绿色的
+ * "通过"徽章会被当成任务已经完事了。
+ */
+function ReviewSection({
+  run,
+  locale,
+}: {
+  readonly run: Run;
+  readonly locale: string;
+}): ReactElement | null {
+  const { t } = useTranslation();
+  const review = run.review;
+  if (review === undefined) {
+    return null;
+  }
+  return (
+    <section className="flex flex-col gap-2">
+      <h3 className="text-xs font-medium text-fg-muted">{t("runs.review.title")}</h3>
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge className={cn("shrink-0 border-transparent", VERDICT_CLASS[review.verdict])}>
+          {t(`runs.review.verdict.${review.verdict}`)}
+        </Badge>
+        <span className="font-mono text-2xs text-fg-subtle">
+          {formatAbsoluteTime(review.reviewedAt, locale)}
+        </span>
+        <span className="text-2xs text-fg-subtle">
+          {t("runs.review.by", { profile: review.profileId })}
+        </span>
+      </div>
+      <p className="text-xs whitespace-pre-wrap text-fg select-text">{review.summary}</p>
+      {review.findings.length > 0 ? (
+        <ul className="flex list-disc flex-col gap-0.5 pl-4">
+          {review.findings.map((finding) => (
+            <li key={finding} className="text-xs text-fg-muted select-text">
+              {finding}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {review.commands.length > 0 ? (
+        <div className="flex flex-col gap-0.5">
+          <span className="text-2xs text-fg-subtle">{t("runs.review.commands")}</span>
+          {review.commands.map((cmd) => (
+            <code
+              key={`${cmd.command}-${cmd.exitCode}`}
+              className="truncate font-mono text-2xs text-fg-muted select-text"
+            >
+              {cmd.command} → {cmd.exitCode}
+            </code>
+          ))}
+        </div>
+      ) : (
+        // 一份没跑过任何命令的结论与跑过的不是一个分量，如实说明（见 ReviewRecord.commands）
+        <span className="text-2xs text-fg-subtle">{t("runs.review.noCommands")}</span>
+      )}
+      <span className="text-2xs text-fg-subtle">{t("runs.review.notAcceptance")}</span>
+    </section>
+  );
+}
+
 function RunDetail({ run, locale }: { readonly run: Run; readonly locale: string }): ReactElement {
   const { t } = useTranslation();
   return (
@@ -195,6 +266,8 @@ function RunDetail({ run, locale }: { readonly run: Run; readonly locale: string
         </section>
       ) : null}
 
+      <ReviewSection run={run} locale={locale} />
+
       <KnowledgeQueries run={run} locale={locale} />
 
       <section className="flex flex-col gap-2">
@@ -251,11 +324,19 @@ function RunsView({ projectRoot }: { readonly projectRoot: string }): ReactEleme
               run.id === selected?.id ? "bg-surface-active" : "hover:bg-surface-hover",
             )}
           >
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <EndReasonBadge run={run} />
               <span className="text-xs text-fg-subtle">
                 {t("runs.attempt", { n: run.attempt })}
               </span>
+              {/* 结论进列表，否则用户得逐条点开才知道哪次审过 */}
+              {run.review !== undefined ? (
+                <Badge
+                  className={cn("shrink-0 border-transparent", VERDICT_CLASS[run.review.verdict])}
+                >
+                  {t(`runs.review.verdict.${run.review.verdict}`)}
+                </Badge>
+              ) : null}
             </div>
             <span className="truncate font-mono text-2xs text-fg-muted">{run.id}</span>
           </button>

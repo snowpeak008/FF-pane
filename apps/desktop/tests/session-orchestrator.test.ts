@@ -135,6 +135,8 @@ interface Harness {
   readonly sessions: Map<string, SessionRecord>;
   readonly captured: CapturedTurn[];
   readonly observedMessages: string[];
+  /** T7.2：审查结论回写（updateRun 收到的整条 Run）。 */
+  readonly updatedRuns: Run[];
 }
 
 function makeHarness(
@@ -168,6 +170,7 @@ function makeHarness(
   const savedPlans: Plan[] = [];
   const captured: CapturedTurn[] = [];
   const observedMessages: string[] = [];
+  const updatedRuns: Run[] = [];
   const sessions = new Map<string, SessionRecord>();
   if (opts.existingSession !== undefined) {
     sessions.set(opts.existingSession.id, opts.existingSession);
@@ -202,6 +205,10 @@ function makeHarness(
       savedTasks.push(tk);
     },
     listRuns: async () => opts.runs ?? [],
+    loadRun: async (_l, id) => (opts.runs ?? []).find((r) => r.id === id),
+    updateRun: async (_l, run) => {
+      updatedRuns.push(run);
+    },
     listTasks: async () => opts.tasks ?? [],
     loadLatestPlan: async () => opts.latestPlan,
     loadSession: async (_l, id) => sessions.get(id),
@@ -235,6 +242,7 @@ function makeHarness(
     sessions,
     captured,
     observedMessages,
+    updatedRuns,
   };
 }
 
@@ -1057,5 +1065,196 @@ describe("T6.6 Agent 只读知识库检索工具", () => {
     expect(ack.accepted).toBe(true);
     expect(h.captured[0]?.mcpServers).toBeUndefined();
     expect(h.persistedRuns).toHaveLength(1);
+  });
+});
+
+describe("T7.2 审查轮（reviewer-review，§3.1）", () => {
+  /** 被审查的那条 Run：一次跑完的 Worker 尝试，带 diff 与验证结果。 */
+  function reviewedRun(overrides: Partial<Run> = {}): Run {
+    return {
+      id: "run-under-review" as unknown as Run["id"],
+      taskId: "task-1" as unknown as TaskId,
+      attempt: 1,
+      profileId: "prof-worker" as unknown as ProfileId,
+      startedAt: 100,
+      endedAt: 200,
+      endReason: "completed",
+      fileChanges: [{ path: "src/a.ts", diff: "@@ -1 +1 @@\n-old\n+new" }],
+      commands: [{ command: "npm test", exitCode: 0 }],
+      verifyResult: { command: "npm test", exitCode: 0, output: "all green" },
+      report: "做完了",
+      rawLogPath: "raw.log",
+      ...overrides,
+    } as unknown as Run;
+  }
+
+  function reviewRequest(runId = "run-under-review"): StartSessionRequest {
+    return {
+      turnId: "t-review",
+      projectRoot: "/proj",
+      profileId: "prof-1" as unknown as ProfileId,
+      input: {
+        kind: "reviewer-review",
+        taskId: "task-1" as unknown as TaskId,
+        runId: runId as unknown as Run["id"],
+      },
+    };
+  }
+
+  /** 一轮跑完并给出结构化结论的事件流。 */
+  function verdictEvents(body: string): AgentEvent[] {
+    return [
+      { kind: "session_start" },
+      { kind: "text", content: body, final: true, channel: "answer" },
+      { kind: "end", reason: "completed" },
+    ];
+  }
+
+  const PASS_ANSWER =
+    '看过了。\n```json\n{"verdict":"pass","summary":"两条验收标准都满足","findings":[]}\n```';
+
+  function reviewHarness(
+    events: readonly AgentEvent[],
+    runs: readonly Run[] = [reviewedRun()],
+  ): ReturnType<typeof makeHarness> {
+    return makeHarness(events, {
+      profile: profile({ id: "prof-1", defaultRole: "reviewer" }),
+      task: task({ status: "done", verifyCmd: "npm test" }),
+      runs,
+    });
+  }
+
+  it("role=reviewer；结论写回被审的那条 Run，且不铸新 Run、不改任务状态", async () => {
+    const h = reviewHarness(verdictEvents(PASS_ANSWER));
+    const orch = createSessionOrchestrator(h.deps);
+
+    const ack = await orch.start(reviewRequest());
+    await flushUntilEnd(h.published);
+
+    expect(ack.accepted).toBe(true);
+    expect(h.published[0]).toMatchObject({ kind: "started", role: "reviewer" });
+    // 不铸新 Run：Run 是「任务的一次尝试」，审查不是尝试
+    expect(h.persistedRuns).toHaveLength(0);
+    // 不推进任务：done ≠ accepted 由 acceptTask 在状态机层锁死（§6.3）
+    expect(h.savedTasks).toHaveLength(0);
+    expect(h.updatedRuns).toHaveLength(1);
+    expect(h.updatedRuns[0]).toMatchObject({
+      id: "run-under-review",
+      review: { verdict: "pass", summary: "两条验收标准都满足", profileId: "prof-1" },
+    });
+    // 被审 Run 的原有证据原样保留（回写只加一个字段）
+    expect(h.updatedRuns[0]?.report).toBe("做完了");
+    expect(h.updatedRuns[0]?.fileChanges).toHaveLength(1);
+  });
+
+  it("end 事件带结论与被审 Run 的 id（渲染层据此 toast 并跳转）", async () => {
+    const h = reviewHarness(verdictEvents(PASS_ANSWER));
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start(reviewRequest());
+    await flushUntilEnd(h.published);
+
+    expect(h.published.at(-1)).toMatchObject({
+      kind: "end",
+      reason: "completed",
+      runId: "run-under-review",
+      reviewVerdict: "pass",
+    });
+  });
+
+  it("第 4 层是审查材料：验收标准 + diff + 结论合同，且不含任务合同的执行指令", async () => {
+    const h = reviewHarness(verdictEvents(PASS_ANSWER));
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start(reviewRequest());
+    await flushUntilEnd(h.published);
+
+    const prompt = h.captured[0]?.prompt ?? "";
+    expect(prompt).toContain("验收标准");
+    expect(prompt).toContain("@@ -1 +1 @@");
+    expect(prompt).toContain("审查结论（结构化输出）");
+    // 任务合同渲染里的执行指令措辞不该出现（那会把审查者往「我该做点什么」带）
+    expect(prompt).not.toContain("可写范围（仅这些路径可改）");
+  });
+
+  it("解析不出结论 → inconclusive 并保留原文（绝不猜 pass/fail）", async () => {
+    const h = reviewHarness(verdictEvents("我觉得写得挺好的，应该没问题。"));
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start(reviewRequest());
+    await flushUntilEnd(h.published);
+
+    expect(h.updatedRuns[0]?.review).toMatchObject({
+      verdict: "inconclusive",
+      summary: "我觉得写得挺好的，应该没问题。",
+    });
+  });
+
+  it("轮次未跑完（取消/崩溃）→ 不写结论（那是一次没发生的审查，不该覆盖旧结论）", async () => {
+    const h = reviewHarness([
+      { kind: "session_start" },
+      { kind: "text", content: "才看了一半", final: false, channel: "answer" },
+      { kind: "end", reason: "cancelled" },
+    ]);
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start(reviewRequest());
+    await flushUntilEnd(h.published);
+
+    expect(h.updatedRuns).toHaveLength(0);
+    expect(h.published.at(-1)).toMatchObject({ kind: "end", reason: "cancelled" });
+    expect(h.published.at(-1)).not.toHaveProperty("reviewVerdict");
+  });
+
+  it("装配的是 Reviewer 信封：合同的验证命令放行并进结论留档（§7 verify_only 白名单）", async () => {
+    const h = reviewHarness([
+      { kind: "session_start" },
+      { kind: "command", command: "npm test", status: "completed", exitCode: 0 },
+      { kind: "text", content: PASS_ANSWER, final: true, channel: "answer" },
+      { kind: "end", reason: "completed" },
+    ]);
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start(reviewRequest());
+    await flushUntilEnd(h.published);
+
+    // "它到底验没验"要查得到——一份没跑过命令的 pass 与跑过的不是一个分量
+    expect(h.updatedRuns[0]?.review?.commands).toEqual([{ command: "npm test", exitCode: 0 }]);
+  });
+
+  it("合同外的命令被权限层掐断整轮 → 不写结论（一次被拦下的审查不是一份结论）", async () => {
+    const h = reviewHarness([
+      { kind: "session_start" },
+      // verify_only 白名单只有任务合同的 npm test；这条越界
+      { kind: "command", command: "rm -rf build", status: "completed", exitCode: 0 },
+      { kind: "text", content: PASS_ANSWER, final: true, channel: "answer" },
+      { kind: "end", reason: "completed" },
+    ]);
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start(reviewRequest());
+    await flushUntilEnd(h.published);
+
+    expect(h.published.at(-1)).not.toMatchObject({ reason: "completed" });
+    expect(h.updatedRuns).toHaveLength(0);
+  });
+
+  it("Run 不属于该任务 → 拒绝受理（拿 A 的验收标准审 B 的改动，结论必然是垃圾）", async () => {
+    const h = reviewHarness(verdictEvents(PASS_ANSWER), [
+      reviewedRun({ taskId: "task-other" as unknown as TaskId }),
+    ]);
+    const orch = createSessionOrchestrator(h.deps);
+
+    const ack = await orch.start(reviewRequest());
+
+    expect(ack).toMatchObject({ accepted: false });
+    expect(h.updatedRuns).toHaveLength(0);
+  });
+
+  it("Run 不存在 → 拒绝受理", async () => {
+    const h = reviewHarness(verdictEvents(PASS_ANSWER), []);
+    const orch = createSessionOrchestrator(h.deps);
+
+    expect(await orch.start(reviewRequest("nope"))).toMatchObject({ accepted: false });
   });
 });

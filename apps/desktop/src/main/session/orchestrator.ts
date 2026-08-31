@@ -13,9 +13,16 @@
  * 能力判定 native（传 resume 绑定给适配器）或 context_rebuild（重建计划/任务/state/Run
  * 上下文前置到提示词）。session_start 报出的原生会话 ID 回写登记，供后续续接。
  *
+ * 跨 Agent 迁移（T7.1，§10.4）：带 handoffText 的一轮强制开新会话，把用户确认过的交接包
+ * 正文前置到提示词，会话类型标 handoff。
+ *
+ * 审查轮（T7.2，§3.1）：Reviewer 角色的一轮，第 4 层是「任务合同的验收标准 + 被审 Run 的
+ * 证据」，权限为角色默认的只读 + verify_only；结论解析后写回**被审的那条 Run**，不铸新
+ * Run、不改任务状态（done ≠ accepted 由 acceptTask 在状态机层锁死，§6.3）。
+ *
  * 边界（各归其工单，本编排器不越界）：
  * - Planner 讨论只产出对话，不解析结构化计划（计划生成是后续细化）；
- * - 跨 Agent 迁移（handoff）见 Phase 7；记忆候选闭环见 T4.4。
+ * - 记忆候选闭环见 T4.4。
  */
 
 import {
@@ -30,6 +37,7 @@ import {
 import {
   assemblePrompt,
   assembleRebuildContext,
+  assembleReviewMaterial,
   assembleRunEnvelope,
   compileHabitProfile,
   createInitialDraft,
@@ -45,6 +53,9 @@ import {
   PLAN_OUTPUT_CONTRACT,
   PLANNER_DEFAULT_ENVELOPE,
   parsePlannerPlanDraft,
+  parseReviewConclusion,
+  REVIEW_OUTPUT_CONTRACT,
+  REVIEWER_DEFAULT_ENVELOPE,
   settleTaskAfterRun,
   startRun,
   supersedePlan,
@@ -66,6 +77,7 @@ import type {
   Plan,
   PlanVersion,
   Provider,
+  ReviewRecord,
   Role,
   Run,
   RunId,
@@ -125,6 +137,16 @@ export interface SessionOrchestratorDeps {
   readonly loadTask: (layout: ProjectLayout, id: Task["id"]) => Promise<Task | undefined>;
   readonly saveTask: (layout: ProjectLayout, task: Task) => Promise<void>;
   readonly listRuns: (layout: ProjectLayout) => Promise<readonly Run[]>;
+  /** 读取一条 Run（T7.2 审查轮的取材；不存在返回 undefined）。 */
+  readonly loadRun: (layout: ProjectLayout, id: RunId) => Promise<Run | undefined>;
+  /**
+   * 写回一条已存在 Run 的结构化记录（T7.2 审查结论回写）。
+   *
+   * 与 persistRun 分开：那个是**铸一条新 Run**（连带 raw.log 与 changes.diff 三件套），
+   * 这个只改 run.json 的一个字段。用 persistRun 回写会把原始日志与 diff 用审查轮的
+   * 内容覆盖掉——那正是被审查的证据本身。
+   */
+  readonly updateRun: (layout: ProjectLayout, run: Run) => Promise<void>;
   /** 项目全部任务（上下文重建用）。 */
   readonly listTasks: (layout: ProjectLayout) => Promise<readonly Task[]>;
   /** 最新计划版本（上下文重建用；无计划返回 undefined）。 */
@@ -207,6 +229,15 @@ interface PlanTurnContext {
   readonly layout: ProjectLayout;
 }
 
+/** 审查轮（reviewer-review）收尾所需的上下文（T7.2；非审查轮为 undefined）。 */
+interface ReviewTurnContext {
+  readonly layout: ProjectLayout;
+  /** 被审查的那条 Run（结论写回它）。 */
+  readonly reviewedRun: Run;
+  /** 执行审查的 Profile（与执行者通常不同，故必须随结论留档）。 */
+  readonly profileId: AgentProfile["id"];
+}
+
 export function createSessionOrchestrator(deps: SessionOrchestratorDeps): SessionOrchestrator {
   const active = new Map<string, ActiveTurn>();
 
@@ -272,7 +303,12 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         return { accepted: false, reason: "Provider 不存在" };
       }
 
-      const role: Role = request.input.kind === "worker-task" ? "worker" : "planner";
+      const role: Role =
+        request.input.kind === "worker-task"
+          ? "worker"
+          : request.input.kind === "reviewer-review"
+            ? "reviewer"
+            : "planner";
       const layout = deps.resolveLayout(request.projectRoot);
       const [memory, config, habits] = await Promise.all([
         deps.loadActiveMemory(layout),
@@ -340,8 +376,50 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
       let guardCtx: GuardTurnContext;
       let workerCtx: WorkerContext | undefined;
       let planCtx: PlanTurnContext | undefined;
+      let reviewCtx: ReviewTurnContext | undefined;
 
-      if (request.input.kind === "worker-task") {
+      if (request.input.kind === "reviewer-review") {
+        // 审查轮（T7.2，§3.1）：注入任务合同的验收标准 + 本次 Run 的证据，权限走
+        // Reviewer 角色默认（只读 + verify_only）。
+        const task = await deps.loadTask(layout, request.input.taskId);
+        if (task === undefined) {
+          return { accepted: false, reason: "任务不存在" };
+        }
+        const reviewedRun = await deps.loadRun(layout, request.input.runId);
+        if (reviewedRun === undefined) {
+          return { accepted: false, reason: "执行记录不存在" };
+        }
+        if (reviewedRun.taskId !== task.id) {
+          // 该 Run 不属于这个任务：拿 A 任务的验收标准去审 B 任务的改动，结论必然是垃圾。
+          return { accepted: false, reason: "该执行记录不属于这个任务" };
+        }
+        prompt = `${assemblePrompt({
+          role: "reviewer",
+          // 第 4 层给审查材料而非任务合同：合同渲染的是执行指令（"你只能改这些路径"），
+          // 那会把审查者往"我该做点什么"的方向带（见 core assembleReviewMaterial 注释）。
+          input: { kind: "message", text: assembleReviewMaterial({ task, run: reviewedRun }) },
+          projectMemory: memory,
+          outputLanguage,
+          ...(habitProfile !== undefined ? { habitProfile } : {}),
+        })}\n\n${REVIEW_OUTPUT_CONTRACT}`;
+        reviewCtx = { layout, reviewedRun, profileId: profile.id };
+        // 审查者的信封：角色默认 ∩ Profile 预设。**不走 assembleRunEnvelope**——那条
+        // 路径会把任务合同的 writeScope 并进来，而任务信封的 shell 是 "allowed"、
+        // writePaths 是任务允许写的那些路径。虽然与 Reviewer 角色默认相交后 shell 仍会
+        // 收窄回 verify_only、writePaths 与空集相交仍为空，结果是对的，但那是"靠交集
+        // 恰好救回来"，读代码的人得自己在脑子里算一遍才敢确信审查者不能写文件。
+        // 直接用角色默认相交 Profile 预设，"审查者不可写"是当场可见的事实。
+        // verifyCommands 照给：verify_only 的白名单正是任务合同的验证命令（§7）。
+        const reviewerEnvelope = toRunEnvelope(
+          intersectEnvelopes(REVIEWER_DEFAULT_ENVELOPE, profile.permissionPreset),
+        );
+        guardCtx = {
+          cwd: request.projectRoot,
+          envelope: reviewerEnvelope,
+          ...(task.verifyCmd !== undefined ? { verifyCommands: [task.verifyCmd] } : {}),
+          ...(Object.keys(env).length > 0 ? { secrets: env } : {}),
+        };
+      } else if (request.input.kind === "worker-task") {
         const task = await deps.loadTask(layout, request.input.taskId);
         if (task === undefined) {
           return { accepted: false, reason: "任务不存在" };
@@ -481,11 +559,15 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
       });
 
       // 事件流消费独立于受理应答（fire-and-forget，结束时清理登记）
-      void drain(request.turnId, guarded, workerCtx, planCtx, sessionCtx, knowledgeCtx).finally(
-        () => {
-          active.delete(request.turnId);
-        },
-      );
+      void drain(request.turnId, guarded, {
+        ...(workerCtx !== undefined ? { workerCtx } : {}),
+        ...(planCtx !== undefined ? { planCtx } : {}),
+        ...(reviewCtx !== undefined ? { reviewCtx } : {}),
+        sessionCtx,
+        ...(knowledgeCtx !== undefined ? { knowledgeCtx } : {}),
+      }).finally(() => {
+        active.delete(request.turnId);
+      });
 
       return { accepted: true, turnId: request.turnId, sessionId };
     } catch (thrown) {
@@ -494,15 +576,22 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
     }
   }
 
+  /**
+   * 一轮的收尾上下文。四种轮次（Planner 讨论 / 计划生成 / Worker 执行 / 审查）各带各的，
+   * 至多一个在场——收成一个对象是为了让新增轮次不必再给 drain/finalize 加一个位置参数
+   * （T7.2 前已是六个参数，其中三个可为 undefined，调用点全靠数逗号对齐）。
+   */
+  interface TurnContexts {
+    readonly workerCtx?: WorkerContext;
+    readonly planCtx?: PlanTurnContext;
+    readonly reviewCtx?: ReviewTurnContext;
+    readonly sessionCtx: SessionContext;
+    readonly knowledgeCtx?: KnowledgeContext;
+  }
+
   /** 消费一轮的事件流，推增量、收尾落库。 */
-  async function drain(
-    turnId: string,
-    guarded: GuardedTurn,
-    workerCtx: WorkerContext | undefined,
-    planCtx: PlanTurnContext | undefined,
-    sessionCtx: SessionContext,
-    knowledgeCtx: KnowledgeContext | undefined,
-  ): Promise<void> {
+  async function drain(turnId: string, guarded: GuardedTurn, ctx: TurnContexts): Promise<void> {
+    const { workerCtx, sessionCtx } = ctx;
     let answerText = "";
     let verifyResult: VerifyResult | undefined;
     const verifyCmd = workerCtx?.runningTask.verifyCmd;
@@ -510,7 +599,7 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
     try {
       for await (const event of guarded.events) {
         if (event.kind === "end") {
-          await finalize(turnId, guarded, workerCtx, planCtx, knowledgeCtx, {
+          await finalize(turnId, guarded, ctx, {
             reason: event.reason,
             ...(event.message !== undefined ? { message: event.message } : {}),
             report: answerText,
@@ -547,14 +636,14 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         }
       }
       // 事件流保证以 end 收尾；未见 end 视作崩溃兜底
-      await finalize(turnId, guarded, workerCtx, planCtx, knowledgeCtx, {
+      await finalize(turnId, guarded, ctx, {
         reason: "crashed",
         message: "事件流未以 end 收尾",
         report: answerText,
       });
     } catch (thrown) {
       const message = thrown instanceof Error ? thrown.message : String(thrown);
-      await finalize(turnId, guarded, workerCtx, planCtx, knowledgeCtx, {
+      await finalize(turnId, guarded, ctx, {
         reason: "crashed",
         message,
         report: answerText,
@@ -583,13 +672,54 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
     return draft.version;
   }
 
-  /** 收尾：Worker 轮落 Run + 推进任务；Planner/计划生成轮据 planCtx 落计划；三类都推 end 事件。 */
+  /**
+   * 审查轮收尾（T7.2）：解析结论 → 写回被审的那条 Run。
+   *
+   * **只有轮次自身跑完（completed）才写结论**：取消 / 崩溃 / 失败不是"一次得不出结论的
+   * 审查"，而是一次没发生的审查，把它写成 inconclusive 会覆盖掉此前那次真审查的结论。
+   * 返回写回的结论（供 end 事件带出）；未写回返回 undefined。
+   *
+   * 写回失败不抛：整轮已经跑完，把用户已经付出的那次审查连同一个 end 事件一起吞掉，
+   * 比丢一条结论更坏。失败记日志，end 事件照推。
+   */
+  async function persistReview(
+    ctx: ReviewTurnContext,
+    guarded: GuardedTurn,
+    outcome: { readonly reason: Run["endReason"] & string; readonly report: string },
+  ): Promise<ReviewRecord | undefined> {
+    if (outcome.reason !== "completed") {
+      return undefined;
+    }
+    const conclusion = parseReviewConclusion(outcome.report);
+    const evidence = toStoredRunEvidence(guarded.evidence());
+    const review: ReviewRecord = {
+      reviewedAt: deps.now(),
+      profileId: ctx.profileId,
+      verdict: conclusion.verdict,
+      summary: conclusion.summary,
+      findings: conclusion.findings,
+      commands: evidence.commands as readonly CommandRecord[],
+    };
+    try {
+      // 从磁盘重读而非改 ctx.reviewedRun：审查期间该 Run 可能已被别处写过
+      // （另一次审查、将来的补充字段）。读回来再改一个字段，不把过期的整条覆盖上去。
+      const current = (await deps.loadRun(ctx.layout, ctx.reviewedRun.id)) ?? ctx.reviewedRun;
+      await deps.updateRun(ctx.layout, { ...current, review });
+    } catch (thrown) {
+      console.warn(`[session] failed to persist review conclusion: ${String(thrown)}`);
+      return undefined;
+    }
+    return review;
+  }
+
+  /**
+   * 收尾：Worker 轮落 Run + 推进任务；计划生成轮落计划；审查轮把结论写回被审的 Run；
+   * 四类都推 end 事件。
+   */
   async function finalize(
     turnId: string,
     guarded: GuardedTurn,
-    workerCtx: WorkerContext | undefined,
-    planCtx: PlanTurnContext | undefined,
-    knowledgeCtx: KnowledgeContext | undefined,
+    ctx: TurnContexts,
     outcome: {
       readonly reason: Run["endReason"] & string;
       readonly message?: string;
@@ -597,6 +727,7 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
       readonly verifyResult?: VerifyResult;
     },
   ): Promise<void> {
+    const { workerCtx, planCtx, reviewCtx, knowledgeCtx } = ctx;
     // 知识库工具审计（T6.6）：轮末一次性回读 sidecar 写下的调用记录。
     // 未挂工具 = undefined（与"挂了但一次没调用"的空数组是两件事，见 Run.knowledgeQueries）。
     // 读取失败不该拖垮收尾：readKnowledgeAudit 自身已把失败归一为空数组，这里再兜一层。
@@ -610,6 +741,20 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
     }
 
     if (workerCtx === undefined) {
+      // 审查轮：结论写回被审的那条 Run（不铸新 Run，见 ReviewRecord 注释）。
+      if (reviewCtx !== undefined) {
+        const review = await persistReview(reviewCtx, guarded, outcome);
+        deps.publish({
+          turnId,
+          kind: "end",
+          reason: outcome.reason,
+          ...(outcome.message !== undefined ? { message: outcome.message } : {}),
+          // runId 带的是**被审查**的那条 Run：渲染层据它跳到执行记录页看完整结论。
+          runId: reviewCtx.reviewedRun.id,
+          ...(review !== undefined ? { reviewVerdict: review.verdict } : {}),
+        });
+        return;
+      }
       // 计划生成轮：轮成功则解析答复中的计划块并落盘；失败原因经 end.message 回传（不写盘）
       let planVersion: PlanVersion | undefined;
       let endMessage = outcome.message;

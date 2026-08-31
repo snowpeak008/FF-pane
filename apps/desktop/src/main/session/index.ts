@@ -31,6 +31,7 @@ import {
   listRuns,
   listTasks,
   loadPlan,
+  loadRun,
   loadStateSnapshot,
   loadTask,
   type ProjectLayout,
@@ -192,6 +193,15 @@ export async function createSessionHandlers(
     listRuns: async (projectLayout) => {
       const result = await listRuns(projectLayout);
       return result.ok ? result.value : [];
+    },
+    loadRun: async (projectLayout, id) => {
+      const result = await loadRun(projectLayout, id);
+      return result.ok ? result.value : undefined;
+    },
+    // 审查结论回写（T7.2）：只改 run.json，不碰 raw.log / changes.diff——
+    // 那两份正是被审查的证据本身（见编排器 deps.updateRun 注释）。
+    updateRun: async (projectLayout, run) => {
+      await saveRun(projectLayout, run);
     },
     listTasks: async (projectLayout) => {
       const result = await listTasks(projectLayout);

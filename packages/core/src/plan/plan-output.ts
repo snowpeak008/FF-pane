@@ -8,6 +8,7 @@
  */
 
 import type { PlanVersion, TaskContract, TaskId } from "@ff-pane/shared";
+import { extractLastJsonBlock, nonEmptyString, toStringList } from "../text/json-block.js";
 import type { PlanDraftChanges } from "./next-draft.js";
 
 /**
@@ -48,47 +49,6 @@ export type ParsePlanResult =
 
 /** 计划草案的占位版本号：createInitialDraft / createNextDraft 落库时会统一重绑。 */
 const PLACEHOLDER_VERSION = 1 as PlanVersion;
-
-/** 提取答复中最后一个围栏代码块的内容（优先带 json 标签的块，其次任意围栏块）。 */
-function extractLastJsonBlock(text: string): string | undefined {
-  const fence = /```(json)?[ \t]*\r?\n([\s\S]*?)```/gi;
-  let lastJson: string | undefined;
-  let lastAny: string | undefined;
-  for (let m = fence.exec(text); m !== null; m = fence.exec(text)) {
-    const body = m[2] ?? "";
-    lastAny = body;
-    if (m[1] !== undefined) {
-      lastJson = body;
-    }
-  }
-  return lastJson ?? lastAny;
-}
-
-/** 把任意值清洗为"非空字符串数组"（非数组→空；逐条 trim、丢空）。 */
-function toStringList(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  const out: string[] = [];
-  for (const item of value) {
-    if (typeof item === "string") {
-      const trimmed = item.trim();
-      if (trimmed.length > 0) {
-        out.push(trimmed);
-      }
-    }
-  }
-  return out;
-}
-
-/** 非空字符串取 trim 后的值，否则 undefined。 */
-function nonEmptyString(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
 
 interface RawTask {
   readonly id?: unknown;

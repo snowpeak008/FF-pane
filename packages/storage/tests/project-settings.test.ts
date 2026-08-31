@@ -43,7 +43,10 @@ describe("ProjectSettingsStore", () => {
   it("update：首次写入即建档，读回合并结果", async () => {
     const merged = await store.updateSettings({ knowledgeToolEnabled: true });
     expect(merged.knowledgeToolEnabled).toBe(true);
-    expect(await store.readSettings()).toEqual({ knowledgeToolEnabled: true });
+    expect(await store.readSettings()).toEqual({
+      knowledgeToolEnabled: true,
+      reviewerEnabled: false,
+    });
   });
 
   it("落盘形状为 { version, project }", async () => {
@@ -76,6 +79,7 @@ describe("ProjectSettingsStore", () => {
       roleBindings: { planner: "p1", worker: "p2" },
       outputLanguage: "en-US",
       knowledgeToolEnabled: true,
+      reviewerEnabled: false,
     });
   });
 
@@ -98,9 +102,52 @@ describe("ProjectSettingsStore", () => {
   it("字段类型不符按缺省处理（不抛错）：开关手改坏了不该让项目打不开", async () => {
     await writeJsonAtomic(projectFile, {
       version: PROJECT_SETTINGS_FILE_VERSION,
-      project: { knowledgeToolEnabled: "yes" },
+      project: { knowledgeToolEnabled: "yes", reviewerEnabled: 1, reviewerProfileId: 7 },
     });
-    expect(await store.readSettings()).toEqual({ knowledgeToolEnabled: false });
+    expect(await store.readSettings()).toEqual({
+      knowledgeToolEnabled: false,
+      reviewerEnabled: false,
+    });
+  });
+
+  it("Reviewer 开关缺省关闭（§3.1「可选，默认关闭」），且默认未绑定", async () => {
+    expect(DEFAULT_PROJECT_SETTINGS.reviewerEnabled).toBe(false);
+    expect(DEFAULT_PROJECT_SETTINGS.reviewerProfileId).toBeUndefined();
+  });
+
+  it("Reviewer 开关与绑定各自独立写入、互不覆盖", async () => {
+    await store.updateSettings({ reviewerProfileId: "prof-r" as never });
+    await store.updateSettings({ reviewerEnabled: true });
+    expect(await store.readSettings()).toEqual({
+      knowledgeToolEnabled: false,
+      reviewerEnabled: true,
+      reviewerProfileId: "prof-r",
+    });
+  });
+
+  it("关掉开关不清除绑定：反复开开关关时不必每次重选审查者", async () => {
+    await store.updateSettings({ reviewerEnabled: true, reviewerProfileId: "prof-r" as never });
+    const off = await store.updateSettings({ reviewerEnabled: false });
+    expect(off.reviewerProfileId).toBe("prof-r");
+    const on = await store.updateSettings({ reviewerEnabled: true });
+    expect(on.reviewerProfileId).toBe("prof-r");
+  });
+
+  it("空串绑定按未绑定读回（手改成空字符串不该变成一个指向空的绑定）", async () => {
+    await writeJsonAtomic(projectFile, {
+      version: PROJECT_SETTINGS_FILE_VERSION,
+      project: { reviewerEnabled: true, reviewerProfileId: "" },
+    });
+    const read = await store.readSettings();
+    expect(read.reviewerEnabled).toBe(true);
+    expect(read.reviewerProfileId).toBeUndefined();
+  });
+
+  it("知识库开关与 Reviewer 开关互不影响", async () => {
+    await store.updateSettings({ knowledgeToolEnabled: true });
+    const merged = await store.updateSettings({ reviewerEnabled: true });
+    expect(merged.knowledgeToolEnabled).toBe(true);
+    expect(merged.reviewerEnabled).toBe(true);
   });
 
   it("结构不符抛 ProjectSettingsFileInvalidError：顶层非对象", async () => {

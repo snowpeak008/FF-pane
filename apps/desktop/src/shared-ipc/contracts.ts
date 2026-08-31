@@ -40,6 +40,7 @@ import type {
   ProjectRegistryEntry,
   Provider,
   ProviderId,
+  ReviewVerdict,
   Role,
   Run,
   RunEndReason,
@@ -135,6 +136,10 @@ export interface RestoreProjectRequest {
 export interface ProjectSettingsView {
   /** 设计文档 §8.3.5 —— Agent 只读知识库检索工具开关（缺省关闭）。 */
   readonly knowledgeToolEnabled: boolean;
+  /** 设计文档 §3.1 —— Reviewer 角色开关（T7.2，缺省关闭）。 */
+  readonly reviewerEnabled: boolean;
+  /** 设计文档 §3.1 —— Reviewer 绑定的 Profile（T7.2；未绑定时缺省）。 */
+  readonly reviewerProfileId?: ProfileId;
 }
 
 /** projects:update-settings 请求：只带要改的字段。 */
@@ -588,7 +593,15 @@ export type SessionInput =
    * 轮结束时主进程解析答复中的计划块 → 落 draft 计划。text 为可选补充指令（缺省即"据讨论出计划"）。
    */
   | { readonly kind: "planner-plan"; readonly text?: string }
-  | { readonly kind: "worker-task"; readonly taskId: TaskId };
+  | { readonly kind: "worker-task"; readonly taskId: TaskId }
+  /**
+   * 审查一次执行（T7.2，§3.1）：Reviewer 角色，注入任务合同的验收标准 + 该 Run 的
+   * 证据，权限为角色默认的只读 + verify_only。结论写回 `runId` 指向的那条 Run。
+   *
+   * 带 runId 而不是只带 taskId：一个任务可以有多条 Run（失败重试，§6.3），
+   * "审查这个任务"是有歧义的，"审查这一次尝试"才不是。
+   */
+  | { readonly kind: "reviewer-review"; readonly taskId: TaskId; readonly runId: RunId };
 
 /**
  * session:start 请求：启动一轮会话执行。结果与增量内容不走应答，
@@ -718,6 +731,13 @@ export type SessionStreamEvent =
        * 供渲染层 toast「已生成计划 vN」并刷新/跳转计划页。
        */
       readonly planVersion?: PlanVersion;
+      /**
+       * 本轮（reviewer-review）的审查结论（T7.2）。仅审查轮且结论已写回 Run 时出现。
+       *
+       * 只带结论字面量而不带整条 ReviewRecord：理由与逐条问题在执行记录页有完整呈现，
+       * 事件流这里要回答的只是"刚才那次审查得出了什么"——一个 toast 的信息量。
+       */
+      readonly reviewVerdict?: ReviewVerdict;
     };
 
 /** invoke（请求/响应）通道契约表。 */

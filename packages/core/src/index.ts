@@ -35,6 +35,9 @@ export * from "./provider-probe/index.js";
 /** 会话恢复（T4.3）：恢复方式判定 + 上下文重建文本组装（设计文档 §10.3）。 */
 export * from "./resume/index.js";
 
+/** Reviewer 角色（T7.2）：审查材料组装 + 结论合同与解析（设计文档 §3.1）。 */
+export * from "./review/index.js";
+
 /** Run 权限执行层（W2.7a）：信封装配 + 写路径/命令事前裁决 + 证据事后审计。 */
 export * from "./run-guard/index.js";
 export * from "./task/index.js";

@@ -110,6 +110,60 @@ export interface KnowledgeQueryRecord {
   readonly error?: string;
 }
 
+/** 设计文档 §3.1 —— Reviewer 的审查结论（T7.2）。 */
+export const REVIEW_VERDICTS = ["pass", "fail", "inconclusive"] as const;
+
+/**
+ * 设计文档 §3.1 —— 审查结论。
+ *
+ * `inconclusive` 不是"Reviewer 弃权"这个罕见情形的专用值，而是**解析失败的归宿**：
+ * Reviewer 没按合同给出结论块、或块里的 verdict 不是三者之一，一律落这里并保留原文。
+ * 绝不从自由文本猜 pass/fail——两个方向的猜错代价不对称，把 fail 猜成 pass 会让一份
+ * 没通过审查的改动看起来通过了。
+ *
+ * （审查轮本身没跑完——取消、崩溃、适配器报失败——则**不产生本记录**：那不是一次
+ * 得不出结论的审查，而是一次没发生的审查，不该覆盖掉此前已有的结论。）
+ */
+export type ReviewVerdict = (typeof REVIEW_VERDICTS)[number];
+
+/** ReviewVerdict 运行时守卫。 */
+export const isReviewVerdict = createLiteralGuard(REVIEW_VERDICTS);
+
+/**
+ * 设计文档 §3.1 / §6.3 —— Reviewer 对某条 Run 的一次审查结论（T7.2）。
+ *
+ * **它不是一条 Run。** Run 的语义是"任务的一次实际尝试"（§6.4），审查不是尝试；
+ * 更要紧的是 `completeTask` 的 done 门槛只认"本任务的一条 endReason=completed 的 Run"
+ * ——若审查也铸一条 Run，审查者就能替执行者把任务盖成 done。故审查结论写回**被审的
+ * 那条 Run**，Run 的 attempt 序号继续只数 Worker 的尝试。
+ *
+ * **它也不改变任务状态。** `acceptTask` 在状态机层就只认 actor="user"（§6.3 done ≠
+ * accepted），Reviewer 的结论只是给用户的参考材料，通过与否都要用户自己点。
+ */
+export interface ReviewRecord {
+  /** 结论产出时间（epoch 毫秒）。 */
+  readonly reviewedAt: EpochMillis;
+  /** 执行审查的 Agent Profile（审查者通常刻意不同于执行者，故必须留档）。 */
+  readonly profileId: ProfileId;
+  /** 结论。 */
+  readonly verdict: ReviewVerdict;
+  /** 结论理由（Reviewer 原文，Markdown）。verdict 无法解析时这里存整段答复。 */
+  readonly summary: string;
+  /**
+   * 逐条问题（不通过时给出；通过时通常为空数组）。
+   * 与 summary 分开存是为了让「有哪几处不合格」可以逐条显示与逐条核对，
+   * 而不是让用户从一段散文里自己数。
+   */
+  readonly findings: readonly string[];
+  /**
+   * 审查期间实际跑过的命令 + 退出码。
+   * Reviewer 的 shell 策略是 verify_only（§7），能跑的只有任务合同的 verify_cmd；
+   * 留档是为了让「它到底验没验」可查——一份没跑过任何命令的 pass 与跑过的 pass
+   * 是两种分量的结论。
+   */
+  readonly commands: readonly CommandRecord[];
+}
+
 /**
  * 设计文档 §6.4 —— Run（执行记录）：每次尝试一条。
  * 任务 failed 后重试即产生新 Run（§6.3），attempt 递增。
@@ -145,6 +199,14 @@ export interface Run {
    * 压成缺省就把它和「没开」混为一谈了。
    */
   readonly knowledgeQueries?: readonly KnowledgeQueryRecord[];
+  /**
+   * 设计文档 §3.1 —— Reviewer 对本次尝试的审查结论（T7.2；未审查过时缺省）。
+   *
+   * 只保留**最后一次**审查：同一条 Run 反复审查时后者覆盖前者。历史结论不留档，
+   * 因为一条已结束的 Run 是不变的事实，对同一份不变事实的多次审查里，只有最新
+   * 那次代表当前判断；留一串会让用户去猜"以哪条为准"。
+   */
+  readonly review?: ReviewRecord;
   /** 设计文档 §6.4 —— raw_log_path 原始日志文件路径（保留但不进主界面）。 */
   readonly rawLogPath: string;
 }

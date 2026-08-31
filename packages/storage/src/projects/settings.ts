@@ -12,6 +12,7 @@
  * 并上抛 StorageCorruptJsonError；结构不符抛 {@link ProjectSettingsFileInvalidError}。
  */
 
+import type { ProfileId } from "@ff-pane/shared";
 import { readJson, writeJsonAtomic } from "../fs/index.js";
 import { ProjectSettingsFileInvalidError } from "./errors.js";
 
@@ -30,11 +31,30 @@ export interface ProjectSettings {
    * **缺省 false（默认关闭）**：这是设计明写的默认，不是实现偷懒。
    */
   readonly knowledgeToolEnabled: boolean;
+  /**
+   * 设计文档 §3.1 —— Reviewer 角色的项目级开关（T7.2）。
+   * **缺省 false（默认关闭）**：§3.1 角色表里 Reviewer 一栏写的就是"可选，默认关闭"。
+   */
+  readonly reviewerEnabled: boolean;
+  /**
+   * 设计文档 §3.1 / §10.2 —— Reviewer 绑定的 Profile（`RoleBindings.reviewer`）。
+   *
+   * 与开关**分开存**，且关掉开关不清除绑定：审查是一件用户会反复开开关关的事
+   * （"这个任务重要，让它审一下"），每次重开都要重选一遍审查者是纯粹的摩擦。
+   * 因此"没有 Reviewer"由 `reviewerEnabled: false` 表达，而不是由绑定缺席表达——
+   * 本层也就不需要一个"清除绑定"的通道（换绑定直接覆盖即可）。
+   *
+   * 绑定的 Profile 事后被删除时，本字段会指向一个不存在的 ID。那属于**发起审查时**
+   * 才需要处理的问题（编排层加载 Profile 失败会如实报"Profile 不存在"），不该由
+   * 存储层在每次读取时去校验——存储层不认识 Profile 表。
+   */
+  readonly reviewerProfileId?: ProfileId;
 }
 
-/** 出厂缺省：工具默认关闭。 */
+/** 出厂缺省：两个工具/角色开关均默认关闭，Reviewer 未绑定。 */
 export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
   knowledgeToolEnabled: false,
+  reviewerEnabled: false,
 };
 
 /** 项目级配置存取接口（消费方：会话编排器、项目设置界面）。 */
@@ -71,16 +91,30 @@ async function loadRaw(projectFile: string): Promise<Record<string, unknown>> {
   return { ...(file.project as Record<string, unknown>) };
 }
 
+/** 取一个布尔字段；类型不符按「当它没写」处理（理由见 pickSettings）。 */
+function pickBoolean(raw: Record<string, unknown>, key: string, fallback: boolean): boolean {
+  const value = raw[key];
+  return typeof value === "boolean" ? value : fallback;
+}
+
 /**
  * 从原文解出本层字段。
- * 类型不符的值按「当它没写」处理而不是抛错：这是个布尔开关，手改坏了不该让整个项目打不开，
- * 而缺省是安全的一侧（关闭）。真正会破坏后续消费的结构问题（顶层/version/project）才抛。
+ * 类型不符的值按「当它没写」处理而不是抛错：这些是开关与一个 ID，手改坏了不该让整个
+ * 项目打不开，而缺省都是安全的一侧（关闭 / 未绑定）。真正会破坏后续消费的结构问题
+ * （顶层/version/project）才抛。
  */
 function pickSettings(raw: Record<string, unknown>): ProjectSettings {
-  const enabled = raw["knowledgeToolEnabled"];
+  const reviewerProfileId = raw["reviewerProfileId"];
   return {
-    knowledgeToolEnabled:
-      typeof enabled === "boolean" ? enabled : DEFAULT_PROJECT_SETTINGS.knowledgeToolEnabled,
+    knowledgeToolEnabled: pickBoolean(
+      raw,
+      "knowledgeToolEnabled",
+      DEFAULT_PROJECT_SETTINGS.knowledgeToolEnabled,
+    ),
+    reviewerEnabled: pickBoolean(raw, "reviewerEnabled", DEFAULT_PROJECT_SETTINGS.reviewerEnabled),
+    ...(typeof reviewerProfileId === "string" && reviewerProfileId.length > 0
+      ? { reviewerProfileId: reviewerProfileId as ProfileId }
+      : {}),
   };
 }
 

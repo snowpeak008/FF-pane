@@ -490,6 +490,18 @@
       "hitCount": "{{n}} hit(s)",
       "duration": "{{ms}} ms",
       "failed": "Call failed: {{reason}}"
+    },
+    "review": {
+      "title": "Review verdict",
+      "by": "Reviewer profile: {{profile}}",
+      "commands": "Commands run during review",
+      "noCommands": "No commands were run during this review (verdict based on materials only).",
+      "notAcceptance": "A review verdict is not acceptance — whether to accept the task is always your call.",
+      "verdict": {
+        "pass": "Passed",
+        "fail": "Failed",
+        "inconclusive": "No verdict"
+      }
     }
   },
   "session": {
@@ -605,7 +617,34 @@
     "dispatch": "Dispatch",
     "retry": "Retry",
     "noWorkerProfile": "No Worker profile configured. Add one in Settings.",
-    "dispatchError": "Dispatch failed"
+    "dispatchError": "Dispatch failed",
+    "review": {
+      "start": "Review",
+      "again": "Review again",
+      "noRun": "This task has no run to review yet",
+      "startError": "Failed to start review",
+      "failNote": "Review did not pass. This is advisory only — accepting is still your call.",
+      "verdict": {
+        "pass": "Review passed",
+        "fail": "Review failed",
+        "inconclusive": "No verdict"
+      },
+      "verdictHint": {
+        "pass": "The reviewer considers all acceptance criteria met. A verdict is not acceptance — you still confirm.",
+        "fail": "The reviewer found unmet acceptance criteria. See the runs page for details.",
+        "inconclusive": "The reviewer gave no parseable verdict. See the runs page for the raw answer."
+      }
+    },
+    "reviewer": {
+      "label": "Enable reviewer",
+      "bindingLabel": "Reviewer profile",
+      "hint": "After a worker finishes, you can review its output against the acceptance criteria. The reviewer is read-only and may only run the task's verify command.",
+      "offHint": "Optional role, off by default. When on, done tasks get a Review button.",
+      "pick": "Pick a profile",
+      "noProfiles": "No profiles yet — create one in settings first.",
+      "needBinding": "Pick a reviewer profile first.",
+      "saveError": "Failed to save reviewer settings"
+    }
   },
   "task": {
     "status": {
