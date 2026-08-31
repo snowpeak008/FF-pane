@@ -6,7 +6,13 @@
 
 import { createLiteralGuard } from "./common.js";
 
-/** 设计文档 §9.1 —— 界面语言，首发两种；架构上支持随时增加语言包。 */
+/**
+ * 设计文档 §9.1 —— 界面语言，首发两种；架构上支持随时增加语言包。
+ *
+ * **这是界面语言的唯一注册表**：renderer 的 i18n/resolve.ts 直接复用它，
+ * 不再自带一份清单（两份同形清单曾并存，只有一份被运行时消费）。
+ * 新增语言 = 新增 locales/<tag>.json + 在 i18n/resources.ts 登记 + 在此扩充。
+ */
 export const UI_LANGUAGES = ["zh-CN", "en-US"] as const;
 
 /** 设计文档 §9.1 —— 界面语言代码。 */
@@ -15,8 +21,17 @@ export type UiLanguage = (typeof UI_LANGUAGES)[number];
 /** UiLanguage 运行时守卫。 */
 export const isUiLanguage = createLiteralGuard(UI_LANGUAGES);
 
-/** 设计文档 §9.1 —— 无匹配语言包时的回退语言。 */
-export const FALLBACK_UI_LANGUAGE: UiLanguage = "en-US";
+/**
+ * 设计文档 §9.1 —— 无匹配语言包时的回退语言（**解析回退**）。
+ *
+ * 2026-09-01 经用户确认由 en-US 改为 zh-CN：产品以中文为默认语言，
+ * 用户没选过、且系统语言又匹配不上任何语言包时应落中文。
+ * 系统语言检测本身保留——本常量只是级联的最后一环。
+ *
+ * 与 i18next 的 fallbackLng（某语言包缺 key 时用哪本顶上）是两个不同问题，
+ * 后者在 renderer 的 i18n/index.ts 单独声明。
+ */
+export const FALLBACK_UI_LANGUAGE: UiLanguage = "zh-CN";
 
 /**
  * 设计文档 §9.1 —— 界面语言设置项。

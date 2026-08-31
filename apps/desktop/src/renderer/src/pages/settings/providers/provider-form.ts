@@ -1,12 +1,12 @@
 /**
- * Provider 编辑表单的纯逻辑（W3.2a）：类型 → 字段可见性、表单态 → 线上草稿。
- * 无 React / DOM 依赖，可直接单测（见 tests/provider-form.test.ts）。
+ * Provider 编辑表单的纯逻辑（W3.2a）：类型 → 字段可见性、既有 Provider → 表单态、
+ * 表单态 → 线上草稿。无 React / DOM 依赖，可直接单测（见 tests/provider-form.test.ts）。
  *
  * 校验的权威在 storage 层 validateProviderDraft（create/update 时强制执行）；
  * 本层只做"构造草稿 + 决定字段显隐"，不复制后端校验规则（避免两处漂移）。
  */
 
-import type { ModelKind, ProviderType } from "@ff-pane/shared";
+import type { ModelKind, Provider, ProviderType } from "@ff-pane/shared";
 import type { ProviderDraftWire } from "../../../../../shared-ipc/contracts";
 
 /** 类型下拉的展示顺序（cli_login 无需网络配置，custom 高阶，排后）。 */
@@ -81,6 +81,31 @@ export function emptyProviderForm(): ProviderFormState {
     timeoutS: "",
     requestTemplate: "",
     enabled: true,
+  };
+}
+
+/**
+ * 既有 Provider → 编辑表单态（读入侧）。与 buildProviderDraft（写出侧）成对，
+ * 两者必须闭合：读进来的可选字段若在此漏掉，用户编辑一次就会被 providers:update
+ * 的整表单替换语义静默抹掉（proxy 曾经就是这样丢值的）。
+ * apiKeyRef 刻意不进表单：密钥只以尾 4 位占位显示，明文永不回渲染层（§4.3）。
+ */
+export function formFromProvider(provider: Provider): ProviderFormState {
+  return {
+    name: provider.name,
+    type: provider.type,
+    baseUrl: provider.baseUrl ?? "",
+    models: provider.models.map((model) => ({
+      id: model.id,
+      displayName: model.displayName,
+      kind: model.kind,
+    })),
+    defaultModel: provider.defaultModel ?? "",
+    embeddingModel: provider.embeddingModel ?? "",
+    proxy: provider.proxy ?? "",
+    timeoutS: provider.timeoutS !== undefined ? String(provider.timeoutS) : "",
+    requestTemplate: provider.requestTemplate ?? "",
+    enabled: provider.enabled,
   };
 }
 

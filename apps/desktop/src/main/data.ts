@@ -318,8 +318,10 @@ export async function createDataHandlers(
       if (!outlet.ok) {
         return outlet.failure;
       }
-      const apiKey = await resolveProbeKey(request);
+      // 取密钥也在 try 内：revealSecret 会抛（SecretNotFoundError / 后端不可用），
+      // 抛在 try 之外则已构造的 ProxyAgent 不会 close。
       try {
+        const apiKey = await resolveProbeKey(request);
         return await testConnection({
           provider: request.provider,
           ...(apiKey !== undefined ? { apiKey } : {}),
@@ -336,8 +338,9 @@ export async function createDataHandlers(
       if (!outlet.ok) {
         return outlet.failure;
       }
-      const apiKey = await resolveProbeKey(request);
+      // 同 test-connection：取密钥的抛出路径也必须经过 finally 的 close。
       try {
+        const apiKey = await resolveProbeKey(request);
         return await fetchModels({
           provider: request.provider,
           ...(apiKey !== undefined ? { apiKey } : {}),

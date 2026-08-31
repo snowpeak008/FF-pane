@@ -1,13 +1,23 @@
 /**
  * UI 语言解析（纯逻辑，无浏览器/Electron 依赖，可直接单测）。
- * 解析顺序：用户已保存的选择 → 系统语言 → en-US 回退（项目设计计划 §9.1）。
+ * 解析顺序：用户已保存的选择 → 系统语言 → zh-CN 回退（项目设计计划 §9.1）。
  */
 
-export const SUPPORTED_LANGUAGES = ["zh-CN", "en-US"] as const;
+import { FALLBACK_UI_LANGUAGE, UI_LANGUAGES, type UiLanguage } from "@ff-pane/shared";
 
-export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
+/**
+ * 支持的界面语言。刻意复用领域层的 UI_LANGUAGES 而非再抄一份：
+ * 两份同形清单并存时，只有被运行时消费的那份会被维护，另一份静默漂移。
+ */
+export const SUPPORTED_LANGUAGES = UI_LANGUAGES;
 
-export const FALLBACK_LANGUAGE: SupportedLanguage = "en-US";
+export type SupportedLanguage = UiLanguage;
+
+/**
+ * **解析回退**：用户没选过、系统语言又匹配不上任何语言包时用哪种界面语言。
+ * 值与理由（2026-09-01 改为 zh-CN）见领域层 FALLBACK_UI_LANGUAGE。
+ */
+export const FALLBACK_LANGUAGE: SupportedLanguage = FALLBACK_UI_LANGUAGE;
 
 export function isSupportedLanguage(value: string): value is SupportedLanguage {
   return (SUPPORTED_LANGUAGES as readonly string[]).includes(value);
@@ -17,7 +27,7 @@ export function isSupportedLanguage(value: string): value is SupportedLanguage {
  * 按优先级解析初始 UI 语言：
  * 1. saved —— 用户已保存的选择（非法值视同未保存）
  * 2. systemLocale —— 主进程 app.getLocale() 的系统语言（支持宽松匹配，如 zh / zh-TW → zh-CN）
- * 3. FALLBACK_LANGUAGE（en-US）
+ * 3. FALLBACK_LANGUAGE（zh-CN）
  */
 export function resolveUiLanguage(saved: string | null, systemLocale: string): SupportedLanguage {
   return matchSupported(saved) ?? matchSupported(systemLocale) ?? FALLBACK_LANGUAGE;

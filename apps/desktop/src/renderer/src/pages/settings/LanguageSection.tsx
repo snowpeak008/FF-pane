@@ -6,6 +6,7 @@ import { InlineLoading } from "../../components/states/LoadingState";
 import { inputVariants } from "../../components/ui/input.variants";
 import { changeUiLanguage } from "../../i18n";
 import {
+  FALLBACK_LANGUAGE,
   isSupportedLanguage,
   SUPPORTED_LANGUAGES,
   type SupportedLanguage,
@@ -27,7 +28,11 @@ export function LanguageSection(): ReactElement {
   const { state, refetch } = useInvokeQuery("config:get");
   const config = queryData(state);
 
-  const currentUi: SupportedLanguage = isSupportedLanguage(i18n.language) ? i18n.language : "en-US";
+  // i18n.language 恒为受支持值（initI18n 只喂 resolveUiLanguage 的结果）；
+  // 这条兜底用注册表的回退语言，不再各处硬编码具体语言标签。
+  const currentUi: SupportedLanguage = isSupportedLanguage(i18n.language)
+    ? i18n.language
+    : FALLBACK_LANGUAGE;
 
   const onOutputChange = async (language: AiOutputLanguage): Promise<void> => {
     const settled = await invokeQuery("config:update", { aiOutputLanguage: language });

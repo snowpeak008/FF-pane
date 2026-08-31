@@ -205,9 +205,11 @@ describe("常量数组 ↔ 设计文档定值对照", () => {
     expect(KNOWLEDGE_ORIGIN_KINDS).toEqual(["file_import", "session_capture", "manual"]);
   });
 
-  it("§9.1 界面语言首发 zh-CN / en-US，回退 en-US，设置可跟随系统", () => {
+  it("§9.1 界面语言首发 zh-CN / en-US，回退 zh-CN，设置可跟随系统", () => {
     expect(UI_LANGUAGES).toEqual(["zh-CN", "en-US"]);
     expect(UI_LANGUAGES).toContain(FALLBACK_UI_LANGUAGE);
+    // 2026-09-01 经用户确认：中文为默认语言，解析级联的最后一环落 zh-CN
+    expect(FALLBACK_UI_LANGUAGE).toBe("zh-CN");
     expect(UI_LANGUAGE_SETTINGS).toEqual(["system", "zh-CN", "en-US"]);
   });
 

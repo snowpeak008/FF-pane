@@ -4,7 +4,7 @@ import { SUPPORTED_LANGUAGES } from "../src/renderer/src/i18n/resolve";
 
 /**
  * 语言包结构一致性：各语言包的 key 集合必须完全一致且叶子值非空，
- * 防止「缺失 key 静默回退 en-US」在日常开发中越积越多。
+ * 防止「缺失 key 静默回退基准语言（i18n/index.ts 的 fallbackLng = zh-CN）」在日常开发中越积越多。
  */
 function loadLocale(tag: string): Record<string, unknown> {
   const url = new URL(`../../../locales/${tag}.json`, import.meta.url);

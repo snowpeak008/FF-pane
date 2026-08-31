@@ -1,10 +1,11 @@
 /**
  * 语言包装配：仓库根 locales/*.json 经 vite 静态导入打进 renderer bundle。
- * 新增语言 = 新增 locales/<tag>.json + 在此登记 + 扩充 resolve.ts 的 SUPPORTED_LANGUAGES。
+ * 新增语言 = 新增 locales/<tag>.json + 在此登记（resources 与 ENDONYMS 两处，缺一即编译失败）
+ * + 扩充领域层注册表 UI_LANGUAGES（@ff-pane/shared，resolve.ts 的 SUPPORTED_LANGUAGES 即它）。
  */
 import enUS from "../../../../../../locales/en-US.json";
 import zhCN from "../../../../../../locales/zh-CN.json";
-import type { SupportedLanguage } from "./resolve";
+import { SUPPORTED_LANGUAGES, type SupportedLanguage } from "./resolve";
 
 /** i18next resources：每种语言一个默认命名空间（translation）。 */
 export const resources = {
@@ -12,11 +13,17 @@ export const resources = {
   "en-US": { translation: enUS },
 } as const satisfies Record<SupportedLanguage, { translation: unknown }>;
 
-/** 语言切换控件的选项：label 取各语言包内的自称（endonym），不随当前 UI 语言翻译。 */
+/**
+ * 各语言的自称（endonym），取自语言包内部，不随当前 UI 语言翻译。
+ * satisfies 是这里的守卫：新增语言忘了登记自称，本行即编译失败。
+ */
+const ENDONYMS = {
+  "zh-CN": zhCN.settings.language.displayName,
+  "en-US": enUS.settings.language.displayName,
+} as const satisfies Record<SupportedLanguage, string>;
+
+/** 语言切换控件的选项：顺序随注册表，label 用自称。 */
 export const LANGUAGE_OPTIONS: readonly {
   readonly code: SupportedLanguage;
   readonly label: string;
-}[] = [
-  { code: "zh-CN", label: zhCN.settings.language.displayName },
-  { code: "en-US", label: enUS.settings.language.displayName },
-];
+}[] = SUPPORTED_LANGUAGES.map((code) => ({ code, label: ENDONYMS[code] }));

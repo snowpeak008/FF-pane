@@ -18,6 +18,7 @@ import { cn } from "../../../lib/cn";
 import {
   buildProviderDraft,
   emptyProviderForm,
+  formFromProvider,
   type ModelRow,
   PROVIDER_TYPE_ORDER,
   type ProviderFormState,
@@ -29,25 +30,6 @@ import {
 } from "./provider-form";
 
 const MODEL_KINDS: readonly ModelKind[] = ["chat", "embedding"];
-
-function formFromProvider(provider: Provider): ProviderFormState {
-  return {
-    name: provider.name,
-    type: provider.type,
-    baseUrl: provider.baseUrl ?? "",
-    models: provider.models.map((model) => ({
-      id: model.id,
-      displayName: model.displayName,
-      kind: model.kind,
-    })),
-    defaultModel: provider.defaultModel ?? "",
-    embeddingModel: provider.embeddingModel ?? "",
-    proxy: provider.proxy ?? "",
-    timeoutS: provider.timeoutS !== undefined ? String(provider.timeoutS) : "",
-    requestTemplate: provider.requestTemplate ?? "",
-    enabled: provider.enabled,
-  };
-}
 
 function buildProbeInput(form: ProviderFormState): ProbeProviderInput {
   const baseUrl = form.baseUrl.trim();
