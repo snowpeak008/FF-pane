@@ -24,6 +24,7 @@ import {
   supportsProbe,
   usesApiKey,
   usesBaseUrl,
+  usesProxy,
   usesRequestTemplate,
 } from "./provider-form";
 
@@ -41,6 +42,7 @@ function formFromProvider(provider: Provider): ProviderFormState {
     })),
     defaultModel: provider.defaultModel ?? "",
     embeddingModel: provider.embeddingModel ?? "",
+    proxy: provider.proxy ?? "",
     timeoutS: provider.timeoutS !== undefined ? String(provider.timeoutS) : "",
     requestTemplate: provider.requestTemplate ?? "",
     enabled: provider.enabled,
@@ -149,6 +151,12 @@ export function ProviderEditorDialog({
     return ref !== undefined ? { apiKeyRef: ref } : {};
   }, [apiKey, provider]);
 
+  /** 草稿态的代理出口：与保存时同一套裁剪 / 类型门槛，先测后存两端一致。 */
+  const resolveProxyArg = useCallback((): { readonly proxy?: string } => {
+    const proxy = usesProxy(form.type) ? form.proxy.trim() : "";
+    return proxy.length > 0 ? { proxy } : {};
+  }, [form.proxy, form.type]);
+
   const testConnection = useCallback(async () => {
     setTesting(true);
     setTestResult(undefined);
@@ -156,6 +164,7 @@ export function ProviderEditorDialog({
     const settled = await invokeQuery("providers:test-connection", {
       provider: buildProbeInput(form),
       ...resolveKeyArgs(),
+      ...resolveProxyArg(),
       ...(model.length > 0 ? { model } : {}),
     });
     setTesting(false);
@@ -164,7 +173,7 @@ export function ProviderEditorDialog({
       return;
     }
     setTestResult(settled.data);
-  }, [form, resolveKeyArgs]);
+  }, [form, resolveKeyArgs, resolveProxyArg]);
 
   const fetchModels = useCallback(async () => {
     setFetchingModels(true);
@@ -172,6 +181,7 @@ export function ProviderEditorDialog({
     const settled = await invokeQuery("providers:fetch-models", {
       provider: buildProbeInput(form),
       ...resolveKeyArgs(),
+      ...resolveProxyArg(),
     });
     setFetchingModels(false);
     if (settled.status === "error") {
@@ -189,7 +199,7 @@ export function ProviderEditorDialog({
         kind: m.kind,
       })),
     });
-  }, [form, patch, resolveKeyArgs]);
+  }, [form, patch, resolveKeyArgs, resolveProxyArg]);
 
   const save = useCallback(async () => {
     setSaving(true);
@@ -269,6 +279,22 @@ export function ProviderEditorDialog({
                 placeholder="https://api.example.com/v1"
                 className="font-mono text-xs"
                 onChange={(e) => patch({ baseUrl: e.target.value })}
+              />
+            </Field>
+          ) : null}
+
+          {usesProxy(form.type) ? (
+            <Field
+              htmlFor="provider-proxy"
+              label={t("settings.providers.field.proxy")}
+              hint={t("settings.providers.field.proxyHint")}
+            >
+              <Input
+                id="provider-proxy"
+                value={form.proxy}
+                placeholder="http://127.0.0.1:7890"
+                className="font-mono text-xs"
+                onChange={(e) => patch({ proxy: e.target.value })}
               />
             </Field>
           ) : null}

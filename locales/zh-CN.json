@@ -329,6 +329,8 @@
         "type": "类型",
         "baseUrl": "API 地址",
         "baseUrlHint": "需带版本段，如 https://api.deepseek.com/v1",
+        "proxy": "代理",
+        "proxyHint": "留空即直连；格式 http://host:port（支持 https://，暂不支持 socks）。仅作用于连接测试与拉取模型。",
         "apiKey": "API 密钥",
         "apiKeyHint": "仅加密存入系统密钥库，界面只显示尾 4 位。",
         "apiKeyKept": "保持不变（尾 {{tail}}）；键入以更换",

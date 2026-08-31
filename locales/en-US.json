@@ -329,6 +329,8 @@
         "type": "Type",
         "baseUrl": "API base URL",
         "baseUrlHint": "Include the version segment, e.g. https://api.deepseek.com/v1",
+        "proxy": "Proxy",
+        "proxyHint": "Leave empty to connect directly; format http://host:port (https:// works, socks is not supported). Applies to connection tests and model fetching only.",
         "apiKey": "API key",
         "apiKeyHint": "Stored encrypted in the OS keychain; only the last 4 chars are shown.",
         "apiKeyKept": "Kept (ends {{tail}}); type to replace",

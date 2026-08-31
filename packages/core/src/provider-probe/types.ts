@@ -3,7 +3,12 @@
  * 本模块是纯网络探测逻辑：明文 API key 由调用方（主进程，经 W1.5b revealSecret）
  * 取出后作为参数传入、用完即弃——不依赖 Electron / secrets 模块，不做任何密钥存取。
  * 所有失败均以判别联合返回（不抛业务异常），供 IPC 层直接序列化转发。
+ *
+ * 下方 reference 指令：ProbeFetch 用到 Node 运行时全局（RequestInit / Response），
+ * 而本包 tsconfig 未开 "types"，需显式引入 @types/node 的全局声明（同 http.ts）。
  */
+
+/// <reference types="node" />
 
 import type { ModelId, ProviderModel, ProviderType } from "@ff-pane/shared";
 
@@ -54,6 +59,16 @@ export interface ProbeProviderInput {
   readonly defaultModel?: ModelId;
 }
 
+/**
+ * 探测请求实际使用的 fetch，缺省为运行时全局 fetch。
+ *
+ * 存在的理由是**网络出口由调用方决定**：Provider 的代理配置（Provider.proxy）
+ * 要经 undici ProxyAgent 生效，而 undici 是 Electron 主进程侧的事——本包不认识
+ * Electron、也不认识 undici（模块头的纪律），故只留这一个函数接缝，代理的构造与
+ * 校验落在主进程（apps/desktop/src/main/provider-proxy.ts）。
+ */
+export type ProbeFetch = (url: string, init: RequestInit) => Promise<Response>;
+
 /** fetchModels 入参。 */
 export interface FetchModelsParams {
   readonly provider: ProbeProviderInput;
@@ -62,6 +77,8 @@ export interface FetchModelsParams {
    * 请求体与任何返回值。openai_compatible 允许缺省（如本地 Ollama 无鉴权）。
    */
   readonly apiKey?: string;
+  /** 自定义网络出口（如经代理）。缺省走全局 fetch，与不注入时逐字节同行为。 */
+  readonly fetchImpl?: ProbeFetch;
 }
 
 /** testConnection 入参：在 fetchModels 基础上允许显式指定探测模型。 */

@@ -390,6 +390,35 @@ describe("testConnection · anthropic", () => {
   });
 });
 
+describe("网络出口注入（ProbeFetch）", () => {
+  it("注入 fetchImpl 时全部探测请求都走它；不注入即全局 fetch", async () => {
+    const mock = await startMockServer((_req, res) => {
+      sendJson(res, 200, { data: [{ id: "probe-model" }] });
+    });
+    // 出口的实现由调用方决定（主进程给的是带 ProxyAgent 的 fetch），本包只认这个函数。
+    const calls: string[] = [];
+    const result = await fetchModels({
+      provider: openAiProvider(`${mock.origin}/v1`),
+      apiKey: API_KEY,
+      fetchImpl: (url, init) => {
+        calls.push(url);
+        return fetch(url, init);
+      },
+    });
+    expectSuccess(result);
+    expect(calls).toEqual([`${mock.origin}/v1/models`]);
+    expect(mock.requests).toHaveLength(1);
+
+    const direct = await fetchModels({
+      provider: openAiProvider(`${mock.origin}/v1`),
+      apiKey: API_KEY,
+    });
+    expectSuccess(direct);
+    expect(calls).toHaveLength(1);
+    expect(mock.requests).toHaveLength(2);
+  });
+});
+
 describe("testConnection · 不支持的类型与非法配置", () => {
   it("cli_login / custom 返回 stage=unsupported", async () => {
     const cliResult = await testConnection({ provider: { type: "cli_login" } });

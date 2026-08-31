@@ -12,7 +12,7 @@
 
 import { PROVIDER_DEFAULT_TIMEOUT_S } from "@ff-pane/shared";
 import { describeCauseChain, truncateRawText } from "./raw-error.js";
-import type { ProbeFailure, ProbeProviderInput } from "./types.js";
+import type { ProbeFailure, ProbeFetch, ProbeProviderInput } from "./types.js";
 import { normalizeBaseUrl } from "./url.js";
 
 /** anthropic 必需的 API 版本头（官方要求的固定日期版本）。 */
@@ -38,6 +38,8 @@ export interface TimedFetchInit {
   readonly headers: Readonly<Record<string, string>>;
   readonly body?: string;
   readonly timeoutS: number;
+  /** 自定义网络出口；缺省用全局 fetch。 */
+  readonly fetchImpl?: ProbeFetch | undefined;
 }
 
 /** 判定错误（沿 cause 链）是否为超时/中止。本模块唯一的 abort 源是超时信号。 */
@@ -57,6 +59,8 @@ function isTimeoutLike(error: unknown): boolean {
  * 发起一次带超时的请求并读完响应体。
  * 超时用 AbortSignal.timeout，同一信号覆盖连接与响应体读取全程；
  * 网络层失败的 rawError 取 cause 链原始 message（describeCauseChain）。
+ * 出口可由 init.fetchImpl 替换（主进程注入代理，见 types.ts ProbeFetch），
+ * 缺省即全局 fetch——不注入时与注入前逐字节同行为。
  */
 export async function timedFetch(url: string, init: TimedFetchInit): Promise<HttpAttempt> {
   const timeoutMs = Math.max(1, Math.round(init.timeoutS * 1000));
@@ -69,8 +73,9 @@ export async function timedFetch(url: string, init: TimedFetchInit): Promise<Htt
     requestInit.body = init.body;
   }
   const startedAt = performance.now();
+  const send = init.fetchImpl ?? fetch;
   try {
-    const response = await fetch(url, requestInit);
+    const response = await send(url, requestInit);
     const bodyText = await response.text();
     return {
       kind: "response",

@@ -69,6 +69,7 @@ import { type BrowserWindow, dialog, type OpenDialogOptions } from "electron";
 import type { InvokeHandlers } from "../shared-ipc/server";
 import { resolveGlobalRoot } from "./data-root";
 import { type ProjectSummarySources, summarizeProjects } from "./project-summary";
+import { resolveProbeOutlet } from "./provider-proxy";
 import { createSafeStorageBackend, createSecretStore, resolveSecretsFile } from "./secrets";
 
 /** 本数据层负责的 invoke 通道集合。 */
@@ -312,20 +313,39 @@ export async function createDataHandlers(
     },
 
     "providers:test-connection": async (request) => {
+      // 代理先解析：地址非法时一次网络请求都不该发出去（走 invalid-config 通道）。
+      const outlet = resolveProbeOutlet(request.proxy);
+      if (!outlet.ok) {
+        return outlet.failure;
+      }
       const apiKey = await resolveProbeKey(request);
-      return testConnection({
-        provider: request.provider,
-        ...(apiKey !== undefined ? { apiKey } : {}),
-        ...(request.model !== undefined ? { model: request.model } : {}),
-      });
+      try {
+        return await testConnection({
+          provider: request.provider,
+          ...(apiKey !== undefined ? { apiKey } : {}),
+          ...(request.model !== undefined ? { model: request.model } : {}),
+          ...(outlet.fetchImpl !== undefined ? { fetchImpl: outlet.fetchImpl } : {}),
+        });
+      } finally {
+        await outlet.dispose?.();
+      }
     },
 
     "providers:fetch-models": async (request) => {
+      const outlet = resolveProbeOutlet(request.proxy);
+      if (!outlet.ok) {
+        return outlet.failure;
+      }
       const apiKey = await resolveProbeKey(request);
-      return fetchModels({
-        provider: request.provider,
-        ...(apiKey !== undefined ? { apiKey } : {}),
-      });
+      try {
+        return await fetchModels({
+          provider: request.provider,
+          ...(apiKey !== undefined ? { apiKey } : {}),
+          ...(outlet.fetchImpl !== undefined ? { fetchImpl: outlet.fetchImpl } : {}),
+        });
+      } finally {
+        await outlet.dispose?.();
+      }
     },
 
     "secrets:masked-tail": async (request) => ({ tail: await secrets.maskedTail(request.ref) }),

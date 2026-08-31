@@ -14,7 +14,6 @@
  */
 
 import { readFileSync } from "node:fs";
-import process from "node:process";
 import { PassThrough, Writable } from "node:stream";
 import type { NativeSessionId } from "@ff-pane/shared";
 import { describe, expect, it } from "vitest";
@@ -348,22 +347,16 @@ describe("启动参数与进程形态", () => {
     expect(CLAUDE_CODE_HIDDEN_ARGS).toStrictEqual(["--permission-prompt-tool", "--max-turns"]);
   });
 
-  it.runIf(process.platform === "win32")(
-    "Windows 下显式给出归一化基底环境（PATH 键名大小写陷阱，见 adapter.ts windowsBaseEnv）",
-    async () => {
-      const { harness } = await replay("01-basic-write-bash.jsonl");
-      const baseEnv = harness.spec.baseEnv;
-      // 真实键名是 "Path"，拷进普通对象后 env["PATH"] 会是 undefined，
-      // 进程层就扫不到 PATH。这里必须留下大写键，且不得出现大小写重复键。
-      expect(baseEnv?.["PATH"]).toBe(process.env["PATH"]);
-      expect(Object.keys(baseEnv ?? {}).filter((name) => /^path$/i.test(name))).toStrictEqual([
-        "PATH",
-      ]);
-      expect(Object.keys(baseEnv ?? {}).filter((name) => /^pathext$/i.test(name))).toStrictEqual([
-        "PATHEXT",
-      ]);
-    },
-  );
+  it("不钉基底环境：PATH 键名大小写归进程层兜底，本适配器与其余四家同规格", async () => {
+    const { harness } = await replay("01-basic-write-bash.jsonl");
+    // 曾有过一个 windowsBaseEnv()：把 PATH/PATHEXT 归一为大写键再交给进程层，绕开
+    // 「{...process.env} 丢失魔法访问 → env["PATH"] 为 undefined → 裸命令名误判
+    // ENOENT」。fcc6ff7 在 windows-command.ts 做了根因修复（getEnvCaseInsensitive），
+    // 该绕过随之成为冗余并已删除。断言 undefined 是为了钉住这个结论：谁再把基底钉死
+    // 在本适配器里，就得先解释为什么只有 claude-code 需要特殊待遇。
+    // 大小写取值本身的回归由 process.test.ts 的「PATH/PATHEXT 大小写不敏感取值」守。
+    expect(harness.spec.baseEnv).toBeUndefined();
+  });
 
   it("装配期参数非法即抛（maxTurns / maxBudgetUsd）", () => {
     expect(() => createClaudeCodeAdapter({ maxTurns: 0 })).toThrow(RangeError);

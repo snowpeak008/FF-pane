@@ -27,6 +27,15 @@ export function usesApiKey(type: ProviderType): boolean {
   return type === "openai_compatible" || type === "anthropic";
 }
 
+/**
+ * 该类型是否谈得上代理出口。与 usesBaseUrl 同域且刻意共用判定：代理是"这条 HTTP
+ * 出口怎么走"的问题，没有 baseUrl 的 cli_login 由 CLI 自管端点与网络，
+ * 其代理走用户 shell 的环境变量，工作台不代管。
+ */
+export function usesProxy(type: ProviderType): boolean {
+  return usesBaseUrl(type);
+}
+
 /** 该类型是否需要 requestTemplate（仅 custom）。 */
 export function usesRequestTemplate(type: ProviderType): boolean {
   return type === "custom";
@@ -52,6 +61,8 @@ export interface ProviderFormState {
   readonly models: readonly ModelRow[];
   readonly defaultModel: string;
   readonly embeddingModel: string;
+  /** 代理地址（§4.1 proxy），空串即直连。 */
+  readonly proxy: string;
   readonly timeoutS: string;
   readonly requestTemplate: string;
   readonly enabled: boolean;
@@ -66,6 +77,7 @@ export function emptyProviderForm(): ProviderFormState {
     models: [],
     defaultModel: "",
     embeddingModel: "",
+    proxy: "",
     timeoutS: "",
     requestTemplate: "",
     enabled: true,
@@ -94,6 +106,7 @@ export function buildProviderDraft(form: ProviderFormState): ProviderDraftWire {
   const baseUrl = form.baseUrl.trim();
   const defaultModel = form.defaultModel.trim();
   const embeddingModel = form.embeddingModel.trim();
+  const proxy = form.proxy.trim();
   const timeoutRaw = form.timeoutS.trim();
   const timeoutS = timeoutRaw.length > 0 ? Number(timeoutRaw) : undefined;
   const requestTemplate = form.requestTemplate.trim();
@@ -106,6 +119,7 @@ export function buildProviderDraft(form: ProviderFormState): ProviderDraftWire {
     ...(usesBaseUrl(form.type) && baseUrl.length > 0 ? { baseUrl } : {}),
     ...(defaultModel.length > 0 && modelIds.has(defaultModel) ? { defaultModel } : {}),
     ...(embeddingModel.length > 0 && modelIds.has(embeddingModel) ? { embeddingModel } : {}),
+    ...(usesProxy(form.type) && proxy.length > 0 ? { proxy } : {}),
     ...(timeoutS !== undefined && Number.isFinite(timeoutS) ? { timeoutS } : {}),
     ...(usesRequestTemplate(form.type) && requestTemplate.length > 0 ? { requestTemplate } : {}),
   };

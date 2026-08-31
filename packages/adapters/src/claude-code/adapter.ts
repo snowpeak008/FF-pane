@@ -120,38 +120,6 @@ function requirePositiveNumber(name: string, value: number | undefined): void {
   }
 }
 
-/**
- * Windows 基底环境：把 PATH / PATHEXT 归一为大写键名。
- *
- * 为什么需要（本机 2026-08-29 实测）：W2.1a 的 buildAgentEnv 以 `{...process.env}`
- * 拷贝基底环境，而 Windows 上这些键的真实名字是 `Path`——Node 只在 process.env
- * 这个代理上提供大小写不敏感访问，一旦拷进普通对象，`env["PATH"]` 就是 undefined，
- * resolveSpawnTarget 于是扫不到 PATH、把 `claude` 判成 ENOENT（真机冒烟第一版
- * 即栽在这里）。显式给出归一后的基底即可绕开；根因修复属 W2.1a 的文件，不在本
- * 工单可改范围。W2.1a 修好后本函数仍然无害（键名与值都与 process.env 一致）。
- */
-function windowsBaseEnv(): NodeJS.ProcessEnv | undefined {
-  if (process.platform !== "win32") {
-    return undefined;
-  }
-  const base: NodeJS.ProcessEnv = {};
-  for (const [name, value] of Object.entries(process.env)) {
-    // 跳过大小写变体，下面按大写写回，避免同名不同壳的重复键进入子进程环境块。
-    if (!/^(?:path|pathext)$/i.test(name)) {
-      base[name] = value;
-    }
-  }
-  const path = process.env["PATH"];
-  const pathExt = process.env["PATHEXT"];
-  if (path !== undefined) {
-    base["PATH"] = path;
-  }
-  if (pathExt !== undefined) {
-    base["PATHEXT"] = pathExt;
-  }
-  return base;
-}
-
 /** Windows 路径大小写不敏感；resume 的 cwd 比对必须按平台规则来。 */
 function sameDirectory(left: string, right: string): boolean {
   const a = resolvePath(left);
@@ -258,7 +226,8 @@ function startClaudeCodeTurn(ctx: AdapterTurnContext, resolved: ResolvedOptions)
     args,
     cwd: ctx.cwd,
     env: ctx.env,
-    baseEnv: windowsBaseEnv(),
+    // 不钉基底环境：进程层缺省即 process.env，PATH/PATHEXT 的大小写由
+    // windows-command.ts 的 getEnvCaseInsensitive 兜住（根因修复 fcc6ff7）。
     timeoutMs: ctx.timeoutMs,
     // 双向协议的前提：stdin 必须是管道（提示词、审批回执、interrupt 都走它）。
     stdin: "pipe",

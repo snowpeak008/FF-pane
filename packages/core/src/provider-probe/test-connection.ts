@@ -77,6 +77,7 @@ async function testOpenAiCompatible(params: TestConnectionParams): Promise<Conne
     method: "GET",
     headers,
     timeoutS: target.timeoutS,
+    fetchImpl: params.fetchImpl,
   });
   if (modelsAttempt.kind !== "response") {
     return attemptFailure(modelsAttempt);
@@ -110,6 +111,7 @@ async function testOpenAiCompatible(params: TestConnectionParams): Promise<Conne
     headers: { ...headers, "content-type": "application/json" },
     body: JSON.stringify({ model, messages: PROBE_MESSAGES, max_tokens: 1, stream: false }),
     timeoutS: target.timeoutS,
+    fetchImpl: params.fetchImpl,
   });
   if (chatAttempt.kind !== "response") {
     return attemptFailure(chatAttempt);
@@ -153,6 +155,7 @@ async function testAnthropic(params: TestConnectionParams): Promise<ConnectionTe
     headers: { "content-type": "application/json", ...anthropicHeaders(params.apiKey) },
     body: JSON.stringify({ model, max_tokens: 1, messages: PROBE_MESSAGES }),
     timeoutS: target.timeoutS,
+    fetchImpl: params.fetchImpl,
   });
   if (attempt.kind !== "response") {
     return attemptFailure(attempt);

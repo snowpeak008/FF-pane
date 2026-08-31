@@ -7,6 +7,7 @@ import {
   supportsProbe,
   usesApiKey,
   usesBaseUrl,
+  usesProxy,
   usesRequestTemplate,
 } from "../src/renderer/src/pages/settings/providers/provider-form";
 
@@ -23,6 +24,13 @@ describe("字段显隐规则", () => {
     expect(usesApiKey("anthropic")).toBe(true);
     expect(usesApiKey("cli_login")).toBe(false);
     expect(usesApiKey("custom")).toBe(false);
+  });
+
+  it("proxy：与 baseUrl 同域——cli_login 的网络由 CLI 自管，不在工作台配代理", () => {
+    expect(usesProxy("openai_compatible")).toBe(true);
+    expect(usesProxy("anthropic")).toBe(true);
+    expect(usesProxy("custom")).toBe(true);
+    expect(usesProxy("cli_login")).toBe(false);
   });
 
   it("requestTemplate 仅 custom；探测仅 openai/anthropic", () => {
@@ -87,6 +95,21 @@ describe("buildProviderDraft", () => {
     expect("timeoutS" in buildProviderDraft(form({ type: "cli_login" }))).toBe(false);
     const draft = buildProviderDraft(form({ type: "cli_login", timeoutS: "60" }));
     expect(draft.timeoutS).toBe(60);
+  });
+
+  it("proxy 空串省略、有值裁剪后带上；cli_login 一律省略", () => {
+    const direct = buildProviderDraft(form({ type: "openai_compatible", baseUrl: "https://x/v1" }));
+    expect("proxy" in direct).toBe(false);
+    const proxied = buildProviderDraft(
+      form({
+        type: "openai_compatible",
+        baseUrl: "https://x/v1",
+        proxy: " http://127.0.0.1:7890 ",
+      }),
+    );
+    expect(proxied.proxy).toBe("http://127.0.0.1:7890");
+    const cli = buildProviderDraft(form({ type: "cli_login", proxy: "http://127.0.0.1:7890" }));
+    expect("proxy" in cli).toBe(false);
   });
 
   it("custom：带 requestTemplate", () => {

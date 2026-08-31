@@ -642,6 +642,12 @@ describe("Windows 命令解析与 .cmd 垫片", () => {
       // buildAgentEnv 的产物（普通对象）同样必须可解析
       const built = buildAgentEnv({ baseEnv: plainEnv }).env;
       expect(findExecutableOnWindowsPath("node", built)?.toLowerCase()).toMatch(/node\.exe$/);
+      // 缺省基底（即 process.env 展开，本机真实键名多为 "Path"）也必须可解析——
+      // 这正是各适配器不钉 baseEnv 时走的那条路（claude-code 的 windowsBaseEnv
+      // 绕过因此成为冗余并于 v0.8.x 清债二单删除）。
+      const defaultBase = buildAgentEnv({}).env;
+      expect(Object.keys(defaultBase).filter((name) => /^path$/i.test(name))).toHaveLength(1);
+      expect(findExecutableOnWindowsPath("node", defaultBase)?.toLowerCase()).toMatch(/node\.exe$/);
     },
   );
 

@@ -246,7 +246,13 @@ export interface RemoveProviderRequest {
   readonly id: ProviderId;
 }
 
-/** providers:test-connection 请求：草稿态即可测（先测后存）。 */
+/**
+ * providers:test-connection 请求：草稿态即可测（先测后存）。
+ *
+ * proxy 与 provider 分列两个字段而不是并进 ProbeProviderInput：core 的探测层不消费
+ * 代理（它不认识 undici），代理是主进程侧的网络出口。若把 proxy 塞进 ProbeProviderInput，
+ * 任何直接调用 core 的人都会以为传了就生效——那是一个静默失效的陷阱。
+ */
 export interface TestProviderConnectionRequest {
   readonly provider: ProbeProviderInput;
   /** 明文密钥（未保存的表单）。 */
@@ -255,6 +261,8 @@ export interface TestProviderConnectionRequest {
   readonly apiKeyRef?: ApiKeyRef;
   /** 显式指定探测模型 ID。 */
   readonly model?: ModelId;
+  /** Provider.proxy（§4.1）：探测请求的代理出口，主进程消费；缺省 / 空串即直连。 */
+  readonly proxy?: string;
 }
 
 /** providers:fetch-models 请求。 */
@@ -262,6 +270,8 @@ export interface FetchProviderModelsRequest {
   readonly provider: ProbeProviderInput;
   readonly apiKey?: string;
   readonly apiKeyRef?: ApiKeyRef;
+  /** 同 TestProviderConnectionRequest.proxy。 */
+  readonly proxy?: string;
 }
 
 /** secrets:masked-tail 请求。 */

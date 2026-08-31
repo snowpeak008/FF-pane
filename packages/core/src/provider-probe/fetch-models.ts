@@ -71,6 +71,7 @@ async function fetchOpenAiCompatibleModels(params: FetchModelsParams): Promise<F
     method: "GET",
     headers: { accept: "application/json", ...bearerHeaders(params.apiKey) },
     timeoutS: target.timeoutS,
+    fetchImpl: params.fetchImpl,
   });
   if (attempt.kind !== "response") {
     return attemptFailure(attempt);
@@ -91,6 +92,7 @@ async function fetchAnthropicModels(params: FetchModelsParams): Promise<FetchMod
     method: "GET",
     headers: { accept: "application/json", ...anthropicHeaders(params.apiKey) },
     timeoutS: target.timeoutS,
+    fetchImpl: params.fetchImpl,
   });
   if (attempt.kind !== "response") {
     return attemptFailure(attempt);
