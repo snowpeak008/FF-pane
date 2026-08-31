@@ -5,12 +5,8 @@ import { toast } from "sonner";
 import { InlineLoading } from "../../components/states/LoadingState";
 import { inputVariants } from "../../components/ui/input.variants";
 import { changeUiLanguage } from "../../i18n";
-import {
-  FALLBACK_LANGUAGE,
-  isSupportedLanguage,
-  SUPPORTED_LANGUAGES,
-  type SupportedLanguage,
-} from "../../i18n/resolve";
+import { FALLBACK_LANGUAGE, isSupportedLanguage, type SupportedLanguage } from "../../i18n/resolve";
+import { LANGUAGE_OPTIONS } from "../../i18n/resources";
 import { invokeQuery, queryData } from "../../ipc/query";
 import { useInvokeQuery } from "../../ipc/useInvokeQuery";
 import { cn } from "../../lib/cn";
@@ -54,9 +50,11 @@ export function LanguageSection(): ReactElement {
           value={currentUi}
           onChange={(e) => changeUiLanguage(e.target.value as SupportedLanguage)}
         >
-          {SUPPORTED_LANGUAGES.map((lang) => (
-            <option key={lang} value={lang}>
-              {t(`settings.languageName.${lang}`)}
+          {/* 标签用各语言的自称（endonym），不经 t()：语言选项的名字不该随当前界面语言变，
+              且这样新增语言就不必再往每一本语言包补一条 languageName（见 i18n/resources.ts）。 */}
+          {LANGUAGE_OPTIONS.map(({ code, label }) => (
+            <option key={code} value={code}>
+              {label}
             </option>
           ))}
         </select>
@@ -78,6 +76,8 @@ export function LanguageSection(): ReactElement {
             value={config.aiOutputLanguage}
             onChange={(e) => void onOutputChange(e.target.value as AiOutputLanguage)}
           >
+            {/* AI 输出语言仍走 t(languageName)：它不绑语言包（可以有没有界面翻译的输出语言），
+                故没有"自称"可取，其名字只能由语言包提供。这是与上面界面语言选择器的刻意分歧。 */}
             {AI_OUTPUT_LANGUAGES.map((lang) => (
               <option key={lang} value={lang}>
                 {t(`settings.languageName.${lang}`)}

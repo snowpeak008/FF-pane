@@ -22,7 +22,11 @@ const ENDONYMS = {
   "en-US": enUS.settings.language.displayName,
 } as const satisfies Record<SupportedLanguage, string>;
 
-/** 语言切换控件的选项：顺序随注册表，label 用自称。 */
+/**
+ * 界面语言选择器（设置页 LanguageSection）的选项：顺序随注册表，label 用自称。
+ * 刻意不经 t()——语言选项的名字不该随当前界面语言变，且这样新增语言
+ * 无需再往每一本语言包补一条 languageName（那是漏改无检查会红的一处）。
+ */
 export const LANGUAGE_OPTIONS: readonly {
   readonly code: SupportedLanguage;
   readonly label: string;
