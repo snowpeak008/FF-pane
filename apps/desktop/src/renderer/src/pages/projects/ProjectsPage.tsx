@@ -24,7 +24,8 @@ import { ProjectCard } from "./ProjectCard";
  */
 export function ProjectsPage(): ReactElement {
   const { t } = useTranslation();
-  const { state, refetch } = useInvokeQuery("projects:list");
+  // projects:summary 而非 projects:list：本页要的是注册表 + 派生信息（T7.4，§11.1）
+  const { state, refetch } = useInvokeQuery("projects:summary");
   const [createOpen, setCreateOpen] = useState(false);
   // 正在移除的项目 id 集合：禁用对应卡片的按钮，防重复触发
   const [removingIds, setRemovingIds] = useState<ReadonlySet<string>>(new Set());
@@ -126,12 +127,12 @@ export function ProjectsPage(): ReactElement {
 
         {state.status === "success" && state.data.length > 0 ? (
           <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">
-            {state.data.map((project) => (
+            {state.data.map((view) => (
               <ProjectCard
-                key={project.id}
-                project={project}
-                active={project.id === activeProjectId}
-                removing={removingIds.has(project.id)}
+                key={view.entry.id}
+                view={view}
+                active={view.entry.id === activeProjectId}
+                removing={removingIds.has(view.entry.id)}
                 onOpen={handleOpen}
                 onRemove={(entry) => void handleRemove(entry)}
               />

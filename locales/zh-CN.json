@@ -242,7 +242,27 @@
     "opened": "已切换到项目「{{name}}」",
     "card": {
       "createdAt": "登记于 {{time}}",
-      "removeLabel": "从工作台移除「{{name}}」"
+      "removeLabel": "从工作台移除「{{name}}」",
+      "plan": "计划 v{{n}} · {{status}}",
+      "noPlan": "尚无计划",
+      "activeTasks": "进行中任务 {{n}}",
+      "taskTotal": "共 {{n}} 个任务（含已接受与已取消）",
+      "lastActivity": "最后活动 {{time}} · {{source}}",
+      "noActivity": "尚无活动",
+      "activitySource": {
+        "plan": "计划",
+        "run": "执行记录",
+        "session": "会话"
+      },
+      "workbenchMissing": "数据目录 .workbench/ 读不到，卡片信息不可用",
+      "partial": "部分信息读取失败：{{parts}}",
+      "partSeparator": "、",
+      "part": {
+        "plan": "计划",
+        "task": "任务",
+        "run": "执行记录",
+        "session": "会话登记"
+      }
     },
     "remove": {
       "toast": "已移除「{{name}}」",

@@ -34,6 +34,7 @@ import type {
   MemoryEntryId,
   ModelId,
   Plan,
+  PlanStatus,
   PlanVersion,
   ProfileId,
   ProjectId,
@@ -145,6 +146,70 @@ export interface ProjectSettingsView {
 /** projects:update-settings 请求：只带要改的字段。 */
 export interface UpdateProjectSettingsRequest extends ProjectScopedRequest {
   readonly patch: Partial<ProjectSettingsView>;
+}
+
+/**
+ * 「最后活动时间」的出处（T7.4，§11.1）。
+ *
+ * 只有三个取值而不是四个：**任务记录不带时间戳**——`Task = TaskContract + status`，
+ * 合同里没有创建/更新时刻（见 `shared/domain/task.ts`）。任务的时间信息全在它的 Run 上，
+ * 故任务经由 `run` 这一路参与。这是领域事实，不是这里漏读了一处。
+ */
+export const PROJECT_ACTIVITY_SOURCES = ["plan", "run", "session"] as const;
+
+export type ProjectActivitySource = (typeof PROJECT_ACTIVITY_SOURCES)[number];
+
+/**
+ * 项目摘要的四个数据源（读失败时按源逐个降级，见 `ProjectSummary.unavailable`）。
+ * 这里保留 `task` —— 任务虽不贡献时间点，却贡献「进行中任务数」，它读不到时也要如实说。
+ */
+export const PROJECT_SUMMARY_PARTS = ["plan", "task", "run", "session"] as const;
+
+export type ProjectSummaryPart = (typeof PROJECT_SUMMARY_PARTS)[number];
+
+/**
+ * 项目卡片的派生信息（T7.4，§11.1「当前计划版本与状态 / 进行中任务数 / 最后活动时间」）。
+ *
+ * **不持久化**：这三项由查询层从计划 · 任务 · Run · 会话登记当场汇总。持久化它们等于
+ * 要求每一处写计划/任务/Run/会话的代码都记得回头更新一份摘要，漏一处就是一张长期撒谎的
+ * 卡片。派生则永远与磁盘上的事实一致（同 T7.2 的任务审查结论派生）。
+ *
+ * 全是数字、版本号与枚举，**不含任何面向用户的文案**——措辞由渲染层按语言包取。
+ */
+export interface ProjectSummary {
+  /**
+   * `.workbench/` 是否存在。为假时后四项一律是零值，界面须如实标注「数据目录缺失」，
+   * 而不是把它显示成一个干干净净的新项目——项目被移除目录或盘坏了，与刚建好，是两回事。
+   */
+  readonly workbenchPresent: boolean;
+  /** 当前（版本号最大的）计划版本；缺省 = 尚无计划。 */
+  readonly planVersion?: number;
+  /** 当前计划的状态；与 planVersion 同进同出。 */
+  readonly planStatus?: PlanStatus;
+  /** 进行中（未收尾）的任务数：全部任务减去 accepted 与 cancelled 两个终态。 */
+  readonly activeTaskCount: number;
+  /** 任务总数（含终态），供界面表达「3 / 12」这类分母。 */
+  readonly taskCount: number;
+  /** 最后活动时刻（epoch 毫秒）；缺省 = 四个来源都没有可用时间点。 */
+  readonly lastActivityAt?: number;
+  /** 最后活动的出处；与 lastActivityAt 同进同出。 */
+  readonly lastActivitySource?: ProjectActivitySource;
+  /**
+   * 本次汇总中读失败的数据源（如 sessions.json 损坏）。非空 = 卡片信息不完整，
+   * 界面如实标注。单个源失败不影响其余源，更不影响别的项目（§单文件失败不中断批量）。
+   */
+  readonly unavailable: readonly ProjectSummaryPart[];
+}
+
+/**
+ * 项目列表页的一行：注册表条目 + 派生摘要。
+ *
+ * 与 `KnowledgeEntryView` 同款分层——实体归实体、派生归派生，界面一眼看得出哪些是
+ * 落盘事实、哪些是算出来的。
+ */
+export interface ProjectSummaryView {
+  readonly entry: ProjectRegistryEntry;
+  readonly summary: ProjectSummary;
 }
 
 /**
@@ -749,8 +814,18 @@ export interface IpcInvokeContracts {
   "diagnostics:check-sqlite": { request: undefined; response: SqliteCheckReport };
   /** 打开系统目录选择器，返回选定目录的绝对路径（取消经判别字段区分，不走错误）。 */
   "dialog:pick-directory": { request: undefined; response: PickDirectoryResult };
-  /** 列出工作台已登记的全部项目（§11.1 项目列表页数据源）。 */
+  /** 列出工作台已登记的全部项目（注册表原样，只读 projects.json，不碰任何项目目录）。 */
   "projects:list": { request: undefined; response: readonly ProjectRegistryEntry[] };
+  /**
+   * 项目列表页数据源（§11.1，T7.4）：注册表条目 + 当场汇总的派生信息。
+   *
+   * 与 `projects:list` 分开而不是就地扩展返回值：这一路要为每个项目扫 plans/tasks/runs/
+   * sessions 四处磁盘，而 `projects:list` 的另两个消费者（`useActiveProject` 与命令面板的
+   * 项目切换）只要名字和路径。把磁盘扫描塞进它们的必经之路，是让「切个项目」为一屏它们
+   * 根本不显示的信息买单。`projects:create/remove/restore` 也仍返回 `ProjectRegistryEntry`，
+   * 列表页不必在两种形状之间转译。
+   */
+  "projects:summary": { request: undefined; response: readonly ProjectSummaryView[] };
   /** 登记新项目：生成 .workbench/ 目录结构并写入注册表，返回登记后的条目。 */
   "projects:create": { request: CreateProjectRequest; response: ProjectRegistryEntry };
   /** 从工作台移除项目登记（不删除磁盘文件），返回被移除条目供撤销。 */
@@ -923,6 +998,7 @@ export const INVOKE_CHANNELS = [
   "diagnostics:check-sqlite",
   "dialog:pick-directory",
   "projects:list",
+  "projects:summary",
   "projects:create",
   "projects:remove",
   "projects:restore",

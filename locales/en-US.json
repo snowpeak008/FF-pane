@@ -242,7 +242,27 @@
     "opened": "Switched to project \"{{name}}\"",
     "card": {
       "createdAt": "Added {{time}}",
-      "removeLabel": "Remove \"{{name}}\" from the workspace"
+      "removeLabel": "Remove \"{{name}}\" from the workspace",
+      "plan": "Plan v{{n}} · {{status}}",
+      "noPlan": "No plan yet",
+      "activeTasks": "{{n}} in progress",
+      "taskTotal": "{{n}} tasks in total (including accepted and cancelled)",
+      "lastActivity": "Last activity {{time}} · {{source}}",
+      "noActivity": "No activity yet",
+      "activitySource": {
+        "plan": "plan",
+        "run": "runs",
+        "session": "session"
+      },
+      "workbenchMissing": "Cannot read .workbench/ — details unavailable",
+      "partial": "Some details failed to load: {{parts}}",
+      "partSeparator": ", ",
+      "part": {
+        "plan": "plan",
+        "task": "tasks",
+        "run": "runs",
+        "session": "session registry"
+      }
     },
     "remove": {
       "toast": "Removed \"{{name}}\"",

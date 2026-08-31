@@ -11,6 +11,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
   acceptTask,
@@ -67,12 +68,14 @@ import {
 import { type BrowserWindow, dialog, type OpenDialogOptions } from "electron";
 import type { InvokeHandlers } from "../shared-ipc/server";
 import { resolveGlobalRoot } from "./data-root";
+import { type ProjectSummarySources, summarizeProjects } from "./project-summary";
 import { createSafeStorageBackend, createSecretStore, resolveSecretsFile } from "./secrets";
 
 /** 本数据层负责的 invoke 通道集合。 */
 type DataChannel =
   | "dialog:pick-directory"
   | "projects:list"
+  | "projects:summary"
   | "projects:create"
   | "projects:remove"
   | "projects:restore"
@@ -158,10 +161,10 @@ export async function createDataHandlers(
     return undefined;
   }
 
-  // 最新计划版本（v1..vN 连续，逐版加载到 not-found 为止）。与 session 层的同名函数
-  // 是两份同形代码：那份绑在编排器依赖注入上，这份服务查询通道，跨进程边界不共享闭包。
-  async function loadLatestPlan(projectLayout: ProjectLayout): Promise<Plan | undefined> {
-    let latest: Plan | undefined;
+  // 全部计划版本（v1..vN 连续，逐版加载到 not-found 为止，按版本升序）。与 session 层的
+  // 同名逻辑是两份同形代码：那份绑在编排器依赖注入上，这份服务查询通道，跨进程边界不共享闭包。
+  async function loadAllPlans(projectLayout: ProjectLayout): Promise<readonly Plan[]> {
+    const plans: Plan[] = [];
     for (let v = 1; ; v += 1) {
       const result = await loadPlan(projectLayout, v as PlanVersion);
       if (!result.ok) {
@@ -170,10 +173,51 @@ export async function createDataHandlers(
         }
         throw result.error;
       }
-      latest = result.value.plan;
+      plans.push(result.value.plan);
     }
-    return latest;
+    return plans;
   }
+
+  /** 最新计划版本（= 版本号最大的那份，见 loadAllPlans）。 */
+  async function loadLatestPlan(projectLayout: ProjectLayout): Promise<Plan | undefined> {
+    return (await loadAllPlans(projectLayout)).at(-1);
+  }
+
+  // 项目摘要（T7.4）的四路读取：一律用查询通道自己那套「缺目录视为空集」的处置，
+  // 其余读错误照常抛出，由 summarizeProject 降级为对应源的 unavailable。
+  const summarySources: ProjectSummarySources = {
+    resolveLayout: resolveProjectLayout,
+    workbenchPresent: async (projectLayout) => {
+      try {
+        return (await stat(projectLayout.workbenchDir)).isDirectory();
+      } catch {
+        // ENOENT（目录被删）与 EACCES/EIO（坏盘）在卡片上是同一句话：这个项目的数据读不到
+        return false;
+      }
+    },
+    listPlans: loadAllPlans,
+    listTasks: async (projectLayout) => {
+      const result = await listTasks(projectLayout);
+      if (!result.ok) {
+        if (result.error.code === "not-found") {
+          return [];
+        }
+        throw result.error;
+      }
+      return result.value;
+    },
+    listRuns: async (projectLayout) => {
+      const result = await listRuns(projectLayout);
+      if (!result.ok) {
+        if (result.error.code === "not-found") {
+          return [];
+        }
+        throw result.error;
+      }
+      return result.value;
+    },
+    listSessions: (projectLayout) => createSessionStore(projectLayout.sessionsFile).listSessions(),
+  };
 
   return {
     "dialog:pick-directory": async () => {
@@ -193,6 +237,10 @@ export async function createDataHandlers(
     },
 
     "projects:list": () => registry.listProjects(),
+
+    // §11.1 项目列表页：注册表 + 逐项目当场汇总的派生信息（不持久化，见 project-summary.ts）
+    "projects:summary": async () =>
+      summarizeProjects(await registry.listProjects(), summarySources),
 
     "projects:create": async (request) => {
       // 归一为绝对路径：注册表以 rootPath 唯一，接线层负责归一（见 registry 模块注释）
@@ -493,22 +541,7 @@ export async function createDataHandlers(
       };
     },
 
-    "plans:list": async (request) => {
-      const layout = resolveProjectLayout(request.projectRoot);
-      // 版本 v1..vN 连续（每次修改产出下一版），逐版加载到 not-found 为止
-      const plans: Plan[] = [];
-      for (let v = 1; ; v += 1) {
-        const result = await loadPlan(layout, v as PlanVersion);
-        if (!result.ok) {
-          if (result.error.code === "not-found") {
-            break;
-          }
-          throw result.error;
-        }
-        plans.push(result.value.plan);
-      }
-      return plans;
-    },
+    "plans:list": (request) => loadAllPlans(resolveProjectLayout(request.projectRoot)),
 
     "plans:approve": async (request) => {
       const layout = resolveProjectLayout(request.projectRoot);
