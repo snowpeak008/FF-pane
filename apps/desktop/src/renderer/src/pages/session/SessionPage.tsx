@@ -1,4 +1,5 @@
 import type { SessionRecord } from "@ff-pane/shared";
+import { ArrowLeftRight } from "lucide-react";
 import { type ReactElement, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
@@ -13,6 +14,7 @@ import { useSessionStore } from "../../stores/session";
 import { NoActiveProject } from "../NoActiveProject";
 import type { ChatMessageView } from "./ChatMessage";
 import { Composer } from "./Composer";
+import { HandoffDialog } from "./HandoffDialog";
 import { MessageStream } from "./MessageStream";
 import { PermissionBanner } from "./PermissionBanner";
 import { SessionResumePanel } from "./SessionResumePanel";
@@ -41,6 +43,9 @@ export function SessionPage(): ReactElement {
   const endedTurnSeq = useSessionStore((s) => s.endedTurnSeq);
   const lastEndedTurn = useSessionStore((s) => s.lastEndedTurn);
   const [cancelling, setCancelling] = useState(false);
+  // 跨 Agent 迁移（T7.1，§10.4）：对话框只在打开时挂载——交接包是"此刻的项目现状"快照，
+  // 常驻会让它在项目推进后悄悄过期。
+  const [handoffOpen, setHandoffOpen] = useState(false);
 
   // 计划生成轮结束：toast「已生成计划 vN」+ 一键跳计划页。以 endedTurnSeq 单调递增触发，
   // 仅处理一次（seq 去重）。planVersion 缺席 = 普通讨论轮，不打扰。
@@ -136,7 +141,26 @@ export function SessionPage(): ReactElement {
             model={turnModel}
             status={turnStatus}
             resumeKind={turnResumeKind}
+            actions={
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={busy}
+                onClick={() => setHandoffOpen(true)}
+              >
+                <ArrowLeftRight aria-hidden size={14} />
+                {t("session.handoff.action")}
+              </Button>
+            }
           />
+          {handoffOpen ? (
+            <HandoffDialog
+              open
+              onOpenChange={setHandoffOpen}
+              projectRoot={entry.rootPath}
+              currentProfile={plannerProfile}
+            />
+          ) : null}
           {!busy ? (
             <SessionResumePanel
               projectRoot={entry.rootPath}

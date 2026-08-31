@@ -15,6 +15,9 @@ export function assertNever(value: never, context = "assertNever"): never {
 /** 习惯（共享记忆）领域逻辑（Phase 5）：相近条目检测、习惯档案编译。 */
 export * from "./habit/index.js";
 
+/** 跨 Agent 交接包（T7.1）：8 字段组装 + 文本渲染（设计文档 §10.4）。 */
+export * from "./handoff/index.js";
+
 export * from "./memory/index.js";
 
 export * from "./permission/index.js";

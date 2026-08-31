@@ -1,5 +1,5 @@
 import type { ModelId, Role, SessionResumeKind } from "@ff-pane/shared";
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { TurnStatus } from "../../stores/session";
 
@@ -11,6 +11,11 @@ export interface SessionStatusBarProps {
   readonly status: TurnStatus;
   /** 本轮恢复方式（T4.3，§10.3）：null = 全新会话，不显示徽标。 */
   readonly resumeKind: SessionResumeKind | null;
+  /**
+   * 右侧动作槽（T7.1 的「跨 Agent 迁移」入口挂在这里）。
+   * 状态条是「我正在和谁讨论」的唯一常驻答复（§11.2），换掉这个"谁"的入口理应就在旁边。
+   */
+  readonly actions?: ReactNode;
 }
 
 /**
@@ -24,6 +29,7 @@ export function SessionStatusBar({
   model,
   status,
   resumeKind,
+  actions,
 }: SessionStatusBarProps): ReactElement {
   const { t } = useTranslation();
   const hasTurn = role !== null && status !== "idle";
@@ -47,6 +53,7 @@ export function SessionStatusBar({
       ) : (
         <span className="text-xs text-fg-subtle">{t("session.noActiveSession")}</span>
       )}
+      {actions !== undefined ? <div className="ml-auto flex items-center">{actions}</div> : null}
     </div>
   );
 }

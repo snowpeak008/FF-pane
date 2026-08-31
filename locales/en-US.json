@@ -524,7 +524,8 @@
     },
     "resumeKind": {
       "native": "Native resume",
-      "context_rebuild": "Context rebuild"
+      "context_rebuild": "Context rebuild",
+      "handoff": "Cross-agent handoff"
     },
     "resume": {
       "title": "Resume a session",
@@ -540,7 +541,25 @@
     "planGenerated": "Plan v{{version}} generated",
     "viewPlan": "View plan",
     "directExecute": "Just do it",
-    "directExecuteHint": "Skip habit-based shaping for this turn and act directly (habits stay intact)."
+    "directExecuteHint": "Skip habit-based shaping for this turn and act directly (habits stay intact).",
+    "handoff": {
+      "action": "Switch agent",
+      "title": "Cross-agent handoff",
+      "description": "The handoff package contains only this project's plan, tasks and project memory. API keys, raw execution logs and other projects never enter it. Confirming starts a new session and hands the text below to the new agent.",
+      "target": "Hand off to which profile",
+      "targetHint": "A new agent cannot pick up the old agent's session, so a handoff always starts a new session.",
+      "targetPlaceholder": "Select a profile",
+      "targetOptionSwitch": "{{name}} ({{runtime}}, different runtime)",
+      "targetOptionSame": "{{name}} ({{runtime}})",
+      "previewLabel": "Handoff package",
+      "previewHint": "Edit freely — what you leave here is exactly what gets injected.",
+      "summary": "{{plan}} · {{tasks}} tasks · {{decisions}} decisions · {{rules}} rules · {{lessons}} lessons · {{issues}} open",
+      "planVersion": "Plan v{{version}}",
+      "noPlan": "No plan yet",
+      "confirm": "Confirm and hand off",
+      "kickoff": "Read the handoff package above. First restate your understanding of the current progress and constraints, then say what you intend to do next. Do not start working yet.",
+      "migrated": "Handed off. The package was injected into a new session."
+    }
   },
   "shortcut": {
     "scope": {

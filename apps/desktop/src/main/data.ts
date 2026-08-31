@@ -15,11 +15,13 @@ import { resolve } from "node:path";
 import {
   acceptTask,
   approvePlan,
+  buildHandoff,
   cancelTask,
   deriveAcceptanceCandidates,
   detectHabitConflicts,
   fetchModels,
   ProfileValidationError,
+  renderHandoff,
   testConnection,
   validateProfileDraft,
 } from "@ff-pane/core";
@@ -49,6 +51,7 @@ import {
   loadPlan,
   loadTask,
   type ProfileDraftValidator,
+  type ProjectLayout,
   type ProviderDraft,
   profileReferencesProvider,
   resolveProjectLayout,
@@ -105,7 +108,8 @@ type DataChannel =
   | "habits:check-conflicts"
   | "plans:list"
   | "plans:approve"
-  | "sessions:list";
+  | "sessions:list"
+  | "handoff:generate";
 
 /** 目录选择器挂靠的父窗口取值器（窗口在数据层装配后才创建，故惰性取用）。 */
 export type MainWindowGetter = () => BrowserWindow | null;
@@ -152,6 +156,23 @@ export async function createDataHandlers(
       return secrets.revealSecret(input.apiKeyRef);
     }
     return undefined;
+  }
+
+  // 最新计划版本（v1..vN 连续，逐版加载到 not-found 为止）。与 session 层的同名函数
+  // 是两份同形代码：那份绑在编排器依赖注入上，这份服务查询通道，跨进程边界不共享闭包。
+  async function loadLatestPlan(projectLayout: ProjectLayout): Promise<Plan | undefined> {
+    let latest: Plan | undefined;
+    for (let v = 1; ; v += 1) {
+      const result = await loadPlan(projectLayout, v as PlanVersion);
+      if (!result.ok) {
+        if (result.error.code === "not-found") {
+          break;
+        }
+        throw result.error;
+      }
+      latest = result.value.plan;
+    }
+    return latest;
   }
 
   return {
@@ -440,6 +461,36 @@ export async function createDataHandlers(
     "sessions:list": async (request) => {
       const layout = resolveProjectLayout(request.projectRoot);
       return createSessionStore(layout.sessionsFile).listSessions();
+    },
+
+    "handoff:generate": async (request) => {
+      // 跨 Agent 交接包（T7.1，§10.4）。取材只有本项目的计划 / 任务 / 项目记忆三样——
+      // 不读 Run（raw.log 的宿主）、不碰密钥模块、不触别的项目，红线在取材面上落实（§4.3 规则 2）。
+      const layout = resolveProjectLayout(request.projectRoot);
+      const [plan, tasksResult, memoryResult] = await Promise.all([
+        loadLatestPlan(layout),
+        listTasks(layout),
+        listEntries(layout),
+      ]);
+      // 未初始化的项目（无 tasks 目录）视为空集，与 tasks:list 同一处置；其余读错误上抛。
+      if (!tasksResult.ok && tasksResult.error.code !== "not-found") {
+        throw tasksResult.error;
+      }
+      const tasks = tasksResult.ok ? tasksResult.value : [];
+      const handoff = buildHandoff({
+        ...(plan !== undefined ? { plan } : {}),
+        tasks,
+        memory: memoryResult.entries,
+      });
+      return {
+        text: renderHandoff(handoff),
+        ...(handoff.plan !== undefined ? { planVersion: handoff.plan.version } : {}),
+        taskCount: handoff.progress.length,
+        decisionCount: handoff.decisions.length,
+        ruleCount: handoff.rules.length,
+        lessonCount: handoff.recentLessons.length,
+        openIssueCount: handoff.openIssues.length,
+      };
     },
 
     "plans:list": async (request) => {

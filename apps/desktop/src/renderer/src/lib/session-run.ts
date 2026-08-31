@@ -28,6 +28,12 @@ export async function startSessionTurn(params: {
    * 从恢复列表选中的会话亦经此传入触发原生恢复 / 上下文重建。
    */
   readonly sessionId?: LocalSessionId;
+  /**
+   * 跨 Agent 交接包正文（T7.1，§10.4）：用户在预览框里确认过的那一份。
+   * 给出即表示本轮是迁移——主进程强制开新会话并把它前置到提示词，故与 sessionId 互斥
+   * （同时传入时 sessionId 被忽略，新 Agent 续不上旧 Agent 的会话）。
+   */
+  readonly handoffText?: string;
 }): Promise<{ readonly turnId: string; readonly ack: StartSessionAck | null }> {
   const turnId = newTurnId();
   const role = params.input.kind === "worker-task" ? "worker" : "planner";
@@ -40,6 +46,7 @@ export async function startSessionTurn(params: {
     profileId: params.profileId,
     input: params.input,
     ...(params.sessionId !== undefined ? { sessionId: params.sessionId } : {}),
+    ...(params.handoffText !== undefined ? { handoffText: params.handoffText } : {}),
   });
   if (settled.status === "error") {
     store.failLocalTurn(turnId, settled.error.message);

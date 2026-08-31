@@ -27,8 +27,15 @@ export interface HandoffTaskProgress {
 export interface Handoff {
   /** 设计文档 §10.4 —— project_goal 项目目标（一段话）。 */
   readonly projectGoal: string;
-  /** 设计文档 §10.4 —— plan 当前计划版本全文（结构化，渲染为文本属 T7.1）。 */
-  readonly plan: Plan;
+  /**
+   * 设计文档 §10.4 —— plan 当前计划版本全文（结构化，渲染为文本见 core/handoff/render）。
+   *
+   * T7.1 改为可选：换 Agent 未必发生在有计划之后（最典型的一次就是"和这个 Planner
+   * 聊不下去，换一个再谈"——此刻计划恰恰还没出来）。要求必有计划会让交接包在最需要它的
+   * 时刻反而生成不出来。缺省 = 尚无计划，渲染层如实写明，与 §10.3 上下文重建对
+   * "无计划"的处理同构（assembleRebuildContext 也是缺省即不渲染该节）。
+   */
+  readonly plan?: Plan;
   /** 设计文档 §10.4 —— progress 任务清单及状态。 */
   readonly progress: readonly HandoffTaskProgress[];
   /** 设计文档 §10.4 —— decisions：active 状态的 decision 记忆。 */

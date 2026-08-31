@@ -524,7 +524,8 @@
     },
     "resumeKind": {
       "native": "原生恢复",
-      "context_rebuild": "上下文重建"
+      "context_rebuild": "上下文重建",
+      "handoff": "跨 Agent 迁移"
     },
     "resume": {
       "title": "恢复历史会话",
@@ -540,7 +541,25 @@
     "planGenerated": "已生成计划 v{{version}}",
     "viewPlan": "查看计划",
     "directExecute": "直接做",
-    "directExecuteHint": "本轮跳过据流程习惯的整形，直接执行（不影响习惯档案）。"
+    "directExecuteHint": "本轮跳过据流程习惯的整形，直接执行（不影响习惯档案）。",
+    "handoff": {
+      "action": "换 Agent",
+      "title": "跨 Agent 迁移",
+      "description": "交接包只含本项目的计划、任务与项目记忆；密钥、原始执行日志、其他项目内容不会进入。确认后开一个新会话，把下面这份正文交给新 Agent。",
+      "target": "交给哪个 Profile",
+      "targetHint": "新 Agent 接不上旧 Agent 的会话记录，故迁移一律开新会话。",
+      "targetPlaceholder": "请选择",
+      "targetOptionSwitch": "{{name}}（{{runtime}}，换 Runtime）",
+      "targetOptionSame": "{{name}}（{{runtime}}）",
+      "previewLabel": "交接包正文",
+      "previewHint": "可直接编辑；确认后注入的就是你改完的这一份。",
+      "summary": "{{plan}} · 任务 {{tasks}} · 决定 {{decisions}} · 规则 {{rules}} · 经验 {{lessons}} · 未决 {{issues}}",
+      "planVersion": "计划 v{{version}}",
+      "noPlan": "尚无计划",
+      "confirm": "确认并迁移",
+      "kickoff": "请阅读以上交接包，先复述你对当前进度与约束的理解，再说明你打算接下来做什么。不要直接动手。",
+      "migrated": "已迁移到新 Agent，交接包已注入新会话。"
+    }
   },
   "shortcut": {
     "scope": {

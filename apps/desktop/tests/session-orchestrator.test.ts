@@ -789,6 +789,107 @@ describe("createSessionOrchestrator", () => {
   });
 });
 
+describe("T7.1 跨 Agent 迁移（handoff，§10.4）", () => {
+  const HANDOFF = "# 跨 Agent 交接包（工作台生成）\n\n用户改过的那一份";
+
+  /** 一条带原生绑定、且适配器支持原生恢复的既有会话——不迁移时它会走 native。 */
+  function resumableSession(): SessionRecord {
+    return {
+      id: "sess-1" as unknown as LocalSessionId,
+      profileId: "prof-1" as unknown as ProfileId,
+      role: "planner",
+      native: { nativeSessionId: "native-1" as unknown as NativeSessionId, cwd: "/proj" },
+      createdAt: 500,
+      lastActiveAt: 500,
+    } as unknown as SessionRecord;
+  }
+
+  function migrationHarness(): ReturnType<typeof makeHarness> {
+    return makeHarness(
+      [
+        { kind: "session_start" },
+        { kind: "text", content: "ok", final: true, channel: "answer" },
+        { kind: "end", reason: "completed" },
+      ],
+      {
+        profile: profile({ defaultRole: "planner" }),
+        nativeResume: "yes",
+        existingSession: resumableSession(),
+        stateSnapshot: "正在做某事",
+      },
+    );
+  }
+
+  it("带交接包 → resumeKind=handoff，交接包正文前置到提示词", async () => {
+    const h = migrationHarness();
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start({ ...plannerRequest(), handoffText: HANDOFF });
+    await flushUntilEnd(h.published);
+
+    expect(h.published[0]).toMatchObject({ kind: "started", resumeKind: "handoff" });
+    expect(h.captured[0]?.prompt.startsWith(HANDOFF)).toBe(true);
+  });
+
+  it("强制开新会话：即便传了可原生恢复的 sessionId 也不续接（新 Agent 续不上旧 Agent 的会话）", async () => {
+    const h = migrationHarness();
+    const orch = createSessionOrchestrator(h.deps);
+
+    const ack = await orch.start({
+      ...plannerRequest(),
+      sessionId: "sess-1" as unknown as LocalSessionId,
+      handoffText: HANDOFF,
+    });
+    await flushUntilEnd(h.published);
+
+    expect(ack).toMatchObject({ accepted: true, sessionId: "sess-new" });
+    expect(h.captured[0]?.resume).toBeUndefined();
+    expect(h.sessions.get("sess-new")?.resumeKind).toBe("handoff");
+    expect(h.sessions.get("sess-new")?.native).toBeUndefined();
+  });
+
+  it("不注入上下文重建文本：迁移不是「续上你自己的历史」", async () => {
+    const h = makeHarness(
+      [
+        { kind: "session_start" },
+        { kind: "text", content: "ok", final: true, channel: "answer" },
+        { kind: "end", reason: "completed" },
+      ],
+      {
+        profile: profile({ defaultRole: "planner" }),
+        nativeResume: "no",
+        existingSession: resumableSession(),
+        stateSnapshot: "正在做某事",
+      },
+    );
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start({
+      ...plannerRequest(),
+      sessionId: "sess-1" as unknown as LocalSessionId,
+      handoffText: HANDOFF,
+    });
+    await flushUntilEnd(h.published);
+
+    expect(h.captured[0]?.prompt).not.toContain("会话恢复上下文");
+  });
+
+  it("空白交接包按「没给」处理：照常续接，不标 handoff、不插空段落", async () => {
+    const h = migrationHarness();
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start({
+      ...plannerRequest(),
+      sessionId: "sess-1" as unknown as LocalSessionId,
+      handoffText: "   \n  ",
+    });
+    await flushUntilEnd(h.published);
+
+    expect(h.published[0]).toMatchObject({ kind: "started", resumeKind: "native" });
+    expect(h.captured[0]?.prompt.startsWith("\n")).toBe(false);
+  });
+});
+
 describe("T6.6 Agent 只读知识库检索工具", () => {
   const SPEC: McpStdioServerSpec = {
     command: "/app/electron",

@@ -545,6 +545,31 @@ export type KnowledgeExportResult =
     };
 
 /**
+ * handoff:generate 应答（T7.1，§10.4）：预览文本 + 一份计数摘要。
+ *
+ * 文本是权威产物（用户编辑它、确认后注入的就是它）；摘要只供预览界面在正文之上
+ * 交代"这份交接包里有什么、有多少"——交接包动辄上百行，用户不该靠通读来判断它是否完整。
+ * 摘要里全是数字与版本号，**不含任何面向用户的文案**：主进程不产出中文（check-i18n 的
+ * 约束在渲染层，但事实源在这里），措辞由渲染层按界面语言取语言包。
+ */
+export interface HandoffPreview {
+  /** 渲染后的交接包正文（Markdown；用户可编辑后原样注入）。 */
+  readonly text: string;
+  /** 当前计划版本；缺省 = 尚无计划（§10.4 plan 字段为空的诚实表达）。 */
+  readonly planVersion?: number;
+  /** 交接的任务条数。 */
+  readonly taskCount: number;
+  /** active 的 decision 记忆条数。 */
+  readonly decisionCount: number;
+  /** active 的 rule 记忆条数。 */
+  readonly ruleCount: number;
+  /** 本次取样的 lesson 记忆条数（见 core DEFAULT_RECENT_LESSONS）。 */
+  readonly lessonCount: number;
+  /** 阻塞与未决问题条数。 */
+  readonly openIssueCount: number;
+}
+
+/**
  * 会话执行输入（§12 十步流程）：Planner 讨论消息 或 Worker 任务派发。
  * role 由输入类别隐含：planner-message → planner；worker-task → worker。
  */
@@ -580,6 +605,15 @@ export interface StartSessionRequest extends ProjectScopedRequest {
    * 提供且该会话已登记 = 续接（据登记的原生绑定与适配器能力判定 native / context_rebuild）。
    */
   readonly sessionId?: LocalSessionId;
+  /**
+   * 跨 Agent 交接包正文（T7.1，§10.4）。给出即表示本轮是一次**迁移**：
+   * 主进程强制开新会话（换了 Agent，旧会话的原生绑定对新 Agent 无意义）、
+   * 把这段文本前置到提示词、并把本轮的会话类型标注为 `handoff`。
+   *
+   * 传的是**文本**而不是 Handoff 结构体：用户在预览框里改过的那一份才是要注入的那一份
+   * （§10.4"预览可编辑，确认后注入"）。若传结构体再由主进程渲染，用户的编辑会被静默丢弃。
+   */
+  readonly handoffText?: string;
 }
 
 /** session:start 应答：仅表示已受理（true）或拒绝受理（false + reason）。 */
@@ -781,6 +815,8 @@ export interface IpcInvokeContracts {
   "plans:approve": { request: ApprovePlanRequest; response: Plan };
   /** 列出当前项目已登记的会话（T4.3 会话恢复；按最近活跃降序，供恢复选择）。 */
   "sessions:list": { request: ProjectScopedRequest; response: readonly SessionRecord[] };
+  /** 生成跨 Agent 交接包（T7.1，§10.4）：8 字段组装 + 渲染成可编辑的预览文本。 */
+  "handoff:generate": { request: ProjectScopedRequest; response: HandoffPreview };
   /** 知识库总览（§8.3.6 来源管理：条目 + 文档数/块数 + 索引状态 + 嵌入能力）。 */
   "knowledge:list": { request: undefined; response: KnowledgeOverview };
   /** 打开文件 / 目录选择器（按支持的扩展名过滤），返回选定路径。 */
@@ -903,6 +939,7 @@ export const INVOKE_CHANNELS = [
   "plans:list",
   "plans:approve",
   "sessions:list",
+  "handoff:generate",
   "knowledge:list",
   "knowledge:pick-paths",
   "knowledge:import",

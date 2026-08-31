@@ -283,19 +283,34 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
       // 习惯档案（§8.2.2）：编译 active + enabled 习惯为 Prompt 第 2 层文本（跨项目、跨角色生效）。
       const habitProfile = compileHabitProfile(habits);
 
+      // 跨 Agent 迁移（T7.1，§10.3 第三分支 / §10.4）：带交接包正文的一轮。
+      // 换了 Agent，旧会话的原生绑定对新 Agent 毫无意义（那是另一个 CLI 的会话文件），
+      // 上下文重建同样不该走——重建假装"你续上了自己的历史"，而这里恰恰不是。故一律开新会话，
+      // 注入用户确认过的交接包正文，会话类型如实标 handoff（§2「不伪装成会话恢复」）。
+      const trimmedHandoff = request.handoffText?.trim();
+      // 空白正文按"没给"处理：一个只剩空格的交接包既不该改变会话类型，也不该在提示词里
+      // 占一个空段落让 Agent 以为交接内容被吞了。
+      const handoffText =
+        trimmedHandoff !== undefined && trimmedHandoff.length > 0 ? trimmedHandoff : undefined;
+      const migrating = handoffText !== undefined;
+
       // 会话恢复（T4.3）：判定本轮所属会话与恢复方式。
       // 首轮（无 sessionId 或该会话未登记）= 全新会话；续接轮据登记的原生绑定 + cwd +
       // 适配器能力判定 native / context_rebuild。
-      const sessionId = request.sessionId ?? deps.newLocalSessionId();
+      const sessionId = migrating
+        ? deps.newLocalSessionId()
+        : (request.sessionId ?? deps.newLocalSessionId());
       const existing =
-        request.sessionId !== undefined
+        !migrating && request.sessionId !== undefined
           ? await deps.loadSession(layout, request.sessionId)
           : undefined;
       const priorBinding = existing?.native;
       let resumeKind: SessionResumeKind | undefined;
       let resumeBinding: NativeSessionBinding | undefined;
       let resumeContext: string | undefined;
-      if (existing !== undefined) {
+      if (migrating) {
+        resumeKind = "handoff";
+      } else if (existing !== undefined) {
         resumeKind = decideResumeKind({
           hasNativeBinding: priorBinding !== undefined,
           bindingCwdMatches: priorBinding?.cwd === request.projectRoot,
@@ -406,6 +421,12 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
       // 上下文重建：把重建文本前置到提示词（native 恢复走原生会话，不注入）
       if (resumeContext !== undefined) {
         prompt = `${resumeContext}\n\n${prompt}`;
+      }
+      // 跨 Agent 迁移：注入用户预览并确认过的交接包正文（§10.4）。注入的是**渲染层送来的文本**
+      // 而非在这里重新渲染一遍——用户在预览框里改过的那一份才是他确认的那一份。
+      // 与 resumeContext 互斥（migrating 时不会走恢复分支），故两者不会同时前置。
+      if (handoffText !== undefined) {
+        prompt = `${handoffText}\n\n${prompt}`;
       }
 
       // Agent 只读知识库检索工具（T6.6，§8.3.5 路径二）：项目开关开启时才装配。
