@@ -29,6 +29,7 @@ export const KNOWN_RUNTIMES = [
   "claude-code",
   "gemini-cli",
   "opencode",
+  "grok-build",
   "generic-exec",
 ] as const;
 

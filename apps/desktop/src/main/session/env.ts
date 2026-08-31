@@ -18,6 +18,11 @@ export function runtimeApiKeyEnvVar(runtime: RuntimeId): string | undefined {
       return "ANTHROPIC_API_KEY";
     case "gemini-cli":
       return "GEMINI_API_KEY";
+    // grok 的凭据解析顺序里 XAI_API_KEY 是全局兜底（grok-build.md §5），
+    // 且它正落在「密钥只经 env 下发」的红线内。cli_login 型 Provider 走
+    // 用户自己的 `grok login` 登录态，本函数的返回值对其无效（上层不注入）。
+    case "grok-build":
+      return "XAI_API_KEY";
     // opencode 的 Provider 在其自身配置内声明；generic-exec 由 Profile 的自定义
     // 配置决定，均不由本层按固定变量名注入。
     default:

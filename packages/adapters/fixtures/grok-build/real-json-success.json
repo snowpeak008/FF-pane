@@ -1,0 +1,24 @@
+{
+  "text": "I created hello.txt containing 'hello' and checked the Node version.",
+  "stopReason": "end_turn",
+  "sessionId": "01a05779-cfba-78a3-aa81-db907fb6382f",
+  "requestId": "e9dce72f-35ba-4647-8c92-d72928d2a757",
+  "usage": {
+    "input_tokens": 2436,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+    "output_tokens": 135,
+    "reasoning_tokens": 0,
+    "total_tokens": 2571
+  },
+  "num_turns": 3,
+  "modelUsage": {
+    "ffpane-fixture-model": {
+      "inputTokens": 2436,
+      "outputTokens": 135,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "modelCalls": 3
+    }
+  }
+}

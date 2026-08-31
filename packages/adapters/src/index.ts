@@ -12,6 +12,8 @@ export * from "./events/index.js";
 export * from "./gemini-cli/index.js";
 /** L2 通用单次命令适配器（W2.2）：任意 CLI 一进一出的兜底接入。 */
 export * from "./generic-exec/index.js";
+/** Grok Build 适配器（T7.3）：headless streaming-json 映射、事件流自带 diff。 */
+export * from "./grok-build/index.js";
 /** 运行时权限拦截桥接（W2.7b）：把 core 的 run-guard 裁决接到真实事件流上。 */
 export * from "./guard/index.js";
 /** OpenCode 适配器（W2.6）：`opencode serve` + HTTP/SSE 接入路径。 */

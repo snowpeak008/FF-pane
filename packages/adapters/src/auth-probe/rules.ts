@@ -150,10 +150,40 @@ const opencodeRule: RuntimeProbeRule = {
   },
 };
 
+/**
+ * grok-build：`grok models`
+ *
+ * grok 1.0.13 无登录态查询子命令（`grok login` 会真的发起登录，不能拿来探测）。
+ * 借用模型枚举命令，真机实测（未登录）：**退出码恒为 0**，但 stdout 首行是
+ * "You are not authenticated."，其后照常打印内置模型清单。
+ * 判定只能看文本：未登录标记出现 → logged_out；退出码 0 且无该标记 → logged_in；
+ * 非零退出码 → unknown。
+ * 注意：`XAI_API_KEY` 会让 grok 视作已认证——cli_login 语义只认 CLI 自管凭证，
+ * 生产执行器已剥离 API key 类环境变量（见 executor.ts）。
+ */
+const grokBuildRule: RuntimeProbeRule = {
+  command: "grok",
+  args: ["models"],
+  evaluate(execution) {
+    const combined = stripAnsi(`${execution.stdout}\n${execution.stderr}`);
+    if (/not authenticated|not signed in/i.test(combined)) {
+      return { status: "logged_out", detail: describeExecution(execution) };
+    }
+    if (execution.exitCode === 0) {
+      return { status: "logged_in", detail: describeExecution(execution) };
+    }
+    return {
+      status: "unknown",
+      detail: `非零退出码且无未登录标记。${describeExecution(execution)}`,
+    };
+  },
+};
+
 /** Runtime → 探测规则映射。 */
 export const PROBE_RULES: Readonly<Record<CliLoginRuntime, RuntimeProbeRule>> = Object.freeze({
   codex: codexRule,
   "claude-code": claudeCodeRule,
   "gemini-cli": geminiCliRule,
   opencode: opencodeRule,
+  "grok-build": grokBuildRule,
 });

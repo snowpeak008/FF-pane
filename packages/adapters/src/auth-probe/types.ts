@@ -6,7 +6,13 @@
  */
 
 /** 支持 cli_login 探测的 Agent Runtime 标识。 */
-export const CLI_LOGIN_RUNTIMES = ["codex", "claude-code", "gemini-cli", "opencode"] as const;
+export const CLI_LOGIN_RUNTIMES = [
+  "codex",
+  "claude-code",
+  "gemini-cli",
+  "opencode",
+  "grok-build",
+] as const;
 
 /** cli_login Runtime 字符串联合。 */
 export type CliLoginRuntime = (typeof CLI_LOGIN_RUNTIMES)[number];

@@ -27,7 +27,14 @@ import { buildProfileDraft, emptyProfileForm, formFromProfile } from "./profile-
  * 已知 Runtime 下拉项（权威闭合清单在 @ff-pane/adapters KNOWN_RUNTIMES；
  * desktop 未依赖 adapters 且 RuntimeId 为开放 string，故此处镜像一份供选择）。
  */
-const RUNTIME_OPTIONS = ["codex", "claude-code", "gemini-cli", "opencode", "generic-exec"] as const;
+const RUNTIME_OPTIONS = [
+  "codex",
+  "claude-code",
+  "gemini-cli",
+  "opencode",
+  "grok-build",
+  "generic-exec",
+] as const;
 
 export interface ProfileEditorDialogProps {
   readonly open: boolean;
