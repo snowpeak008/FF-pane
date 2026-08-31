@@ -1,6 +1,8 @@
 /** Agent Runtime 适配器（codex / claude / gemini / opencode / generic-exec，T2.x 落地）。 */
 /** AgentAdapter 统一接口、turn 模型与注册表（W2.1c）。 */
 export * from "./adapter.js";
+/** Aider 适配器（T7.3b）：纯文本 stdout 行扫描 + git 快照 diff 自补。 */
+export * from "./aider/index.js";
 export * from "./auth-probe/index.js";
 /** Claude Code 适配器（W2.4）：stream-json 双向协议、stdio 权限转发、interrupt 优雅取消。 */
 export * from "./claude-code/index.js";

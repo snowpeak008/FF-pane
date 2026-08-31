@@ -1,0 +1,46 @@
+{
+  "name": "real-success-newfile",
+  "exitCode": 0,
+  "args": [
+    "--model",
+    "openai/ffpane-fixture-model",
+    "--yes-always",
+    "--no-pretty",
+    "--no-fancy-input",
+    "--no-check-update",
+    "--no-show-release-notes",
+    "--no-show-model-warnings",
+    "--no-gitignore",
+    "--no-auto-commits",
+    "--no-dirty-commits",
+    "--no-analytics",
+    "--no-detect-urls",
+    "--no-auto-lint",
+    "--no-auto-test",
+    "--no-suggest-shell-commands",
+    "--map-tokens",
+    "0",
+    "--chat-history-file",
+    "<SIDE>\\chat.md",
+    "--input-history-file",
+    "<SIDE>\\input.history",
+    "--encoding",
+    "utf-8",
+    "--message-file",
+    "<SIDE>\\prompt.txt"
+  ],
+  "repoFiles": [
+    ".git",
+    "notes",
+    "readme.txt"
+  ],
+  "gitLog": [
+    "init"
+  ],
+  "gitStatus": [
+    "AM notes/hello.md",
+    " M readme.txt"
+  ],
+  "homeFiles": [],
+  "readme": "hello world\r\nsee notes/hello.md\r\n"
+}

@@ -1,0 +1,34 @@
+Detected dumb terminal, disabling fancy input and pretty output.
+
+Aider v0.86.2
+Model: openai/ffpane-fixture-model with diff edit format
+Git repo: .git with 1 files
+Repo-map: disabled
+Added readme.txt to the chat.
+
+I will patch it.
+
+readme.txt
+<<<<<<< SEARCH
+this text does not exist in the file
+=======
+replacement
+>>>>>>> REPLACE
+
+Tokens: 1.9k sent, 27 received.
+The LLM did not conform to the edit format.
+https://aider.chat/docs/troubleshooting/edit-errors.html
+
+# 1 SEARCH/REPLACE block failed to match!
+
+## SearchReplaceNoExactMatch: This SEARCH block failed to exactly match lines in readme.txt
+<<<<<<< SEARCH
+this text does not exist in the file
+=======
+replacement
+>>>>>>> REPLACE
+
+The SEARCH section must exactly match an existing block of lines including all white space, comments, indentation, docstrings, etc
+
+Sorry, I cannot apply that change.
+Tokens: 2.0k sent, 8 received.

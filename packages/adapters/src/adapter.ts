@@ -30,6 +30,7 @@ export const KNOWN_RUNTIMES = [
   "gemini-cli",
   "opencode",
   "grok-build",
+  "aider",
   "generic-exec",
 ] as const;
 

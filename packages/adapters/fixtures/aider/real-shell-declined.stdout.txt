@@ -1,0 +1,16 @@
+Detected dumb terminal, disabling fancy input and pretty output.
+
+Aider v0.86.2
+Model: openai/ffpane-fixture-model with diff edit format
+Git repo: .git with 1 files
+Repo-map: disabled
+
+Let's check the Node version.
+
+```bash
+node -v
+```
+
+Tokens: 2.4k sent, 16 received.
+
+node -v

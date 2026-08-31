@@ -15,3 +15,10 @@
 # docx 是 ZIP 包：不显式标记就会落到上面的 text=auto，
 # 一旦其二进制头里出现 CR LF 字节序列就会被行尾归一化改坏（T6.1 解析 fixture 依赖它逐字节完好）
 *.docx binary
+
+# Aider fixture 是**真机 stdout 的逐字节录制**（T7.3b）。aider 在 Windows 上输出 CRLF，
+# 而「适配器要剥掉行尾 \r」正是它要证明的行为之一（scanner.ts / 逐字节回放单测都依赖它）。
+# 落到上面的 eol=lf 会把 CRLF 归一成 LF，等于把录到的证据改掉，故显式关闭行尾转换。
+packages/adapters/fixtures/aider/*.stdout.txt -text
+packages/adapters/fixtures/aider/*.stderr.txt -text
+packages/adapters/fixtures/aider/*.chat-history.md -text

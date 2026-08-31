@@ -1,0 +1,30 @@
+{
+  "name": "real-defaults-residue",
+  "exitCode": 0,
+  "args": [
+    "--model",
+    "openai/ffpane-fixture-model",
+    "--message",
+    "Append a line saying hello aider to readme.txt.",
+    "--yes-always",
+    "--no-check-update",
+    "--no-show-model-warnings"
+  ],
+  "repoFiles": [
+    ".aider.chat.history.md",
+    ".aider.input.history",
+    ".aider.tags.cache.v4",
+    ".git",
+    ".gitignore",
+    "readme.txt"
+  ],
+  "gitLog": [
+    "docs: append greeting to readme",
+    "init"
+  ],
+  "gitStatus": [
+    "?? .gitignore"
+  ],
+  "homeFiles": [],
+  "readme": "hello world\r\nhello aider\r\n"
+}

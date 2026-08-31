@@ -1,0 +1,19 @@
+{
+  "name": "real-badargs",
+  "exitCode": 2,
+  "args": [
+    "--no-such-flag-at-all",
+    "--message",
+    "hi"
+  ],
+  "repoFiles": [
+    ".git",
+    "readme.txt"
+  ],
+  "gitLog": [
+    "init"
+  ],
+  "gitStatus": [],
+  "homeFiles": [],
+  "readme": "hello world\n"
+}

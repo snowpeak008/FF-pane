@@ -33,6 +33,7 @@ const RUNTIME_OPTIONS = [
   "gemini-cli",
   "opencode",
   "grok-build",
+  "aider",
   "generic-exec",
 ] as const;
 

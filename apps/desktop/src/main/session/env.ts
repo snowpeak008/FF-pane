@@ -23,6 +23,13 @@ export function runtimeApiKeyEnvVar(runtime: RuntimeId): string | undefined {
     // 用户自己的 `grok login` 登录态，本函数的返回值对其无效（上层不注入）。
     case "grok-build":
       return "XAI_API_KEY";
+    // aider 的认证完全由 litellm 按 Provider 读环境变量，没有 cli_login 登录态可用
+    // （aider.md §5.2）。默认走 OpenAI 兼容链路的标准变量名；用别家 Provider 时
+    // 由 Profile 侧的自定义配置覆盖。
+    // 注意：这个变量是 aider 唯一的认证材料来源，缺席会让它进 onboarding 并唤起
+    // 浏览器（§7.3 坑 1），故适配器在 startTurn 里对它做启动前快速失败。
+    case "aider":
+      return "OPENAI_API_KEY";
     // opencode 的 Provider 在其自身配置内声明；generic-exec 由 Profile 的自定义
     // 配置决定，均不由本层按固定变量名注入。
     default:
@@ -30,9 +37,15 @@ export function runtimeApiKeyEnvVar(runtime: RuntimeId): string | undefined {
   }
 }
 
-/** 各 Runtime 读取自定义 base_url 的环境变量名（仅 openai 兼容链路需要）。 */
+/**
+ * 各 Runtime 读取自定义 base_url 的环境变量名（仅 openai 兼容链路需要）。
+ *
+ * aider 也用 `OPENAI_BASE_URL` 而非 `OPENAI_API_BASE`：实测（aider.md §5.2）
+ * litellm 优先取 `OPENAI_BASE_URL`，它**会压过** aider 自己的 `--openai-api-base`
+ * 参数。既然优先级最高的那个就是它，注入它才能保证路由确定。
+ */
 function runtimeBaseUrlEnvVar(runtime: RuntimeId): string | undefined {
-  return runtime === "codex" ? "OPENAI_BASE_URL" : undefined;
+  return runtime === "codex" || runtime === "aider" ? "OPENAI_BASE_URL" : undefined;
 }
 
 /** 单 Provider 每轮临时装配的 codex model_provider 槽名（无跨轮共享，故固定即可）。 */

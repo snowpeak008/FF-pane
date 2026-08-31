@@ -1,0 +1,25 @@
+Detected dumb terminal, disabling fancy input and pretty output.
+
+You can skip this check with --no-gitignore
+Added .aider* to .gitignore
+Aider v0.86.2
+Model: openai/ffpane-fixture-model with whole edit format
+Git repo: .git with 1 files
+Repo-map: using 1024 tokens, auto refresh
+
+
+https://aider.chat/HISTORY.html#release-notes
+
+
+readme.txt
+I will append a line to the readme.
+
+readme.txt
+```
+hello world
+hello aider
+```
+
+Tokens: 748 sent, 23 received.
+Applied edit to readme.txt
+Commit 4297f9e docs: append greeting to readme

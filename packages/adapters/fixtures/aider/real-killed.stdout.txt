@@ -1,0 +1,9 @@
+Detected dumb terminal, disabling fancy input and pretty output.
+
+Aider v0.86.2
+Model: openai/ffpane-fixture-model with whole edit format
+Git repo: .git with 1 files
+Repo-map: disabled
+
+
+readme.txt
