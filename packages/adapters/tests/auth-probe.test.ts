@@ -165,8 +165,55 @@ describe("probeCliLogin：opencode（opencode auth list，凭证计数判定）"
   });
 });
 
-describe("probeCliLogin：四 runtime 通用三态", () => {
+describe("probeCliLogin：grok-build（grok models，只看文本不看退出码）", () => {
+  /** 真机实测（1.0.13，未登录）的 stdout 形态：首行是未登录标记，其后照常列模型。 */
+  const NOT_AUTHENTICATED_STDOUT =
+    "You are not authenticated.\n\nAvailable models:\n  grok-code-fast-1\n  grok-4-latest\n";
+
+  it("退出码 0 + 首行未登录标记 → logged_out（退出码在本 Runtime 上不承载判据）", async () => {
+    const { execute } = fakeExecutor(completed(0, NOT_AUTHENTICATED_STDOUT));
+    const result = await probeCliLogin("grok-build", { execute });
+    expect(result.status).toBe("logged_out");
+    expect(result.probedWith).toBe("grok models");
+    expect(result.detail).toContain("退出码 0");
+  });
+
+  it("另一措辞 not signed in 同样判 logged_out（不分大小写、含 ANSI、走 stderr）", async () => {
+    const { execute } = fakeExecutor(
+      completed(0, "", "\u001B[31mYou are NOT SIGNED IN\u001B[0m\n"),
+    );
+    const result = await probeCliLogin("grok-build", { execute });
+    expect(result.status).toBe("logged_out");
+  });
+
+  it("退出码 0 且无未登录标记 → logged_in", async () => {
+    const { execute } = fakeExecutor(completed(0, "Available models:\n  grok-4-latest\n"));
+    const result = await probeCliLogin("grok-build", { execute });
+    expect(result.status).toBe("logged_in");
+  });
+
+  it("非零退出码且无未登录标记 → unknown（不猜成未登录）", async () => {
+    const { execute } = fakeExecutor(completed(1, "", "Error: network unreachable\n"));
+    const result = await probeCliLogin("grok-build", { execute });
+    expect(result.status).toBe("unknown");
+    expect(result.detail).toContain("非零退出码且无未登录标记");
+  });
+
+  it("未登录标记优先于非零退出码 → logged_out", async () => {
+    const { execute } = fakeExecutor(completed(1, NOT_AUTHENTICATED_STDOUT));
+    const result = await probeCliLogin("grok-build", { execute });
+    expect(result.status).toBe("logged_out");
+  });
+});
+
+describe("probeCliLogin：五 runtime 通用三态", () => {
   const runtimes: readonly CliLoginRuntime[] = CLI_LOGIN_RUNTIMES;
+
+  // 把「五」这个数字钉在断言上：日后 CLI_LOGIN_RUNTIMES 增删时这条先红，
+  // 而不是留下一个像本条此前那样悄悄过期的测试标题。
+  it("清单恰为五家，与本 describe 标题一致", () => {
+    expect(CLI_LOGIN_RUNTIMES).toHaveLength(5);
+  });
 
   it.each(runtimes)("%s：执行器报 cli_missing → cli_missing", async (runtime) => {
     const { execute } = fakeExecutor({ kind: "cli_missing" });
@@ -257,7 +304,7 @@ describe("detail 敏感内容过滤与截断", () => {
 });
 
 describe("isCliLoginRuntime 守卫", () => {
-  it("接受四个合法值、拒绝其他", () => {
+  it("接受五个合法值、拒绝其他", () => {
     for (const runtime of CLI_LOGIN_RUNTIMES) {
       expect(isCliLoginRuntime(runtime)).toBe(true);
     }

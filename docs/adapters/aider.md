@@ -68,7 +68,7 @@ aider --message-file <PATH> [OPTIONS]
 | `--no-show-model-warnings` | 不因模型元数据缺失而询问 | 自定义模型名会多一次询问 |
 | `--encoding utf-8` | 读写编码 | 中文提示词/文件在 GBK 默认页下乱码 |
 
-**（二）不许动用户仓库（§8 红线，逐条实测见 §8.1）**
+**（二）不许动用户仓库与用户机器（八条，§8 红线，逐条实测见 §8.1）**
 
 | 参数 | 拦住的默认行为 |
 |---|---|
@@ -79,6 +79,7 @@ aider --message-file <PATH> [OPTIONS]
 | `--chat-history-file <TMP>` | 默认写 `<git 根>/.aider.chat.history.md` |
 | `--input-history-file <TMP>` | 默认写 `<git 根>/.aider.input.history` |
 | `--no-analytics` | 默认在 `~/.aider/` 下写 `analytics.json`、`installs.json`、`caches/…json` 并可能上报 |
+| `--no-detect-urls` | 默认**开**（`args.py:843-846` `default=True`）：aider 会正则扫提示词里的 URL 并逐个问「Add URL to the chat?」（`base_coder.py:964-981`）。该询问**没有** `explicit_yes_required`，故 `--yes-always` 一律答「是」（`io.py:867`）→ 无人值守地 `cmd_web(url)` 抓网页、把抓回的正文追加进提示词。即一条**联网 + 上下文污染**的默认行为，而任务合同里出现 URL 是常事 |
 
 **（三）行为确定、不额外花钱**
 
@@ -432,7 +433,7 @@ aider 启动时按顺序加载 `~/.env` → `<git 根>/.env` → `<cwd>/.env` �
 也能改默认值，但优先级是「命令行 > 环境变量 > 配置文件 > 默认值」，实测下发
 `--no-auto-commits` / `--map-tokens 0` 能压过仓库 `.aider.conf.yml` 里的 `auto-commits: true` /
 `map-tokens: 4096`。**这就是 §1.2 那张表必须整套显式下发、不能依赖默认值的原因**：
-默认值随时可能被用户仓库或用户 shell 改掉，而其中七条是红线。
+默认值随时可能被用户仓库或用户 shell 改掉，而其中八条（§1.2 第二组）是红线。
 
 **坑 5：新建文件会被 git add 进索引。**
 

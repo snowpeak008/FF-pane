@@ -8,7 +8,9 @@ import { runSqliteCheck } from "./sqlite-check";
  * 冒烟自测模式（pnpm smoke → electron . --smoke），本任务的客观验收手段：
  * 1. 主进程直接验证 better-sqlite3 内存库查询（风险 R1）
  * 2. 主进程验证真实 safeStorage 密钥往返（W1.5b：store→reveal + maskedTail + delete）
- * 3. 创建隐藏窗口加载 renderer（URL 带 ?smoke=1）
+ * 3. 创建隐藏窗口加载 renderer（URL 带 ?smoke=1；该模式下 renderer 只跑自检、
+ *    **不挂载全功能 App**——本模式只装配下面那几个通道，挂上 App 会让默认页发起
+ *    一个没有 handler 的页面级查询，见 renderer/src/main.tsx 的说明）
  * 4. renderer 依次执行：IPC ping-pong / app-info / 经 IPC 的 sqlite 检查 / 事件订阅 / CSP 拦截 eval
  * 5. renderer 经 smoke:report 上报，全部通过退出码 0，任一失败退出码 1；超时兜底退出码 1
  */

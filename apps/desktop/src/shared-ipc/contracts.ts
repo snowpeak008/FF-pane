@@ -820,10 +820,14 @@ export interface IpcInvokeContracts {
    * 项目列表页数据源（§11.1，T7.4）：注册表条目 + 当场汇总的派生信息。
    *
    * 与 `projects:list` 分开而不是就地扩展返回值：这一路要为每个项目扫 plans/tasks/runs/
-   * sessions 四处磁盘，而 `projects:list` 的另两个消费者（`useActiveProject` 与命令面板的
-   * 项目切换）只要名字和路径。把磁盘扫描塞进它们的必经之路，是让「切个项目」为一屏它们
-   * 根本不显示的信息买单。`projects:create/remove/restore` 也仍返回 `ProjectRegistryEntry`，
-   * 列表页不必在两种形状之间转译。
+   * sessions 四处磁盘，而 `projects:list` 只要名字和路径。把磁盘扫描塞进它的必经之路，
+   * 是让「切个项目」为一屏它根本不显示的信息买单。
+   * `projects:create/remove/restore` 也仍返回 `ProjectRegistryEntry`，列表页不必在两种
+   * 形状之间转译。
+   *
+   * 今日 `projects:list` 的消费者**只有 `useActiveProject` 一个**。命令面板将来也会吃这
+   * 份列表，但它不自己调 IPC（列表由挂载方经 prop 注入），且迄今未挂进 `App.tsx`——所以
+   * 这里不把它算作现有消费者。上面那条取舍与消费者有几个无关：轻通道就该保持轻。
    */
   "projects:summary": { request: undefined; response: readonly ProjectSummaryView[] };
   /** 登记新项目：生成 .workbench/ 目录结构并写入注册表，返回登记后的条目。 */

@@ -7,7 +7,7 @@
  * 输出模式（调研 §0），故命令行的职责不是「挑一个好解析的格式」，而是：
  *
  * 1. **让 headless 跑得起来**（`--message-file` + `--model` + `--yes-always`）；
- * 2. **拦住七条会动用户仓库的默认行为**（§1.2 第二组，逐条实测见 §8.1）；
+ * 2. **拦住八条会动用户仓库与用户机器的默认行为**（§1.2 第二组，逐条实测见 §8.1）；
  * 3. **让行为确定、不额外花钱**（关掉 auto-lint 的自动修复轮与永远执行不了的命令建议）。
  *
  * 第 2 组每一条都是红线而非偏好：aider 默认会往用户仓库写三个 `.aider.*`、
@@ -148,7 +148,8 @@ export function buildAiderArgs(input: AiderArgsInput): string[] {
     "--no-show-model-warnings",
     "--encoding",
     "utf-8",
-    // 不许动用户仓库的那一组（§1.2 第二组，七条红线）。
+    // 不许动用户仓库与用户机器的那一组（§1.2 第二组，八条红线；`--no-detect-urls`
+    // 拦的是「扫提示词里的 URL 并在 --yes-always 下自动抓网页」这条联网默认行为）。
     "--no-gitignore",
     "--no-auto-commits",
     "--no-dirty-commits",

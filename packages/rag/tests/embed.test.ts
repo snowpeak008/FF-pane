@@ -8,7 +8,12 @@
  */
 
 import { once } from "node:events";
-import { createServer, type IncomingHttpHeaders, type ServerResponse } from "node:http";
+import {
+  createServer,
+  type IncomingHttpHeaders,
+  type Server,
+  type ServerResponse,
+} from "node:http";
 import type { AddressInfo } from "node:net";
 import type { Provider } from "@ff-pane/shared";
 import { afterEach, describe, expect, it } from "vitest";
@@ -61,6 +66,31 @@ afterEach(async () => {
   await Promise.all(openServers.splice(0).map((mock) => mock.close()));
 });
 
+/**
+ * WHATWG fetch 「坏端口」黑名单里落在动态端口范围内的那些：`listen(0)` 抽到其中之一时
+ * mock 服务照常在听，但 fetch 在建立连接之前就报 `fetch failed ← bad port`。
+ * 根因与实测枚举见 `packages/core/tests/provider-probe.test.ts` 同名常量的注释。
+ */
+const FETCH_BAD_PORTS: ReadonlySet<number> = new Set([
+  1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669,
+  6679, 6697, 10080,
+]);
+
+/** 绑定一个 fetch 真的到得了的本地端口（抽到黑名单上的端口就换一个再绑）。 */
+async function listenOnFetchablePort(server: Server): Promise<number> {
+  for (let attempt = 0; attempt < 64; attempt += 1) {
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const { port } = server.address() as AddressInfo;
+    if (!FETCH_BAD_PORTS.has(port)) {
+      return port;
+    }
+    server.close();
+    await once(server, "close");
+  }
+  throw new Error("连续 64 次 listen(0) 都落在 fetch 坏端口上，无法起 mock 服务");
+}
+
 /** 起一个记录全部请求的本地 mock 服务，afterEach 自动关闭。 */
 async function startMockServer(
   handler: (request: RecordedRequest, res: ServerResponse) => void,
@@ -79,9 +109,7 @@ async function startMockServer(
       handler(requests[requests.length - 1] as RecordedRequest, res);
     });
   });
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  const { port } = server.address() as AddressInfo;
+  const port = await listenOnFetchablePort(server);
   const mock: MockServer = {
     origin: `http://127.0.0.1:${port}`,
     requests,

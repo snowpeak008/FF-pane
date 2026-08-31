@@ -4,7 +4,7 @@
  *
  * 与 tests/aider.test.ts 的分工：那份是 fixture 回放，验证的是「给定这段 stdout，
  * 扫描与映射对不对」；这里验证的是它前面那几段——命令行组装真的能让 aider 启动、
- * `--message-file` 真的被读到、七条红线开关真的生效、diff 真的补得上、
+ * `--message-file` 真的被读到、八条红线开关真的生效、diff 真的补得上、
  * transcript 真的能续接、临时文件真的清干净。这些没有任何单测覆盖得到。
  *
  * ## 安全纪律（不可放松）
@@ -157,7 +157,7 @@ check(
   changes.map((c) => `${c.path}:${(c.diff ?? "").length}B`).join(","),
 );
 
-// 5~6：流式与会话
+// 5~7：流式与会话
 check("有文本增量且以 final 收尾", texts.length > 1 && texts.at(-1)?.final === true);
 check(
   "会话凭据（transcript 路径）经 session_start 报出",
@@ -169,7 +169,7 @@ check(
     resumeEvents.filter((e) => e.kind === "end")[0]?.reason === "completed",
 );
 
-// 7~10：红线（本工单的核心防线）
+// 8~13：红线（本工单的核心防线，共 6 条）
 check(
   "用户仓库无残留文件（用 dir 列目录判，不用 git status —— aider 会把 .aider* 写进 .gitignore）",
   newFiles.length === 0,
@@ -193,7 +193,7 @@ check(
   existsSync(turn.sessionFile) && !turn.sessionFile.startsWith(projectRoot),
 );
 
-// 11：命令事件如实为零（能力声明 commandEvents = no）
+// 14：命令事件如实为零（能力声明 commandEvents = no）
 check("无命令事件（headless 下 aider 结构性地不执行模型请求的命令）", commands.length === 0);
 
 rmSync(projectRoot, { recursive: true, force: true });

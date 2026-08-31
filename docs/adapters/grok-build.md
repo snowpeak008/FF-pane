@@ -247,6 +247,19 @@ NDJSON，每行一个带 `type` 的对象，由 grok 的 ACP session update 投�
    两条应对缺一不可：① 必开 `--always-approve`（安全由 FF-pane 权限层承担，与 codex 的 bypass 同理）；
    ② `end.stopReason === "cancelled"` 必须映射成 `cancelled` 而**不是** `completed`——
    否则一次什么都没干的 Run 会被记成成功，还会满足任务 done 的证据门槛。
+
+   **「其实没执行」的文本标记共三条**（`failed` 命中其一即改判 `denied`）。
+   来源是适配器实现 `packages/adapters/src/grok-build/mapper.ts` 的 `DENIAL_MARKERS`，
+   重录 fixture 时据此逐条核对措辞：
+
+   | 标记 | 实录出处 |
+   |---|---|
+   | `User cancelled the execution` | `real-streaming-json-headless-noapprove.jsonl:7`（无审批路径）、`real-streaming-json-deny-rule.jsonl:12`（命令工具） |
+   | `Denied by permission policy` | `real-streaming-json-deny-rule.jsonl:7`（`--deny` 路径，见坑 2） |
+   | `was not executed` | 同上第 7 行——实录原文是「Tool \`write\` **was not executed**: Denied by permission policy: …」，即它与上一条同句出现 |
+
+   第三条是前两条的伴生句，单独留着是**刻意冗余**：三条都只会把「其实没执行」的 `failed`
+   归到 `denied`，措辞哪天漂移时的症状是多记一条阻断证据，而不是漏掉一次越界。
 2. **`--deny` 规则是纵深防御，不是防线。** 实测 `--deny "Write(**)"` 确实拦住了写
    （`real-streaming-json-deny-rule.jsonl`：`failed` +「Denied by permission policy」），
    但规则语法是 grok 自己的 glob 方言，与本产品的 `writePaths` 信封不同源；

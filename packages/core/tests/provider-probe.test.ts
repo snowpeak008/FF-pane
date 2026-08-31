@@ -6,7 +6,12 @@
  */
 
 import { once } from "node:events";
-import { createServer, type IncomingHttpHeaders, type ServerResponse } from "node:http";
+import {
+  createServer,
+  type IncomingHttpHeaders,
+  type Server,
+  type ServerResponse,
+} from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -44,6 +49,43 @@ afterEach(async () => {
   await Promise.all(openServers.splice(0).map((mock) => mock.close()));
 });
 
+/**
+ * WHATWG fetch 的「坏端口」黑名单（https://fetch.spec.whatwg.org/#bad-port-blocklist）
+ * 中落在操作系统动态端口范围内的那些。清单里 1024 以下的项一并省去——动态端口范围
+ * 不会低于 1024，`listen(0)` 拿不到那些端口。
+ *
+ * 为什么测试需要认识这张表：fetch 规范要求实现对黑名单端口**在建立连接之前**就返回
+ * 网络错误，undici 的形态是 `TypeError: fetch failed` 且 cause 的 message 恰为
+ * `bad port`。而 `listen(0)` 给的是动态端口范围里的任意一个——本机（Windows，
+ * `netsh int ipv4 show dynamicport tcp`）是 1024~15000，与黑名单有 19 处交集，
+ * 下表即在该范围上逐端口实测枚举得出。抽中其中之一时 mock 服务照常在听、端口也确实
+ * 空闲，但 fetch 永远到不了它，于是本该断言 HTTP 状态的用例会收到 `network` 阶段的
+ * 失败。这正是 §4.5 登记的「全量并发下偶发 `fetch failed ← bad port`」的根因：
+ * 一次全量约 50 次绑定，命中概率 1-(1-19/13977)^50 ≈ 7%，与实测的约 1/7 吻合。
+ *
+ * 处置是**消除这个碰运气的前提**而不是给请求加重试：黑名单是端口的静态属性，换一个
+ * 端口即可确定性地绕开，而重试请求只会把一个必然失败的调用重试到超时。
+ */
+const FETCH_BAD_PORTS: ReadonlySet<number> = new Set([
+  1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669,
+  6679, 6697, 10080,
+]);
+
+/** 绑定一个 fetch 真的到得了的本地端口（抽到黑名单上的端口就换一个再绑）。 */
+async function listenOnFetchablePort(server: Server): Promise<number> {
+  for (let attempt = 0; attempt < 64; attempt += 1) {
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const { port } = server.address() as AddressInfo;
+    if (!FETCH_BAD_PORTS.has(port)) {
+      return port;
+    }
+    server.close();
+    await once(server, "close");
+  }
+  throw new Error("连续 64 次 listen(0) 都落在 fetch 坏端口上，无法起 mock 服务");
+}
+
 /** 起一个记录全部请求的本地 mock 服务，afterEach 自动关闭。 */
 async function startMockServer(handler: MockHandler): Promise<MockServer> {
   const requests: RecordedRequest[] = [];
@@ -61,9 +103,7 @@ async function startMockServer(handler: MockHandler): Promise<MockServer> {
       handler(recorded, res);
     });
   });
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  const { port } = server.address() as AddressInfo;
+  const port = await listenOnFetchablePort(server);
   const mock: MockServer = {
     origin: `http://127.0.0.1:${port}`,
     requests,
@@ -374,10 +414,10 @@ describe("testConnection · 不支持的类型与非法配置", () => {
   });
 
   it("连接被拒时 stage=network，rawError 保留 cause 链原始 message", async () => {
+    // 先占一个 fetch 可达的端口再放掉：端口本身必须不在坏端口黑名单里，否则 fetch
+    // 会在连接之前就拒绝，这条用例就变成了在验证 bad port 而不是在验证连接被拒。
     const server = createServer(() => {});
-    server.listen(0, "127.0.0.1");
-    await once(server, "listening");
-    const { port } = server.address() as AddressInfo;
+    const port = await listenOnFetchablePort(server);
     server.close();
     await once(server, "close");
 

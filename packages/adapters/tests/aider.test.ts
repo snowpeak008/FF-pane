@@ -127,7 +127,7 @@ describe("aider 命令行组装", () => {
     expect(args).not.toContain("--message");
   });
 
-  it("七条红线开关整套下发（默认值会动用户仓库，且默认值可被仓库配置改掉）", () => {
+  it("八条红线开关整套下发（默认值会动用户仓库，且默认值可被仓库配置改掉）", () => {
     const args = buildAiderArgs(base);
     for (const flag of [
       "--no-gitignore",
@@ -581,7 +581,7 @@ describe("aider fixture 的真机事实（红线证据）", () => {
     }
   });
 
-  it("不下发开关时默认值有多脏（对照组，证明那七条开关不是摆设）", async () => {
+  it("不下发开关时默认值有多脏（对照组，证明那八条开关不是摆设）", async () => {
     const meta = await readMeta("real-defaults-residue");
     expect(meta.repoFiles).toContain(".aider.chat.history.md");
     expect(meta.repoFiles).toContain(".aider.input.history");

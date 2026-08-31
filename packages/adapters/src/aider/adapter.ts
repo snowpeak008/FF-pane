@@ -15,10 +15,10 @@
  *    这是本适配器唯一「宁可不启动」的前置校验：一条说得清原因的 end(failed)
  *    远好过一个会弹窗的进程。
  *
- * 2. **七条红线开关整套显式下发**（command.ts）。aider 默认会往用户仓库写三个
- *    `.aider.*`、改写用户的 `.gitignore`、并且自己 git commit。且默认值可被用户
- *    仓库里的 `.aider.conf.yml` 或用户 shell 里的 `AIDER_*` 变量改掉，
- *    所以只有写进命令行才压得住。
+ * 2. **八条红线开关整套显式下发**（command.ts）。aider 默认会往用户仓库写三个
+ *    `.aider.*`、改写用户的 `.gitignore`、自己 git commit，还会扫提示词里的 URL
+ *    去抓网页。且默认值可被用户仓库里的 `.aider.conf.yml` 或用户 shell 里的
+ *    `AIDER_*` 变量改掉，所以只有写进命令行才压得住。
  *
  * 3. **红线跑完还要核查一遍**（verifyNoResidue）。开关生效是"应该"，不是"已经"。
  *    轮次结束后实测仓库里有没有多出 `.aider*`、HEAD 有没有变——多出来就发一条

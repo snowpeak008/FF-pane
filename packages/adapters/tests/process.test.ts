@@ -52,6 +52,29 @@ async function readFirstLine(stream: AsyncIterable<Buffer>): Promise<string> {
   return buffer.trim();
 }
 
+/**
+ * 等到队列的排队字节数达到 target 为止（消费端此刻不该在取字节，否则条件不单调）。
+ * 返回是否等到，交由调用方断言——超时静默通过会把一次真实回归读成成功。
+ */
+async function waitForPendingBytes(
+  queue: ByteChunkQueue,
+  target: number,
+  timeoutMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (queue.pendingBytes >= target) {
+      return true;
+    }
+    if (Date.now() >= deadline) {
+      return false;
+    }
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 2);
+    });
+  }
+}
+
 /** Windows：用 tasklist 查证 pid 是否还在（进程树终止的独立证据）。 */
 function pidAlive(pid: number): Promise<boolean> {
   if (!isWindows) {
@@ -158,7 +181,7 @@ describe("spawnAgentProcess：流的完整性与分离", () => {
     expect(exit.exitCode).toBe(0);
   }, 30_000);
 
-  it("慢消费者把队列顶到上限（触发 pause）后依然不丢字节", async () => {
+  it("消费端停住时队列顶到上限（触发 pause），放行后依然不丢字节", async () => {
     const blockSize = 1024;
     const blockCount = 4096;
     const highWaterMark = 16 * 1024;
@@ -172,19 +195,34 @@ describe("spawnAgentProcess：流的完整性与分离", () => {
       streamHighWaterMark: highWaterMark,
     });
     const queue = handle.stdout as ByteChunkQueue;
-    let received = 0;
-    let sawBacklog = false;
-    for await (const chunk of handle.stdout) {
-      received += chunk.length;
-      if (queue.pendingBytes >= highWaterMark) {
-        sawBacklog = true;
+    const iterator = queue[Symbol.asyncIterator]();
+
+    // 先取一块，确认流已经开始产出。
+    const first = await iterator.next();
+    expect(first.done).toBe(false);
+    let received = first.value?.length ?? 0;
+
+    // 然后**把消费端按住不动**，等生产端自己把队列顶到上限。产出总量（4 MiB）远大于
+    // 上限（16 KiB），且这期间没有任何一处在取走字节，故 pendingBytes 只增不减——
+    // 积压窗口由这个等待条件确定，不再取决于「消费恰好慢于生产」。
+    //
+    // 原先的写法是「消费端每块睡 2 ms，顺便看一眼 pendingBytes」：而 pause 恰好发生在
+    // 队列达到上限的那一刻，紧接着的一次 shift 就把它降回上限以下，所以采样点看到的
+    // 几乎总是「刚刚被抽走一块之后」的低水位。要采到 >= 上限，得赶上「队列一次积压了
+    // 两块以上」的巧合，而那取决于机器负载与管道分块大小——这就是 §4.5 登记的
+    // 「全量并发下偶发 sawBacklog 不成立」。
+    const sawBacklog = await waitForPendingBytes(queue, highWaterMark, 20_000);
+    expect(sawBacklog).toBe(true);
+
+    // 放行：resume 之后剩余字节必须一个不少地交完。
+    for (;;) {
+      const next = await iterator.next();
+      if (next.done === true) {
+        break;
       }
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, 2);
-      });
+      received += next.value.length;
     }
     expect(received).toBe(blockSize * blockCount);
-    expect(sawBacklog).toBe(true);
     expect((await handle.exitPromise).exitCode).toBe(0);
   }, 30_000);
 

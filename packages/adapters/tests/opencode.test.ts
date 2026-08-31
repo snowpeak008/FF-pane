@@ -474,6 +474,34 @@ interface FakeOptions {
   readonly legacyPermissionStatus?: number;
 }
 
+/**
+ * WHATWG fetch 「坏端口」黑名单里落在动态端口范围内的那些：`listen(0)` 抽到其中之一时
+ * 假服务照常在听，但 fetch 在建立连接之前就报 `fetch failed ← bad port`。
+ * 根因与实测枚举见 `packages/core/tests/provider-probe.test.ts` 同名常量的注释。
+ * 假 `serve` 子进程脚本（`FAKE_SERVE_SOURCE`）里另有一份同规则的实现。
+ */
+const FETCH_BAD_PORTS: ReadonlySet<number> = new Set([
+  1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669,
+  6679, 6697, 10080,
+]);
+
+/** 绑定一个 fetch 真的到得了的本地端口（抽到黑名单上的端口就换一个再绑）。 */
+async function listenOnFetchablePort(server: Server): Promise<number> {
+  for (let attempt = 0; attempt < 64; attempt += 1) {
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    const { port } = server.address() as AddressInfo;
+    if (!FETCH_BAD_PORTS.has(port)) {
+      return port;
+    }
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+    });
+  }
+  throw new Error("连续 64 次 listen(0) 都落在 fetch 坏端口上，无法起假服务");
+}
+
 async function startFakeOpenCode(options: FakeOptions = {}): Promise<FakeOpenCode> {
   const requests: RecordedRequest[] = [];
   const waiters: {
@@ -568,13 +596,10 @@ async function startFakeOpenCode(options: FakeOptions = {}): Promise<FakeOpenCod
     });
   });
 
-  await new Promise<void>((resolve) => {
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  const address = server.address() as AddressInfo;
+  const port = await listenOnFetchablePort(server);
 
   return {
-    baseUrl: `http://127.0.0.1:${address.port}`,
+    baseUrl: `http://127.0.0.1:${port}`,
     requests,
     emit(event: unknown): void {
       for (const subscriber of subscribers) {
@@ -695,10 +720,23 @@ const server = createServer((req, res) => {
   }
   res.writeHead(404).end();
 });
-server.listen(0, "127.0.0.1", () => {
-  if (process.env["FAKE_SERVE_SILENT"] === "1") return;
-  console.log("opencode server listening on http://127.0.0.1:" + server.address().port);
-});
+// 只公告 fetch 可达的端口：WHATWG 坏端口黑名单上的端口会让健康检查的 fetch 在建立
+// 连接之前就失败，见测试文件里 FETCH_BAD_PORTS 的注释。
+const badPorts = new Set([
+  1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669,
+  6679, 6697, 10080,
+]);
+const listen = () => {
+  server.listen(0, "127.0.0.1", () => {
+    if (badPorts.has(server.address().port)) {
+      server.close(listen);
+      return;
+    }
+    if (process.env["FAKE_SERVE_SILENT"] === "1") return;
+    console.log("opencode server listening on http://127.0.0.1:" + server.address().port);
+  });
+};
+listen();
 `;
 
 describe("Server 生命周期（假 serve 子进程）", () => {

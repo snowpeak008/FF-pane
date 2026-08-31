@@ -14,6 +14,7 @@
  */
 
 import type { Plan, ProjectRegistryEntry, Run, SessionRecord, Task } from "@ff-pane/shared";
+import { isTaskTerminalStatus } from "@ff-pane/shared";
 import type { ProjectLayout } from "@ff-pane/storage";
 import type {
   ProjectActivitySource,
@@ -23,13 +24,21 @@ import type {
 } from "../shared-ipc/contracts";
 
 /**
- * 已收尾的任务状态：不计入「进行中任务数」。
+ * 「进行中任务数」= 非终态任务数，终态判定直接用领域层的 `isTaskTerminalStatus`
+ * （`shared/domain/task.ts` 的 `TASK_TERMINAL_STATUSES`，§6.3）。
  *
- * 只排除这两个而不是"只数 running"：`running` 仅在一轮 Worker 在飞时为真，闭着应用时
- * 它恒为 0，那样的数字回答不了 §11.1 要项目列表回答的「各自到哪了」。反过来 `done` 要算
- * 进去——§6.3 写明 done ≠ accepted，一个等着用户验收的任务显然还没完事。
+ * 本文件曾自带一份同内容的 `["accepted","cancelled"]`。两份逐字相同时结果当然是对的，
+ * 但日后领域侧增删终态，这里不会跟着变，症状是「任务看板认它是终态、项目卡片仍把它算成
+ * 进行中」——一处静默的口径分叉。故改为复用领域守卫：终态集合只有一个定义处。
+ *
+ * 口径本身（T7.4 主管理员裁定）：只排除终态而不是"只数 running"——`running` 仅在一轮
+ * Worker 在飞时为真，闭着应用时它恒为 0，那样的数字回答不了 §11.1 要项目列表回答的
+ * 「各自到哪了」。反过来 `done` 要算进去——§6.3 写明 done ≠ accepted，一个等着用户
+ * 验收的任务显然还没完事。
  */
-const SETTLED_TASK_STATUSES: readonly Task["status"][] = ["accepted", "cancelled"];
+function isActiveTask(task: Task): boolean {
+  return !isTaskTerminalStatus(task.status);
+}
 
 /** 汇总所需的四路读取 + 一次目录探测，全部由宿主注入。 */
 export interface ProjectSummarySources {
@@ -169,9 +178,7 @@ export async function summarizeProject(
 
   const currentPlan = pickCurrentPlan(planList);
   const activity = pickLastActivity(planList, runList, sessionList);
-  const activeTaskCount = taskList.filter(
-    (task) => !SETTLED_TASK_STATUSES.includes(task.status),
-  ).length;
+  const activeTaskCount = taskList.filter(isActiveTask).length;
 
   return {
     workbenchPresent: true,
