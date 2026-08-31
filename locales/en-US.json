@@ -631,5 +631,114 @@
       "toast": "You’ve said “{{content}}” {{count}} times — make it a lasting habit?",
       "review": "Review"
     }
+  },
+  "knowledge": {
+    "loadError": "Failed to load the knowledge base",
+    "tab": {
+      "search": "Search",
+      "sources": "Sources"
+    },
+    "searchLabel": "Search the knowledge base",
+    "searchPlaceholder": "Type keywords or a sentence, then press Enter",
+    "search": "Search",
+    "filters": "Filters",
+    "filter": {
+      "format": "Format",
+      "tag": "Tag",
+      "directory": "Source folder"
+    },
+    "format": {
+      "markdown": "Markdown",
+      "text": "Text",
+      "source_code": "Source code",
+      "pdf": "PDF",
+      "docx": "Word",
+      "html": "HTML"
+    },
+    "searchIdle": "No search yet. Type keywords or a sentence and press Enter.",
+    "searching": "Searching…",
+    "searchError": "Search failed",
+    "searchEmpty": "No matches. Try different wording, or relax the filters.",
+    "hits": "{{count}} hit(s)",
+    "recall": {
+      "hybrid": "Keyword + semantic",
+      "keywordOnly": "Full-text only",
+      "likeFallback": "Query too short — fell back to substring match",
+      "approximate": "Too many candidates — semantic results are approximate"
+    },
+    "blocker": {
+      "no-provider": "No embedding model configured — full-text search only",
+      "spec-mismatch": "Embedding model differs from the built index — rebuild the vector index"
+    },
+    "source": {
+      "vector": "Semantic",
+      "keyword": "Keyword"
+    },
+    "page": "p. {{page}}",
+    "context": "{{count}} context chunk(s)",
+    "selectHit": "Select this hit from “{{title}}”",
+    "sendToSession": "Send to session",
+    "copyCitation": "Copy citation",
+    "sentToSession": "Added to the session composer",
+    "citationSource": "Source: ",
+    "importFiles": "Import files",
+    "importDirectory": "Import folder",
+    "rebuildAll": "Rebuild all indexes",
+    "rebuildSelected": "Rebuild {{count}} selected",
+    "exportAll": "Export all",
+    "exportSelected": "Export {{count}} selected",
+    "stats": {
+      "documents": "{{count}} document(s)",
+      "chunks": "{{count}} chunk(s)",
+      "vectors": "Vectors {{vectors}}/{{total}}",
+      "vectorDetail": "Backend {{backend}} · {{dimensions}} dims · model {{model}}",
+      "embedder": "Embedding: {{provider}} / {{model}}"
+    },
+    "emptySources": "The knowledge base is empty. Import a folder to get started.",
+    "noMatchingSource": "No matching source. Try another keyword.",
+    "sourcesSearchLabel": "Filter sources",
+    "sourcesSearchPlaceholder": "Filter by title, path, or tag",
+    "column": {
+      "title": "Title",
+      "format": "Format",
+      "chunks": "Chunks",
+      "state": "Index state",
+      "importedAt": "Imported"
+    },
+    "state": {
+      "keyword-only": "Full-text",
+      "partial": "Vectors {{embedded}}/{{total}}",
+      "indexed": "Indexed",
+      "empty": "Empty"
+    },
+    "selectSource": "Select source “{{title}}”",
+    "remove": "Remove",
+    "removeTitle": "Remove source “{{title}}”?",
+    "removeDescription": "This deletes its chunks, full-text index, and vectors. The original file is untouched and can be imported again.",
+    "removed": "Removed “{{title}}”",
+    "removeError": "Removal failed",
+    "rebuild": "Rebuild",
+    "rebuildAllTitle": "Rebuild all indexes?",
+    "rebuildSelectedTitle": "Rebuild the {{count}} selected index(es)?",
+    "rebuildDescription": "Originals are re-read, re-parsed, re-chunked, and re-embedded. Those sources are unsearchable meanwhile, and a remote embedding model will bill for the calls.",
+    "rebuildError": "Rebuild failed",
+    "importError": "Import failed",
+    "importDone": "Import done: {{indexed}} indexed, {{skipped}} skipped, {{chunks}} chunks, {{embedded}} embedded",
+    "importCancelled": "Cancelled — {{indexed}} document(s) already indexed",
+    "importFailures": "{{count}} file(s) failed to parse",
+    "embedFatal": "Embedding aborted",
+    "exportError": "Export failed",
+    "exported": "Exported {{count}} document(s)",
+    "phase": {
+      "scanning": "Scanning files",
+      "indexing": "Parsing and indexing",
+      "embedding": "Generating vectors",
+      "done": "Done"
+    },
+    "insertFromKnowledge": "Insert from knowledge base",
+    "insertTitle": "Insert from knowledge base",
+    "insertDescription": "The selected chunk is added to the composer with its source citation.",
+    "insert": "Insert",
+    "inserted": "Citation inserted"
   }
 }

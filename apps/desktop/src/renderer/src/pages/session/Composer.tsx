@@ -1,9 +1,11 @@
+import { BookOpen } from "lucide-react";
 import { type KeyboardEvent, type ReactElement, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../components/ui/Button";
 import { Textarea } from "../../components/ui/Input";
 import { Tooltip } from "../../components/ui/Tooltip";
 import { useSessionStore } from "../../stores/session";
+import { KnowledgeInsertDialog } from "./KnowledgeInsertDialog";
 
 export interface ComposerProps {
   /**
@@ -39,6 +41,8 @@ export function Composer({
   const clearDraft = useSessionStore((s) => s.clearComposerDraft);
   // 习惯先行「直接做」是单次意图，随发送重置——存本地 UI 态即可（不进 store）。
   const [directExecute, setDirectExecute] = useState(false);
+  // 「从知识库插入」（T6.5 / §8.3.5）：插入的是引用文本，与发送与否无关，故只管开合
+  const [insertOpen, setInsertOpen] = useState(false);
 
   const canSend = !disabled && draft.trim().length > 0;
 
@@ -66,7 +70,7 @@ export function Composer({
 
   return (
     <div className="shrink-0 border-t border-border p-3">
-      <div className="mx-auto mb-1.5 flex max-w-3xl items-center">
+      <div className="mx-auto mb-1.5 flex max-w-3xl items-center justify-between gap-2">
         <Tooltip content={t("session.directExecuteHint")} wrapTrigger>
           <label className="flex cursor-pointer items-center gap-1.5 text-2xs text-fg-muted">
             <input
@@ -77,6 +81,10 @@ export function Composer({
             {t("session.directExecute")}
           </label>
         </Tooltip>
+        <Button variant="ghost" size="sm" onClick={() => setInsertOpen(true)}>
+          <BookOpen aria-hidden size={14} />
+          {t("knowledge.insertFromKnowledge")}
+        </Button>
       </div>
       <div className="mx-auto flex max-w-3xl items-end gap-2">
         <Textarea
@@ -107,6 +115,8 @@ export function Composer({
           button
         )}
       </div>
+      {/* 对话框内的检索在打开时才发起（组件挂载即拉），关闭即卸载，不驻留订阅 */}
+      {insertOpen ? <KnowledgeInsertDialog open onOpenChange={setInsertOpen} /> : null}
     </div>
   );
 }

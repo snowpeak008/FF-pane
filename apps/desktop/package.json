@@ -17,6 +17,7 @@
   "dependencies": {
     "@ff-pane/adapters": "workspace:*",
     "@ff-pane/core": "workspace:*",
+    "@ff-pane/rag": "workspace:*",
     "@ff-pane/shared": "workspace:*",
     "@ff-pane/storage": "workspace:*",
     "better-sqlite3": "^13.0.3",

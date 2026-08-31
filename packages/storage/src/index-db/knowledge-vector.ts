@@ -119,6 +119,12 @@ export interface VectorIndex {
   clear(): void;
   /** 已存向量条数。 */
   count(): number;
+  /**
+   * 从给定候选里挑出「已经有向量」的那些（T6.5 断点续传的判定依据）。
+   * 反过来即「还差哪些块要嵌入」——用户后配嵌入模型、上一轮导入中途崩掉，
+   * 都靠它把差额补齐，而不是把整库重新算一遍。
+   */
+  existingRowids(chunkRowids: readonly number[]): Set<number>;
   /** KNN 检索。 */
   search(params: VectorSearchParams): VectorNeighbor[];
 }
@@ -147,6 +153,38 @@ function assertDimensions(vector: readonly number[], dimensions: number): void {
  * 候选集比这还大时不走 IN 预过滤，改为超额召回后再过滤（见 knowledge-search）。
  */
 export const VECTOR_PREFILTER_MAX_CANDIDATES = 20_000;
+
+/**
+ * 分批跑「rowid IN (...)」的存在性查询。
+ * 分批不是优化而是必须：候选来自「本次导入涉及的全部块」，十万级块一次绑完
+ * 会撞上 SQLITE_MAX_VARIABLE_NUMBER。批大小复用预过滤那条上限，口径一致。
+ *
+ * 这里不受 T6.4 那个「单元素 IN 在 vec0 里退化」的坑影响：那个坑属于 KNN 路径
+ *（MATCH + k 时的近似回退），本查询没有 MATCH，单元素 IN 被改写成 rowid = x
+ * 就是一次普通点查，结果正确。
+ */
+function queryExistingRowids(
+  db: Database.Database,
+  table: string,
+  column: string,
+  chunkRowids: readonly number[],
+  bind: (rowid: number) => number | bigint,
+): Set<number> {
+  const found = new Set<number>();
+  for (let start = 0; start < chunkRowids.length; start += VECTOR_PREFILTER_MAX_CANDIDATES) {
+    const batch = chunkRowids.slice(start, start + VECTOR_PREFILTER_MAX_CANDIDATES);
+    const rows = db
+      .prepare(
+        `SELECT ${column} AS chunkRowid FROM ${table}
+         WHERE ${column} IN (${batch.map(() => "?").join(", ")})`,
+      )
+      .all(...batch.map(bind)) as { readonly chunkRowid: number }[];
+    for (const row of rows) {
+      found.add(Number(row.chunkRowid));
+    }
+  }
+  return found;
+}
 
 /** vec0 后端：虚表 KNN。 */
 function createVec0Index(db: Database.Database, dimensions: number, model: string): VectorIndex {
@@ -183,6 +221,9 @@ function createVec0Index(db: Database.Database, dimensions: number, model: strin
         readonly n: number;
       };
       return row.n;
+    },
+    existingRowids(chunkRowids) {
+      return queryExistingRowids(db, KNOWLEDGE_VEC0_TABLE, "rowid", chunkRowids, toSqliteInteger);
     },
     search(params) {
       assertDimensions(params.vector, dimensions);
@@ -282,6 +323,9 @@ function createFallbackIndex(
     count() {
       const row = db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { readonly n: number };
       return row.n;
+    },
+    existingRowids(chunkRowids) {
+      return queryExistingRowids(db, table, "chunk_rowid", chunkRowids, (rowid) => rowid);
     },
     search(params) {
       assertDimensions(params.vector, dimensions);

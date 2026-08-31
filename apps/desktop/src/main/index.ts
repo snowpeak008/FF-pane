@@ -4,6 +4,7 @@ import { app, BrowserWindow, dialog, ipcMain, session, shell } from "electron";
 import { registerInvokeHandlers } from "../shared-ipc/server";
 import { installCsp } from "./csp";
 import { createDataHandlers } from "./data";
+import { createKnowledgeHandlers } from "./knowledge";
 import { createSessionHandlers } from "./session";
 import { startSmokeMode } from "./smoke";
 import { runSqliteCheck } from "./sqlite-check";
@@ -136,6 +137,16 @@ async function bootstrap(): Promise<void> {
   } catch (thrown) {
     const message = thrown instanceof Error ? thrown.message : String(thrown);
     console.error(`[main] session layer init failed: ${message}`);
+  }
+
+  // 知识库层接线（T6.5）：索引库连接 + sqlite-vec 装载 + 导入编排。
+  // 独立 try：装配失败（索引库损坏等）只让知识库页不可用，不牵连数据层与会话层。
+  try {
+    const knowledgeHandlers = await createKnowledgeHandlers(() => mainWindow);
+    registerInvokeHandlers(ipcMain, knowledgeHandlers);
+  } catch (thrown) {
+    const message = thrown instanceof Error ? thrown.message : String(thrown);
+    console.error(`[main] knowledge layer init failed: ${message}`);
   }
 
   createMainWindow({ hidden: false });

@@ -96,6 +96,12 @@ export interface SessionUiState {
 export interface SessionUiActions {
   readonly setActiveSessionId: (sessionId: LocalSessionId | null) => void;
   readonly setComposerDraft: (draft: string) => void;
+  /**
+   * 往草稿末尾追加一段（知识库引用插入，§8.3.5）。
+   * **追加而不是覆盖**：用户往往已经写了半句话，正等着把资料垫进去；
+   * 覆盖会让「从知识库插入」变成一个会吃掉输入的按钮。
+   */
+  readonly appendComposerDraft: (text: string) => void;
   readonly clearComposerDraft: () => void;
   readonly setSidePanelTab: (tab: SessionSidePanelTab) => void;
   readonly setFocusedMessageId: (messageId: string | null) => void;
@@ -143,6 +149,12 @@ export const useSessionStore = create<SessionStore>()((set) => ({
   },
   setComposerDraft: (draft) => {
     set({ composerDraft: draft });
+  },
+  appendComposerDraft: (text) => {
+    set((state) => ({
+      composerDraft:
+        state.composerDraft.trim() === "" ? text : `${state.composerDraft.trimEnd()}\n\n${text}`,
+    }));
   },
   clearComposerDraft: () => {
     set({ composerDraft: "" });

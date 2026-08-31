@@ -450,6 +450,85 @@ export function listEntryChunks(
   return rows.map(toKnowledgeChunk);
 }
 
+/**
+ * 某条目全部块的 rowid（升序）。
+ * 块 rowid 是索引内部键、不在 KnowledgeChunk 上，而「这条目已嵌入几块」只能拿它
+ * 去问向量索引（`VectorIndex.existingRowids`）。单独一个瘦查询是为了让来源管理页
+ * 逐条目问也不用把块正文一起读进内存——十万级块的正文是几百 MB。
+ */
+export function listEntryChunkRowids(
+  db: Database.Database,
+  entryId: KnowledgeEntryId,
+): readonly number[] {
+  const rows = db
+    .prepare(
+      `SELECT ${KNOWLEDGE_CHUNK_TABLE}.chunk_rowid AS chunkRowid
+       FROM ${KNOWLEDGE_CHUNK_TABLE}
+       JOIN ${KNOWLEDGE_ENTRY_TABLE}
+         ON ${KNOWLEDGE_ENTRY_TABLE}.entry_rowid = ${KNOWLEDGE_CHUNK_TABLE}.entry_rowid
+       WHERE ${KNOWLEDGE_ENTRY_TABLE}.id = ?
+       ORDER BY chunkRowid`,
+    )
+    .all(entryId) as { readonly chunkRowid: number }[];
+  return rows.map((row) => row.chunkRowid);
+}
+
+/**
+ * 待嵌入的块行（T6.5 导入编排用）：块 rowid + 正文，外加它归属的条目。
+ * 比 KnowledgeChunk 多一个 rowid、少一份出处——嵌入阶段只需要「拿什么去算、算完写到哪」。
+ */
+export interface EmbeddableChunkRow {
+  /** 块 rowid（写向量索引时的键）。 */
+  readonly chunkRowid: number;
+  /** 块 ID。 */
+  readonly chunkId: KnowledgeChunkId;
+  /** 所属条目。 */
+  readonly entryId: KnowledgeEntryId;
+  /** 块正文（送去嵌入的文本）。 */
+  readonly text: string;
+}
+
+/**
+ * 列出块行供嵌入（按 rowid 升序，确定性）。
+ * 不在这里判断「哪些已经有向量」——那是向量索引的事实（`VectorIndex.existingRowids`），
+ * 而向量后端可能压根不存在（未配嵌入模型）。两件事分开，调用方按需组合。
+ */
+export function listChunkRowsForEmbedding(
+  db: Database.Database,
+  entryIds?: readonly KnowledgeEntryId[],
+): readonly EmbeddableChunkRow[] {
+  const base = `
+    SELECT ${KNOWLEDGE_CHUNK_TABLE}.chunk_rowid AS chunkRowid,
+           ${KNOWLEDGE_CHUNK_TABLE}.id         AS chunkId,
+           ${KNOWLEDGE_ENTRY_TABLE}.id         AS entryId,
+           ${KNOWLEDGE_CHUNK_TABLE}.text       AS text
+    FROM ${KNOWLEDGE_CHUNK_TABLE}
+    JOIN ${KNOWLEDGE_ENTRY_TABLE}
+      ON ${KNOWLEDGE_ENTRY_TABLE}.entry_rowid = ${KNOWLEDGE_CHUNK_TABLE}.entry_rowid`;
+  // 空数组是「限定在零个条目内」，语义上就该是空结果——不能与「不限定」混同
+  if (entryIds !== undefined && entryIds.length === 0) {
+    return [];
+  }
+  const sql =
+    entryIds === undefined
+      ? `${base} ORDER BY chunkRowid`
+      : `${base} WHERE ${KNOWLEDGE_ENTRY_TABLE}.id IN (${entryIds.map(() => "?").join(", ")})
+         ORDER BY chunkRowid`;
+  const statement = db.prepare(sql);
+  const rows = (entryIds === undefined ? statement.all() : statement.all(...entryIds)) as {
+    readonly chunkRowid: number;
+    readonly chunkId: string;
+    readonly entryId: string;
+    readonly text: string;
+  }[];
+  return rows.map((row) => ({
+    chunkRowid: row.chunkRowid,
+    chunkId: row.chunkId as KnowledgeChunkId,
+    entryId: row.entryId as KnowledgeEntryId,
+    text: row.text,
+  }));
+}
+
 /** 清空整个知识库索引（含向量）。派生数据的核选项，用于「全部重建」。 */
 export function clearKnowledgeIndex(db: Database.Database, vectorIndex?: VectorIndex): void {
   db.transaction(() => {

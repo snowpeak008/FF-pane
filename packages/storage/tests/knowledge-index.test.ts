@@ -39,6 +39,7 @@ import {
   type KnowledgeChunkInput,
   type KnowledgeFilters,
   type KnowledgeSearchOptions,
+  listChunkRowsForEmbedding,
   listEntryChunks,
   listKnowledgeEntries,
   loadVectorExtension,
@@ -330,6 +331,23 @@ describe.each([
     expect(index.search({ vector: unitVector(0, 4), limit: 50 })).toHaveLength(1);
   });
 
+  it("existingRowids 只报已有向量的块（T6.5 断点续传的判定依据）", async () => {
+    const db = openDb();
+    const index = await setupIndex(db);
+    if (index === undefined) {
+      return;
+    }
+    seedEntry(db, makeEntry(), ["a", "b", "c"]);
+    index.put(1, unitVector(0, 4));
+    index.put(3, unitVector(1, 4));
+
+    expect([...index.existingRowids([1, 2, 3, 999])].sort((x, y) => x - y)).toEqual([1, 3]);
+    // 单元素候选（T6.4 那个坑只在 KNN 路径上，这里是普通点查，必须如实命中）
+    expect([...index.existingRowids([3])]).toEqual([3]);
+    expect([...index.existingRowids([2])]).toEqual([]);
+    expect([...index.existingRowids([])]).toEqual([]);
+  });
+
   it("重开库后能按状态行还原同一后端", async () => {
     const db = openDb();
     const index = await setupIndex(db);
@@ -573,6 +591,23 @@ describe("条目与块写入", () => {
 
     expect(getKnowledgeStats(db)).toMatchObject({ entries: 2, chunks: 3, vectors: 0 });
     expect(listKnowledgeEntries(db).map((row) => row.entry.id)).toEqual([newer.id, older.id]);
+  });
+
+  it("listChunkRowsForEmbedding：带 rowid、按 rowid 升序、可限定条目", () => {
+    const db = openDb();
+    const first = makeEntry();
+    const second = makeEntry();
+    seedEntry(db, first, ["甲", "乙"]);
+    seedEntry(db, second, ["丙"]);
+
+    const all = listChunkRowsForEmbedding(db);
+    expect(all.map((row) => row.text)).toEqual(["甲", "乙", "丙"]);
+    expect(all.map((row) => row.chunkRowid)).toEqual([...all.map((r) => r.chunkRowid)].sort());
+    expect(all.map((row) => row.entryId)).toEqual([first.id, first.id, second.id]);
+
+    expect(listChunkRowsForEmbedding(db, [second.id]).map((row) => row.text)).toEqual(["丙"]);
+    // 空数组是「限定在零个条目内」，不能与「不限定」混同
+    expect(listChunkRowsForEmbedding(db, [])).toEqual([]);
   });
 
   it("clearKnowledgeIndex 清空一切（派生数据的核选项）", () => {

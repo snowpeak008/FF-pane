@@ -26,6 +26,9 @@ importers:
       '@ff-pane/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@ff-pane/rag':
+        specifier: workspace:*
+        version: link:../../packages/rag
       '@ff-pane/shared':
         specifier: workspace:*
         version: link:../../packages/shared

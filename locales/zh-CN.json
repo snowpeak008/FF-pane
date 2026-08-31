@@ -631,5 +631,114 @@
       "toast": "检测到你多次（{{count}} 次）提到「{{content}}」，要固化成长期习惯吗？",
       "review": "去确认"
     }
+  },
+  "knowledge": {
+    "loadError": "知识库读取失败",
+    "tab": {
+      "search": "检索",
+      "sources": "来源"
+    },
+    "searchLabel": "检索知识库",
+    "searchPlaceholder": "输入关键词或一句话描述，回车检索",
+    "search": "检索",
+    "filters": "过滤",
+    "filter": {
+      "format": "格式",
+      "tag": "标签",
+      "directory": "来源目录"
+    },
+    "format": {
+      "markdown": "Markdown",
+      "text": "文本",
+      "source_code": "源码",
+      "pdf": "PDF",
+      "docx": "Word",
+      "html": "网页"
+    },
+    "searchIdle": "还没有检索过。输入关键词或一句话描述，回车开始。",
+    "searching": "正在检索…",
+    "searchError": "检索失败",
+    "searchEmpty": "没有命中。换个说法，或到「来源」标签放宽过滤。",
+    "hits": "命中 {{count}} 条",
+    "recall": {
+      "hybrid": "关键词 + 语义",
+      "keywordOnly": "纯全文检索",
+      "likeFallback": "查询过短，已回退子串匹配",
+      "approximate": "候选过多，语义结果为近似"
+    },
+    "blocker": {
+      "no-provider": "未配置嵌入模型，当前为纯全文检索",
+      "spec-mismatch": "嵌入模型与已建索引不符，需重建向量索引"
+    },
+    "source": {
+      "vector": "语义",
+      "keyword": "关键词"
+    },
+    "page": "第 {{page}} 页",
+    "context": "上下文 {{count}} 块",
+    "selectHit": "选择「{{title}}」的这条命中",
+    "sendToSession": "发送到会话",
+    "copyCitation": "复制引用",
+    "sentToSession": "已加入会话输入框",
+    "citationSource": "来源：",
+    "importFiles": "导入文件",
+    "importDirectory": "导入文件夹",
+    "rebuildAll": "重建全部索引",
+    "rebuildSelected": "重建选中 {{count}} 项",
+    "exportAll": "导出全部",
+    "exportSelected": "导出选中 {{count}} 项",
+    "stats": {
+      "documents": "{{count}} 篇文档",
+      "chunks": "{{count}} 个块",
+      "vectors": "向量 {{vectors}}/{{total}}",
+      "vectorDetail": "后端 {{backend}} · {{dimensions}} 维 · 模型 {{model}}",
+      "embedder": "嵌入：{{provider}} / {{model}}"
+    },
+    "emptySources": "知识库还是空的。导入一个文件夹，把资料沉进来。",
+    "noMatchingSource": "没有匹配的来源。换个关键词试试。",
+    "sourcesSearchLabel": "筛选来源",
+    "sourcesSearchPlaceholder": "按标题、路径或标签筛选",
+    "column": {
+      "title": "标题",
+      "format": "格式",
+      "chunks": "块数",
+      "state": "索引状态",
+      "importedAt": "导入时间"
+    },
+    "state": {
+      "keyword-only": "全文索引",
+      "partial": "向量 {{embedded}}/{{total}}",
+      "indexed": "已建索引",
+      "empty": "无内容"
+    },
+    "selectSource": "选择来源「{{title}}」",
+    "remove": "移除",
+    "removeTitle": "移除来源「{{title}}」？",
+    "removeDescription": "将删除该来源的全部块、全文索引与向量。原文件不受影响，可重新导入。",
+    "removed": "已移除「{{title}}」",
+    "removeError": "移除失败",
+    "rebuild": "重建",
+    "rebuildAllTitle": "重建全部索引？",
+    "rebuildSelectedTitle": "重建选中的 {{count}} 项索引？",
+    "rebuildDescription": "将重读原文件、重新解析分块并重算向量。期间这些来源检索不到；使用远端嵌入模型时会产生调用费用。",
+    "rebuildError": "重建失败",
+    "importError": "导入失败",
+    "importDone": "导入完成：新建/更新 {{indexed}} 篇，跳过 {{skipped}} 篇，共 {{chunks}} 块，嵌入 {{embedded}} 块",
+    "importCancelled": "已取消，已入库 {{indexed}} 篇",
+    "importFailures": "{{count}} 个文件解析失败",
+    "embedFatal": "嵌入中止",
+    "exportError": "导出失败",
+    "exported": "已导出 {{count}} 篇",
+    "phase": {
+      "scanning": "正在扫描文件",
+      "indexing": "正在解析与索引",
+      "embedding": "正在生成向量",
+      "done": "完成"
+    },
+    "insertFromKnowledge": "从知识库插入",
+    "insertTitle": "从知识库插入",
+    "insertDescription": "选中的内容会带出处引用一并加入输入框。",
+    "insert": "插入",
+    "inserted": "已插入引用"
   }
 }

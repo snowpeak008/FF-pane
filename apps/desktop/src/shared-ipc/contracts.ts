@@ -24,6 +24,10 @@ import type {
   HabitCategory,
   HabitEntry,
   HabitEntryId,
+  KnowledgeChunk,
+  KnowledgeEntry,
+  KnowledgeEntryId,
+  KnowledgeFormat,
   LocalSessionId,
   MemoryEntry,
   MemoryEntryId,
@@ -262,6 +266,239 @@ export interface CheckHabitConflictsRequest {
   readonly excludeId?: HabitEntryId;
 }
 
+// ── 知识库（§8.3，T6.5）：全局作用域，不带 projectRoot ──────────────────────
+
+/**
+ * 条目视图（§8.3.6 来源管理「文档数 / 块数 / 索引状态」）：
+ * 条目 + 两个派生计数。计数由索引算出，不进领域实体——它们随索引重建而变，
+ * 不是条目自身的属性。
+ */
+export interface KnowledgeEntryView {
+  readonly entry: KnowledgeEntry;
+  /** 该条目的块数。 */
+  readonly chunkCount: number;
+  /** 该条目已有向量的块数（未建向量索引时恒为 0）。 */
+  readonly embeddedCount: number;
+}
+
+/** 向量索引现状；未建索引时整体缺席（纯 FTS 模式，§8.3.3）。 */
+export interface KnowledgeVectorStatus {
+  /** 'vec0' | 'fallback'。 */
+  readonly backend: string;
+  readonly dimensions: number;
+  /** 建索引所用的嵌入模型。 */
+  readonly model: string;
+  /** 全库已存向量条数。 */
+  readonly vectors: number;
+}
+
+/**
+ * 嵌入不可用的原因码。**用码不用文案**：渲染层据码取语言包，
+ * 主进程不产出面向用户的中文（renderer 禁硬编码 CJK，check-i18n 把关）。
+ */
+export const KNOWLEDGE_EMBEDDING_BLOCKERS = ["no-provider", "spec-mismatch"] as const;
+
+/**
+ * no-provider —— 没有「已启用 + openai_compatible + 配了 embeddingModel + 有 baseUrl」的 Provider；
+ * spec-mismatch —— 已建索引的维度/模型/后端与当前嵌入器不符，须重建向量索引。
+ */
+export type KnowledgeEmbeddingBlocker = (typeof KNOWLEDGE_EMBEDDING_BLOCKERS)[number];
+
+/**
+ * 嵌入能力状态。不可用**不是错误**（§8.3.3「向量检索是增强，不是前提」），
+ * 故做成判别联合让界面必须显式呈现「当前为纯全文检索」，而不是静默少一路召回。
+ */
+export type KnowledgeEmbeddingStatus =
+  | {
+      readonly available: true;
+      /** 提供嵌入能力的 Provider 显示名。 */
+      readonly providerName: string;
+      readonly model: string;
+    }
+  | {
+      readonly available: false;
+      readonly blocker: KnowledgeEmbeddingBlocker;
+      /** 补充说明（如维度不符的具体数字）；面向用户的措辞由渲染层按 blocker 取。 */
+      readonly detail?: string;
+    };
+
+/** knowledge:list 响应：来源管理页一次取齐的全部事实。 */
+export interface KnowledgeOverview {
+  /** 全部条目（按导入时间倒序）。 */
+  readonly entries: readonly KnowledgeEntryView[];
+  /** 全库块数。 */
+  readonly totalChunks: number;
+  /** 向量索引现状；未建索引时缺席。 */
+  readonly vector?: KnowledgeVectorStatus;
+  /** 当前嵌入能力。 */
+  readonly embedding: KnowledgeEmbeddingStatus;
+}
+
+/** 导入路径选择的类别：多选文件，或选一个目录（递归展开）。 */
+export type KnowledgePickKind = "files" | "directory";
+
+/** knowledge:pick-paths 请求。 */
+export interface KnowledgePickPathsRequest {
+  readonly kind: KnowledgePickKind;
+}
+
+/** knowledge:pick-paths 响应；取消不是错误，经判别字段区分（同 dialog:pick-directory）。 */
+export type KnowledgePickPathsResult =
+  | { readonly cancelled: true }
+  | { readonly cancelled: false; readonly paths: readonly string[] };
+
+/** knowledge:import 请求：导入文件或整个目录（§8.3.2）。 */
+export interface KnowledgeImportRequest {
+  /** 渲染层生成的关联 ID，贯穿本次导入的全部进度事件。 */
+  readonly importId: string;
+  /** 文件或目录路径；目录递归展开并按支持的扩展名筛选。 */
+  readonly paths: readonly string[];
+  /** 给本批条目打的标签（§8.3.4 过滤维度之一）。 */
+  readonly tags?: readonly string[];
+  /** 忽略内容哈希、强制重新解析与索引（§8.3.2 增量索引的显式旁路）。 */
+  readonly force?: boolean;
+}
+
+/** knowledge:rebuild 请求：重建索引（重读原文件 → 重新解析分块嵌入）。 */
+export interface KnowledgeRebuildRequest {
+  readonly importId: string;
+  /** 限定重建这些条目；省略 = 全部重建（§8.3.6「一键重建索引」）。 */
+  readonly entryIds?: readonly KnowledgeEntryId[];
+  /**
+   * 连带重建向量索引（先 drop 再按当前嵌入模型重建）。
+   * 换了嵌入模型时必须置真——维度/模型不同的向量混在一张表里检索结果毫无意义。
+   */
+  readonly resetVectors?: boolean;
+}
+
+/** 单个文件的失败记录（§单文件失败不中断批量）。 */
+export interface KnowledgeImportFailure {
+  readonly filePath: string;
+  /** 失败原文（开发者可读；界面原样展示，不翻译）。 */
+  readonly message: string;
+}
+
+/** 导入 / 重建的最终报告。 */
+export interface KnowledgeImportReport {
+  readonly importId: string;
+  /** 扫描到的候选文件数。 */
+  readonly scanned: number;
+  /** 实际建立 / 更新索引的条目数。 */
+  readonly indexed: number;
+  /** 因内容哈希未变而跳过的条目数（增量索引的收益）。 */
+  readonly skipped: number;
+  /** 本次写入的块数。 */
+  readonly chunks: number;
+  /** 本次成功嵌入的块数。 */
+  readonly embedded: number;
+  /** 因已有向量而跳过的块数（断点续传的收益）。 */
+  readonly embedSkipped: number;
+  /** 嵌入失败的块数。 */
+  readonly embedFailed: number;
+  /** 嵌入致命错误原文（鉴权失败 / 维度不符 / 配置错）；出现即中止取新批次。 */
+  readonly embedFatal?: string;
+  /** 解析 / 索引阶段的单文件失败明细。 */
+  readonly failures: readonly KnowledgeImportFailure[];
+  /** 是否被用户取消。 */
+  readonly cancelled: boolean;
+}
+
+/** 导入阶段（进度条的分段依据）。 */
+export const KNOWLEDGE_IMPORT_PHASES = ["scanning", "indexing", "embedding", "done"] as const;
+
+export type KnowledgeImportPhase = (typeof KNOWLEDGE_IMPORT_PHASES)[number];
+
+/** knowledge:import-progress 事件载荷。 */
+export interface KnowledgeImportProgressEvent {
+  readonly importId: string;
+  readonly phase: KnowledgeImportPhase;
+  /** 已完成数；scanning 阶段为已扫描文件数。 */
+  readonly done: number;
+  /** 总数；scanning 阶段总数未知时为 0。 */
+  readonly total: number;
+  /** 当前处理的文件路径（indexing 阶段）。 */
+  readonly currentPath?: string;
+}
+
+/** knowledge:cancel-import 请求。 */
+export interface KnowledgeCancelImportRequest {
+  readonly importId: string;
+}
+
+/** 检索过滤条件（§8.3.4 四个过滤维度）。与 storage 的 KnowledgeFilters 同构。 */
+export interface KnowledgeSearchFilters {
+  /** 格式（OR 语义）。 */
+  readonly formats?: readonly KnowledgeFormat[];
+  /** 标签（OR 语义）。 */
+  readonly tags?: readonly string[];
+  /** 来源目录前缀。 */
+  readonly sourcePathPrefix?: string;
+  /** 导入时间下界（含，epoch 毫秒）。 */
+  readonly importedAfter?: number;
+  /** 导入时间上界（含，epoch 毫秒）。 */
+  readonly importedBefore?: number;
+  /** 限定在若干条目内检索。 */
+  readonly entryIds?: readonly KnowledgeEntryId[];
+}
+
+/** knowledge:search 请求。查询向量由主进程用当前嵌入模型编码，渲染层不碰嵌入。 */
+export interface KnowledgeSearchRequest {
+  readonly query: string;
+  readonly filters?: KnowledgeSearchFilters;
+  readonly limit?: number;
+}
+
+/** 一条命中（块 + 出处 + 上下文扩展 + 它所属条目的展示信息）。 */
+export interface KnowledgeHitView {
+  readonly chunk: KnowledgeChunk;
+  /** RRF 融合分（越大越靠前）。 */
+  readonly score: number;
+  /** 命中它的召回路径（"fts" | "like-fallback" | "vector"）。 */
+  readonly sources: readonly string[];
+  /** 上下文扩展：前后相邻块。 */
+  readonly before: readonly KnowledgeChunk[];
+  readonly after: readonly KnowledgeChunk[];
+  /** 所属条目标题（块本身不带，界面与引用文案都要用）。 */
+  readonly entryTitle: string;
+  /** 所属条目格式。 */
+  readonly entryFormat: KnowledgeFormat;
+}
+
+/** knowledge:search 响应：命中 + 本次实际走了哪几路（界面据此说明降级情形）。 */
+export interface KnowledgeSearchResponse {
+  readonly hits: readonly KnowledgeHitView[];
+  /** 关键词路是否走了 FTS（false = 查询过短、回退 LIKE 子串扫描）。 */
+  readonly usedFts: boolean;
+  /** 向量路是否参与。 */
+  readonly usedVector: boolean;
+  /** 向量路的过滤是否为精确前置（false = 候选集过大、结果为近似）。 */
+  readonly vectorPrefilterExact: boolean;
+  /** 向量路缺席的原因；usedVector 为真时缺席。 */
+  readonly embeddingBlocker?: KnowledgeEmbeddingBlocker;
+}
+
+/** knowledge:remove-entry 请求：移除来源（连带删除其索引与向量，§8.3.6）。 */
+export interface KnowledgeRemoveEntryRequest {
+  readonly id: KnowledgeEntryId;
+}
+
+/** knowledge:export 请求：选中条目 → 单个 Markdown 文件（含出处元数据，§8.3.6）。 */
+export interface KnowledgeExportRequest {
+  /** 空数组 = 导出全部。 */
+  readonly entryIds: readonly KnowledgeEntryId[];
+}
+
+/** knowledge:export 响应；取消不是错误。 */
+export type KnowledgeExportResult =
+  | { readonly cancelled: true }
+  | {
+      readonly cancelled: false;
+      /** 落盘路径。 */
+      readonly path: string;
+      /** 实际导出的条目数。 */
+      readonly entries: number;
+    };
+
 /**
  * 会话执行输入（§12 十步流程）：Planner 讨论消息 或 Worker 任务派发。
  * role 由输入类别隐含：planner-message → planner；worker-task → worker。
@@ -475,6 +712,31 @@ export interface IpcInvokeContracts {
   "plans:approve": { request: ApprovePlanRequest; response: Plan };
   /** 列出当前项目已登记的会话（T4.3 会话恢复；按最近活跃降序，供恢复选择）。 */
   "sessions:list": { request: ProjectScopedRequest; response: readonly SessionRecord[] };
+  /** 知识库总览（§8.3.6 来源管理：条目 + 文档数/块数 + 索引状态 + 嵌入能力）。 */
+  "knowledge:list": { request: undefined; response: KnowledgeOverview };
+  /** 打开文件 / 目录选择器（按支持的扩展名过滤），返回选定路径。 */
+  "knowledge:pick-paths": {
+    request: KnowledgePickPathsRequest;
+    response: KnowledgePickPathsResult;
+  };
+  /** 导入文件 / 文件夹（解析 → 分块 → 索引 → 嵌入）；进度经 knowledge:import-progress 推送。 */
+  "knowledge:import": { request: KnowledgeImportRequest; response: KnowledgeImportReport };
+  /** 重建索引（重读原文件重跑整条管道）；进度与报告同导入。 */
+  "knowledge:rebuild": { request: KnowledgeRebuildRequest; response: KnowledgeImportReport };
+  /** 取消在飞的导入 / 重建；ok=false 表示没有该 importId 的在飞任务。 */
+  "knowledge:cancel-import": {
+    request: KnowledgeCancelImportRequest;
+    response: { readonly ok: boolean };
+  };
+  /** 混合检索（§8.3.4 双路召回 RRF 融合 + 上下文扩展 + 四维过滤）。 */
+  "knowledge:search": { request: KnowledgeSearchRequest; response: KnowledgeSearchResponse };
+  /** 移除来源（连带删除其块、FTS 与向量）。 */
+  "knowledge:remove-entry": {
+    request: KnowledgeRemoveEntryRequest;
+    response: { readonly removed: boolean };
+  };
+  /** 导出选中条目为单个 Markdown 文件（含出处元数据）。 */
+  "knowledge:export": { request: KnowledgeExportRequest; response: KnowledgeExportResult };
   /** 启动一轮会话执行（Planner 讨论 / Worker 派发）；增量经 session:event 推送。 */
   "session:start": { request: StartSessionRequest; response: StartSessionAck };
   /** 回执一条上浮的权限请求（§7）。 */
@@ -505,6 +767,8 @@ export interface IpcEventContracts {
   "session:event": { payload: SessionStreamEvent };
   /** 系统观察建议（来源三，§8.2.4）：据反复纠正生成的 observed 习惯候选，非阻塞提示。 */
   "habits:suggestion": { payload: HabitSuggestionEvent };
+  /** 知识库导入 / 重建进度（§8.3.2「导入进度」）。 */
+  "knowledge:import-progress": { payload: KnowledgeImportProgressEvent };
 }
 
 export type InvokeChannel = keyof IpcInvokeContracts;
@@ -563,6 +827,14 @@ export const INVOKE_CHANNELS = [
   "plans:list",
   "plans:approve",
   "sessions:list",
+  "knowledge:list",
+  "knowledge:pick-paths",
+  "knowledge:import",
+  "knowledge:rebuild",
+  "knowledge:cancel-import",
+  "knowledge:search",
+  "knowledge:remove-entry",
+  "knowledge:export",
   "session:start",
   "session:respond-permission",
   "session:cancel",
@@ -575,6 +847,7 @@ export const EVENT_CHANNELS = [
   "smoke:event",
   "session:event",
   "habits:suggestion",
+  "knowledge:import-progress",
 ] as const satisfies readonly EventChannel[];
 
 type AssertNever<T extends never> = T;
