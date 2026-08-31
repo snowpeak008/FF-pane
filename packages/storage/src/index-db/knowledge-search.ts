@@ -24,7 +24,11 @@
  *    做会把相邻块也卷进排序，等于让一次命中占掉三个名次。
  */
 
-import { fuseByRrf, type RankedList } from "@ff-pane/rag";
+// 走 ./retrieve 子路径而非 rag 的 barrel：barrel 会连带载入解析层，而解析层在 import
+// 时就会拉起 pdfjs-dist（并打印一串 canvas / DOMMatrix polyfill 警告）。融合排序是纯函数，
+// 不该为它把一个 PDF 解析器载进每个只想检索的进程——T6.6 的 MCP sidecar 每轮被拉起一次，
+// 这笔开销与 stderr 噪声会逐次重现。
+import { fuseByRrf, type RankedList } from "@ff-pane/rag/retrieve";
 import type { KnowledgeChunk, KnowledgeEntryId, KnowledgeFormat } from "@ff-pane/shared";
 import type Database from "better-sqlite3";
 import { toPosixPath } from "../index.js";

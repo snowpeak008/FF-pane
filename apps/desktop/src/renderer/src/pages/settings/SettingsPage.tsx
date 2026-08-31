@@ -4,6 +4,7 @@ import { Separator } from "../../components/ui/Separator";
 import { PageHeader } from "../../layout/PageHeader";
 import { AppearanceSection } from "./AppearanceSection";
 import { DefaultPermissionSection } from "./DefaultPermissionSection";
+import { KnowledgeToolSection } from "./KnowledgeToolSection";
 import { LanguageSection } from "./LanguageSection";
 import { ProfilesSection } from "./profiles/ProfilesSection";
 import { ProvidersSection } from "./providers/ProvidersSection";
@@ -30,6 +31,8 @@ export function SettingsPage(): ReactElement {
           <ProfilesSection />
           <Separator />
           <DefaultPermissionSection />
+          <Separator />
+          <KnowledgeToolSection />
         </div>
       </div>
     </>

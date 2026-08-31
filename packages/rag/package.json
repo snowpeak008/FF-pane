@@ -7,6 +7,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./retrieve": {
+      "types": "./dist/retrieve/index.d.ts",
+      "default": "./dist/retrieve/index.js"
     }
   },
   "scripts": {

@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/Ta
 import { useInvokeQuery } from "../../ipc/useInvokeQuery";
 import { PageHeader } from "../../layout/PageHeader";
 import { useSessionStore } from "../../stores/session";
+import { AgentToolPanel } from "./AgentToolPanel";
 import { buildKnowledgeCitation, deriveFilterOptions } from "./knowledge-view";
 import { SearchPanel } from "./SearchPanel";
 import { SourcesPanel } from "./SourcesPanel";
@@ -91,7 +92,10 @@ function KnowledgeView({
         />
       </TabsContent>
 
-      <TabsContent value="sources" className="flex min-h-0 flex-1 flex-col pt-3">
+      <TabsContent value="sources" className="flex min-h-0 flex-1 flex-col gap-3 pt-3">
+        {/* Agent 只读检索工具开关（T6.6）：项目级、默认关，放在来源标签下 ——
+            它回答的是"这批资料要不要让 Agent 自己查"，与来源管理是同一件事的两面。 */}
+        <AgentToolPanel />
         <SourcesPanel overview={overview} importer={importer} onChanged={refetch} />
       </TabsContent>
     </Tabs>

@@ -30,7 +30,12 @@ import { readJsonlStream } from "../events/index.js";
 import type { AgentProcessHandle } from "../process/index.js";
 import { findExecutableOnWindowsPath, spawnAgentProcess } from "../process/index.js";
 import type { CodexSandboxPolicy } from "./command.js";
-import { buildCodexArgs, CODEX_RUNTIME, DEFAULT_CODEX_COMMAND } from "./command.js";
+import {
+  buildCodexArgs,
+  buildCodexMcpOverrides,
+  CODEX_RUNTIME,
+  DEFAULT_CODEX_COMMAND,
+} from "./command.js";
 import type { CodexDiffCollector, CodexDiffDiagnostics, CodexGitExecutor } from "./git-diff.js";
 import { createCodexDiffCollector } from "./git-diff.js";
 import { createCodexEventMapper } from "./mapper.js";
@@ -182,11 +187,19 @@ export async function attachCodexDiff(
 
 function startCodexTurn(options: CodexAdapterOptions, ctx: AdapterTurnContext): CodexTurn {
   const command = resolveCodexCommand(options.command ?? DEFAULT_CODEX_COMMAND);
-  // 配置覆盖合并：构造级（options，如成本控制）为底，逐轮级（ctx，如 openai_compatible
-  // → model_provider 路由）覆盖同名键。任一为空时不额外分配对象。
+  // MCP 注入（T6.6）：编译成同一套 `-c` 覆盖，故不需要新的参数通道。
+  // 放在最前作底，逐轮 configOverrides 仍可覆盖同名键（保持既有优先级语义不变）。
+  const mcpOverrides =
+    ctx.mcpServers !== undefined && Object.keys(ctx.mcpServers).length > 0
+      ? buildCodexMcpOverrides(ctx.mcpServers)
+      : undefined;
+  // 配置覆盖合并：MCP 注入 → 构造级（options，如成本控制）→ 逐轮级（ctx，如
+  // openai_compatible → model_provider 路由），后者覆盖同名键。全空时不额外分配对象。
   const mergedConfigOverrides =
-    options.configOverrides !== undefined || ctx.configOverrides !== undefined
-      ? { ...options.configOverrides, ...ctx.configOverrides }
+    mcpOverrides !== undefined ||
+    options.configOverrides !== undefined ||
+    ctx.configOverrides !== undefined
+      ? { ...mcpOverrides, ...options.configOverrides, ...ctx.configOverrides }
       : undefined;
   const args = buildCodexArgs({
     cwd: ctx.cwd,

@@ -24,6 +24,7 @@ import {
   type GuardedTurn,
   type GuardTurnContext,
   guardTurn,
+  type McpStdioServerSpec,
   toStoredRunEvidence,
 } from "@ff-pane/adapters";
 import {
@@ -57,6 +58,7 @@ import type {
   FileChange,
   GlobalConfig,
   HabitEntry,
+  KnowledgeQueryRecord,
   LocalSessionId,
   MemoryEntry,
   ModelId,
@@ -147,6 +149,27 @@ export interface SessionOrchestratorDeps {
   readonly newRunId: () => RunId;
   /** 生成一个新的本地会话 ID（开新会话时）。 */
   readonly newLocalSessionId: () => LocalSessionId;
+  /**
+   * 装配本轮的 Agent 只读知识库检索工具（T6.6，§8.3.5 路径二）。
+   *
+   * 缺省（未注入）或返回 undefined = 本轮不挂该工具，这也是项目开关默认关闭时的路径。
+   * 返回值里的 readAudit 由收尾阶段调用，把 sidecar 写下的调用记录读回 Run。
+   */
+  readonly prepareKnowledgeTool?: (
+    layout: ProjectLayout,
+  ) => Promise<KnowledgeToolBinding | undefined>;
+}
+
+/** 本轮知识库工具的绑定：注入用的服务端规格 + 收尾用的审计回读。 */
+export interface KnowledgeToolBinding {
+  /** MCP 服务器注册名。 */
+  readonly serverName: string;
+  /** 服务端规格（交给适配器按 Runtime 注入）。 */
+  readonly spec: McpStdioServerSpec;
+  /** 是否允许 Agent 同时保留它自己配置的 MCP 服务端（缺省 false，见 §7 论证）。 */
+  readonly inheritUserMcpServers?: boolean;
+  /** 读回本轮全部调用记录（一次没调用返回空数组）。 */
+  readAudit(): Promise<readonly KnowledgeQueryRecord[]>;
 }
 
 /** 在飞轮次的内部状态。 */
@@ -175,6 +198,9 @@ interface WorkerContext {
   readonly profileId: AgentProfile["id"];
   readonly startedAt: number;
 }
+
+/** 本轮挂上的知识库工具（未挂时为 undefined）；收尾时据它回读审计。 */
+type KnowledgeContext = KnowledgeToolBinding;
 
 /** 计划生成轮（planner-plan）落库所需的上下文（普通 Planner 讨论轮为 undefined）。 */
 interface PlanTurnContext {
@@ -382,6 +408,16 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         prompt = `${resumeContext}\n\n${prompt}`;
       }
 
+      // Agent 只读知识库检索工具（T6.6，§8.3.5 路径二）：项目开关开启时才装配。
+      // 两个角色都挂——Planner 讨论方案时正是最需要查资料的时候。装配失败不该
+      // 拖垮整轮（工具是增强而非前提），故失败只记日志、本轮无此工具照常执行。
+      let knowledgeCtx: KnowledgeContext | undefined;
+      try {
+        knowledgeCtx = await deps.prepareKnowledgeTool?.(layout);
+      } catch (thrown) {
+        console.warn(`[session] knowledge tool unavailable this turn: ${String(thrown)}`);
+      }
+
       const turnCtx: AdapterTurnContext = {
         cwd: request.projectRoot,
         prompt,
@@ -389,6 +425,14 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         ...(Object.keys(configOverrides).length > 0 ? { configOverrides } : {}),
         ...(model !== undefined ? { model } : {}),
         ...(resumeBinding !== undefined ? { resume: resumeBinding } : {}),
+        ...(knowledgeCtx !== undefined
+          ? {
+              mcpServers: { [knowledgeCtx.serverName]: knowledgeCtx.spec },
+              ...(knowledgeCtx.inheritUserMcpServers === true
+                ? { inheritUserMcpServers: true }
+                : {}),
+            }
+          : {}),
       };
 
       // 登记会话（首轮建档；续接轮沿用 createdAt + 已知原生绑定）。session_start 报出
@@ -416,9 +460,11 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
       });
 
       // 事件流消费独立于受理应答（fire-and-forget，结束时清理登记）
-      void drain(request.turnId, guarded, workerCtx, planCtx, sessionCtx).finally(() => {
-        active.delete(request.turnId);
-      });
+      void drain(request.turnId, guarded, workerCtx, planCtx, sessionCtx, knowledgeCtx).finally(
+        () => {
+          active.delete(request.turnId);
+        },
+      );
 
       return { accepted: true, turnId: request.turnId, sessionId };
     } catch (thrown) {
@@ -434,6 +480,7 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
     workerCtx: WorkerContext | undefined,
     planCtx: PlanTurnContext | undefined,
     sessionCtx: SessionContext,
+    knowledgeCtx: KnowledgeContext | undefined,
   ): Promise<void> {
     let answerText = "";
     let verifyResult: VerifyResult | undefined;
@@ -442,7 +489,7 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
     try {
       for await (const event of guarded.events) {
         if (event.kind === "end") {
-          await finalize(turnId, guarded, workerCtx, planCtx, {
+          await finalize(turnId, guarded, workerCtx, planCtx, knowledgeCtx, {
             reason: event.reason,
             ...(event.message !== undefined ? { message: event.message } : {}),
             report: answerText,
@@ -479,14 +526,14 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         }
       }
       // 事件流保证以 end 收尾；未见 end 视作崩溃兜底
-      await finalize(turnId, guarded, workerCtx, planCtx, {
+      await finalize(turnId, guarded, workerCtx, planCtx, knowledgeCtx, {
         reason: "crashed",
         message: "事件流未以 end 收尾",
         report: answerText,
       });
     } catch (thrown) {
       const message = thrown instanceof Error ? thrown.message : String(thrown);
-      await finalize(turnId, guarded, workerCtx, planCtx, {
+      await finalize(turnId, guarded, workerCtx, planCtx, knowledgeCtx, {
         reason: "crashed",
         message,
         report: answerText,
@@ -521,6 +568,7 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
     guarded: GuardedTurn,
     workerCtx: WorkerContext | undefined,
     planCtx: PlanTurnContext | undefined,
+    knowledgeCtx: KnowledgeContext | undefined,
     outcome: {
       readonly reason: Run["endReason"] & string;
       readonly message?: string;
@@ -528,6 +576,18 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
       readonly verifyResult?: VerifyResult;
     },
   ): Promise<void> {
+    // 知识库工具审计（T6.6）：轮末一次性回读 sidecar 写下的调用记录。
+    // 未挂工具 = undefined（与"挂了但一次没调用"的空数组是两件事，见 Run.knowledgeQueries）。
+    // 读取失败不该拖垮收尾：readKnowledgeAudit 自身已把失败归一为空数组，这里再兜一层。
+    let knowledgeQueries: readonly KnowledgeQueryRecord[] | undefined;
+    if (knowledgeCtx !== undefined) {
+      knowledgeQueries = await knowledgeCtx.readAudit().catch(() => []);
+      if (knowledgeQueries.length > 0) {
+        // 两个角色都推：Planner 轮没有 Run，这是它唯一的可见途径
+        deps.publish({ turnId, kind: "knowledge-query", queries: knowledgeQueries });
+      }
+    }
+
     if (workerCtx === undefined) {
       // 计划生成轮：轮成功则解析答复中的计划块并落盘；失败原因经 end.message 回传（不写盘）
       let planVersion: PlanVersion | undefined;
@@ -575,6 +635,7 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         commands: evidence.commands as readonly CommandRecord[],
         ...(outcome.verifyResult !== undefined ? { verifyResult: outcome.verifyResult } : {}),
         ...(report.length > 0 ? { report } : {}),
+        ...(knowledgeQueries !== undefined ? { knowledgeQueries } : {}),
       });
       const changesDiff = evidence.fileChanges
         .map((change) => change.diff)

@@ -15,6 +15,7 @@ import type {
   CommandRecord,
   EpochMillis,
   FileChange,
+  KnowledgeQueryRecord,
   ProfileId,
   Run,
   RunEndReason,
@@ -82,6 +83,11 @@ export interface EndRunParams {
   readonly verifyResult?: VerifyResult;
   /** Worker 完成报告（产出了才有，§6.4）。 */
   readonly report?: string;
+  /**
+   * 本轮 Agent 对只读知识库检索工具的全部调用（T6.6，§8.3.5 路径二）。
+   * 缺省 = 本轮没挂这个工具；空数组 = 挂了但一次没调用（两者在界面上是两种文案）。
+   */
+  readonly knowledgeQueries?: readonly KnowledgeQueryRecord[];
 }
 
 /**
@@ -102,6 +108,7 @@ export function endRun(run: Run, params: EndRunParams): EndedRun {
     commands: params.commands ?? run.commands,
     ...(params.verifyResult !== undefined ? { verifyResult: params.verifyResult } : {}),
     ...(params.report !== undefined ? { report: params.report } : {}),
+    ...(params.knowledgeQueries !== undefined ? { knowledgeQueries: params.knowledgeQueries } : {}),
   };
 }
 

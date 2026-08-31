@@ -1,4 +1,4 @@
-import type { Run, RunEndReason } from "@ff-pane/shared";
+import type { KnowledgeQueryRecord, Run, RunEndReason } from "@ff-pane/shared";
 import { type ReactElement, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { EmptyState } from "../../components/states/EmptyState";
@@ -31,6 +31,104 @@ function EndReasonBadge({ run }: { readonly run: Run }): ReactElement {
     <Badge className={cn("shrink-0 border-transparent", END_REASON_CLASS[reason])}>
       {t(`runs.endReason.${reason}`)}
     </Badge>
+  );
+}
+
+/**
+ * 一次只读知识库检索工具调用（T6.6，§8.3.5 路径二）。
+ * 展开的是「调用了什么 + 命中了什么」：查询串、走了哪几路、每条命中的出处与片段。
+ */
+function KnowledgeQueryCard({
+  record,
+  locale,
+}: {
+  readonly record: KnowledgeQueryRecord;
+  readonly locale: string;
+}): ReactElement {
+  const { t } = useTranslation();
+  // 如实标注检索路径：纯关键词是一等状态而非缺陷（§8.3.3），
+  // 用户看到"只走了关键词"时不该以为出了故障。
+  const mode = record.usedVector
+    ? t("runs.knowledge.modeHybrid")
+    : record.usedFts
+      ? t("runs.knowledge.modeKeyword")
+      : t("runs.knowledge.modeFallback");
+
+  return (
+    <div className="flex flex-col gap-1.5 rounded-sm bg-surface-sunken p-2">
+      <div className="flex items-baseline justify-between gap-3">
+        <code className="min-w-0 flex-1 truncate font-mono text-xs text-fg select-text">
+          {record.query}
+        </code>
+        <span className="shrink-0 font-mono text-2xs text-fg-subtle">
+          {formatAbsoluteTime(record.calledAt, locale)}
+        </span>
+      </div>
+      <div className="flex items-center gap-2 text-2xs text-fg-subtle">
+        <span>{mode}</span>
+        <span>·</span>
+        <span>{t("runs.knowledge.hitCount", { n: record.hits.length })}</span>
+        <span>·</span>
+        <span>{t("runs.knowledge.duration", { ms: record.durationMs })}</span>
+      </div>
+      {record.error !== undefined ? (
+        <span className="text-2xs text-danger-text select-text">
+          {t("runs.knowledge.failed", { reason: record.error })}
+        </span>
+      ) : null}
+      {record.hits.map((hit) => (
+        <div key={hit.chunkId} className="flex flex-col gap-0.5 border-l-2 border-border pl-2">
+          <span className="truncate text-2xs text-fg-muted select-text">
+            {hit.title}
+            {" — "}
+            {[
+              hit.filePath,
+              ...(hit.headingPath !== undefined && hit.headingPath.length > 0
+                ? [hit.headingPath.join(" › ")]
+                : []),
+              ...(hit.page !== undefined ? [`p.${hit.page}`] : []),
+            ].join(" — ")}
+          </span>
+          <span className="text-2xs text-fg-subtle select-text">{hit.snippet}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * 执行记录页的「知识库检索」区（T6.6）。
+ *
+ * 三态而非两态，因为缺省与空数组含义不同（见 Run.knowledgeQueries）：
+ * 缺省 = 本轮没开这个工具（整区不显示，不给用户看一个与他无关的空区）；
+ * 空数组 = 开了但 Agent 一次没调用（显示并说明，这是有信息量的观察）。
+ */
+function KnowledgeQueries({
+  run,
+  locale,
+}: {
+  readonly run: Run;
+  readonly locale: string;
+}): ReactElement | null {
+  const { t } = useTranslation();
+  const queries = run.knowledgeQueries;
+  if (queries === undefined) {
+    return null;
+  }
+  return (
+    <section className="flex flex-col gap-2">
+      <h3 className="text-xs font-medium text-fg-muted">{t("runs.knowledge.title")}</h3>
+      {queries.length === 0 ? (
+        <span className="text-xs text-fg-subtle">{t("runs.knowledge.enabledUnused")}</span>
+      ) : (
+        // 审计记录没有 ID，而同一轮内同一查询可被重复调用（calledAt + query 都不保证唯一）。
+        // 这份列表属于一条已结束的 Run：只读、永不重排也永不插入，正是下标可安全做键的情形。
+        queries.map((record, index) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: 已结束 Run 的只读列表，永不重排或插入（理由见上）
+          <KnowledgeQueryCard key={`${record.calledAt}-${index}`} record={record} locale={locale} />
+        ))
+      )}
+    </section>
   );
 }
 
@@ -96,6 +194,8 @@ function RunDetail({ run, locale }: { readonly run: Run; readonly locale: string
           ) : null}
         </section>
       ) : null}
+
+      <KnowledgeQueries run={run} locale={locale} />
 
       <section className="flex flex-col gap-2">
         <h3 className="text-xs font-medium text-fg-muted">{t("runs.fileChanges")}</h3>

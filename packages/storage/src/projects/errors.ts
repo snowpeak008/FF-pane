@@ -12,6 +12,7 @@ export const PROJECT_REGISTRY_ERROR_CODES = [
   "project-already-registered",
   "project-not-found",
   "projects-file-invalid",
+  "project-settings-file-invalid",
 ] as const;
 
 /** 项目注册表层错误码。 */
@@ -67,6 +68,22 @@ export class ProjectsFileInvalidError extends ProjectRegistryError {
 
   constructor(path: string, reason: string) {
     super(`projects.json 结构不符合约定（${reason}）: ${path}`);
+    this.path = path;
+  }
+}
+
+/**
+ * 项目级 project.json 是合法 JSON 但整文件结构不符合约定（顶层非对象、版本不支持、
+ * project 非对象）。与上者同一处置纪律：结构不符不隔离，留在原地人工修复——
+ * 这个文件将来还要装角色绑定与权限策略，自动挪走的代价比让用户改一行大得多。
+ */
+export class ProjectSettingsFileInvalidError extends ProjectRegistryError {
+  override readonly code = "project-settings-file-invalid" as const;
+  /** 出错的 project.json 路径。 */
+  readonly path: string;
+
+  constructor(path: string, reason: string) {
+    super(`project.json 结构不符合约定（${reason}）: ${path}`);
     this.path = path;
   }
 }

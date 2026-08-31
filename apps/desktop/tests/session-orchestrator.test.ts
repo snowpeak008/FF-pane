@@ -6,13 +6,19 @@
  * 全为测试替身，落库与状态推进用可观测的假实现断言。
  */
 
-import { type AgentAdapter, type AgentEvent, createAdapterRegistry } from "@ff-pane/adapters";
+import {
+  type AgentAdapter,
+  type AgentEvent,
+  createAdapterRegistry,
+  type McpStdioServerSpec,
+} from "@ff-pane/adapters";
 import { WORKER_DEFAULT_ENVELOPE } from "@ff-pane/core";
 import type {
   AgentProfile,
   GlobalConfig,
   HabitEntry,
   HabitEntryId,
+  KnowledgeQueryRecord,
   LocalSessionId,
   NativeSessionId,
   Plan,
@@ -27,6 +33,7 @@ import type { ProjectLayout } from "@ff-pane/storage";
 import { describe, expect, it } from "vitest";
 import {
   createSessionOrchestrator,
+  type KnowledgeToolBinding,
   type SessionOrchestratorDeps,
 } from "../src/main/session/orchestrator";
 import type { SessionStreamEvent, StartSessionRequest } from "../src/shared-ipc/contracts";
@@ -36,6 +43,9 @@ interface CapturedTurn {
   readonly prompt: string;
   readonly resume?: { readonly nativeSessionId: string; readonly cwd: string };
   readonly configOverrides?: Readonly<Record<string, string>>;
+  /** T6.6：本轮注入的 MCP 服务端（未挂知识库工具时缺席）。 */
+  readonly mcpServers?: Readonly<Record<string, McpStdioServerSpec>>;
+  readonly inheritUserMcpServers?: boolean;
 }
 
 function fakeAdapter(
@@ -59,6 +69,10 @@ function fakeAdapter(
         prompt: ctx.prompt,
         ...(ctx.resume !== undefined ? { resume: ctx.resume } : {}),
         ...(ctx.configOverrides !== undefined ? { configOverrides: ctx.configOverrides } : {}),
+        ...(ctx.mcpServers !== undefined ? { mcpServers: ctx.mcpServers } : {}),
+        ...(ctx.inheritUserMcpServers !== undefined
+          ? { inheritUserMcpServers: ctx.inheritUserMcpServers }
+          : {}),
       });
       return {
         events: (async function* () {
@@ -140,6 +154,11 @@ function makeHarness(
     readonly habits?: readonly HabitEntry[];
     /** 注册的 fake 适配器 runtime 键（默认 "fake"，需与 profile.runtime 一致）。 */
     readonly runtime?: string;
+    /**
+     * T6.6：本轮的知识库工具绑定。缺省 = 完全不注入 prepareKnowledgeTool 依赖
+     *（等价于旧行为）；给 null = 注入了但返回 undefined（项目开关关闭那条路径）。
+     */
+    readonly knowledgeTool?: KnowledgeToolBinding | null;
   } = {},
 ): Harness {
   const published: SessionStreamEvent[] = [];
@@ -196,6 +215,12 @@ function makeHarness(
     persistRun: async (_l, run) => {
       persistedRuns.push(run);
     },
+    ...(opts.knowledgeTool !== undefined
+      ? {
+          prepareKnowledgeTool: async () =>
+            opts.knowledgeTool === null ? undefined : opts.knowledgeTool,
+        }
+      : {}),
     now: () => 1000,
     newRunId: () => "run-1" as unknown as Run["id"],
     newLocalSessionId: () => "sess-new" as unknown as LocalSessionId,
@@ -761,5 +786,175 @@ describe("createSessionOrchestrator", () => {
     expect(h.captured[0]?.resume).toBeUndefined();
     expect(h.captured[0]?.prompt).toContain("会话恢复上下文");
     expect(h.captured[0]?.prompt).toContain("正在做某事");
+  });
+});
+
+describe("T6.6 Agent 只读知识库检索工具", () => {
+  const SPEC: McpStdioServerSpec = {
+    command: "/app/electron",
+    args: ["/app/out/main/knowledge-mcp.js"],
+    env: { FF_PANE_KNOWLEDGE_DB: "/root/index.sqlite" },
+    allowedTools: ["knowledge_search"],
+  };
+
+  function binding(
+    queries: readonly KnowledgeQueryRecord[],
+    overrides: Partial<KnowledgeToolBinding> = {},
+  ): KnowledgeToolBinding {
+    return {
+      serverName: "ffpane-knowledge",
+      spec: SPEC,
+      readAudit: async () => queries,
+      ...overrides,
+    };
+  }
+
+  function queryRecord(query: string): KnowledgeQueryRecord {
+    return {
+      calledAt: 900,
+      query,
+      limit: 8,
+      hits: [
+        {
+          entryId: "e1" as KnowledgeQueryRecord["hits"][number]["entryId"],
+          chunkId: "c1" as KnowledgeQueryRecord["hits"][number]["chunkId"],
+          title: "使用指南",
+          filePath: "docs/guide.md",
+          score: 0.5,
+          snippet: "片段",
+        },
+      ],
+      usedFts: true,
+      usedVector: false,
+      durationMs: 4,
+    };
+  }
+
+  const OK_EVENTS: AgentEvent[] = [
+    { kind: "session_start" },
+    { kind: "text", content: "done", final: true, channel: "answer" },
+    { kind: "end", reason: "completed" },
+  ];
+
+  it("项目开关关闭 → 完全不注入：Agent 侧看不到这个工具", async () => {
+    const h = makeHarness(OK_EVENTS, { knowledgeTool: null });
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start(workerRequest());
+    await flushUntilEnd(h.published);
+
+    expect(h.captured[0]?.mcpServers).toBeUndefined();
+    // 未挂工具 → knowledgeQueries 缺省（与"挂了但没调用"的空数组区分）
+    expect(h.persistedRuns[0]?.knowledgeQueries).toBeUndefined();
+  });
+
+  it("开关开启 → 按注册名注入 MCP 服务端规格", async () => {
+    const h = makeHarness(OK_EVENTS, { knowledgeTool: binding([]) });
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start(workerRequest());
+    await flushUntilEnd(h.published);
+
+    expect(h.captured[0]?.mcpServers).toEqual({ "ffpane-knowledge": SPEC });
+  });
+
+  it("缺省不继承用户自己的 MCP 服务端（MCP 工具绕过 §7 权限信封）", async () => {
+    const h = makeHarness(OK_EVENTS, { knowledgeTool: binding([]) });
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start(workerRequest());
+    await flushUntilEnd(h.published);
+
+    expect(h.captured[0]?.inheritUserMcpServers).toBeUndefined();
+  });
+
+  it("用户显式允许时透传 inheritUserMcpServers", async () => {
+    const h = makeHarness(OK_EVENTS, {
+      knowledgeTool: binding([], { inheritUserMcpServers: true }),
+    });
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start(workerRequest());
+    await flushUntilEnd(h.published);
+
+    expect(h.captured[0]?.inheritUserMcpServers).toBe(true);
+  });
+
+  it("Worker 轮：审计落进 Run.knowledgeQueries 并推 knowledge-query 事件", async () => {
+    const records = [queryRecord("RRF 融合"), queryRecord("权限信封")];
+    const h = makeHarness(OK_EVENTS, { knowledgeTool: binding(records) });
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start(workerRequest());
+    await flushUntilEnd(h.published);
+
+    expect(h.persistedRuns[0]?.knowledgeQueries).toEqual(records);
+    expect(h.published.find((e) => e.kind === "knowledge-query")).toMatchObject({
+      queries: records,
+    });
+  });
+
+  it("挂了但一次没调用 → 空数组（不是缺省）：界面据此说「工具开着但没用上」", async () => {
+    const h = makeHarness(OK_EVENTS, { knowledgeTool: binding([]) });
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start(workerRequest());
+    await flushUntilEnd(h.published);
+
+    expect(h.persistedRuns[0]?.knowledgeQueries).toEqual([]);
+    // 零调用不推事件（一条"查了 0 次"的通知只是噪声）
+    expect(h.published.some((e) => e.kind === "knowledge-query")).toBe(false);
+  });
+
+  it("Planner 轮没有 Run，事件是它唯一的可见途径", async () => {
+    const records = [queryRecord("检索设计")];
+    const h = makeHarness(OK_EVENTS, {
+      profile: profile({ defaultRole: "planner" }),
+      knowledgeTool: binding(records),
+    });
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start(plannerRequest());
+    await flushUntilEnd(h.published);
+
+    expect(h.persistedRuns).toHaveLength(0);
+    expect(h.published.find((e) => e.kind === "knowledge-query")).toMatchObject({
+      queries: records,
+    });
+  });
+
+  it("审计回读失败不拖垮收尾：Run 照常落库", async () => {
+    const h = makeHarness(OK_EVENTS, {
+      knowledgeTool: binding([], {
+        readAudit: async () => {
+          throw new Error("审计文件被删了");
+        },
+      }),
+    });
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start(workerRequest());
+    await flushUntilEnd(h.published);
+
+    expect(h.persistedRuns).toHaveLength(1);
+    expect(h.persistedRuns[0]?.knowledgeQueries).toEqual([]);
+  });
+
+  it("装配抛错不拖垮整轮：本轮无此工具但照常执行（工具是增强而非前提）", async () => {
+    const h = makeHarness(OK_EVENTS, { knowledgeTool: null });
+    const deps: SessionOrchestratorDeps = {
+      ...h.deps,
+      prepareKnowledgeTool: async () => {
+        throw new Error("索引库打不开");
+      },
+    };
+    const orch = createSessionOrchestrator(deps);
+
+    const ack = await orch.start(workerRequest());
+    await flushUntilEnd(h.published);
+
+    expect(ack.accepted).toBe(true);
+    expect(h.captured[0]?.mcpServers).toBeUndefined();
+    expect(h.persistedRuns).toHaveLength(1);
   });
 });

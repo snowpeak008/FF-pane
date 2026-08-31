@@ -35,6 +35,7 @@ import {
   createConfigStore,
   createProfileStore,
   createProjectRegistry,
+  createProjectSettingsStore,
   createProviderStore,
   createSessionStore,
   deleteEntry,
@@ -72,6 +73,8 @@ type DataChannel =
   | "projects:create"
   | "projects:remove"
   | "projects:restore"
+  | "projects:get-settings"
+  | "projects:update-settings"
   | "providers:list"
   | "providers:create"
   | "providers:update"
@@ -181,6 +184,17 @@ export async function createDataHandlers(
     "projects:remove": (request) => registry.removeProject(request.id),
 
     "projects:restore": (request) => registry.restoreProject(request.entry),
+
+    // 项目级设置（T6.6）：只读写 project.json 中本层负责的字段，其余键原样保留
+    "projects:get-settings": (request) =>
+      createProjectSettingsStore(
+        resolveProjectLayout(request.projectRoot).projectFile,
+      ).readSettings(),
+
+    "projects:update-settings": (request) =>
+      createProjectSettingsStore(
+        resolveProjectLayout(request.projectRoot).projectFile,
+      ).updateSettings(request.patch),
 
     "providers:list": () => providers.listProviders(),
 

@@ -404,6 +404,22 @@
         "light": "Light",
         "dark": "Dark"
       }
+    },
+    "knowledgeTool": {
+      "title": "Knowledge search tool (MCP)",
+      "subtitle": "How the agent-facing read-only search tool is launched. Leave blank to use the built-in server — most setups never need to change this.",
+      "transportNote": "The transport is always stdio (a process pipe): no port is opened and no network traffic is produced, so it is unaffected by VPNs, system proxies and firewalls, and it does not disturb your other MCP servers.",
+      "serverName": "Server name",
+      "serverNameHint": "MCP server name registered with the agent. Blank uses {{name}}. A server you already have under the same name would collide.",
+      "command": "Executable",
+      "commandHint": "Blank uses the built-in server. Setting it takes over launching entirely, so provide the arguments too.",
+      "args": "Arguments",
+      "argsHint": "Space separated. Editable only when an executable is set.",
+      "env": "Environment variables",
+      "envHint": "One KEY=VALUE per line. The index and audit paths are injected automatically; set them here only to override. Do not put secrets here.",
+      "builtIn": "(built-in server)",
+      "saved": "Saved",
+      "error": "Could not save"
     }
   },
   "memory": {
@@ -464,6 +480,16 @@
       "cancelled": "Cancelled",
       "crashed": "Crashed",
       "running": "Running"
+    },
+    "knowledge": {
+      "title": "Knowledge search",
+      "enabledUnused": "The read-only search tool was enabled this run, but the agent never called it.",
+      "modeHybrid": "Keyword + semantic",
+      "modeKeyword": "Keyword only",
+      "modeFallback": "Keyword only (query too short; fell back to substring matching)",
+      "hitCount": "{{n}} hit(s)",
+      "duration": "{{ms}} ms",
+      "failed": "Call failed: {{reason}}"
     }
   },
   "session": {
@@ -739,6 +765,13 @@
     "insertTitle": "Insert from knowledge base",
     "insertDescription": "The selected chunk is added to the composer with its source citation.",
     "insert": "Insert",
-    "inserted": "Citation inserted"
+    "inserted": "Citation inserted",
+    "agentTool": {
+      "label": "Let the agent search the knowledge base",
+      "hint": "Applies to the current project \"{{project}}\" only. Off by default.",
+      "needProject": "Select a project on the Projects page first, then decide whether to enable it there.",
+      "enabledNote": "Agents in this project get a read-only search tool. Every query and every hit is recorded in the execution log. Agents cannot write to, modify, or delete the knowledge base.",
+      "saveError": "Could not save the setting"
+    }
   }
 }

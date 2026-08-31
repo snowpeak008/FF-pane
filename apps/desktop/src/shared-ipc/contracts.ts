@@ -28,6 +28,7 @@ import type {
   KnowledgeEntry,
   KnowledgeEntryId,
   KnowledgeFormat,
+  KnowledgeQueryRecord,
   LocalSessionId,
   MemoryEntry,
   MemoryEntryId,
@@ -124,6 +125,21 @@ export interface RemoveProjectRequest {
 /** projects:restore 请求：撤销移除，把先前 projects:remove 返回的条目放回。 */
 export interface RestoreProjectRequest {
   readonly entry: ProjectRegistryEntry;
+}
+
+/**
+ * 项目级设置视图（T6.6）：project.json 中工作台当前负责读写的字段。
+ * 与 storage 的 ProjectSettings 同构，此处独立声明——契约由渲染层与主进程共享，
+ * 不能依赖 node-only 的 @ff-pane/storage（与 ProviderDraft 同一处置）。
+ */
+export interface ProjectSettingsView {
+  /** 设计文档 §8.3.5 —— Agent 只读知识库检索工具开关（缺省关闭）。 */
+  readonly knowledgeToolEnabled: boolean;
+}
+
+/** projects:update-settings 请求：只带要改的字段。 */
+export interface UpdateProjectSettingsRequest extends ProjectScopedRequest {
+  readonly patch: Partial<ProjectSettingsView>;
 }
 
 /**
@@ -612,6 +628,23 @@ export type SessionStreamEvent =
       readonly diff?: string;
     }
   | {
+      /**
+       * Agent 调用了只读知识库检索工具（T6.6，§8.3.5 路径二）。
+       *
+       * **在轮次收尾时一次性推出全部调用，而不是逐次实时推**：调用记录由 sidecar
+       * 进程逐行追加到审计文件，主进程与它之间没有连接（那正是 stdio 方案不占端口、
+       * 不碰网络的代价），故只能在轮末回读。为此去实时监视文件（fs.watch 在 Windows
+       * 上并不可靠、轮询要挂定时器）不值得——用户要的是"看得见 Agent 查了什么"，
+       * 晚几秒与实时在这件事上没有区别。
+       *
+       * Worker 轮的同一批记录还会落进 Run（执行记录页）；Planner 轮没有 Run，
+       * 本事件是它唯一的可见途径。
+       */
+      readonly turnId: string;
+      readonly kind: "knowledge-query";
+      readonly queries: readonly KnowledgeQueryRecord[];
+    }
+  | {
       readonly turnId: string;
       readonly kind: "end";
       readonly reason: RunEndReason;
@@ -641,6 +674,13 @@ export interface IpcInvokeContracts {
   "projects:remove": { request: RemoveProjectRequest; response: ProjectRegistryEntry };
   /** 撤销移除：把被移除的条目原样放回注册表。 */
   "projects:restore": { request: RestoreProjectRequest; response: ProjectRegistryEntry };
+  /** 读取项目级设置（project.json 中工作台负责的字段，T6.6）。 */
+  "projects:get-settings": { request: ProjectScopedRequest; response: ProjectSettingsView };
+  /** 更新项目级设置（非破坏性合并，保留其他工单写入的字段）。 */
+  "projects:update-settings": {
+    request: UpdateProjectSettingsRequest;
+    response: ProjectSettingsView;
+  };
   /** 列出全部 Provider（设置页 §4）。 */
   "providers:list": { request: undefined; response: readonly Provider[] };
   /** 新建 Provider（明文密钥加密落库后返回落盘条目）。 */
@@ -796,6 +836,8 @@ export const INVOKE_CHANNELS = [
   "projects:create",
   "projects:remove",
   "projects:restore",
+  "projects:get-settings",
+  "projects:update-settings",
   "providers:list",
   "providers:create",
   "providers:update",

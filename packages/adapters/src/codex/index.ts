@@ -9,6 +9,7 @@ export {
 } from "./adapter.js";
 export {
   buildCodexArgs,
+  buildCodexMcpOverrides,
   CODEX_RUNTIME,
   CODEX_SANDBOX_POLICIES,
   type CodexArgsInput,

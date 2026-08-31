@@ -23,6 +23,7 @@
  */
 
 import type { ModelId, NativeSessionBinding, RuntimeId } from "@ff-pane/shared";
+import type { McpStdioServerSpec } from "../adapter.js";
 
 /** Runtime 注册键（adapter.ts KNOWN_RUNTIMES 之一）。 */
 export const CODEX_RUNTIME: RuntimeId = "codex";
@@ -70,6 +71,37 @@ export interface CodexArgsInput {
   readonly addDirs?: readonly string[] | undefined;
   /** 原样追加的参数（逃生门，接在生成参数之后、提示词之前）。 */
   readonly extraArgs?: readonly string[] | undefined;
+}
+
+/**
+ * 把一组 MCP 服务端编译成 codex 的 `-c mcp_servers.*` 覆盖键值（T6.6）。
+ *
+ * **per-launch 覆盖，不碰 `~/.codex/config.toml`**：`-c` 的语义是"本次启动叠加这些配置"，
+ * 用户全局配置里的 MCP 服务端照常生效、且分毫不动。这正是"不影响用户其他 MCP 关联"的
+ * 落法——我们只往这一次启动里加一个名字，不做任何删改。
+ *
+ * 值按 codex `-c` 的 TOML 语义产出：字符串用 JSON.stringify（JSON 字符串是合法的 TOML
+ * 基本字符串，转义规则一致），数组与内联表手工拼装。**刻意不写 `enabled` 键**：老版本
+ * codex 不认识它时会因未知配置键拒绝启动，而"定义了即启用"本来就是默认行为。
+ */
+export function buildCodexMcpOverrides(
+  servers: Readonly<Record<string, McpStdioServerSpec>>,
+): Record<string, string> {
+  const overrides: Record<string, string> = {};
+  for (const [name, spec] of Object.entries(servers)) {
+    const prefix = `mcp_servers.${name}`;
+    overrides[`${prefix}.command`] = JSON.stringify(spec.command);
+    if (spec.args !== undefined && spec.args.length > 0) {
+      overrides[`${prefix}.args`] = `[${spec.args.map((arg) => JSON.stringify(arg)).join(", ")}]`;
+    }
+    if (spec.env !== undefined && Object.keys(spec.env).length > 0) {
+      const entries = Object.entries(spec.env).map(
+        ([key, value]) => `${JSON.stringify(key)} = ${JSON.stringify(value)}`,
+      );
+      overrides[`${prefix}.env`] = `{ ${entries.join(", ")} }`;
+    }
+  }
+  return overrides;
 }
 
 /** 沙箱参数：首轮用 `-s`，resume 轮只能用 `-c sandbox_mode=`（codex.md §3）。 */

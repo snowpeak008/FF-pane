@@ -50,6 +50,16 @@ export {
   toPermissionPayload,
 } from "./mapper.js";
 export {
+  buildClaudeMcpConfig,
+  CLAUDE_MCP_DIR_PREFIX,
+  CLAUDE_MCP_FILE_NAME,
+  type ClaudeMcpFile,
+  ClaudeMcpFileError,
+  type ClaudeMcpFileOptions,
+  claudeMcpToolName,
+  writeClaudeMcpFile,
+} from "./mcp-file.js";
+export {
   CLAUDE_CODE_DISPLAY_NAME,
   CLAUDE_CODE_RUNTIME,
   CLAUDE_COMMAND_TOOLS,

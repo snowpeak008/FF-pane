@@ -109,6 +109,21 @@ export interface ClaudeCodeTurnArgs {
   readonly model?: ModelId | undefined;
   /** 原生会话 ID（cwd 一致性由适配器在启动前校验）。 */
   readonly resumeSessionId?: string | undefined;
+  /**
+   * 本轮 MCP 配置文件路径（T6.6，由 mcp-file.ts 逐轮落盘）。
+   * 缺席 = 本轮不注入任何 MCP 服务端，连 `--mcp-config` 都不传。
+   */
+  readonly mcpConfigPath?: string | undefined;
+  /**
+   * 本轮要额外放行的 MCP 工具（`mcp__<服务器>__<工具>`）。
+   * 与 options.allowedTools 合并——前者是权限信封的翻译结果，两者来源不同不该互相覆盖。
+   */
+  readonly mcpAllowedTools?: readonly string[] | undefined;
+  /**
+   * 是否忽略用户自己的 MCP 配置（`--strict-mcp-config`）。
+   * 仅在本轮注入了 MCP 时才有意义（见 buildClaudeCodeArgs 内的注释）。
+   */
+  readonly strictMcp?: boolean | undefined;
 }
 
 /** 组装 `claude` 的完整参数表。 */
@@ -131,8 +146,10 @@ export function buildClaudeCodeArgs(
   }
   // 变参形态：`--allowedTools "Write" "Bash(git *)"`（§6.2 实测），
   // 空格与括号的转义由 W2.1a 的 Windows 垫片处理，此处只管分词。
-  if (options.allowedTools !== undefined && options.allowedTools.length > 0) {
-    args.push("--allowedTools", ...options.allowedTools);
+  // MCP 工具（T6.6）与信封翻译结果合并：两者来源不同，谁都不该覆盖谁。
+  const allowedTools = [...(options.allowedTools ?? []), ...(turn.mcpAllowedTools ?? [])];
+  if (allowedTools.length > 0) {
+    args.push("--allowedTools", ...allowedTools);
   }
   if (options.disallowedTools !== undefined && options.disallowedTools.length > 0) {
     args.push("--disallowedTools", ...options.disallowedTools);
@@ -152,7 +169,15 @@ export function buildClaudeCodeArgs(
   if (options.settingSources !== undefined && options.settingSources.length > 0) {
     args.push("--setting-sources", options.settingSources.join(","));
   }
-  if (options.strictMcpConfig === true) {
+  // MCP 注入（T6.6）：逐轮临时配置文件，用户的 ~/.claude.json 分毫不动。
+  if (turn.mcpConfigPath !== undefined) {
+    args.push("--mcp-config", turn.mcpConfigPath);
+  }
+  // --strict-mcp-config = 只用上面这份配置，忽略用户自己配的 MCP 服务器。
+  // 缺省开启的理由见 AdapterTurnContext.inheritUserMcpServers：MCP 工具在 CLI 内部
+  // 执行，完全绕过 §7 权限信封的拦截路径，放任它们进入一轮受管执行等于在信封上
+  // 开一个看不见的口子。构造级 strictMcpConfig 是既有逃生门，两者任一为真即生效。
+  if (options.strictMcpConfig === true || turn.strictMcp === true) {
     args.push("--strict-mcp-config");
   }
   if (options.extraArgs !== undefined) {

@@ -56,6 +56,8 @@ import {
 } from "./control.js";
 import type { ClaudeCodeMapperState } from "./mapper.js";
 import { createClaudeCodeMapperState, mapClaudeCodeRecord, toPermissionPayload } from "./mapper.js";
+import type { ClaudeMcpFile } from "./mcp-file.js";
+import { claudeMcpToolName, writeClaudeMcpFile } from "./mcp-file.js";
 import { CLAUDE_CODE_DISPLAY_NAME, CLAUDE_CODE_RUNTIME } from "./native.js";
 
 /** 等 interrupt 回执 / 取消收尾的时限，超时即树杀兜底（§5 建议 5 秒）。 */
@@ -225,9 +227,31 @@ function startClaudeCodeTurn(ctx: AdapterTurnContext, resolved: ResolvedOptions)
     );
   }
 
+  // MCP 注入（T6.6）：逐轮临时配置文件 + 显式放行只读工具。用户的 ~/.claude.json 不动。
+  const mcpServers = ctx.mcpServers ?? {};
+  const hasMcp = Object.keys(mcpServers).length > 0;
+  let mcpFile: ClaudeMcpFile | undefined;
+  if (hasMcp) {
+    try {
+      mcpFile = writeClaudeMcpFile(mcpServers);
+    } catch (error) {
+      // 装配失败即快速失败：带着"以为挂上了其实没挂"的状态跑完一轮，
+      // 表现是模型莫名其妙查不到东西，比直接报错难查得多。
+      return failFastTurn(describeError(error));
+    }
+  }
+  const mcpAllowedTools = Object.entries(mcpServers).flatMap(([name, spec]) =>
+    (spec.allowedTools ?? []).map((tool) => claudeMcpToolName(name, tool)),
+  );
+
   const args = buildClaudeCodeArgs(resolved.cli, {
     model: ctx.model,
     resumeSessionId: ctx.resume?.nativeSessionId,
+    ...(mcpFile !== undefined ? { mcpConfigPath: mcpFile.path } : {}),
+    ...(mcpAllowedTools.length > 0 ? { mcpAllowedTools } : {}),
+    // 只在本轮确有注入时才谈"忽略用户 MCP 配置"：没注入还传 strict，
+    // 等于平白剥夺用户的 MCP 工具而换不来任何东西。
+    ...(hasMcp && ctx.inheritUserMcpServers !== true ? { strictMcp: true } : {}),
   });
   const handle = resolved.spawn({
     command: resolved.command,
@@ -460,6 +484,8 @@ function startClaudeCodeTurn(ctx: AdapterTurnContext, resolved: ResolvedOptions)
       // 收束动作也一起吊死；settleProcess 幂等，正常路径下面还会 await 同一个。
       void settleProcess().catch(() => undefined);
       void Promise.resolve(iterator.return?.(undefined)).catch(() => undefined);
+      // 临时 MCP 配置用完即删（remove 幂等、失败静默）。与 settleProcess 同理不 await。
+      void mcpFile?.remove();
     }
     const exit = await settleProcess();
     if (!sawEnd) {

@@ -7,6 +7,8 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { detectHabitConflicts, observeCorrection } from "@ff-pane/core";
 import type {
   HabitEntry,
@@ -20,6 +22,7 @@ import {
   createConfigStore,
   createObservationStore,
   createProfileStore,
+  createProjectSettingsStore,
   createProviderStore,
   createSessionStore,
   initGlobalLayout,
@@ -42,13 +45,22 @@ import {
 import { type InvokeHandlers, publishEvent, type WebContentsLike } from "../../shared-ipc/server";
 import { resolveGlobalRoot } from "../data-root";
 import { createSafeStorageBackend, createSecretStore, resolveSecretsFile } from "../secrets";
+import {
+  createKnowledgeAuditPath,
+  readKnowledgeAudit,
+  resolveKnowledgeMcpServer,
+} from "./knowledge-tool";
 import { createSessionOrchestrator } from "./orchestrator";
 import { createDesktopAdapterRegistry } from "./registry";
 
 export * from "./env";
 export * from "./event-map";
+export * from "./knowledge-tool";
 export * from "./orchestrator";
 export * from "./registry";
+
+/** 主进程模块目录：内置 MCP sidecar 与 main/index.js 同目录（见 electron.vite.config.ts）。 */
+const moduleDir = dirname(fileURLToPath(import.meta.url));
 
 /** 本层负责的 invoke 通道集合。 */
 type SessionChannel = "session:start" | "session:respond-permission" | "session:cancel";
@@ -199,6 +211,30 @@ export async function createSessionHandlers(
       if (changesDiff.length > 0) {
         await writeRunChangesDiff(projectLayout, run.id, changesDiff);
       }
+    },
+    // Agent 只读知识库检索工具（T6.6，§8.3.5 路径二）：项目开关默认关闭，
+    // 关着就返回 undefined —— 本轮连 MCP 配置都不生成，Agent 侧完全看不到这个工具。
+    prepareKnowledgeTool: async (projectLayout) => {
+      const settings = await createProjectSettingsStore(projectLayout.projectFile).readSettings();
+      if (!settings.knowledgeToolEnabled) {
+        return undefined;
+      }
+      const auditPath = await createKnowledgeAuditPath();
+      const globalConfig = await config.readConfig();
+      const { serverName, spec } = resolveKnowledgeMcpServer({
+        moduleDir,
+        // 知识库是全局作用域（§10.1，T6.5 结论），故索引库取全局 layout 而非项目 layout
+        indexDbFile: layout.indexDbFile,
+        auditPath,
+        ...(globalConfig.knowledgeTool !== undefined
+          ? { settings: globalConfig.knowledgeTool }
+          : {}),
+      });
+      return {
+        serverName,
+        spec,
+        readAudit: () => readKnowledgeAudit(auditPath),
+      };
     },
     now: () => Date.now(),
     newRunId: () => randomUUID() as RunId,

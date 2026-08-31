@@ -404,6 +404,22 @@
         "light": "浅色",
         "dark": "深色"
       }
+    },
+    "knowledgeTool": {
+      "title": "知识库检索工具（MCP）",
+      "subtitle": "Agent 只读检索工具的接入方式。留空即用内置服务端——绝大多数情况不需要改这里。",
+      "transportNote": "传输固定为 stdio（进程间管道）：不监听端口、不产生网络流量，因此与 VPN、系统代理、防火墙无关，也不会影响你已配置的其他 MCP 服务。",
+      "serverName": "服务器名",
+      "serverNameHint": "注册给 Agent 的 MCP 服务器名，留空用 {{name}}。与你已有的同名服务会互相覆盖。",
+      "command": "可执行文件",
+      "commandHint": "留空使用内置服务端；填了即完全接管启动方式，参数也要一并给出。",
+      "args": "启动参数",
+      "argsHint": "空格分隔。仅在指定了可执行文件时可编辑。",
+      "env": "环境变量",
+      "envHint": "一行一个 KEY=VALUE。索引库与审计文件路径由程序自动注入，此处只在需要覆盖时填。请勿在此填写密钥。",
+      "builtIn": "（内置服务端）",
+      "saved": "已保存",
+      "error": "保存失败"
     }
   },
   "memory": {
@@ -464,6 +480,16 @@
       "cancelled": "已取消",
       "crashed": "崩溃",
       "running": "执行中"
+    },
+    "knowledge": {
+      "title": "知识库检索",
+      "enabledUnused": "本轮开启了只读检索工具，但 Agent 一次都没有调用。",
+      "modeHybrid": "关键词 + 语义",
+      "modeKeyword": "仅关键词",
+      "modeFallback": "仅关键词（查询过短，回退子串匹配）",
+      "hitCount": "{{n}} 条命中",
+      "duration": "{{ms}} ms",
+      "failed": "调用失败：{{reason}}"
     }
   },
   "session": {
@@ -739,6 +765,13 @@
     "insertTitle": "从知识库插入",
     "insertDescription": "选中的内容会带出处引用一并加入输入框。",
     "insert": "插入",
-    "inserted": "已插入引用"
+    "inserted": "已插入引用",
+    "agentTool": {
+      "label": "允许 Agent 主动检索知识库",
+      "hint": "仅对当前项目「{{project}}」生效，默认关闭。",
+      "needProject": "先在项目列表页选中一个项目，再决定是否为它开启。",
+      "enabledNote": "本项目的 Agent 将获得一个只读检索工具；它每次查了什么、命中了什么，都会记进执行记录。Agent 无法写入、修改或删除知识库。",
+      "saveError": "保存开关失败"
+    }
   }
 }

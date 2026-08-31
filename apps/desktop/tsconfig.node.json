@@ -8,6 +8,7 @@
   },
   "include": [
     "src/main",
+    "src/mcp",
     "src/preload",
     "src/shared-ipc",
     "tests",

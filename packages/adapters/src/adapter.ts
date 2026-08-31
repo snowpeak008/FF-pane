@@ -38,6 +38,36 @@ export type KnownRuntime = (typeof KNOWN_RUNTIMES)[number];
 /** KnownRuntime 运行时守卫（Profile 读入 / UI 下拉框校验）。 */
 export const isKnownRuntime = createLiteralGuard(KNOWN_RUNTIMES);
 
+/**
+ * 一个经 stdio 接入的 MCP 服务端（T6.6，设计文档 §8.3.5 路径二）。
+ *
+ * **只支持 stdio，不支持 http/sse**，这是刻意收窄的：本产品要接的是自己的只读检索
+ * 服务端，进程间管道不占端口、不产生网络流量，因此与用户的 VPN、系统代理、防火墙
+ * 规则完全无关。留一个 url 字段就意味着日后会有人往里填一个要走网络的地址。
+ */
+export interface McpStdioServerSpec {
+  /** 服务端可执行文件。 */
+  readonly command: string;
+  /** 启动参数。 */
+  readonly args?: readonly string[];
+  /**
+   * 注入给服务端进程的环境变量。
+   *
+   * **不得放密钥**：各 Runtime 承载它的方式不同——codex 走 `-c` 命令行参数（在进程
+   * 列表里肉眼可见）、claude 走临时 JSON 配置文件（落盘）。两者都与 §4.3「密钥只经
+   * env 直接下发给 Agent 进程、不落盘不进命令行」相抵触。这里只该放路径一类的非机密项。
+   */
+  readonly env?: Readonly<Record<string, string>>;
+  /**
+   * 该服务端中要**预先放行**的工具名（不带 `mcp__<服务器>__` 前缀，适配器自行加）。
+   *
+   * 支持逐工具审批的 Runtime（claude）据此免掉审批弹窗。只该列真正无副作用的工具：
+   * 本产品注入的只有只读检索，故列它是安全的；若将来注入有副作用的服务端，
+   * 这里留空、让它照常走审批通道才是对的。
+   */
+  readonly allowedTools?: readonly string[];
+}
+
 /** 权限审批决定（用户在 UI 上的二选一，经 IPC 下行到适配器回执原生请求）。 */
 export const PERMISSION_DECISIONS = ["allow", "deny"] as const;
 
@@ -70,6 +100,27 @@ export interface AdapterTurnContext {
    * openai_compatible Provider 装配成 codex 的 model_provider 路由（base_url + env_key）。
    */
   readonly configOverrides?: Readonly<Record<string, string>>;
+  /**
+   * 本轮要挂给 Agent 的 MCP 服务端（键 = 注册名）。与 env / configOverrides 同款
+   * 「通用通道、按 Runtime 解释」：codex 映射为 per-launch `-c mcp_servers.*` 覆盖，
+   * claude-code 映射为逐轮临时 `--mcp-config` 文件，其余 Runtime 忽略。
+   *
+   * 两条纪律，各适配器实现时必须遵守：
+   * 1. **绝不改写用户的全局 MCP 配置**（codex 的 `~/.codex/config.toml`、claude 的
+   *    `~/.claude.json`）。注入一律是逐轮、进程级、用完即散——用户的配置不该因为
+   *    在本产品里跑过一轮而发生任何持久变化。
+   * 2. **注入以注册名为隔离单位**，只影响同名条目。
+   */
+  readonly mcpServers?: Readonly<Record<string, McpStdioServerSpec>>;
+  /**
+   * 是否让 Agent 同时保留它自己配置的 MCP 服务端（缺省 false = 本轮只挂上面这些）。
+   *
+   * 缺省排他不是为了"干净"，而是权限层的完整性：§7 的信封拦的是子进程的文件与命令，
+   * 而 MCP 工具在 CLI 内部直接执行，完全不经过拦截路径。放任用户的任意 MCP 服务端
+   * 进入一轮受管执行，等于在权限信封上开了一个它看不见的口子。用户明确要这么做时
+   * 才打开（设置项），并且要知道那些工具不受信封约束。
+   */
+  readonly inheritUserMcpServers?: boolean;
   /**
    * 原生会话恢复绑定；缺席 = 开新会话。
    * cwd 不一致的绑定是非法输入（claude resume 严格绑定 cwd），
