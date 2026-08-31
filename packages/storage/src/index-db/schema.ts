@@ -15,6 +15,7 @@
  */
 
 import { MEMORY_CATEGORIES, MEMORY_STATUSES } from "@ff-pane/shared";
+import { KNOWLEDGE_MIGRATION_V2 } from "./knowledge-schema.js";
 import type { IndexDbMigration } from "./migrations.js";
 
 /** 记忆影子内容表(external content;派生数据,可随索引整体重建)。 */
@@ -80,4 +81,6 @@ export const INDEX_DB_MIGRATIONS: readonly IndexDbMigration[] = [
       db.exec(MEMORY_SCHEMA_V1);
     },
   },
+  // v2 知识库索引（T6.4）。定义在 knowledge-schema.ts,本清单只负责登记顺序。
+  KNOWLEDGE_MIGRATION_V2,
 ];

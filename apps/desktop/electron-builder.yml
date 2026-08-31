@@ -33,9 +33,14 @@ asar: true
 #   1) prebuilds/<platform>-<arch>.node —— Node-API 预编译，本机当前生效形态
 #   2) build/{Debug,Release}/better_sqlite3.node —— node-gyp 源码编译形态
 # 两种路径形态都覆盖，防止换机后依赖形态不同导致安装版加载失败。
+# sqlite-vec（T6.4）同理：vec0.dll 由 SQLite 的 loadExtension 走系统 LoadLibrary 加载，
+# asar 内的虚拟路径喂不进去。平台包名为 sqlite-vec-<os>-<arch>，通配覆盖全部平台，
+# 免得将来出 macOS/Linux 包时漏掉。加载失败会降级到退路后端（见 knowledge-vector.ts），
+# 不至于打不开知识库——但那是兜底，正常路径必须让它能加载。
 asarUnpack:
   - node_modules/better-sqlite3/build/Release/**
   - node_modules/better-sqlite3/prebuilds/**
+  - node_modules/sqlite-vec-*/**
 
 win:
   target:

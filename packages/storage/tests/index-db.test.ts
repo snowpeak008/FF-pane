@@ -8,6 +8,7 @@ import {
   closeIndexDb,
   DEFAULT_BUSY_TIMEOUT_MS,
   deleteMemoryEntry,
+  INDEX_DB_MIGRATIONS,
   type IndexDbMigration,
   IndexDbVersionError,
   openIndexDb,
@@ -118,7 +119,10 @@ describe("index-db 连接基座", () => {
     const db = track(openIndexDb({ filePath: makeTempDbPath() }));
     expect(db.pragma("journal_mode", { simple: true })).toBe("wal");
     expect(db.pragma("busy_timeout", { simple: true })).toBe(DEFAULT_BUSY_TIMEOUT_MS);
-    expect(readUserVersion(db)).toBe(1);
+    // 对齐迁移清单长度而不是写死数字：以后再加迁移（如 T6.4 的 v2）不必改本断言
+    expect(readUserVersion(db)).toBe(INDEX_DB_MIGRATIONS.length);
+    // 外键约束需显式开启（知识库索引的 ON DELETE CASCADE 依赖它）
+    expect(db.pragma("foreign_keys", { simple: true })).toBe(1);
   });
 
   it("busy_timeout 可注入覆盖", () => {

@@ -39,6 +39,10 @@ export function openIndexDb(options: OpenIndexDbOptions): Database.Database {
     // WAL 下 NORMAL 已保证库一致性,只在断电场景可能丢最近事务——索引可重建,可接受。
     db.pragma("synchronous = NORMAL");
     db.pragma(`busy_timeout = ${busyTimeoutMs}`);
+    // 外键约束（SQLite 默认关闭）：知识库索引（v2）靠 ON DELETE CASCADE 保证
+    // 删条目即连带删块与标签。v1 的记忆表不含外键，开启对它无影响。
+    // 注：vec0 是虚表，CASCADE 管不到，向量删除由 knowledge-index 显式处理。
+    db.pragma("foreign_keys = ON");
     runMigrations(db, INDEX_DB_MIGRATIONS);
     return db;
   } catch (thrown) {

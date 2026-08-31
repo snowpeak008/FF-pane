@@ -10,6 +10,8 @@ export * from "./chunk/index.js";
 export * from "./embed/index.js";
 /** 解析层（T6.1）：按扩展名分发的解析器注册表，产出 ParsedDocument 供分块器消费。 */
 export * from "./parse/index.js";
+/** 检索层（T6.4）：BM25 与向量双路召回的 RRF 融合规则（纯函数，不认识 SQLite）。 */
+export * from "./retrieve/index.js";
 
 /**
  * Reciprocal Rank Fusion 单路得分：1 / (k + rank)。
