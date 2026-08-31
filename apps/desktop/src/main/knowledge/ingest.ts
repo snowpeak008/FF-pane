@@ -349,9 +349,160 @@ export async function runIngest(
   };
 }
 
-/** 条目是否还能重建（只有 file_import 有原文件可回读）。 */
-export function isRebuildable(entry: KnowledgeEntry): boolean {
-  return entry.origin.kind === "file_import";
+/**
+ * 一条笔记（手动新建 / 会话收录，§8.3.2 导入方式二与三）的索引输入。
+ *
+ * 与文件导入的区别只有一处：**真实数据源是谁**。文件导入指向用户自己的原文件，
+ * 笔记的原文件则是我们写在 `knowledge/notes/` 下的那一份——§8.4「文件是真实数据源」
+ * 这条纪律对两者一视同仁，故笔记同样先落盘、再从盘上那份字节解析建索引，
+ * 而不是拿内存里的字符串走一条捷径：那会让「用编辑器直接改笔记」与索引对不上。
+ */
+export interface NoteIngestRequest {
+  readonly importId: string;
+  readonly entryId: KnowledgeEntryId;
+  /** `notes/<entryId>.md` 的绝对路径；调用方已写盘。 */
+  readonly filePath: string;
+  /** 落盘的那份字节（哈希与解析都用它，保证与文件内容同源）。 */
+  readonly bytes: Uint8Array;
+  /** 条目标题：用户给的，不用解析器从文件名猜出来的那个。 */
+  readonly title: string;
+  readonly origin: KnowledgeOrigin;
+  readonly tags?: readonly string[];
+  /** 重新索引时的原条目（沿用导入时间与标签，同文件导入的规则）。 */
+  readonly existing?: KnowledgeEntry;
+}
+
+/**
+ * 索引一条笔记：解析 → 分块 → 落库 → 嵌入，与文件导入共用后两段。
+ *
+ * 标题**不取解析器的结果**：笔记文件名是 `ke-<uuid>.md`，解析器对 Markdown 的标题回退
+ * 正是文件名，直接用会让用户在来源管理里看到一串 UUID。用户给的标题才是这条的标题。
+ */
+export async function runNoteIngest(
+  deps: IngestDeps,
+  request: NoteIngestRequest,
+): Promise<KnowledgeImportReport> {
+  const base = emptyReport(request.importId);
+  deps.onProgress({
+    importId: request.importId,
+    phase: "indexing",
+    done: 0,
+    total: 1,
+    currentPath: request.filePath,
+  });
+
+  try {
+    const document = await parseDocument({ filePath: request.filePath, bytes: request.bytes });
+    const drafts = chunkDocument(document, { filePath: request.filePath });
+    const tags = mergeTags(request.existing?.tags, request.tags);
+    const entry: KnowledgeEntry = {
+      id: request.entryId,
+      title: request.title,
+      format: document.format,
+      origin: request.origin,
+      contentHash: hashBytes(request.bytes),
+      importedAt: request.existing?.importedAt ?? deps.now(),
+      ...(tags.length === 0 ? {} : { tags }),
+    };
+    upsertKnowledgeEntry(deps.db, entry);
+    const chunks = toKnowledgeChunks(drafts, {
+      entryId: request.entryId,
+      newId: () => deps.newChunkId(),
+    });
+    replaceEntryChunks(
+      deps.db,
+      request.entryId,
+      chunks.map((chunk) => ({
+        id: chunk.id,
+        seq: chunk.seq,
+        text: chunk.text,
+        provenance: chunk.provenance,
+      })),
+      deps.getVectorIndex(),
+    );
+    deps.onProgress({ importId: request.importId, phase: "indexing", done: 1, total: 1 });
+
+    const embedResult = await runEmbedPhase(
+      deps,
+      { importId: request.importId, files: [request.filePath], force: true },
+      [request.entryId],
+    );
+    deps.onProgress({ importId: request.importId, phase: "done", done: 1, total: 1 });
+
+    return {
+      ...base,
+      scanned: 1,
+      indexed: 1,
+      chunks: chunks.length,
+      embedded: embedResult.embedded,
+      embedSkipped: embedResult.skipped,
+      embedFailed: embedResult.failed,
+      ...(embedResult.fatal === undefined ? {} : { embedFatal: embedResult.fatal }),
+      cancelled: embedResult.cancelled,
+    };
+  } catch (thrown) {
+    // 单条笔记失败没有「其余条目照常」可言，但仍按报告形态返回而不是抛：
+    // 调用方（IPC handler）对导入与笔记用的是同一套结果渲染
+    deps.onProgress({ importId: request.importId, phase: "done", done: 1, total: 1 });
+    return {
+      ...base,
+      scanned: 1,
+      failures: [
+        {
+          filePath: request.filePath,
+          message: thrown instanceof Error ? thrown.message : String(thrown),
+        },
+      ],
+    };
+  }
+}
+
+/**
+ * 条目是否还能重建。
+ *
+ * 三种来源都有一份可回读的原文件：file_import 指向用户的原文件，
+ * manual / session_capture 指向 `notes/<entryId>.md`（写入时落的那份）。
+ * 故三者都可重建——否则用户用编辑器改过笔记之后点「重建索引」会静默不生效，
+ * 而那正是 §8.4「可以用任何编辑器直接查看和修改」承诺的用法。
+ */
+export function isRebuildable(_entry: KnowledgeEntry): boolean {
+  return true;
+}
+
+/** 条目的原文件路径：file_import 取导入路径，笔记取其 notes 落盘路径。 */
+export function entrySourcePath(entry: KnowledgeEntry, notesDir: string): string {
+  return entry.origin.kind === "file_import"
+    ? entry.origin.sourcePath
+    : joinNotePath(notesDir, entry.id);
+}
+
+/**
+ * 合并两份报告（重建时文件条目与笔记条目各跑一轮，对外仍是一次重建）。
+ * 计数相加、失败清单相接、取消与致命错取「发生过就算数」。
+ */
+export function mergeReports(
+  first: KnowledgeImportReport,
+  second: KnowledgeImportReport,
+): KnowledgeImportReport {
+  const fatal = first.embedFatal ?? second.embedFatal;
+  return {
+    importId: first.importId,
+    scanned: first.scanned + second.scanned,
+    indexed: first.indexed + second.indexed,
+    skipped: first.skipped + second.skipped,
+    chunks: first.chunks + second.chunks,
+    embedded: first.embedded + second.embedded,
+    embedSkipped: first.embedSkipped + second.embedSkipped,
+    embedFailed: first.embedFailed + second.embedFailed,
+    ...(fatal === undefined ? {} : { embedFatal: fatal }),
+    failures: [...first.failures, ...second.failures],
+    cancelled: first.cancelled || second.cancelled,
+  };
+}
+
+/** 笔记落盘路径：由条目 ID 确定性推出，不额外存一个字段（少一处会失真的事实源）。 */
+export function joinNotePath(notesDir: string, entryId: KnowledgeEntryId): string {
+  return `${notesDir.replace(/[\\/]+$/, "")}/${entryId}.md`;
 }
 
 /** 条目仍在库中（重建前的存在性检查）。 */

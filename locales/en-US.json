@@ -772,6 +772,21 @@
       "needProject": "Select a project on the Projects page first, then decide whether to enable it there.",
       "enabledNote": "Agents in this project get a read-only search tool. Every query and every hit is recorded in the execution log. Agents cannot write to, modify, or delete the knowledge base.",
       "saveError": "Could not save the setting"
+    },
+    "newEntry": "New entry",
+    "newTitle": "New knowledge entry",
+    "newDescription": "The body is stored as Markdown under the knowledge notes directory and stays editable in any editor.",
+    "capture": "Save to knowledge base",
+    "captureTitle": "Save this message to the knowledge base",
+    "captureDescription": "The captured text becomes searchable, along with a record of which session it came from.",
+    "saveNote": "Save and index",
+    "noteCreated": "Saved to knowledge base ({{chunks}} chunks)",
+    "field": {
+      "title": "Title",
+      "content": "Body",
+      "contentHint": "Markdown supported; the title is written as a top-level heading.",
+      "tags": "Tags",
+      "tagsHint": "Separate with commas or spaces; used for tag filters in search."
     }
   }
 }

@@ -24,6 +24,7 @@ import { Tooltip } from "../../components/ui/Tooltip";
 import { invokeQuery } from "../../ipc";
 import { formatAbsoluteTime, formatRelativeTime } from "../../lib/time";
 import { ImportProgressBar } from "./ImportProgressBar";
+import { KnowledgeNoteDialog } from "./KnowledgeNoteDialog";
 import { entryIndexState, matchesEntrySearch, sourcePathOf } from "./knowledge-view";
 import type { UseKnowledgeImportResult } from "./useKnowledgeImport";
 
@@ -47,6 +48,7 @@ export function SourcesPanel({ overview, importer, onChanged }: SourcesPanelProp
   const [selected, setSelected] = useState<ReadonlySet<KnowledgeEntryId>>(new Set());
   const [removing, setRemoving] = useState<KnowledgeEntryView | null>(null);
   const [confirmRebuild, setConfirmRebuild] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   const vectorEnabled = overview.vector !== undefined;
   const matched = useMemo(
@@ -140,6 +142,9 @@ export function SourcesPanel({ overview, importer, onChanged }: SourcesPanelProp
           onClick={() => void importer.importPaths("directory").then(reportToast)}
         >
           {t("knowledge.importDirectory")}
+        </Button>
+        <Button variant="secondary" size="md" onClick={() => setCreating(true)}>
+          {t("knowledge.newEntry")}
         </Button>
         <Button
           variant="secondary"
@@ -255,6 +260,8 @@ export function SourcesPanel({ overview, importer, onChanged }: SourcesPanelProp
             .then(reportToast);
         }}
       />
+
+      <KnowledgeNoteDialog open={creating} onOpenChange={setCreating} onCreated={onChanged} />
     </div>
   );
 }

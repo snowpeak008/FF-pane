@@ -10,7 +10,7 @@
  * 导入源文件写在 E2E 的临时数据根下，随 cleanup 一并删除。
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { type LaunchedApp, launchApp } from "./_launch";
@@ -115,4 +115,97 @@ test("知识库 导入 → 混合检索 → 增量跳过 → 移除 全链路", 
   // 移除来源：条目连同其索引一并消失
   expect(result.removedOk).toBe(true);
   expect(result.afterRemoveCount).toBe(1);
+});
+
+test("知识库 手动新建 / 会话收录：落 notes 文件 → 建索引 → 检索得到 → 重建仍在", async () => {
+  const { page, dataRoot } = launched;
+
+  const result = await page.evaluate(async () => {
+    const invoke = (channel: string, req?: unknown) =>
+      // biome-ignore lint/suspicious/noExplicitAny: E2E 里按通道字符串调用，类型在契约层已保证
+      (window as any).ffpane.invoke(channel, req);
+
+    const manual = await invoke("knowledge:create-entry", {
+      importId: "e2e-note-1",
+      title: "灰度发布约定",
+      content: "先切 5% 流量观察十分钟，指标正常再全量。回滚必须先停写。",
+      tags: ["发布", "约定"],
+      source: { kind: "manual" },
+    });
+    const captured = await invoke("knowledge:create-entry", {
+      importId: "e2e-note-2",
+      title: "会话结论",
+      content: "传输选 stdio 而不是 HTTP，因为它不监听端口、与 VPN 无关。",
+      source: { kind: "session_capture", sessionId: "ls-e2e" },
+    });
+    // 空正文必须被当场拒绝，而不是落一条永远检索不到的空条目
+    let emptyRejected = false;
+    try {
+      await invoke("knowledge:create-entry", {
+        importId: "e2e-note-3",
+        title: "空的",
+        content: "   ",
+        source: { kind: "manual" },
+      });
+    } catch {
+      emptyRejected = true;
+    }
+
+    const found = await invoke("knowledge:search", { query: "灰度发布" });
+    const overview = await invoke("knowledge:list");
+    // 重建：笔记走的是 notes/ 下那份原文件，不该在重建里消失或变成 file_import
+    const rebuilt = await invoke("knowledge:rebuild", { importId: "e2e-note-4" });
+    const afterRebuild = await invoke("knowledge:list");
+
+    const noteEntries = afterRebuild.entries.filter(
+      (view: { entry: { origin: { kind: string } } }) => view.entry.origin.kind !== "file_import",
+    );
+    return {
+      manual,
+      captured,
+      emptyRejected,
+      foundTitles: found.hits.map((hit: { entryTitle: string }) => hit.entryTitle),
+      origins: overview.entries.map(
+        (view: { entry: { origin: { kind: string } } }) => view.entry.origin.kind,
+      ),
+      capturedOrigin: overview.entries.find(
+        (view: { entry: { id: string } }) => view.entry.id === captured.entryId,
+      )?.entry.origin,
+      rebuiltIndexed: rebuilt.indexed,
+      rebuiltFailures: rebuilt.failures,
+      noteCount: noteEntries.length,
+      noteChunkCounts: noteEntries.map((view: { chunkCount: number }) => view.chunkCount),
+    };
+  });
+
+  // 落库：各产出块，无失败
+  expect(result.manual.report.indexed).toBe(1);
+  expect(result.manual.report.chunks).toBeGreaterThan(0);
+  expect(result.manual.report.failures).toEqual([]);
+  expect(result.captured.report.indexed).toBe(1);
+
+  // 文件是真实数据源（§8.4）：正文确实落在 knowledge/notes/ 下，用户可直接编辑
+  expect(result.manual.path.replaceAll("\\", "/")).toContain("/knowledge/notes/");
+  expect(readFileSync(result.manual.path, "utf8")).toContain("# 灰度发布约定");
+
+  // 空正文当场拒绝
+  expect(result.emptyRejected).toBe(true);
+
+  // 检索得到手写的那条
+  expect(result.foundTitles).toContain("灰度发布约定");
+
+  // 来源如实记录：一条 manual、一条 session_capture（带会话 ID）
+  expect(result.origins).toContain("manual");
+  expect(result.origins).toContain("session_capture");
+  expect(result.capturedOrigin).toEqual({ kind: "session_capture", sessionId: "ls-e2e" });
+
+  // 重建后笔记还在、块还在，来源没有被改写成 file_import
+  expect(result.rebuiltFailures).toEqual([]);
+  expect(result.rebuiltIndexed).toBeGreaterThanOrEqual(2);
+  expect(result.noteCount).toBe(2);
+  for (const count of result.noteChunkCounts) {
+    expect(count).toBeGreaterThan(0);
+  }
+
+  expect(dataRoot).toBeTruthy();
 });

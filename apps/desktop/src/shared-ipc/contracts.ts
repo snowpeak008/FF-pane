@@ -493,6 +493,35 @@ export interface KnowledgeSearchResponse {
   readonly embeddingBlocker?: KnowledgeEmbeddingBlocker;
 }
 
+/**
+ * knowledge:create-entry 请求：手动新建条目 / 从会话收录（§8.3.2 导入方式二与三）。
+ *
+ * 正文经主进程落到 `knowledge/notes/<entryId>.md` 后再建索引——**渲染层不选路径**：
+ * 笔记的存储位置是 §10.1 定死的，让界面参与只会多出一处能填错的地方。
+ */
+export interface KnowledgeCreateEntryRequest {
+  /** 渲染层生成的关联 ID，贯穿本次索引的进度事件（同 import）。 */
+  readonly importId: string;
+  /** 条目标题（来源管理页与检索结果里显示的那个）。 */
+  readonly title: string;
+  /** Markdown 正文。 */
+  readonly content: string;
+  /** 标签（§8.3.4 过滤维度之一）。 */
+  readonly tags?: readonly string[];
+  /** 来源：手动新建，或收录自某个会话的某条消息。 */
+  readonly source:
+    | { readonly kind: "manual" }
+    | { readonly kind: "session_capture"; readonly sessionId: LocalSessionId };
+}
+
+/** knowledge:create-entry 响应：新条目 ID + 与导入同形的报告。 */
+export interface KnowledgeCreateEntryResult {
+  readonly entryId: KnowledgeEntryId;
+  /** 落盘路径（§8.4：文件是真实数据源，用户可直接编辑这一份）。 */
+  readonly path: string;
+  readonly report: KnowledgeImportReport;
+}
+
 /** knowledge:remove-entry 请求：移除来源（连带删除其索引与向量，§8.3.6）。 */
 export interface KnowledgeRemoveEntryRequest {
   readonly id: KnowledgeEntryId;
@@ -769,6 +798,11 @@ export interface IpcInvokeContracts {
     response: { readonly ok: boolean };
   };
   /** 混合检索（§8.3.4 双路召回 RRF 融合 + 上下文扩展 + 四维过滤）。 */
+  /** 手动新建条目 / 从会话收录：正文落 notes/ → 解析分块索引嵌入（§8.3.2）。 */
+  "knowledge:create-entry": {
+    request: KnowledgeCreateEntryRequest;
+    response: KnowledgeCreateEntryResult;
+  };
   "knowledge:search": { request: KnowledgeSearchRequest; response: KnowledgeSearchResponse };
   /** 移除来源（连带删除其块、FTS 与向量）。 */
   "knowledge:remove-entry": {
@@ -874,6 +908,7 @@ export const INVOKE_CHANNELS = [
   "knowledge:import",
   "knowledge:rebuild",
   "knowledge:cancel-import",
+  "knowledge:create-entry",
   "knowledge:search",
   "knowledge:remove-entry",
   "knowledge:export",

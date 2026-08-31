@@ -1,9 +1,12 @@
-import { Check, Copy } from "lucide-react";
+import type { LocalSessionId } from "@ff-pane/shared";
+import { BookMarked, Check, Copy } from "lucide-react";
 import { type ReactElement, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Button } from "../../components/ui/Button";
 import { cn } from "../../lib/cn";
+import { useSessionStore } from "../../stores/session";
+import { captureTitleOf, KnowledgeNoteDialog } from "../knowledge";
 import { type ChatSegment, parseChatSegments } from "./chat-segments";
 
 /** 消息角色（会话页只区分用户与 Agent 两侧）。 */
@@ -71,6 +74,8 @@ export interface ChatMessageProps {
  */
 export function ChatMessage({ message }: ChatMessageProps): ReactElement {
   const { t } = useTranslation();
+  const [capturing, setCapturing] = useState(false);
+  const sessionId = useSessionStore((state) => state.activeSessionId);
   const segments = parseChatSegments(message.text);
   const copyMessage = (): void => {
     void navigator.clipboard.writeText(message.text).then(() => {
@@ -88,18 +93,49 @@ export function ChatMessage({ message }: ChatMessageProps): ReactElement {
         >
           {t(`session.role.${message.role}`)}
         </span>
-        <Button
-          variant="ghost"
-          size="sm"
-          iconOnly
-          className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-          aria-label={t("common.copy")}
-          title={t("common.copy")}
-          onClick={copyMessage}
-        >
-          <Copy aria-hidden size={14} />
-        </Button>
+        <div className="flex items-center gap-0.5">
+          {/* 「存入知识库」（§8.3.2 导入方式二 / §11.2 消息级操作）：
+              流式进行中不给按钮——此刻的正文只是半截，收录进去的是一份注定不完整的资料 */}
+          {message.streaming === true ? null : (
+            <Button
+              variant="ghost"
+              size="sm"
+              iconOnly
+              className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+              aria-label={t("knowledge.capture")}
+              title={t("knowledge.capture")}
+              onClick={() => setCapturing(true)}
+            >
+              <BookMarked aria-hidden size={14} />
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            iconOnly
+            className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+            aria-label={t("common.copy")}
+            title={t("common.copy")}
+            onClick={copyMessage}
+          >
+            <Copy aria-hidden size={14} />
+          </Button>
+        </div>
       </div>
+
+      <KnowledgeNoteDialog
+        open={capturing}
+        onOpenChange={setCapturing}
+        seedTitle={captureTitleOf(message.text)}
+        seedContent={message.text}
+        // 会话还没开起来（本地 ID 尚未登记）时记成手动新建：
+        // 与其塞一个指不到任何会话的 ID，不如如实说这条不是从会话来的
+        source={
+          sessionId === null
+            ? { kind: "manual" }
+            : { kind: "session_capture", sessionId: sessionId satisfies LocalSessionId }
+        }
+      />
       <div className="flex flex-col gap-2">
         {segments.map((segment, index) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: 段由内容派生、无稳定 id，随文本整体重渲染

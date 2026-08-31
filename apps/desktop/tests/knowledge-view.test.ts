@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildKnowledgeCitation,
   buildKnowledgeCitations,
+  captureTitleOf,
   deriveFilterOptions,
   directoryOf,
   entryIndexState,
@@ -17,6 +18,7 @@ import {
   formatProvenanceTrail,
   matchesEntrySearch,
   PROVENANCE_SEPARATOR,
+  parseTagInput,
   progressPercent,
   sourcePathOf,
 } from "../src/renderer/src/pages/knowledge/knowledge-view";
@@ -224,5 +226,41 @@ describe("进度百分比", () => {
     expect(progressPercent(10, 10)).toBe(100);
     // 越界钳制：进度事件与最终报告之间可能短暂不一致
     expect(progressPercent(12, 10)).toBe(100);
+  });
+});
+
+describe("标签输入解析", () => {
+  it("半角逗号、全角逗号、空白都当分隔符", () => {
+    const full = String.fromCharCode(0xff0c);
+    expect(parseTagInput(`部署${full}回滚, 运维  发布`)).toEqual(["发布", "回滚", "运维", "部署"]);
+  });
+
+  it("去重并按字典序返回（标签是集合，顺序不承载信息）", () => {
+    expect(parseTagInput("b, a, b")).toEqual(["a", "b"]);
+  });
+
+  it("空串与纯分隔符不产出空标签", () => {
+    expect(parseTagInput("")).toEqual([]);
+    expect(parseTagInput("  ,  , ")).toEqual([]);
+  });
+});
+
+describe("收录建议标题", () => {
+  it("取首个非空行", () => {
+    expect(captureTitleOf("\n\n结论是走 stdio\n后面还有别的")).toBe("结论是走 stdio");
+  });
+
+  it("去掉 Markdown 标题记号", () => {
+    expect(captureTitleOf("## 部署清单")).toBe("部署清单");
+  });
+
+  it("超长首行截断并加省略号", () => {
+    const title = captureTitleOf("甲".repeat(100));
+    expect(title.length).toBe(61);
+    expect(title.endsWith("…")).toBe(true);
+  });
+
+  it("全空文本给空标题（由对话框的必填校验兜住）", () => {
+    expect(captureTitleOf("   \n  ")).toBe("");
   });
 });

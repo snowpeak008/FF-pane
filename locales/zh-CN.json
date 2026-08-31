@@ -772,6 +772,21 @@
       "needProject": "先在项目列表页选中一个项目，再决定是否为它开启。",
       "enabledNote": "本项目的 Agent 将获得一个只读检索工具；它每次查了什么、命中了什么，都会记进执行记录。Agent 无法写入、修改或删除知识库。",
       "saveError": "保存开关失败"
+    },
+    "newEntry": "新建条目",
+    "newTitle": "新建知识库条目",
+    "newDescription": "正文以 Markdown 保存在知识库的 notes 目录下，可用任何编辑器直接修改。",
+    "capture": "存入知识库",
+    "captureTitle": "把这条消息存入知识库",
+    "captureDescription": "收录后可在知识库中检索到，并记下它来自哪个会话。",
+    "saveNote": "保存并索引",
+    "noteCreated": "已存入知识库（{{chunks}} 个文本块）",
+    "field": {
+      "title": "标题",
+      "content": "正文",
+      "contentHint": "支持 Markdown；标题会作为一级标题写入文件开头。",
+      "tags": "标签",
+      "tagsHint": "用逗号或空格分隔，供检索时按标签过滤。"
     }
   }
 }

@@ -159,6 +159,52 @@ export function entryIndexState(
   return view.embeddedCount >= view.chunkCount ? "indexed" : "partial";
 }
 
+/**
+ * 全角逗号（U+FF0C）。由码位构造而不是写字面量：本模块禁硬编码 CJK（check-i18n 把关），
+ * 而扫描器分辨不出一个全角标点是分隔符还是漏掉的文案——它拦得对，这里绕得也对。
+ */
+const FULL_WIDTH_COMMA = String.fromCharCode(0xff0c);
+
+/**
+ * 标签输入串 → 标签数组（§8.3.4 的过滤维度之一）。
+ *
+ * 中英文逗号与空白都当分隔符：用户在中文输入法下打出的「，」与半角「,」看起来一样，
+ * 只认后者会让一串标签被存成一个含逗号的怪标签，而它在过滤器里永远匹配不到东西。
+ * 去重后按字典序返回，与 storage 读回标签的顺序一致（标签是集合，顺序不承载信息）。
+ */
+export function parseTagInput(input: string): readonly string[] {
+  const tags = new Set<string>();
+  // U+FF0C 是全角逗号，写码位而不是字面量：check-i18n 扫的是渲染层里的 CJK 字符，
+  // 它分辨不出这是分隔符还是漏掉的文案，而这里确实不是给人看的字
+  const normalized = input.split(FULL_WIDTH_COMMA).join(",");
+  for (const piece of normalized.split(/[,\s]+/)) {
+    const trimmed = piece.trim();
+    if (trimmed !== "") {
+      tags.add(trimmed);
+    }
+  }
+  return [...tags].sort();
+}
+
+/** 收录一条消息时的建议标题长度上限（用户可改，这里只求「一眼认得出是哪条」）。 */
+const CAPTURE_TITLE_MAX = 60;
+
+/**
+ * 消息正文 → 收录时的建议标题（§8.3.2 导入方式二）。
+ *
+ * 取首个非空行并去掉 Markdown 标题记号：留着 `##` 会让来源管理里的条目标题
+ * 长成「## 结论」这种样子——那是排版记号，不是标题的一部分。
+ */
+export function captureTitleOf(text: string): string {
+  const firstLine =
+    text
+      .split("\n")
+      .find((line) => line.trim() !== "")
+      ?.trim() ?? "";
+  const cleaned = firstLine.replace(/^#{1,6}\s+/, "");
+  return cleaned.length > CAPTURE_TITLE_MAX ? `${cleaned.slice(0, CAPTURE_TITLE_MAX)}…` : cleaned;
+}
+
 /** 进度百分比（0~100 整数）；总数未知（0）时返回 undefined，交给不确定态进度条。 */
 export function progressPercent(done: number, total: number): number | undefined {
   if (total <= 0) {

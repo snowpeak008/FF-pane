@@ -22,7 +22,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import type { Embedder } from "@ff-pane/rag";
 import { SUPPORTED_EXTENSIONS } from "@ff-pane/rag";
 import type {
@@ -30,6 +30,7 @@ import type {
   KnowledgeEntry,
   KnowledgeEntryId,
   KnowledgeFormat,
+  KnowledgeOrigin,
 } from "@ff-pane/shared";
 import {
   createProviderStore,
@@ -64,7 +65,15 @@ import { resolveGlobalRoot } from "../data-root";
 import { createSafeStorageBackend, createSecretStore, resolveSecretsFile } from "../secrets";
 import { resolveKnowledgeEmbedder } from "./embedder";
 import { entriesToMarkdown, type KnowledgeExportItem } from "./export";
-import { type IngestDeps, isRebuildable, runIngest } from "./ingest";
+import {
+  entrySourcePath,
+  type IngestDeps,
+  isRebuildable,
+  joinNotePath,
+  mergeReports,
+  runIngest,
+  runNoteIngest,
+} from "./ingest";
 import { collectImportFiles } from "./scan";
 
 export * from "./embedder";
@@ -79,6 +88,7 @@ type KnowledgeChannel =
   | "knowledge:import"
   | "knowledge:rebuild"
   | "knowledge:cancel-import"
+  | "knowledge:create-entry"
   | "knowledge:search"
   | "knowledge:remove-entry"
   | "knowledge:export";
@@ -169,13 +179,21 @@ export async function createKnowledgeHandlers(
     };
   }
 
-  /** 跑一轮导入 / 重建：登记取消器 → 展开文件 → 编排 → 注销。 */
+  /**
+   * 跑一轮导入 / 重建：登记取消器 → 展开文件 → 编排 → 注销。
+   *
+   * `notes` 是重建时一并处理的笔记条目（手动新建 / 会话收录）：它们的原文件在
+   * `notes/` 下，但**不能混进文件清单**走同一条路——那条路一律把条目写成
+   * `file_import`，重建一次就会把笔记的来源改掉、还多出一个新条目。故两者各跑各的，
+   * 共用一个取消器与一份合并后的报告（对用户是一次重建）。
+   */
   async function ingest(input: {
     readonly importId: string;
     readonly paths: readonly string[];
     readonly tags?: readonly string[];
     readonly force: boolean;
     readonly preExpanded?: boolean;
+    readonly notes?: readonly KnowledgeEntry[];
   }): Promise<KnowledgeImportReport> {
     const controller = new AbortController();
     inFlight.set(input.importId, controller);
@@ -198,12 +216,57 @@ export async function createKnowledgeHandlers(
       }
 
       const { embedder } = await resolveEmbedding();
-      return await runIngest(ingestDeps(controller.signal, embedder), {
+      const deps = ingestDeps(controller.signal, embedder);
+      let report = await runIngest(deps, {
         importId: input.importId,
         files,
         ...(input.tags === undefined ? {} : { tags: input.tags }),
         force: input.force,
       });
+
+      for (const note of input.notes ?? []) {
+        if (controller.signal.aborted) {
+          report = { ...report, cancelled: true };
+          break;
+        }
+        const notePath = joinNotePath(layout.knowledgeNotesDir, note.id);
+        try {
+          const bytes = new Uint8Array(await readFile(notePath));
+          report = mergeReports(
+            report,
+            await runNoteIngest(deps, {
+              importId: input.importId,
+              entryId: note.id,
+              filePath: notePath,
+              bytes,
+              title: note.title,
+              origin: note.origin,
+              existing: note,
+            }),
+          );
+        } catch (thrown) {
+          // 笔记文件不见了（用户手工删过 notes/ 下的东西）：如实记一条失败，
+          // 不连坐其余条目——与文件导入「单文件失败不中断批量」同一条纪律
+          report = mergeReports(report, {
+            importId: input.importId,
+            scanned: 1,
+            indexed: 0,
+            skipped: 0,
+            chunks: 0,
+            embedded: 0,
+            embedSkipped: 0,
+            embedFailed: 0,
+            failures: [
+              {
+                filePath: notePath,
+                message: thrown instanceof Error ? thrown.message : String(thrown),
+              },
+            ],
+            cancelled: false,
+          });
+        }
+      }
+      return report;
     } finally {
       inFlight.delete(input.importId);
     }
@@ -297,14 +360,59 @@ export async function createKnowledgeHandlers(
             (request.entryIds === undefined || request.entryIds.includes(entry.id)),
         );
       const files = targets
-        .map((entry) => (entry.origin.kind === "file_import" ? entry.origin.sourcePath : ""))
-        .filter((path) => path !== "");
+        .filter((entry) => entry.origin.kind === "file_import")
+        .map((entry) => entrySourcePath(entry, layout.knowledgeNotesDir));
+      const notes = targets.filter((entry) => entry.origin.kind !== "file_import");
       return ingest({
         importId: request.importId,
         paths: files,
         force: true,
         preExpanded: true,
+        notes,
       });
+    },
+
+    "knowledge:create-entry": async (request) => {
+      const title = request.title.trim();
+      const content = request.content.trim();
+      // 空标题会让来源管理页出现一行没法指认的条目；空正文会产生零个块，
+      // 即一条永远检索不到的记录。两者都当场拒绝，不落一个半成品进库
+      if (title === "") {
+        throw new Error("knowledge: entry title must not be empty");
+      }
+      if (content === "") {
+        throw new Error("knowledge: entry content must not be empty");
+      }
+
+      const entryId = `ke-${randomUUID()}` as KnowledgeEntryId;
+      const filePath = joinNotePath(layout.knowledgeNotesDir, entryId);
+      // 标题写成正文的一级标题：笔记文件要能脱离本软件独立读懂（§8.4），
+      // 而一级标题正是分块器认得的结构信号（T6.2 标题树），检索出处因此带得上
+      const markdown = `# ${title}\n\n${content}\n`;
+      await writeFile(filePath, markdown, "utf8");
+
+      const origin: KnowledgeOrigin =
+        request.source.kind === "manual"
+          ? { kind: "manual" }
+          : { kind: "session_capture", sessionId: request.source.sessionId };
+
+      const controller = new AbortController();
+      inFlight.set(request.importId, controller);
+      try {
+        const { embedder } = await resolveEmbedding();
+        const report = await runNoteIngest(ingestDeps(controller.signal, embedder), {
+          importId: request.importId,
+          entryId,
+          filePath,
+          bytes: new TextEncoder().encode(markdown),
+          title,
+          origin,
+          ...(request.tags === undefined ? {} : { tags: request.tags }),
+        });
+        return { entryId, path: filePath, report };
+      } finally {
+        inFlight.delete(request.importId);
+      }
     },
 
     "knowledge:cancel-import": (request) => {
