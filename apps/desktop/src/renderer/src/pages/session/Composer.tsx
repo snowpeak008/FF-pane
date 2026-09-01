@@ -1,6 +1,7 @@
 import { BookOpen } from "lucide-react";
 import { type KeyboardEvent, type ReactElement, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useCommandHandler, useShortcutScope } from "../../command";
 import { Button } from "../../components/ui/Button";
 import { Textarea } from "../../components/ui/Input";
 import { Tooltip } from "../../components/ui/Tooltip";
@@ -43,6 +44,8 @@ export function Composer({
   const [directExecute, setDirectExecute] = useState(false);
   // 「从知识库插入」（T6.5 / §8.3.5）：插入的是引用文本，与发送与否无关，故只管开合
   const [insertOpen, setInsertOpen] = useState(false);
+  // 输入框是否有焦点：决定 session-input 作用域是否激活（见下方接线）
+  const [inputFocused, setInputFocused] = useState(false);
 
   const canSend = !disabled && draft.trim().length > 0;
 
@@ -61,6 +64,16 @@ export function Composer({
       send();
     }
   };
+
+  // 命令面板接线（T8.1）。两个动作的状态都住在本组件里（对话框开合、草稿与可发送判定），
+  // 挂载方拿不到，故由本组件自报而不是走 Provider 的 handlers prop。
+  // 作用域上报是键位生效的前提——未上报的作用域内键位不触发（§7）。
+  // session 只要输入区在场即激活；session-input 按 §7 的字面意思只在输入框有焦点时激活
+  // （Ctrl+Enter 在任务页是「派发任务」，焦点不在这儿时不该被会话页抢走）。
+  useShortcutScope("session");
+  useShortcutScope("session-input", inputFocused);
+  useCommandHandler("session-insert-knowledge", () => setInsertOpen(true));
+  useCommandHandler("session-send", send);
 
   const button = (
     <Button variant="primary" size="md" disabled={!canSend} onClick={send}>
@@ -91,6 +104,8 @@ export function Composer({
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={onKeyDown}
+          onFocus={() => setInputFocused(true)}
+          onBlur={() => setInputFocused(false)}
           placeholder={t("session.composerPlaceholder")}
           rows={2}
           className="flex-1"

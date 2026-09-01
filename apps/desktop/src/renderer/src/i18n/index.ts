@@ -4,7 +4,12 @@
  */
 import i18next from "i18next";
 import { initReactI18next } from "react-i18next";
-import { resolveUiLanguage, type SupportedLanguage } from "./resolve";
+import {
+  type LanguageSetting,
+  resolveLanguageSetting,
+  resolveUiLanguage,
+  type SupportedLanguage,
+} from "./resolve";
 import { resources } from "./resources";
 
 /**
@@ -23,11 +28,26 @@ const MISSING_KEY_FALLBACK_LANGUAGE: SupportedLanguage = "zh-CN";
 /**
  * 语言选择持久化：Phase 0 暂存 localStorage；Phase 1 文件存储层（T1.2）落地后
  * 迁移到全局 config.json（~/.aiworkbench/config.json，项目设计计划 §10.1）——计划内分阶段交付。
+ *
+ * 存的是**设置值**（"system" / "zh-CN" / "en-US"），不是解析结果：T8.1 之前只存具体语言，
+ * 于是「跟随系统」只能由「键根本不存在」表达——用户选过一次就再也回不去（§9.1 的
+ * 设置项本来就是三态）。现在 "system" 是一个可以被显式写入的值。
  */
 const STORAGE_KEY = "ffpane.ui-language";
 
 function readSavedLanguage(): string | null {
-  return window.localStorage.getItem(STORAGE_KEY);
+  try {
+    return window.localStorage.getItem(STORAGE_KEY);
+  } catch (thrown) {
+    // 开发者日志英文（check-i18n 扫描约定）；读不到就按「跟随系统」走
+    console.error("[renderer] language setting read failed:", thrown);
+    return null;
+  }
+}
+
+/** 当前的界面语言设置（三态）。设置页据此显示选中项。 */
+export function readUiLanguageSetting(): LanguageSetting {
+  return resolveLanguageSetting(readSavedLanguage());
 }
 
 async function fetchSystemLocale(): Promise<string> {
@@ -59,8 +79,19 @@ export async function initI18n(): Promise<void> {
   });
 }
 
-/** 切换 UI 语言：立即生效（react-i18next 触发重渲染）并持久化选择。 */
-export function changeUiLanguage(language: SupportedLanguage): void {
-  window.localStorage.setItem(STORAGE_KEY, language);
-  void i18next.changeLanguage(language);
+/**
+ * 切换界面语言设置：立即生效（react-i18next 触发重渲染）并持久化。
+ *
+ * 选「跟随系统」时要现问一次系统语言再切——此刻不能只把键删掉了事：
+ * 用户从 en-US 切回跟随系统，界面必须当场变成系统语言，而不是等下次启动。
+ */
+export async function changeUiLanguage(setting: LanguageSetting): Promise<void> {
+  try {
+    window.localStorage.setItem(STORAGE_KEY, setting);
+  } catch (thrown) {
+    console.error("[renderer] language setting write failed:", thrown);
+  }
+  const language =
+    setting === "system" ? resolveUiLanguage(null, await fetchSystemLocale()) : setting;
+  await i18next.changeLanguage(language);
 }

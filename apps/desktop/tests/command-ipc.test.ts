@@ -8,6 +8,11 @@ import {
   isCommandRunnable,
 } from "../src/renderer/src/command/execute";
 import {
+  mergeHandlers,
+  withHandler,
+  withoutHandler,
+} from "../src/renderer/src/command/handler-registry";
+import {
   COMMAND_IDS,
   type CommandId,
   commandKeywordsKey,
@@ -446,6 +451,69 @@ describe("命令执行：导航经注入回调、未接入的动作不假装成�
 });
 
 // ════════════════════════════════════════════════════════════════════════════
+// 页面自报动作（T8.1：registerCommand / useCommandHandler 的纯逻辑内核）
+// ════════════════════════════════════════════════════════════════════════════
+
+describe("页面自报动作表：登记 / 注销 / 与 prop 合并", () => {
+  it("登记后该命令可执行", () => {
+    const open = vi.fn();
+    const handlers = withHandler({}, "session-insert-knowledge", open);
+    expect(isCommandRunnable("session-insert-knowledge", handlers)).toBe(true);
+    expect(
+      executeCommand("session-insert-knowledge", {
+        navigate: vi.fn(),
+        handlers,
+        openPalette: vi.fn(),
+        closePalette: vi.fn(),
+      }),
+    ).toBe(true);
+    expect(open).toHaveBeenCalledTimes(1);
+  });
+
+  it("注销后回到「待接入」", () => {
+    const open = vi.fn();
+    const registered = withHandler({}, "session-insert-knowledge", open);
+    const cleared = withoutHandler(registered, "session-insert-knowledge", open);
+    expect(isCommandRunnable("session-insert-knowledge", cleared)).toBe(false);
+  });
+
+  it("重挂载时「新的先挂、旧的后卸」不会把新 handler 一并注销", () => {
+    // 这是本机制唯一容易错的地方：错了的表现是命令在路由往返后静默失效
+    const oldHandler = vi.fn();
+    const newHandler = vi.fn();
+    const afterRemount = withHandler(
+      withHandler({}, "session-insert-knowledge", oldHandler),
+      "session-insert-knowledge",
+      newHandler,
+    );
+    // 旧实例此刻才执行它的注销
+    const settled = withoutHandler(afterRemount, "session-insert-knowledge", oldHandler);
+    expect(settled["session-insert-knowledge"]).toBe(newHandler);
+    expect(isCommandRunnable("session-insert-knowledge", settled)).toBe(true);
+  });
+
+  it("注销不认识的命令 / 不是自己那份时原样返回（引用不变，不触发无谓重渲染）", () => {
+    const handlers = withHandler({}, "session-send", vi.fn());
+    expect(withoutHandler(handlers, "tasks-accept", vi.fn())).toBe(handlers);
+    expect(withoutHandler(handlers, "session-send", vi.fn())).toBe(handlers);
+  });
+
+  it("与挂载方 prop 合并时 prop 优先（集成方显式给的动作不被页面顶掉）", () => {
+    const fromPage = vi.fn();
+    const fromProp = vi.fn();
+    const merged = mergeHandlers({ "session-send": fromPage }, { "session-send": fromProp });
+    expect(merged["session-send"]).toBe(fromProp);
+    // 页面独有的动作照常保留
+    const both = mergeHandlers(
+      { "session-insert-knowledge": fromPage },
+      { "session-send": fromProp },
+    );
+    expect(both["session-insert-knowledge"]).toBe(fromPage);
+    expect(both["session-send"]).toBe(fromProp);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
 // 命令搜索匹配（中英文）
 // ════════════════════════════════════════════════════════════════════════════
 
@@ -757,8 +825,6 @@ describe("bindSubscription：订阅一次、解绑幂等、迟到事件丢弃", 
 // ════════════════════════════════════════════════════════════════════════════
 
 describe("挂载入口：模块图在运行时可解析", () => {
-  // 本工单的组件尚未被任何页面引用，vite 打包时会被整体摇掉，
-  // 因此打包成功并不能证明 cmdk / lucide 的导入形状正确——在这里显式加载一次。
   // 说明符声明为 string 而非字面量：tests 归 tsconfig.node.json（未开 --jsx），
   // 静态引用 .tsx 会让 typecheck 失败；这里只验证运行时可解析，类型面由 tsconfig.web 覆盖。
   const tsxEntries: readonly (readonly [string, string])[] = [
@@ -771,6 +837,22 @@ describe("挂载入口：模块图在运行时可解析", () => {
       const loaded = (await import(specifier)) as Record<string, unknown>;
       expect(typeof loaded[exportName], specifier).toBe("function");
     }
+  });
+
+  it("App.tsx 真的挂了命令面板（T8.1：此前只有一句「待接线」注释）", async () => {
+    // 读源码而不是渲染：本仓无 @testing-library/react。这条断言防的是
+    // 「Provider 被谁顺手摘掉、面板悄悄回到不可用」——那在功能测试里表现为
+    // 一个没人会主动去按的快捷键失灵，很久都不会被发现。
+    const source = readFileSync(new URL("../src/renderer/src/App.tsx", import.meta.url), "utf8");
+    expect(source).toContain("CommandPaletteProvider");
+  });
+
+  it("AppLayout 不再自建键盘监听（页面切换键位只由注册表处理，否则一次按键跳两页）", async () => {
+    const source = readFileSync(
+      new URL("../src/renderer/src/layout/AppLayout.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(source).not.toContain("addEventListener");
   });
 
   it("ipc 与 stores 的对外出口可被加载", async () => {

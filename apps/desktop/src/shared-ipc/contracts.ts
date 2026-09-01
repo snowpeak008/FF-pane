@@ -835,9 +835,9 @@ export interface IpcInvokeContracts {
    * `projects:create/remove/restore` 也仍返回 `ProjectRegistryEntry`，列表页不必在两种
    * 形状之间转译。
    *
-   * 今日 `projects:list` 的消费者**只有 `useActiveProject` 一个**。命令面板将来也会吃这
-   * 份列表，但它不自己调 IPC（列表由挂载方经 prop 注入），且迄今未挂进 `App.tsx`——所以
-   * 这里不把它算作现有消费者。上面那条取舍与消费者有几个无关：轻通道就该保持轻。
+   * 今日 `projects:list` 的消费者有两个：`useActiveProject`，以及命令面板的项目模式
+   * （Ctrl+P）——面板自己不调 IPC，列表由挂载方 `App.tsx` 查好经 prop 注入（T8.1 挂载）。
+   * 两者都只要名字和路径，故上面那条取舍在消费者变成两个之后照样成立：轻通道就该保持轻。
    */
   "projects:summary": { request: undefined; response: readonly ProjectSummaryView[] };
   /** 登记新项目：生成 .workbench/ 目录结构并写入注册表，返回登记后的条目。 */

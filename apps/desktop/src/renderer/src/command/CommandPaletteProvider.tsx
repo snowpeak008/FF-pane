@@ -17,6 +17,7 @@ import {
   type PaletteMode,
   paletteModeOf,
 } from "./execute";
+import { mergeHandlers, withHandler, withoutHandler } from "./handler-registry";
 import type { CommandId } from "./ids";
 import { createShortcutRegistry, SHORTCUT_TABLE, type ShortcutScope } from "./shortcuts";
 import { useGlobalShortcuts } from "./useGlobalShortcuts";
@@ -52,6 +53,9 @@ export function CommandPaletteProvider({
   // 同一作用域可能被多个组件同时声明（如页面 + 页内列表），计数到 0 才真正失效
   const scopeCounts = useRef<Map<ShortcutScope, number>>(new Map());
   const [activeScopes, setActiveScopes] = useState<readonly ShortcutScope[]>([]);
+  // 页面在挂载时报上来的动作（registerCommand）。与 handlers prop 合并，prop 优先——
+  // 挂载方是集成方，它显式给的动作不该被某个页面悄悄顶掉。
+  const [pageHandlers, setPageHandlers] = useState<CommandHandlerMap>(EMPTY_HANDLERS);
 
   const openPalette = useCallback((next: PaletteMode = "commands") => {
     setMode(next);
@@ -77,9 +81,21 @@ export function CommandPaletteProvider({
     };
   }, []);
 
+  const registerCommand = useCallback((commandId: CommandId, handler: () => void) => {
+    setPageHandlers((previous) => withHandler(previous, commandId, handler));
+    return () => {
+      setPageHandlers((previous) => withoutHandler(previous, commandId, handler));
+    };
+  }, []);
+
+  const mergedHandlers = useMemo<CommandHandlerMap>(
+    () => mergeHandlers(pageHandlers, handlers),
+    [pageHandlers, handlers],
+  );
+
   const runtime = useMemo<CommandRuntime>(
-    () => ({ navigate, handlers, openPalette, closePalette }),
-    [navigate, handlers, openPalette, closePalette],
+    () => ({ navigate, handlers: mergedHandlers, openPalette, closePalette }),
+    [navigate, mergedHandlers, openPalette, closePalette],
   );
 
   const runCommand = useCallback(
@@ -95,8 +111,8 @@ export function CommandPaletteProvider({
   );
 
   const isRunnable = useCallback(
-    (commandId: CommandId) => isCommandRunnable(commandId, handlers),
-    [handlers],
+    (commandId: CommandId) => isCommandRunnable(commandId, mergedHandlers),
+    [mergedHandlers],
   );
 
   const handleSelectProject = useCallback(
@@ -119,8 +135,9 @@ export function CommandPaletteProvider({
       isRunnable,
       activateScope,
       activeScopes,
+      registerCommand,
       shortcutRegistry: registry,
-      handlers,
+      handlers: mergedHandlers,
     }),
     [
       open,
@@ -131,8 +148,9 @@ export function CommandPaletteProvider({
       isRunnable,
       activateScope,
       activeScopes,
+      registerCommand,
       registry,
-      handlers,
+      mergedHandlers,
     ],
   );
 
@@ -143,7 +161,7 @@ export function CommandPaletteProvider({
         open={open}
         mode={mode}
         registry={registry}
-        handlers={handlers}
+        handlers={mergedHandlers}
         projects={projects}
         onOpenChange={setOpen}
         onRunCommand={runCommand}

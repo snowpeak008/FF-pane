@@ -353,7 +353,9 @@
     "language": {
       "title": "Language",
       "label": "UI language",
-      "displayName": "English"
+      "displayName": "English",
+      "system": "Follow system",
+      "resolved": "Currently showing: {{language}}"
     },
     "languageName": {
       "zh-CN": "简体中文",

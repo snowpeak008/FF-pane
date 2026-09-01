@@ -1,12 +1,12 @@
 import { AI_OUTPUT_LANGUAGES, type AiOutputLanguage } from "@ff-pane/shared";
-import type { ReactElement } from "react";
+import { type ReactElement, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { InlineLoading } from "../../components/states/LoadingState";
 import { inputVariants } from "../../components/ui/input.variants";
-import { changeUiLanguage } from "../../i18n";
-import { FALLBACK_LANGUAGE, isSupportedLanguage, type SupportedLanguage } from "../../i18n/resolve";
-import { LANGUAGE_OPTIONS } from "../../i18n/resources";
+import { changeUiLanguage, readUiLanguageSetting } from "../../i18n";
+import { isSupportedLanguage, type LanguageSetting } from "../../i18n/resolve";
+import { LANGUAGE_ENDONYMS, LANGUAGE_OPTIONS } from "../../i18n/resources";
 import { invokeQuery, queryData } from "../../ipc/query";
 import { useInvokeQuery } from "../../ipc/useInvokeQuery";
 import { cn } from "../../lib/cn";
@@ -24,11 +24,15 @@ export function LanguageSection(): ReactElement {
   const { state, refetch } = useInvokeQuery("config:get");
   const config = queryData(state);
 
-  // i18n.language 恒为受支持值（initI18n 只喂 resolveUiLanguage 的结果）；
-  // 这条兜底用注册表的回退语言，不再各处硬编码具体语言标签。
-  const currentUi: SupportedLanguage = isSupportedLanguage(i18n.language)
-    ? i18n.language
-    : FALLBACK_LANGUAGE;
+  // 选中项是**设置值**（三态），不是当前生效的语言：选「跟随系统」而系统恰好是中文时，
+  // 下拉该显示「跟随系统」而非「简体中文」——否则用户没法确认自己到底选没选跟随。
+  // 持久化在 i18n 模块（localStorage），这里存一份本地态只为让下拉即时回显。
+  const [setting, setSetting] = useState<LanguageSetting>(readUiLanguageSetting);
+
+  const onUiChange = (next: LanguageSetting): void => {
+    setSetting(next);
+    void changeUiLanguage(next);
+  };
 
   const onOutputChange = async (language: AiOutputLanguage): Promise<void> => {
     const settled = await invokeQuery("config:update", { aiOutputLanguage: language });
@@ -43,15 +47,30 @@ export function LanguageSection(): ReactElement {
     <section className="flex flex-col gap-1">
       <h2 className="text-sm font-medium text-fg">{t("settings.language.title")}</h2>
 
-      <SettingRow htmlFor="setting-ui-language" label={t("settings.language.label")}>
+      <SettingRow
+        htmlFor="setting-ui-language"
+        label={t("settings.language.label")}
+        // 只在「跟随系统」下说明当前生效的是哪种语言：选了具体语言时下拉本身就是答案，
+        // 再写一遍是废话（与主题设置区那行 resolved 说明同一取舍）。
+        {...(setting === "system" && isSupportedLanguage(i18n.language)
+          ? {
+              description: t("settings.language.resolved", {
+                language: LANGUAGE_ENDONYMS[i18n.language],
+              }),
+            }
+          : {})}
+      >
         <select
           id="setting-ui-language"
           className={selectClass}
-          value={currentUi}
-          onChange={(e) => changeUiLanguage(e.target.value as SupportedLanguage)}
+          value={setting}
+          onChange={(e) => onUiChange(e.target.value as LanguageSetting)}
         >
-          {/* 标签用各语言的自称（endonym），不经 t()：语言选项的名字不该随当前界面语言变，
-              且这样新增语言就不必再往每一本语言包补一条 languageName（见 i18n/resources.ts）。 */}
+          {/* 「跟随系统」经 t()：它是一句说明，不是某种语言的名字。
+              具体语言用各自的自称（endonym）且不经 t()——语言选项的名字不该随当前界面
+              语言变，且这样新增语言就不必再往每一本语言包补一条 languageName。
+              两者的分工见 i18n/resources.ts。 */}
+          <option value="system">{t("settings.language.system")}</option>
           {LANGUAGE_OPTIONS.map(({ code, label }) => (
             <option key={code} value={code}>
               {label}

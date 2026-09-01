@@ -20,6 +20,14 @@ export interface CommandPaletteContextValue {
   /** 声明一个激活作用域，返回撤销函数（页面请用 useShortcutScope 包装）。 */
   readonly activateScope: (scope: ShortcutScope) => () => void;
   readonly activeScopes: readonly ShortcutScope[];
+  /**
+   * 注册一个命令动作，返回注销函数（页面请用 useCommandHandler 包装）。
+   *
+   * 与 Provider 的 `handlers` prop 是两条互补的路（T8.1 补入后者之外的这一条）：
+   * prop 适合挂载方就知道怎么做的动作；而像「从知识库插入」这种动作要开的对话框
+   * 状态就住在页面组件内部，挂载方拿不到，只能由页面自己在挂载时报上来。
+   */
+  readonly registerCommand: (commandId: CommandId, handler: () => void) => () => void;
   readonly shortcutRegistry: ShortcutRegistry;
   readonly handlers: CommandHandlerMap;
 }

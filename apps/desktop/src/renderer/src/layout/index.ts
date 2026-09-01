@@ -15,4 +15,4 @@ export {
 export { NAV_ICONS } from "./nav-icons";
 export { PageHeader, type PageHeaderProps } from "./PageHeader";
 export { Sidebar, type SidebarProps } from "./Sidebar";
-export { matchPageShortcut, type ShortcutEventLike, shortcutHint } from "./shortcuts";
+export { shortcutHint } from "./shortcuts";

@@ -38,12 +38,9 @@ import {
   SETTINGS_NAV_ITEM,
 } from "../src/renderer/src/layout/nav";
 import { NAV_ICONS } from "../src/renderer/src/layout/nav-icons";
-import {
-  matchPageShortcut,
-  type ShortcutEventLike,
-  shortcutHint,
-} from "../src/renderer/src/layout/shortcuts";
+import { shortcutHint } from "../src/renderer/src/layout/shortcuts";
 import { cn } from "../src/renderer/src/lib/cn";
+import { PAGE_SHORTCUT_ORDER, shortcutIndexOfPage } from "../src/renderer/src/stores/pages";
 
 /**
  * W3.1b 组件库单测。
@@ -380,40 +377,30 @@ describe("导航表与路由表结构（项目设计计划 §11 / 设计系统 �
   });
 });
 
-describe("页面切换快捷键 Ctrl+1~7（设计系统 §7，本工单只管这一组）", () => {
-  const press = (overrides: Partial<ShortcutEventLike>): ShortcutEventLike => ({
-    key: "1",
-    ctrlKey: true,
-    metaKey: false,
-    altKey: false,
-    shiftKey: false,
-    ...overrides,
+describe("页面顺序只此一份注册表（T8.1 收敛）", () => {
+  it("导航表的 id 序列就是页面注册表的键位序列（同一个数组，不是抄的）", () => {
+    // toBe 是引用相等：抄一份内容相同的数组会红，而 toEqual 不会
+    expect(NAV_IDS).toBe(PAGE_SHORTCUT_ORDER);
   });
 
-  it("Ctrl+1~7 命中对应页面", () => {
-    expect(matchPageShortcut(press({ key: "1" }))?.path).toBe("/projects");
-    expect(matchPageShortcut(press({ key: "2" }))?.path).toBe("/session");
-    expect(matchPageShortcut(press({ key: "7" }))?.path).toBe("/knowledge");
+  it("每条导航项的 shortcut 与注册表算出的序号逐项一致", () => {
+    for (const item of NAV_ITEMS) {
+      expect(item.shortcut, `${item.id} 的键位序号与注册表不符`).toBe(shortcutIndexOfPage(item.id));
+    }
   });
 
-  it("不带 Ctrl、或叠加 Shift / Alt / Meta 一律不响应（不与 W3.1c 的全局键位冲突）", () => {
-    expect(matchPageShortcut(press({ ctrlKey: false }))).toBeUndefined();
-    expect(matchPageShortcut(press({ shiftKey: true }))).toBeUndefined();
-    expect(matchPageShortcut(press({ altKey: true }))).toBeUndefined();
-    expect(matchPageShortcut(press({ metaKey: true }))).toBeUndefined();
-  });
-
-  it("超出七页面范围与非数字键不响应", () => {
-    expect(matchPageShortcut(press({ key: "0" }))).toBeUndefined();
-    expect(matchPageShortcut(press({ key: "8" }))).toBeUndefined();
-    expect(matchPageShortcut(press({ key: "9" }))).toBeUndefined();
-    expect(matchPageShortcut(press({ key: "k" }))).toBeUndefined();
-    expect(matchPageShortcut(press({ key: "Enter" }))).toBeUndefined();
-  });
-
-  it("键位提示串与 §7 的写法一致", () => {
+  it("侧栏的键位提示串与 §7 的写法一致", () => {
     expect(shortcutHint(1)).toBe("Ctrl+1");
     expect(shortcutHint(7)).toBe("Ctrl+7");
+  });
+
+  it("布局层不再自带页面切换键位的匹配实现（键位判定唯一，归 command/ 注册表）", async () => {
+    // T8.1 之前这里有 matchPageShortcut，与注册表的 nav-page-by-index 是同一组键位的
+    // 第二个实现，两处都监听会让一次按键跳两页。它随 AppLayout 的 keydown 监听一并删除。
+    const layoutShortcuts: Record<string, unknown> = await import(
+      "../src/renderer/src/layout/shortcuts"
+    );
+    expect(Object.keys(layoutShortcuts)).toEqual(["shortcutHint"]);
   });
 });
 

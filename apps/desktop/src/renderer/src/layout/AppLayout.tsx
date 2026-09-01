@@ -1,7 +1,5 @@
-import { type ReactElement, type ReactNode, useCallback, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { type ReactElement, type ReactNode, useCallback, useState } from "react";
 import { Sidebar } from "./Sidebar";
-import { matchPageShortcut } from "./shortcuts";
 
 /**
  * 侧栏折叠状态的持久化 key。
@@ -37,12 +35,16 @@ export interface AppLayoutProps {
  * 内容列顶部**不由本组件占用**：会话页的常驻状态条、各页面的筛选条属于页面自有头部，
  * 由各页面用 layout/PageHeader 自行渲染（结构上它就是内容列的第一个 flex 子项）。
  *
- * 键盘：这里注册 Ctrl+1 ~ Ctrl+7 的页面切换（设计系统 §7）。
- * 归属边界见 shortcuts.ts —— 全局键位框架与命令面板由 W3.1c 负责，本处不建注册表、
- * 不拦截任何非 `Ctrl+数字` 的组合，两侧监听器可以共存。
+ * 键盘：**本组件不监听键盘**。Ctrl+1~7 的页面切换归 command/ 的全局注册表
+ * （`nav-page-by-index`，全局作用域），§7 定的就是「全局键位优先级最高，页面不得覆盖」。
+ *
+ * 此前这里另挂了一条 window keydown 做同一件事。T8.1 删除它的理由不是"会跳两次"
+ * ——实测并不会：注册表那条挂在**捕获阶段**且命中即 stopPropagation，本处的冒泡监听
+ * 根本收不到 Ctrl+N。也就是说它早已是事实上的死代码，而它的"无害"完全依赖于
+ * 远处另一个文件恰好用了捕获阶段：那边哪天改走冒泡，这里就会立刻变成跳两次。
+ * 同一组键位留两个实现本身就是隐患，与它今天有没有生效无关。
  */
 export function AppLayout({ children }: AppLayoutProps): ReactElement {
-  const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState<boolean>(readCollapsed);
 
   const toggleSidebar = useCallback(() => {
@@ -52,19 +54,6 @@ export function AppLayout({ children }: AppLayoutProps): ReactElement {
       return next;
     });
   }, []);
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent): void => {
-      const target = matchPageShortcut(event);
-      if (target === undefined) {
-        return;
-      }
-      event.preventDefault();
-      void navigate(target.path);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [navigate]);
 
   return (
     <div className="flex h-dvh w-full overflow-hidden bg-canvas text-fg">
