@@ -14,6 +14,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import process from "node:process";
 import { buildAgentEnv } from "./env.js";
+import { assignProcessToNewJob, type ProcessJob } from "./job-object.js";
 import { killProcessTree } from "./kill-tree.js";
 import { ByteChunkQueue, DEFAULT_STREAM_HIGH_WATER_MARK } from "./stream.js";
 import type {
@@ -114,6 +115,12 @@ export function spawnAgentProcess(spec: AgentProcessSpec): AgentProcessHandle {
     return spawnFailedHandle(spec, strippedNames, describeError(errno), errno.code ?? null);
   }
 
+  // Windows 圈禁（T8.2）：紧接 spawn 之后把子进程圈进一个新 Job，此后它派生的一切
+  // 后代都自动属于该 Job。必须在这里做而不是等到 kill 时——入 Job 之前派生的后代
+  // 不属于该 Job。非 Windows 与圈禁不可用时为 undefined，取消照旧走 killProcessTree。
+  const job: ProcessJob | undefined =
+    child.pid === undefined ? undefined : assignProcessToNewJob(child.pid);
+
   const stdout = new ByteChunkQueue(child.stdout, highWaterMark);
   const stderr = new ByteChunkQueue(child.stderr, highWaterMark);
   child.stdin?.on("error", ignoreStreamError);
@@ -155,6 +162,11 @@ export function spawnAgentProcess(spec: AgentProcessSpec): AgentProcessHandle {
       clearTimeout(graceTimer);
       graceTimer = null;
     }
+    // 本轮收场，还掉 Job 句柄——否则每跑一轮泄漏一个内核句柄。
+    // close() 会先摘掉 KILL_ON_JOB_CLOSE 再关，故自然结束不会连带杀掉 CLI 故意留下的
+    // 后台进程；而在此之前，那个标志一直是崩溃兜底（工作台被强杀时 finally 不执行，
+    // 内核会随句柄销毁替我们收拾残留的 Agent 进程）。
+    job?.close();
     settleExit(exit);
   }
 
@@ -198,11 +210,17 @@ export function spawnAgentProcess(spec: AgentProcessSpec): AgentProcessHandle {
     if (processGone || exitState !== null || child.pid === undefined) {
       return;
     }
+    // 先终止 Job（T8.2）：它按「谁在这个 Job 里」下手，故能带走被重父化、
+    // 已不在父子表上的那些后代——taskkill /T 恰恰漏的就是这一类。
+    job?.terminate();
+    // 仍照常走一次树杀：Job 不可用时它是唯一手段；Job 可用时它也无害
+    // （目标多半已被 Job 带走，taskkill 报 128 已不存在），且覆盖了
+    // 「进程显式 breakaway 出 Job」这类理论上的漏网。
     await killProcessTree(child.pid);
     if (await processGoneWithin(KILL_CONFIRM_TIMEOUT_MS)) {
       return;
     }
-    // 树杀后主进程句柄仍未退出（taskkill 被拒等）：对句柄直接补一刀。
+    // 两者都没让主进程句柄退出（taskkill 被拒等）：对句柄直接补一刀。
     try {
       child.kill("SIGKILL");
     } catch (error) {

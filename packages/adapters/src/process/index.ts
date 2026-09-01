@@ -14,6 +14,11 @@ export {
   isApiKeyEnvName,
 } from "./env.js";
 export {
+  assignProcessToNewJob,
+  jobObjectUnavailableReason,
+  type ProcessJob,
+} from "./job-object.js";
+export {
   type KillTreeOutcome,
   killProcessTree,
   TASKKILL_PROCESS_NOT_FOUND_EXIT_CODE,

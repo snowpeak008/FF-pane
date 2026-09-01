@@ -37,10 +37,15 @@ asar: true
 # asar 内的虚拟路径喂不进去。平台包名为 sqlite-vec-<os>-<arch>，通配覆盖全部平台，
 # 免得将来出 macOS/Linux 包时漏掉。加载失败会降级到退路后端（见 knowledge-vector.ts），
 # 不至于打不开知识库——但那是兜底，正常路径必须让它能加载。
+# koffi（T8.2）同理：它自身是 JS，但真正的 FFI 实现是平台包
+# @koromix/koffi-<platform>-<arch> 里的 koffi.node，走 dlopen 加载，asar 内路径喂不进去。
+# 它承载的是「取消任务时把子进程树整个圈禁终止」这条路径（见 process/job-object.ts）；
+# 加载失败会降级回 taskkill /T（功能仍在，只是重父化的孙进程可能残留），但那是兜底。
 asarUnpack:
   - node_modules/better-sqlite3/build/Release/**
   - node_modules/better-sqlite3/prebuilds/**
   - node_modules/sqlite-vec-*/**
+  - node_modules/@koromix/koffi-*/**
 
 win:
   target:

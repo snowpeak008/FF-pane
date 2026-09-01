@@ -8,10 +8,18 @@
  * - Gemini CLI：非 TTY 下无任何取消协议，唯一手段是杀树（gemini-cli.md §5）；
  * - 本层还会多一层 cmd.exe 垫片（见 windows-command.ts），单杀句柄必然漏。
  *
- * 已知残留（记录在案，非本层可解）：Claude Code 在 Windows 用 git-bash 执行
- * Bash 工具，msys 的孙进程不在可枚举进程树上，`taskkill /T` 之后仍可能成为
- * 孤儿（docs/adapters/claude-code.md §5）。适配器应优先走 interrupt 协议，
- * 硬杀只作兜底。彻底解决需要 Windows Job Object，超出本工单范围。
+ * **本层的固有局限（T8.2 已在上层根治，这里如实留档）**：`/T` 遍历的是**当下的
+ * 父子表**。若中间进程在被杀之前自己先退出，它的子进程会被系统重父化，此刻已不在
+ * 我们这棵树上，`/T` 找不到它（taskkill 报 128「目标不存在」），孤儿继续跑。
+ *
+ * 一处归因更正（T8.2 实测）：此前这里与 docs/adapters/claude-code.md §5 都把它记成
+ * 「msys（git-bash）的进程模型断父子链」。四变体对照实测表明**与 msys 无关**——
+ * 纯原生 node → node、中间层先退出，同样逃逸；而 bash → sleep 只要中间层还活着就
+ * 杀得干净。msys 只是碰巧常触发「中间层先退出」这个形态。
+ *
+ * 根治手段是 Windows Job Object（见 job-object.ts）：它按 Job 归属下手而不看父子表，
+ * spawn.ts 已在 spawn 之后立即圈禁。本层仍照常保留并被调用：Job 不可用时它是唯一手段，
+ * 且覆盖「进程显式 breakaway 出 Job」这类理论漏网。
  */
 
 /// <reference types="node" />

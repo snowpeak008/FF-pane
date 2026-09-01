@@ -24,6 +24,10 @@ allowBuilds:
   # electron-builder 依赖链（T0.5）：Squirrel 安装器的 vendor 二进制就位脚本。
   # 我们目标是 NSIS，但放行以保证依赖树完整、避免打包工具静默缺失。
   electron-winstaller: true
+  # koffi（T8.2）：Windows Job Object 圈禁子进程树所需的 FFI。与 better-sqlite3 同类——
+  # 以预编译二进制分发（@koromix/koffi-<platform>-<arch>），install 脚本只做平台包就位，
+  # 不放行则 install 直接报错。
+  koffi: true
 
 # 跳过的可选依赖（T6.1）：
 #   @napi-rs/canvas —— pdfjs-dist 的可选原生依赖，只服务于「把 PDF 渲染成位图」。

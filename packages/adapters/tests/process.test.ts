@@ -22,6 +22,7 @@ import {
   EXIT_SETTLE_GRACE_MS,
   findExecutableOnWindowsPath,
   isApiKeyEnvName,
+  jobObjectUnavailableReason,
   killProcessTree,
   resolveSpawnTarget,
   spawnAgentProcess,
@@ -544,6 +545,107 @@ describe("取消与超时：进程树终止", () => {
     expect(outcome.alreadyGone).toBe(true);
     expect(outcome.error).toContain("无效 pid");
   });
+});
+
+describe("Job Object 圈禁：被重父化的孙进程也带得走（T8.2）", () => {
+  /**
+   * 这一组是 T8.2 的核心回归，场景形状必须是**三层**：
+   *
+   *   我们 spawn 的 CLI（顶层，取消时仍活着）
+   *     └─ 它起的中间进程（一条 shell 命令之类）—— 先退出
+   *          └─ 中间进程起的后台进程 → 被重父化，脱离顶层的子孙表
+   *
+   * 此刻对顶层 `taskkill /T`，遍历的是顶层**当下的**子孙表，那个后台进程已不在其中，
+   * 于是它作为孤儿继续跑。这正是用户点「取消」后仍有 Agent 进程赖着的那个场景。
+   * 三层结构的逃逸已用临时探针独立实测确认（`taskkill /T` 退出码 0、孙进程仍存活），
+   * 故下面这条断言在 T8.2 之前必然失败——它不是一条永远绿的摆设。
+   *
+   * 归因更正（T8.2 四变体实测）：此前 §4.5 与 claude-code.md §5 把这条记成
+   * 「msys（git-bash）进程模型断父子链」，实测**与 msys 无关**——本用例全程只用
+   * node、没有任何 msys 参与，照样复现；而 bash → sleep 只要中间层还活着就杀得干净。
+   * 真因是重父化，msys 只是碰巧常触发这个形态。
+   */
+  const FAKE_CLI_REPARENTING = [
+    "const { spawn } = require('node:child_process');",
+    // 中间进程：起一个 detached 后台进程，回报它的 pid，然后自己立刻退出
+    "const mid = spawn(process.execPath, ['-e', \"const {spawn}=require('node:child_process');\" +",
+    "  \"const kid=spawn(process.execPath,['-e','setTimeout(()=>{},600000)'],\" +",
+    "  \"{stdio:'ignore',detached:true});kid.unref();\" +",
+    "  \"process.stdout.write(String(kid.pid)+'\\\\n');process.exit(0);\"],",
+    "  { stdio: ['ignore','pipe','ignore'] });",
+    "mid.stdout.on('data', d => process.stdout.write(d));",
+    // 顶层保持存活，等着被取消
+    "setInterval(() => {}, 1000);",
+  ].join("");
+
+  it.runIf(isWindows)(
+    "取消时：被重父化、已脱离进程树的后台进程也被带走（此前会残留）",
+    async () => {
+      const handle = spawnAgentProcess({
+        command: NODE,
+        args: ["-e", FAKE_CLI_REPARENTING],
+      });
+      const orphanPid = Number(await readFirstLine(handle.stdout));
+      expect(Number.isInteger(orphanPid)).toBe(true);
+      expect(await pidAlive(orphanPid)).toBe(true);
+
+      const exit = await handle.kill();
+      expect(exit.kind).toBe("killed");
+
+      // 判据：taskkill /T 对这个 pid 无能为力（它已不在顶层子孙表上），
+      // 能让它消失的只有 Job Object 圈禁。
+      expect(await waitUntilGone(orphanPid, 10_000)).toBe(true);
+    },
+    60_000,
+  );
+
+  it.runIf(isWindows)(
+    "超时路径走同一条圈禁：脱离进程树的后台进程同样被终止",
+    async () => {
+      const handle = spawnAgentProcess({
+        command: NODE,
+        args: ["-e", FAKE_CLI_REPARENTING],
+        timeoutMs: 2_500,
+      });
+      const orphanPid = Number(await readFirstLine(handle.stdout));
+      const exit = await handle.exitPromise;
+      expect(exit.kind).toBe("timeout");
+      expect(await waitUntilGone(orphanPid, 10_000)).toBe(true);
+    },
+    60_000,
+  );
+
+  it.runIf(isWindows)("圈禁不可用时如实给出原因（可用时为 null）", () => {
+    // 本机可用即 null；打包漏解包 / 杀软拦 dlopen 等场景会留下可诊断的字符串。
+    // 断言形状而非具体值：这条要在两种环境下都成立（CI 上 koffi 同样应可用）。
+    const reason = jobObjectUnavailableReason();
+    expect(reason === null || typeof reason === "string").toBe(true);
+  });
+
+  it.runIf(isWindows)(
+    "自然结束不牵连 CLI 故意留下的后台进程（close 前摘掉 KILL_ON_JOB_CLOSE）",
+    async () => {
+      // Worker 的任务本身可能是「起一个开发服务器」。取消要杀干净是一回事，
+      // 正常跑完顺手把它杀了是另一回事——后者不该静默发生。
+      const script = [
+        "const { spawn } = require('node:child_process');",
+        "const kid = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 8000)'],",
+        "  { stdio: 'ignore', detached: true });",
+        "kid.unref();",
+        "process.stdout.write(String(kid.pid) + '\\n');",
+        "process.exit(0);",
+      ].join("");
+      const handle = spawnAgentProcess({ command: NODE, args: ["-e", script] });
+      const backgroundPid = Number(await readFirstLine(handle.stdout));
+      const exit = await handle.exitPromise;
+      expect(exit.kind).toBe("exited");
+
+      // 自然结束后它应当还活着（本轮没人要求终止任何东西）
+      expect(await pidAlive(backgroundPid)).toBe(true);
+      await killProcessTree(backgroundPid);
+    },
+    60_000,
+  );
 });
 
 describe("Windows 命令解析与 .cmd 垫片", () => {

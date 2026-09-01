@@ -194,7 +194,16 @@ stdin 每行一个 JSON。用户消息:
 
 CLI 行为(实测):立即回执 `{"type":"control_response","response":{"subtype":"success","request_id":"<同id>","response":{"still_queued":[]}}}` → 正在执行的工具被终止,tool_result 标记 `is_error: true` + `non_execution_kind: "user-rejected"` → 输出 `result`,`subtype: "error_during_execution"`、`terminal_reason: "aborted_tools"` → 进程退出码 1。整个过程约 1~2 秒,事件流完整闭合,会话已落盘可 resume。`init.capabilities` 里的 `interrupt_receipt_v1` 即此协议的能力声明。
 
-**② 硬杀进程树(兜底)**(fixture 07)。`taskkill /PID <pid> /T /F`。后果实测:stdout 戛然而止(最后一行是 `system/task_started`,**没有 result 事件**);**msys/git-bash 的孙进程(如 `sleep.exe`)不在可枚举的进程树上,会成为孤儿存活**。原因:Claude Code 在 Windows 上用 git-bash 执行 Bash 工具,msys 的进程模型会断开父子链。适配器若必须硬杀,应考虑 Windows Job Object 把子进程整个圈进去,或至少记录告警。
+**② 硬杀进程树(兜底)**(fixture 07)。`taskkill /PID <pid> /T /F`。后果实测:stdout 戛然而止(最后一行是 `system/task_started`,**没有 result 事件**);**孙进程(如 `sleep.exe`)可能成为孤儿存活**。
+
+> **归因更正(T8.2,2026-09-01)**:本节原写「msys 的进程模型会断开父子链」,四变体对照实测表明**与 msys 无关**——
+> `bash → sleep` 只要中间层还活着就杀得干净;而**纯原生 `node → node`、中间层先退出**同样逃逸。
+> 真因是:`taskkill /T` 遍历的是**当下的父子表**,中间进程若在被杀前自己先退出,它的子进程会被系统
+> 重父化、脱离这棵树(taskkill 报退出码 128「目标不存在」)。msys 只是碰巧常触发「中间层先退出」这个形态。
+> **已根治**:`packages/adapters/src/process/job-object.ts` 在 spawn 之后立即用 Windows Job Object 圈禁,
+> 按 Job 归属终止而非按父子表,重父化不改变 Job 归属。
+
+结论仍然成立:适配器应优先走 interrupt 协议,硬杀只作兜底。
 
 结论:**先 interrupt,超时(建议 5 秒)再硬杀**。
 
@@ -292,7 +301,7 @@ Windows 下 spawn 目标是 npm shim,Node `spawn` 需 `shell: true` 或直接 `c
 3. **resume 绑定 cwd:** Native Session ID 必须与 cwd 成对登记(§4);跨目录 resume 报错且**首行是非 JSON 文本**。
 4. **解析器容错:** stdout 可能出现非 JSON 行(fixture 09)、未知 `system` subtype(`thinking_tokens`/`status`/`task_started`)、`tool_use_result` 对象/字符串双形态、硬杀后无 result 的截断流(fixture 07)。逐行 `try-parse`,未知即跳过,EOF 无 result 即 crashed。
 5. **用户全局配置泄漏:** init 的 `slash_commands`/`skills` 显示 headless 会继承用户 `~/.claude` 的技能、hooks、CLAUDE.md。FF-pane 的 Run 应加 `--setting-sources user`(或至少 `--strict-mcp-config`)控制变量;`--bare` 最纯净但会断订阅登录,不可默认用。
-6. **Windows 硬杀孤儿进程:** msys 孙进程逃逸(§5),取消一律先 interrupt、超时再杀,必要时 Job Object。
+6. **Windows 硬杀孤儿进程:** 孙进程逃逸树杀(§5,**真因是重父化而非 msys**,T8.2 已用 Job Object 圈禁根治);取消一律先 interrupt、超时再杀。
 7. **隐藏参数漂移风险:** `--max-turns`、`--permission-prompt-tool` 已从 help 隐藏(§1.2),升级 CLI 前先跑 fixture 回放 + 参数探测(`argument missing` 法),对应开发计划 R3。
 8. **成本与预算:** `result.total_cost_usd`/`usage` 直接入 Run 记录;`--max-budget-usd` 是比 max-turns 更贴合"成本控制"的护栏,两者可同时上。
 
