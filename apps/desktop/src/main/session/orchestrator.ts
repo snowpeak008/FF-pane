@@ -20,6 +20,13 @@
  * 证据」，权限为角色默认的只读 + verify_only；结论解析后写回**被审的那条 Run**，不铸新
  * Run、不改任务状态（done ≠ accepted 由 acceptTask 在状态机层锁死，§6.3）。
  *
+ * 对话回放本与中断收尾（T8.2b，§10.2 规则 3 修订版）：每轮开始写在飞标记 + 追加
+ * `user_message`；流式中 assistant 文本节流覆盖写 partial；收尾追加 `assistant_message` +
+ * `turn_end` 并删标记。工作台退出时 `prepareForQuit()` 对仍在飞的轮就地收尾
+ * （`assistant_message{partial}` + `turn_end{interrupted}`，Worker 轮补 Run(interrupted) 并把
+ * 任务拉回 failed），再取消子进程；没赶上的由启动修正（repair.ts）据残留标记补齐。
+ * 续接轮 context_rebuild 把该会话最近几条回放本喂给 assembleRebuildContext 作对话摘录。
+ *
  * 边界（各归其工单，本编排器不越界）：
  * - Planner 讨论只产出对话，不解析结构化计划（计划生成是后续细化）；
  * - 记忆候选闭环见 T4.4。
@@ -69,6 +76,7 @@ import type {
   FileChange,
   GlobalConfig,
   HabitEntry,
+  InflightTurnMarker,
   KnowledgeQueryRecord,
   LocalSessionId,
   MemoryEntry,
@@ -80,10 +88,13 @@ import type {
   ReviewRecord,
   Role,
   Run,
+  RunEndReason,
   RunId,
   SessionRecord,
   SessionResumeKind,
   Task,
+  TaskId,
+  TranscriptEntry,
   VerifyResult,
 } from "@ff-pane/shared";
 import type { ProjectLayout } from "@ff-pane/storage";
@@ -97,6 +108,33 @@ import type {
 } from "../../shared-ipc/contracts";
 import { resolveRuntimeConfigOverrides, resolveRuntimeEnv } from "./env";
 import { mapAgentEvent } from "./event-map";
+import { buildInterruptedRun } from "./interrupted";
+
+/**
+ * partial 文本的节流参数（T8.2b）：距上次落盘 ≥ 2 s **或** 新增 ≥ 2 KB 就覆盖写一次。
+ * 两个阈值取"或"：慢速流靠时间兜底（每 2 s 至少落一次，中断最多丢 2 s 的字），
+ * 快速流靠字节兜底（不让一次 2 s 内涌出的几十 KB 只在内存里）。覆盖写而非追加，
+ * 故落盘代价与累计文本长度线性相关、与事件条数无关。
+ */
+export const PARTIAL_FLUSH_INTERVAL_MS = 2_000;
+export const PARTIAL_FLUSH_BYTES = 2_048;
+
+/** 退出时给取消在飞子进程留的等待上限；超时不再等（Job Object 兜底杀进程，T8.2）。 */
+export const QUIT_CANCEL_WAIT_MS = 1_500;
+
+/**
+ * 续接轮为对话摘录读回放本的尾部条数。摘录只取 6 条消息（core 缺省），但回放本里每轮
+ * 还有一条 turn_end 元数据，故多读一些以保证足够多的消息条目进入取样窗口。
+ */
+export const REBUILD_TRANSCRIPT_TAIL = 24;
+
+/** prepareForQuit 的回报（供日志 / 单测）。 */
+export interface PrepareForQuitReport {
+  /** 本次由退出钩子就地收尾的在飞轮数。 */
+  readonly interrupted: number;
+  /** 取消子进程是否在 QUIT_CANCEL_WAIT_MS 内全部返回。 */
+  readonly cancelledInTime: boolean;
+}
 
 /** 编排器对外接口。 */
 export interface SessionOrchestrator {
@@ -108,6 +146,15 @@ export interface SessionOrchestrator {
   cancel(request: CancelSessionRequest): Promise<SessionActionAck>;
   /** 在飞轮次数（诊断 / 测试）。 */
   activeCount(): number;
+  /** 某轮是否仍在本进程在飞（启动修正据此跳过"活着的"标记）。 */
+  hasActiveTurn(turnId: string): boolean;
+  /**
+   * 工作台即将退出（T8.2b）：对每个仍在飞的轮就地收尾——transcript 补
+   * `assistant_message{partial}` + `turn_end{interrupted}`，Worker 轮补 Run(interrupted) 并把
+   * 任务拉回 failed，删在飞标记；随后取消全部子进程并最多等 QUIT_CANCEL_WAIT_MS。
+   * 幂等：已由本方法或正常收尾处理过的轮不会被处理第二次。
+   */
+  prepareForQuit(): Promise<PrepareForQuitReport>;
 }
 
 /** 编排器依赖（全部注入，便于测试替身）。 */
@@ -167,6 +214,33 @@ export interface SessionOrchestratorDeps {
     rawLog: string,
     changesDiff: string,
   ) => Promise<void>;
+  /**
+   * 对话回放本（T8.2b）：追加一条条目到 `sessions/<sessionId>/transcript.jsonl`。
+   * 写失败由编排器记日志、不影响本轮——回放本是记录，不是轮次的前提。
+   */
+  readonly appendTranscript: (
+    layout: ProjectLayout,
+    sessionId: LocalSessionId,
+    entry: TranscriptEntry,
+  ) => Promise<void>;
+  /** 读某会话回放本的尾部若干条（续接轮的对话摘录取材；读失败视为空）。 */
+  readonly readRecentTranscript: (
+    layout: ProjectLayout,
+    sessionId: LocalSessionId,
+    tail: number,
+  ) => Promise<readonly TranscriptEntry[]>;
+  /** 落位 / 删除在飞轮次标记（T8.2b；删除对不存在的标记幂等）。 */
+  readonly writeInflightMarker: (
+    layout: ProjectLayout,
+    marker: InflightTurnMarker,
+  ) => Promise<void>;
+  readonly deleteInflightMarker: (layout: ProjectLayout, turnId: string) => Promise<void>;
+  /** 覆盖写在飞轮次的部分 assistant 文本（节流由编排器负责）。 */
+  readonly writeInflightPartial: (
+    layout: ProjectLayout,
+    turnId: string,
+    text: string,
+  ) => Promise<void>;
   readonly now: () => number;
   readonly newRunId: () => RunId;
   /** 生成一个新的本地会话 ID（开新会话时）。 */
@@ -194,9 +268,42 @@ export interface KnowledgeToolBinding {
   readAudit(): Promise<readonly KnowledgeQueryRecord[]>;
 }
 
+/**
+ * 一轮的收尾阶段：streaming（事件流消费中）→ finalizing（正常收尾或退出钩子接手）→
+ * settled。只有 streaming 的轮能被退出钩子接手；正常收尾与退出钩子谁先把阶段推到
+ * finalizing，谁负责落盘，另一方看到非 streaming 即放手——两边不会各写一条 Run。
+ */
+type TurnPhase = "streaming" | "finalizing" | "settled";
+
 /** 在飞轮次的内部状态。 */
 interface ActiveTurn {
   readonly guarded: GuardedTurn;
+  /** 收尾所需的上下文（退出钩子接手时要用）。 */
+  readonly ctx: TurnContexts;
+  phase: TurnPhase;
+  /** 已累积的 assistant answer 文本（partial 落盘与收尾 assistant_message 的来源）。 */
+  answerText: string;
+  /** 上次 partial 落盘时刻 / 自那以后新增的字节数（节流依据）。 */
+  partialFlushedAt: number;
+  partialPendingBytes: number;
+  /** partial 写入串行链：收尾删 partial 前先等它结算，避免迟到的写把文件又造出来。 */
+  partialChain: Promise<void>;
+  /** drain 的完成承诺：退出钩子等待正在正常收尾的轮用。 */
+  done: Promise<void>;
+}
+
+/** 一轮开始时记进回放本的用户输入（text-only，见 TranscriptUserMessage 注释）。 */
+interface TranscriptUserInput {
+  readonly text: string;
+  readonly taskId?: TaskId;
+  readonly runId?: RunId;
+}
+
+/** 一轮收尾后进 turn_end 的摘要（各收尾分支各自给出）。 */
+interface TurnEndSummary {
+  readonly endReason: RunEndReason;
+  readonly runId?: RunId;
+  readonly taskId?: TaskId;
 }
 
 /** 会话登记上下文（每轮都有；session_start 报出原生 ID 时据此回写登记）。 */
@@ -238,6 +345,19 @@ interface ReviewTurnContext {
   readonly profileId: AgentProfile["id"];
 }
 
+/**
+ * 一轮的收尾上下文。四种轮次（Planner 讨论 / 计划生成 / Worker 执行 / 审查）各带各的，
+ * 至多一个在场——收成一个对象是为了让新增轮次不必再给 drain/finalize 加一个位置参数
+ * （T7.2 前已是六个参数，其中三个可为 undefined，调用点全靠数逗号对齐）。
+ */
+interface TurnContexts {
+  readonly workerCtx?: WorkerContext;
+  readonly planCtx?: PlanTurnContext;
+  readonly reviewCtx?: ReviewTurnContext;
+  readonly sessionCtx: SessionContext;
+  readonly knowledgeCtx?: KnowledgeContext;
+}
+
 export function createSessionOrchestrator(deps: SessionOrchestratorDeps): SessionOrchestrator {
   const active = new Map<string, ActiveTurn>();
 
@@ -251,20 +371,40 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
     };
   }
 
-  /** 从登记事实（计划/任务/state/最近 Run）重建上下文文本（context_rebuild 用）。 */
-  async function buildRebuildContext(layout: ProjectLayout): Promise<string> {
-    const [plan, tasks, stateSnapshot, runs] = await Promise.all([
+  /**
+   * 从登记事实（计划/任务/state/最近 Run）+ 该会话回放本尾部重建上下文文本（context_rebuild 用）。
+   * 回放本读失败视为"无摘录"：重建的其余材料仍成立，不该因一份记录读不出来就拒绝续接。
+   */
+  async function buildRebuildContext(
+    layout: ProjectLayout,
+    sessionId: LocalSessionId,
+  ): Promise<string> {
+    const [plan, tasks, stateSnapshot, runs, recentTranscript] = await Promise.all([
       deps.loadLatestPlan(layout),
       deps.listTasks(layout),
       deps.loadStateSnapshot(layout),
       deps.listRuns(layout),
+      deps.readRecentTranscript(layout, sessionId, REBUILD_TRANSCRIPT_TAIL).catch((thrown) => {
+        console.warn(`[session] transcript unavailable for rebuild: ${String(thrown)}`);
+        return [] as readonly TranscriptEntry[];
+      }),
     ]);
     return assembleRebuildContext({
       ...(plan !== undefined ? { plan } : {}),
       tasks,
       ...(stateSnapshot !== undefined ? { stateSnapshot } : {}),
       recentRuns: runs,
+      recentTranscript,
     });
+  }
+
+  /** 回放本 / 标记写入的统一容错：记日志、不抛——记录不是轮次的前提。 */
+  async function recordSafely(what: string, work: () => Promise<void>): Promise<void> {
+    try {
+      await work();
+    } catch (thrown) {
+      console.warn(`[session] ${what} failed: ${String(thrown)}`);
+    }
   }
 
   /** 落位会话登记（upsert）。binding 覆盖 ctx.native（session_start 报出新原生 ID 时）。 */
@@ -355,7 +495,7 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         if (resumeKind === "native" && priorBinding !== undefined) {
           resumeBinding = priorBinding;
         } else {
-          resumeContext = await buildRebuildContext(layout);
+          resumeContext = await buildRebuildContext(layout, sessionId);
         }
       }
 
@@ -377,6 +517,8 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
       let workerCtx: WorkerContext | undefined;
       let planCtx: PlanTurnContext | undefined;
       let reviewCtx: ReviewTurnContext | undefined;
+      // 进回放本的用户输入（T8.2b）：只记用户可见的原始输入，见 TranscriptUserMessage 注释
+      let transcriptUser: TranscriptUserInput;
 
       if (request.input.kind === "reviewer-review") {
         // 审查轮（T7.2，§3.1）：注入任务合同的验收标准 + 本次 Run 的证据，权限走
@@ -403,6 +545,7 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
           ...(habitProfile !== undefined ? { habitProfile } : {}),
         })}\n\n${REVIEW_OUTPUT_CONTRACT}`;
         reviewCtx = { layout, reviewedRun, profileId: profile.id };
+        transcriptUser = { text: task.goal, taskId: task.id, runId: reviewedRun.id };
         // 审查者的信封：角色默认 ∩ Profile 预设。**不走 assembleRunEnvelope**——那条
         // 路径会把任务合同的 writeScope 并进来，而任务信封的 shell 是 "allowed"、
         // writePaths 是任务允许写的那些路径。虽然与 Reviewer 角色默认相交后 shell 仍会
@@ -445,6 +588,7 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
           profileId: profile.id,
           startedAt: deps.now(),
         };
+        transcriptUser = { text: task.goal, taskId: task.id };
         guardCtx = {
           cwd: request.projectRoot,
           envelope: assembled.envelope,
@@ -459,6 +603,8 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
           request.input.kind === "planner-plan"
             ? (request.input.text ?? "请基于以上讨论产出结构化计划。")
             : request.input.text;
+        // 计划生成轮无补充指令时记的是那句缺省指令——它就是 Agent 实际收到的用户层输入
+        transcriptUser = { text: messageText };
         prompt = assemblePrompt({
           role: "planner",
           input: { kind: "message", text: messageText },
@@ -547,8 +693,52 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
       };
       await registerSession(sessionCtx);
 
+      // 在飞标记 + 回放本 user_message（T8.2b）：都在 spawn 之前落盘。标记先于子进程存在，
+      // 才能保证"有子进程在跑却没有标记"这个窗口不存在——退出/崩溃后修正逻辑不会漏掉它。
+      const startedAt = deps.now();
+      const marker: InflightTurnMarker = {
+        turnId: request.turnId,
+        sessionId,
+        role,
+        profileId: profile.id,
+        startedAt,
+        ...(resumeKind !== undefined ? { resumeKind } : {}),
+        ...(workerCtx !== undefined ? { taskId: workerCtx.runningTask.id } : {}),
+        ...(reviewCtx !== undefined
+          ? { taskId: reviewCtx.reviewedRun.taskId, runId: reviewCtx.reviewedRun.id }
+          : {}),
+      };
+      await recordSafely("inflight marker write", () => deps.writeInflightMarker(layout, marker));
+      await recordSafely("transcript user_message append", () =>
+        deps.appendTranscript(layout, sessionId, {
+          kind: "user_message",
+          turnId: request.turnId,
+          at: startedAt,
+          text: transcriptUser.text,
+          ...(transcriptUser.taskId !== undefined ? { taskId: transcriptUser.taskId } : {}),
+          ...(transcriptUser.runId !== undefined ? { runId: transcriptUser.runId } : {}),
+        }),
+      );
+
       const guarded = guardTurn(adapter.startTurn(turnCtx), guardCtx);
-      active.set(request.turnId, { guarded });
+      const ctx: TurnContexts = {
+        ...(workerCtx !== undefined ? { workerCtx } : {}),
+        ...(planCtx !== undefined ? { planCtx } : {}),
+        ...(reviewCtx !== undefined ? { reviewCtx } : {}),
+        sessionCtx,
+        ...(knowledgeCtx !== undefined ? { knowledgeCtx } : {}),
+      };
+      const turn: ActiveTurn = {
+        guarded,
+        ctx,
+        phase: "streaming",
+        answerText: "",
+        partialFlushedAt: startedAt,
+        partialPendingBytes: 0,
+        partialChain: Promise.resolve(),
+        done: Promise.resolve(),
+      };
+      active.set(request.turnId, turn);
       deps.publish({
         turnId: request.turnId,
         kind: "started",
@@ -559,13 +749,7 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
       });
 
       // 事件流消费独立于受理应答（fire-and-forget，结束时清理登记）
-      void drain(request.turnId, guarded, {
-        ...(workerCtx !== undefined ? { workerCtx } : {}),
-        ...(planCtx !== undefined ? { planCtx } : {}),
-        ...(reviewCtx !== undefined ? { reviewCtx } : {}),
-        sessionCtx,
-        ...(knowledgeCtx !== undefined ? { knowledgeCtx } : {}),
-      }).finally(() => {
+      turn.done = drain(request.turnId, turn).finally(() => {
         active.delete(request.turnId);
       });
 
@@ -577,32 +761,42 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
   }
 
   /**
-   * 一轮的收尾上下文。四种轮次（Planner 讨论 / 计划生成 / Worker 执行 / 审查）各带各的，
-   * 至多一个在场——收成一个对象是为了让新增轮次不必再给 drain/finalize 加一个位置参数
-   * （T7.2 前已是六个参数，其中三个可为 undefined，调用点全靠数逗号对齐）。
+   * partial 文本节流落盘（T8.2b）：阈值见 PARTIAL_FLUSH_*。写入挂在 per-turn 串行链上，
+   * 慢盘时多次触发只会排队不会并发覆盖；失败记日志——partial 只是中断时的抢救材料。
    */
-  interface TurnContexts {
-    readonly workerCtx?: WorkerContext;
-    readonly planCtx?: PlanTurnContext;
-    readonly reviewCtx?: ReviewTurnContext;
-    readonly sessionCtx: SessionContext;
-    readonly knowledgeCtx?: KnowledgeContext;
+  function flushPartialIfDue(turnId: string, turn: ActiveTurn): void {
+    const now = deps.now();
+    const due =
+      turn.partialPendingBytes >= PARTIAL_FLUSH_BYTES ||
+      now - turn.partialFlushedAt >= PARTIAL_FLUSH_INTERVAL_MS;
+    if (!due || turn.partialPendingBytes === 0) {
+      return;
+    }
+    turn.partialFlushedAt = now;
+    turn.partialPendingBytes = 0;
+    const snapshot = turn.answerText;
+    const layout = turn.ctx.sessionCtx.layout;
+    turn.partialChain = turn.partialChain.then(() =>
+      recordSafely("inflight partial write", () =>
+        deps.writeInflightPartial(layout, turnId, snapshot),
+      ),
+    );
   }
 
   /** 消费一轮的事件流，推增量、收尾落库。 */
-  async function drain(turnId: string, guarded: GuardedTurn, ctx: TurnContexts): Promise<void> {
+  async function drain(turnId: string, turn: ActiveTurn): Promise<void> {
+    const { guarded, ctx } = turn;
     const { workerCtx, sessionCtx } = ctx;
-    let answerText = "";
     let verifyResult: VerifyResult | undefined;
     const verifyCmd = workerCtx?.runningTask.verifyCmd;
 
     try {
       for await (const event of guarded.events) {
         if (event.kind === "end") {
-          await finalize(turnId, guarded, ctx, {
+          await finalize(turnId, turn, {
             reason: event.reason,
             ...(event.message !== undefined ? { message: event.message } : {}),
-            report: answerText,
+            report: turn.answerText,
             ...(verifyResult !== undefined ? { verifyResult } : {}),
           });
           return;
@@ -615,7 +809,9 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
           continue;
         }
         if (event.kind === "text" && event.channel === "answer") {
-          answerText += event.content;
+          turn.answerText += event.content;
+          turn.partialPendingBytes += Buffer.byteLength(event.content, "utf8");
+          flushPartialIfDue(turnId, turn);
         }
         // 捕获验证命令结果（供 completeTask 的 done 门槛判定）
         if (
@@ -636,17 +832,17 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         }
       }
       // 事件流保证以 end 收尾；未见 end 视作崩溃兜底
-      await finalize(turnId, guarded, ctx, {
+      await finalize(turnId, turn, {
         reason: "crashed",
         message: "事件流未以 end 收尾",
-        report: answerText,
+        report: turn.answerText,
       });
     } catch (thrown) {
       const message = thrown instanceof Error ? thrown.message : String(thrown);
-      await finalize(turnId, guarded, ctx, {
+      await finalize(turnId, turn, {
         reason: "crashed",
         message,
-        report: answerText,
+        report: turn.answerText,
       });
     }
   }
@@ -713,10 +909,76 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
   }
 
   /**
+   * 回放本收尾（T8.2b）：追加 `assistant_message`（有文本才追加；`partial` 只在被中断时标）
+   * + `turn_end`，等 partial 写链结算后删标记与 partial。三步各自容错，任一步失败不影响其余。
+   */
+  async function recordTurnEnd(
+    turnId: string,
+    turn: ActiveTurn,
+    summary: TurnEndSummary,
+    options: { readonly partial: boolean },
+  ): Promise<void> {
+    const { layout, sessionId, role, profileId, resumeKind } = turn.ctx.sessionCtx;
+    const text = turn.answerText;
+    const at = deps.now();
+    if (text.trim().length > 0) {
+      await recordSafely("transcript assistant_message append", () =>
+        deps.appendTranscript(layout, sessionId, {
+          kind: "assistant_message",
+          turnId,
+          at,
+          text,
+          ...(options.partial ? { partial: true } : {}),
+        }),
+      );
+    }
+    await recordSafely("transcript turn_end append", () =>
+      deps.appendTranscript(layout, sessionId, {
+        kind: "turn_end",
+        turnId,
+        at,
+        role,
+        profileId,
+        ...(resumeKind !== undefined ? { resumeKind } : {}),
+        ...(summary.runId !== undefined ? { runId: summary.runId } : {}),
+        ...(summary.taskId !== undefined ? { taskId: summary.taskId } : {}),
+        endReason: summary.endReason,
+      }),
+    );
+    await turn.partialChain;
+    await recordSafely("inflight marker delete", () => deps.deleteInflightMarker(layout, turnId));
+  }
+
+  /**
    * 收尾：Worker 轮落 Run + 推进任务；计划生成轮落计划；审查轮把结论写回被审的 Run；
-   * 四类都推 end 事件。
+   * 四类都推 end 事件；最后写回放本收尾并删在飞标记。
+   * 只有 streaming 阶段的轮会被收尾：退出钩子已接手（phase 非 streaming）则放手，
+   * 避免两边各写一条 Run。
    */
   async function finalize(
+    turnId: string,
+    turn: ActiveTurn,
+    outcome: {
+      readonly reason: Run["endReason"] & string;
+      readonly message?: string;
+      readonly report: string;
+      readonly verifyResult?: VerifyResult;
+    },
+  ): Promise<void> {
+    if (turn.phase !== "streaming") {
+      return;
+    }
+    turn.phase = "finalizing";
+    try {
+      const summary = await settleTurn(turnId, turn.guarded, turn.ctx, outcome);
+      await recordTurnEnd(turnId, turn, summary, { partial: false });
+    } finally {
+      turn.phase = "settled";
+    }
+  }
+
+  /** finalize 的主体：按轮次类别落库并推 end 事件，返回进 turn_end 的摘要。 */
+  async function settleTurn(
     turnId: string,
     guarded: GuardedTurn,
     ctx: TurnContexts,
@@ -726,7 +988,7 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
       readonly report: string;
       readonly verifyResult?: VerifyResult;
     },
-  ): Promise<void> {
+  ): Promise<TurnEndSummary> {
     const { workerCtx, planCtx, reviewCtx, knowledgeCtx } = ctx;
     // 知识库工具审计（T6.6）：轮末一次性回读 sidecar 写下的调用记录。
     // 未挂工具 = undefined（与"挂了但一次没调用"的空数组是两件事，见 Run.knowledgeQueries）。
@@ -753,7 +1015,11 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
           runId: reviewCtx.reviewedRun.id,
           ...(review !== undefined ? { reviewVerdict: review.verdict } : {}),
         });
-        return;
+        return {
+          endReason: outcome.reason,
+          runId: reviewCtx.reviewedRun.id,
+          taskId: reviewCtx.reviewedRun.taskId,
+        };
       }
       // 计划生成轮：轮成功则解析答复中的计划块并落盘；失败原因经 end.message 回传（不写盘）
       let planVersion: PlanVersion | undefined;
@@ -777,7 +1043,7 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         ...(endMessage !== undefined ? { message: endMessage } : {}),
         ...(planVersion !== undefined ? { planVersion } : {}),
       });
-      return;
+      return { endReason: outcome.reason };
     }
 
     const { layout, runningTask, profileId, startedAt } = workerCtx;
@@ -824,7 +1090,8 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
       await deps.saveTask(layout, settled).catch(() => undefined);
       const message = thrown instanceof Error ? thrown.message : String(thrown);
       deps.publish({ turnId, kind: "end", reason: "failed", message });
-      return;
+      // Run 没落成，turn_end 不带 runId——回放本不该指向一条不存在的记录
+      return { endReason: "failed", taskId: runningTask.id };
     }
 
     deps.publish({
@@ -834,6 +1101,108 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
       ...(outcome.message !== undefined ? { message: outcome.message } : {}),
       ...(runId !== undefined ? { runId } : {}),
     });
+    return {
+      endReason: outcome.reason,
+      ...(runId !== undefined ? { runId } : {}),
+      taskId: runningTask.id,
+    };
+  }
+
+  /**
+   * 退出钩子接手一个仍在 streaming 的轮（T8.2b）：
+   * Worker 轮 → Run(interrupted，report 为部分文本，证据取已累积的）+ 任务 failed；
+   * 所有轮 → 回放本 `assistant_message{partial}`（有文本才写）+ `turn_end{interrupted}`，删标记；
+   * 推一条 end{interrupted}（窗口多半已关，无害）。任一步失败只记日志，不阻塞退出。
+   */
+  async function settleInterrupted(turnId: string, turn: ActiveTurn): Promise<void> {
+    const { workerCtx, reviewCtx } = turn.ctx;
+    let summary: TurnEndSummary = { endReason: "interrupted" };
+    if (reviewCtx !== undefined) {
+      summary = {
+        endReason: "interrupted",
+        runId: reviewCtx.reviewedRun.id,
+        taskId: reviewCtx.reviewedRun.taskId,
+      };
+    }
+    if (workerCtx !== undefined) {
+      const { layout, runningTask, profileId, startedAt } = workerCtx;
+      summary = { endReason: "interrupted", taskId: runningTask.id };
+      try {
+        const evidence = toStoredRunEvidence(turn.guarded.evidence());
+        const runId = deps.newRunId();
+        const existingRuns = await deps.listRuns(layout);
+        const outcome = buildInterruptedRun({
+          task: runningTask,
+          runId,
+          profileId,
+          startedAt,
+          endedAt: deps.now(),
+          existingRuns,
+          partialReport: turn.answerText,
+          fileChanges: evidence.fileChanges as readonly FileChange[],
+          commands: evidence.commands as readonly CommandRecord[],
+        });
+        const changesDiff = evidence.fileChanges
+          .map((change) => change.diff)
+          .filter((diff) => diff.length > 0)
+          .join("\n");
+        await deps.persistRun(layout, outcome.run, turn.answerText, changesDiff);
+        await deps.saveTask(layout, outcome.task);
+        summary = { endReason: "interrupted", runId, taskId: runningTask.id };
+      } catch (thrown) {
+        console.warn(`[session] interrupted run persist failed: ${String(thrown)}`);
+        // Run 没落成也要把任务从 running 拉回来，否则重启后它永远"执行中"
+        await deps.saveTask(layout, failTask(runningTask)).catch(() => undefined);
+      }
+    }
+    await recordTurnEnd(turnId, turn, summary, { partial: true });
+    deps.publish({
+      turnId,
+      kind: "end",
+      reason: "interrupted",
+      ...(summary.runId !== undefined ? { runId: summary.runId } : {}),
+      message: "工作台退出，本轮被中断",
+    });
+  }
+
+  async function prepareForQuit(): Promise<PrepareForQuitReport> {
+    // 先把阶段全部推到 finalizing，再逐个落盘：这一步是同步的，期间不会有 end 事件插进来
+    // 抢走某一轮（正常收尾看到非 streaming 即放手）。
+    const claimed: Array<[string, ActiveTurn]> = [];
+    const finalizing: ActiveTurn[] = [];
+    for (const [turnId, turn] of active) {
+      if (turn.phase === "streaming") {
+        turn.phase = "finalizing";
+        claimed.push([turnId, turn]);
+      } else if (turn.phase === "finalizing") {
+        finalizing.push(turn);
+      }
+    }
+    for (const [turnId, turn] of claimed) {
+      try {
+        await settleInterrupted(turnId, turn);
+      } finally {
+        turn.phase = "settled";
+      }
+    }
+    // 正在正常收尾的轮：给它们把落盘做完的机会（受总时限约束，由 quit.ts 兜底）
+    await Promise.all(finalizing.map((turn) => turn.done.catch(() => undefined)));
+
+    // 取消全部子进程，最多等 QUIT_CANCEL_WAIT_MS；等不到就放行（Job Object 会收走它们）
+    const cancels = [...active.values()].map((turn) =>
+      turn.guarded.cancel().catch(() => undefined),
+    );
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const cancelledInTime = await Promise.race([
+      Promise.all(cancels).then(() => true),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), QUIT_CANCEL_WAIT_MS);
+      }),
+    ]);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+    return { interrupted: claimed.length, cancelledInTime };
   }
 
   async function respondPermission(request: RespondPermissionRequest): Promise<SessionActionAck> {
@@ -859,5 +1228,7 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
     respondPermission,
     cancel,
     activeCount: () => active.size,
+    hasActiveTurn: (turnId) => active.has(turnId),
+    prepareForQuit,
   };
 }

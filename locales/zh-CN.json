@@ -503,7 +503,8 @@
       "failed": "失败",
       "cancelled": "已取消",
       "crashed": "崩溃",
-      "running": "执行中"
+      "running": "执行中",
+      "interrupted": "被中断（应用退出）"
     },
     "knowledge": {
       "title": "知识库检索",

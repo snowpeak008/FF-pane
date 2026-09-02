@@ -460,11 +460,12 @@ describe("Run 生命周期", () => {
 });
 
 describe("Run 终态与 Task 状态联动", () => {
-  it("联动规则表：completed→complete、failed/crashed→fail、cancelled→caller-decides", () => {
+  it("联动规则表：completed→complete、failed/crashed/interrupted→fail、cancelled→caller-decides", () => {
     expect(RUN_END_TASK_LINKAGE).toEqual({
       completed: "complete",
       failed: "fail",
       crashed: "fail",
+      interrupted: "fail",
       cancelled: "caller-decides",
     });
   });
@@ -485,8 +486,8 @@ describe("Run 终态与 Task 状态联动", () => {
     );
   });
 
-  it("failed / crashed Run → 任务 failed（可重试）", () => {
-    for (const endReason of ["failed", "crashed"] as const) {
+  it("failed / crashed / interrupted Run → 任务 failed（可重试）", () => {
+    for (const endReason of ["failed", "crashed", "interrupted"] as const) {
       const run = makeRun({ endedAt: 2_000, endReason });
       expect(settleTaskAfterRun(makeTask("running"), run, "cancel-task").status).toBe("failed");
     }

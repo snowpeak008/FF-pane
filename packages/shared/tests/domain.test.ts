@@ -3,6 +3,7 @@ import type {
   AgentProfile,
   ApiKeyRef,
   Handoff,
+  InflightTurnMarker,
   KnowledgeChunkId,
   KnowledgeEntryId,
   KnowledgeHit,
@@ -28,6 +29,7 @@ import type {
   Task,
   TaskContract,
   TaskId,
+  TranscriptEntry,
 } from "../src/index.js";
 import {
   AI_OUTPUT_LANGUAGES,
@@ -59,6 +61,7 @@ import {
   isShellPolicy,
   isTaskStatus,
   isTaskTerminalStatus,
+  isTranscriptEntryKind,
   isUiLanguage,
   isUiLanguageSetting,
   KNOWLEDGE_FORMATS,
@@ -79,6 +82,7 @@ import {
   SHELL_POLICIES,
   TASK_STATUSES,
   TASK_TERMINAL_STATUSES,
+  TRANSCRIPT_ENTRY_KINDS,
   UI_LANGUAGE_SETTINGS,
   UI_LANGUAGES,
 } from "../src/index.js";
@@ -106,6 +110,7 @@ const ALL_LITERAL_ARRAYS: ReadonlyArray<readonly string[]> = [
   SHELL_POLICIES,
   TASK_STATUSES,
   TASK_TERMINAL_STATUSES,
+  TRANSCRIPT_ENTRY_KINDS,
   UI_LANGUAGE_SETTINGS,
   UI_LANGUAGES,
 ];
@@ -154,8 +159,12 @@ describe("常量数组 ↔ 设计文档定值对照", () => {
     expect(CLARIFICATION_ANSWERED_BY).toEqual(["user", "planner"]);
   });
 
-  it("§6.4 Run 结束原因 4 种", () => {
-    expect(RUN_END_REASONS).toEqual(["completed", "failed", "cancelled", "crashed"]);
+  it("§6.4 Run 结束原因 4 种 + T8.2b 增补的 interrupted（工作台退出 / 崩溃导致的中断）", () => {
+    expect(RUN_END_REASONS).toEqual(["completed", "failed", "cancelled", "crashed", "interrupted"]);
+  });
+
+  it("T8.2b 对话回放本条目三类：用户提示词 / assistant 文本 / 轮次收尾", () => {
+    expect(TRANSCRIPT_ENTRY_KINDS).toEqual(["user_message", "assistant_message", "turn_end"]);
   });
 
   it("§7 Shell 命令三档策略", () => {
@@ -285,6 +294,7 @@ describe("类型守卫行为", () => {
     { name: "isUiLanguageSetting", guard: isUiLanguageSetting, values: UI_LANGUAGE_SETTINGS },
     { name: "isAiOutputLanguage", guard: isAiOutputLanguage, values: AI_OUTPUT_LANGUAGES },
     { name: "isSessionResumeKind", guard: isSessionResumeKind, values: SESSION_RESUME_KINDS },
+    { name: "isTranscriptEntryKind", guard: isTranscriptEntryKind, values: TRANSCRIPT_ENTRY_KINDS },
   ];
 
   for (const { name, guard, values } of guardCases) {
@@ -496,6 +506,37 @@ describe("聚合结构冒烟（品牌 ID 断言 + 字段形态）", () => {
     };
     expect(session.native?.cwd).toBe("D:/work/demo");
     expect(isSessionResumeKind(session.resumeKind ?? "")).toBe(true);
+  });
+
+  it("T8.2b 对话回放本形状：三类条目按 kind 判别，turn_end 的 endReason 与 Run 同一取值集", () => {
+    const entries: TranscriptEntry[] = [
+      { kind: "user_message", turnId: "t1", at: 1, text: "加一个工具函数" },
+      { kind: "assistant_message", turnId: "t1", at: 2, text: "好的，", partial: true },
+      {
+        kind: "turn_end",
+        turnId: "t1",
+        at: 3,
+        role: "worker",
+        profileId,
+        taskId: "task-1" as TaskId,
+        runId: "run-1" as RunId,
+        endReason: "interrupted",
+      },
+    ];
+    for (const entry of entries) {
+      expect(isTranscriptEntryKind(entry.kind)).toBe(true);
+    }
+    const end = entries[2];
+    expect(end?.kind === "turn_end" && isRunEndReason(end.endReason)).toBe(true);
+    const marker: InflightTurnMarker = {
+      turnId: "t1",
+      sessionId: "sess-1" as LocalSessionId,
+      role: "worker",
+      profileId,
+      startedAt: 1,
+      taskId: "task-1" as TaskId,
+    };
+    expect(marker.runId).toBeUndefined();
   });
 
   it("知识库检索结果形态：命中块 + 前后相邻块 + 出处", () => {

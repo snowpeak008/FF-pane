@@ -1,9 +1,10 @@
 /**
  * 会话登记表持久化与 CRUD（T4.3）：设计文档 §10.2 规则 3 / §10.3。
  *
- * 职责边界：工作台**只登记** Local Session ID ↔ Native Session ID 的映射与会话元数据
- * （承载 Profile、角色、原生绑定、恢复方式、活跃时间），**不复制会话内容**——会话原始
- * 记录归 Agent 自己。故本层持久化的是 SessionRecord（无消息正文），供：
+ * 职责边界：本文件**只登记** Local Session ID ↔ Native Session ID 的映射与会话元数据
+ * （承载 Profile、角色、原生绑定、恢复方式、活跃时间）；消息正文不在这里——Agent 的
+ * 会话文件归 Agent，工作台自己的 text-only 回放本另见 ./transcript.ts（T8.2b）。
+ * 故本层持久化的是 SessionRecord（无消息正文），供：
  * - 原生恢复：按登记的 NativeSessionBinding（ID + cwd 成对）续接原生会话；
  * - 上下文重建：Runtime 不支持原生恢复时，据此重建计划/任务/state/Run 上下文。
  *

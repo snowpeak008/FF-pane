@@ -18,6 +18,7 @@ import type {
   GlobalConfig,
   HabitEntry,
   HabitEntryId,
+  InflightTurnMarker,
   KnowledgeQueryRecord,
   LocalSessionId,
   NativeSessionId,
@@ -28,9 +29,10 @@ import type {
   SessionRecord,
   Task,
   TaskId,
+  TranscriptEntry,
 } from "@ff-pane/shared";
 import type { ProjectLayout } from "@ff-pane/storage";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createSessionOrchestrator,
   type KnowledgeToolBinding,
@@ -137,6 +139,14 @@ interface Harness {
   readonly observedMessages: string[];
   /** T7.2：审查结论回写（updateRun 收到的整条 Run）。 */
   readonly updatedRuns: Run[];
+  /** T8.2b：按会话累积的回放本条目（appendTranscript 的落点）。 */
+  readonly transcripts: Map<string, TranscriptEntry[]>;
+  /** T8.2b：当前仍存在的在飞标记（写入即 set，删除即 delete）。 */
+  readonly markers: Map<string, InflightTurnMarker>;
+  /** T8.2b：partial 覆盖写的历史（每次写入 push 一份快照）。 */
+  readonly partialWrites: { readonly turnId: string; readonly text: string }[];
+  /** 可推进的假时钟（partial 时间阈值测试用）。 */
+  readonly clock: { now: number };
 }
 
 function makeHarness(
@@ -161,6 +171,10 @@ function makeHarness(
      *（等价于旧行为）；给 null = 注入了但返回 undefined（项目开关关闭那条路径）。
      */
     readonly knowledgeTool?: KnowledgeToolBinding | null;
+    /** T8.2b：预置某会话的回放本（续接轮对话摘录测试用）。 */
+    readonly existingTranscript?: readonly TranscriptEntry[];
+    /** 自定义假适配器（如"永不结束的流"）；给出时忽略 events / runtime / nativeResume。 */
+    readonly adapter?: AgentAdapter;
   } = {},
 ): Harness {
   const published: SessionStreamEvent[] = [];
@@ -171,16 +185,24 @@ function makeHarness(
   const captured: CapturedTurn[] = [];
   const observedMessages: string[] = [];
   const updatedRuns: Run[] = [];
+  const transcripts = new Map<string, TranscriptEntry[]>();
+  const markers = new Map<string, InflightTurnMarker>();
+  const partialWrites: { readonly turnId: string; readonly text: string }[] = [];
+  const clock = { now: 1000 };
   const sessions = new Map<string, SessionRecord>();
   if (opts.existingSession !== undefined) {
     sessions.set(opts.existingSession.id, opts.existingSession);
+    if (opts.existingTranscript !== undefined) {
+      transcripts.set(opts.existingSession.id, [...opts.existingTranscript]);
+    }
   }
   const registry = createAdapterRegistry();
   registry.register(
-    fakeAdapter(opts.runtime ?? "fake", events, {
-      ...(opts.nativeResume !== undefined ? { nativeResume: opts.nativeResume } : {}),
-      captured,
-    }),
+    opts.adapter ??
+      fakeAdapter(opts.runtime ?? "fake", events, {
+        ...(opts.nativeResume !== undefined ? { nativeResume: opts.nativeResume } : {}),
+        captured,
+      }),
   );
   const layout = {} as ProjectLayout;
 
@@ -228,7 +250,25 @@ function makeHarness(
             opts.knowledgeTool === null ? undefined : opts.knowledgeTool,
         }
       : {}),
-    now: () => 1000,
+    appendTranscript: async (_l, sessionId, entry) => {
+      const list = transcripts.get(sessionId) ?? [];
+      list.push(entry);
+      transcripts.set(sessionId, list);
+    },
+    readRecentTranscript: async (_l, sessionId, tail) => {
+      const list = transcripts.get(sessionId) ?? [];
+      return list.slice(Math.max(0, list.length - tail));
+    },
+    writeInflightMarker: async (_l, marker) => {
+      markers.set(marker.turnId, marker);
+    },
+    deleteInflightMarker: async (_l, turnId) => {
+      markers.delete(turnId);
+    },
+    writeInflightPartial: async (_l, turnId, text) => {
+      partialWrites.push({ turnId, text });
+    },
+    now: () => clock.now,
     newRunId: () => "run-1" as unknown as Run["id"],
     newLocalSessionId: () => "sess-new" as unknown as LocalSessionId,
   };
@@ -243,6 +283,10 @@ function makeHarness(
     captured,
     observedMessages,
     updatedRuns,
+    transcripts,
+    markers,
+    partialWrites,
+    clock,
   };
 }
 
@@ -1256,5 +1300,462 @@ describe("T7.2 审查轮（reviewer-review，§3.1）", () => {
     const orch = createSessionOrchestrator(h.deps);
 
     expect(await orch.start(reviewRequest("nope"))).toMatchObject({ accepted: false });
+  });
+});
+
+describe("T8.2b 对话回放本与中断收尾", () => {
+  const OK_EVENTS: AgentEvent[] = [
+    { kind: "session_start" },
+    { kind: "text", content: "第一段，", final: false, channel: "answer" },
+    { kind: "text", content: "第二段。", final: true, channel: "answer" },
+    { kind: "end", reason: "completed" },
+  ];
+
+  /**
+   * 永不结束的流：只吐一段文本然后挂住，直到 cancel 才以 cancelled 收尾。
+   * 模拟"Worker 正在跑、用户关了应用"。
+   */
+  function hangingAdapter(captured: { cancels: number }, text = "才写了一半"): AgentAdapter {
+    return {
+      runtime: "fake",
+      displayName: "hanging",
+      capabilities: () => ({
+        nativeResume: "no",
+        streaming: "yes",
+        fileChangeEvents: "yes",
+        commandEvents: "yes",
+        permissionForwarding: "no",
+        gracefulCancel: "yes",
+      }),
+      startTurn: () => {
+        let release: (() => void) | undefined;
+        const gate = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return {
+          events: (async function* () {
+            yield { kind: "session_start" } as AgentEvent;
+            yield { kind: "text", content: text, final: false, channel: "answer" } as AgentEvent;
+            await gate;
+            yield { kind: "end", reason: "cancelled" } as AgentEvent;
+          })(),
+          cancel: async () => {
+            captured.cancels += 1;
+            release?.();
+          },
+        };
+      },
+    };
+  }
+
+  function entriesOf(h: Harness, sessionId = "sess-new"): readonly TranscriptEntry[] {
+    return h.transcripts.get(sessionId) ?? [];
+  }
+
+  it("Planner 讨论轮：开始写标记 + user_message（原文）；收尾 assistant_message（全文）+ turn_end，标记已删", async () => {
+    const h = makeHarness(OK_EVENTS, { profile: profile({ defaultRole: "planner" }) });
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start(plannerMessageRequest("帮我做个登录页"));
+    await flushUntilEnd(h.published);
+
+    expect(entriesOf(h)).toEqual([
+      { kind: "user_message", turnId: "t1", at: 1000, text: "帮我做个登录页" },
+      { kind: "assistant_message", turnId: "t1", at: 1000, text: "第一段，第二段。" },
+      {
+        kind: "turn_end",
+        turnId: "t1",
+        at: 1000,
+        role: "planner",
+        profileId: "prof-1",
+        endReason: "completed",
+      },
+    ]);
+    // 只记用户可见输入：系统提示 / 记忆 / 习惯拼出来的文本不进回放本
+    const userEntry = entriesOf(h)[0];
+    expect(userEntry?.kind === "user_message" && userEntry.text).not.toContain("#");
+    expect(h.markers.size).toBe(0);
+  });
+
+  it("Worker 轮：user_message 记任务目标 + taskId；turn_end 带 runId / taskId", async () => {
+    const h = makeHarness(OK_EVENTS);
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start(workerRequest());
+    await flushUntilEnd(h.published);
+
+    const entries = entriesOf(h);
+    expect(entries[0]).toMatchObject({
+      kind: "user_message",
+      text: "do the thing",
+      taskId: "task-1",
+    });
+    expect(entries.at(-1)).toMatchObject({
+      kind: "turn_end",
+      role: "worker",
+      runId: "run-1",
+      taskId: "task-1",
+      endReason: "completed",
+    });
+    expect(h.markers.size).toBe(0);
+  });
+
+  it("审查轮：user_message / turn_end 都带被审 Run 的 runId 与 taskId", async () => {
+    const reviewed = {
+      id: "run-under-review" as unknown as Run["id"],
+      taskId: "task-1" as unknown as TaskId,
+      attempt: 1,
+      profileId: "prof-worker" as unknown as ProfileId,
+      startedAt: 100,
+      endedAt: 200,
+      endReason: "completed",
+      fileChanges: [],
+      commands: [],
+      report: "做完了",
+      rawLogPath: "raw.log",
+    } as unknown as Run;
+    const h = makeHarness(OK_EVENTS, {
+      profile: profile({ defaultRole: "reviewer" }),
+      task: task({ status: "done" }),
+      runs: [reviewed],
+    });
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start({
+      turnId: "t-review",
+      projectRoot: "/proj",
+      profileId: "prof-1" as unknown as ProfileId,
+      input: { kind: "reviewer-review", taskId: reviewed.taskId, runId: reviewed.id },
+    });
+    await flushUntilEnd(h.published);
+
+    expect(entriesOf(h)[0]).toMatchObject({
+      kind: "user_message",
+      taskId: "task-1",
+      runId: "run-under-review",
+    });
+    expect(entriesOf(h).at(-1)).toMatchObject({
+      kind: "turn_end",
+      role: "reviewer",
+      runId: "run-under-review",
+      taskId: "task-1",
+    });
+  });
+
+  it("失败 / 取消结束同样落 turn_end（endReason 如实）；无文本则不写 assistant_message", async () => {
+    const h = makeHarness([{ kind: "end", reason: "failed", message: "boom" }], {
+      profile: profile({ defaultRole: "planner" }),
+    });
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start(plannerRequest());
+    await flushUntilEnd(h.published);
+
+    expect(entriesOf(h).map((e) => e.kind)).toEqual(["user_message", "turn_end"]);
+    expect(entriesOf(h).at(-1)).toMatchObject({ kind: "turn_end", endReason: "failed" });
+  });
+
+  it("续接轮的 turn_end 记 resumeKind；标记里也带（供修正时沿用）", async () => {
+    const existingSession: SessionRecord = {
+      id: "sess-1" as unknown as LocalSessionId,
+      profileId: "prof-1" as unknown as ProfileId,
+      role: "planner",
+      createdAt: 500,
+      lastActiveAt: 500,
+    } as unknown as SessionRecord;
+    const seenMarkers: InflightTurnMarker[] = [];
+    const h = makeHarness(OK_EVENTS, {
+      profile: profile({ defaultRole: "planner" }),
+      nativeResume: "no",
+      existingSession,
+    });
+    const deps: SessionOrchestratorDeps = {
+      ...h.deps,
+      writeInflightMarker: async (l, marker) => {
+        seenMarkers.push(marker);
+        await h.deps.writeInflightMarker(l, marker);
+      },
+    };
+    const orch = createSessionOrchestrator(deps);
+
+    await orch.start({ ...plannerRequest(), sessionId: existingSession.id });
+    await flushUntilEnd(h.published);
+
+    expect(seenMarkers[0]).toMatchObject({
+      turnId: "t1",
+      sessionId: "sess-1",
+      role: "planner",
+      resumeKind: "context_rebuild",
+    });
+    expect(entriesOf(h, "sess-1").at(-1)).toMatchObject({
+      kind: "turn_end",
+      resumeKind: "context_rebuild",
+    });
+  });
+
+  it("context_rebuild：该会话回放本的最近对话进提示词「最近对话摘录」", async () => {
+    const existingSession: SessionRecord = {
+      id: "sess-1" as unknown as LocalSessionId,
+      profileId: "prof-1" as unknown as ProfileId,
+      role: "planner",
+      createdAt: 500,
+      lastActiveAt: 500,
+    } as unknown as SessionRecord;
+    const h = makeHarness(OK_EVENTS, {
+      profile: profile({ defaultRole: "planner" }),
+      nativeResume: "no",
+      existingSession,
+      existingTranscript: [
+        { kind: "user_message", turnId: "t0", at: 1, text: "上次聊到登录页的表单校验" },
+        { kind: "assistant_message", turnId: "t0", at: 2, text: "建议用 zod", partial: true },
+        {
+          kind: "turn_end",
+          turnId: "t0",
+          at: 3,
+          role: "planner",
+          profileId: "prof-1" as ProfileId,
+          endReason: "interrupted",
+        },
+      ],
+    });
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start({ ...plannerRequest(), sessionId: existingSession.id });
+    await flushUntilEnd(h.published);
+
+    const prompt = h.captured[0]?.prompt ?? "";
+    expect(prompt).toContain("## 最近对话摘录");
+    expect(prompt).toContain("用户：上次聊到登录页的表单校验");
+    expect(prompt).toContain("助手（被中断，不完整）：建议用 zod");
+    expect(prompt).not.toContain("interrupted");
+  });
+
+  it("native 恢复不读回放本进提示词（原生会话自带历史）", async () => {
+    const existingSession: SessionRecord = {
+      id: "sess-1" as unknown as LocalSessionId,
+      profileId: "prof-1" as unknown as ProfileId,
+      role: "planner",
+      native: { nativeSessionId: "native-1" as unknown as NativeSessionId, cwd: "/proj" },
+      createdAt: 500,
+      lastActiveAt: 500,
+    } as unknown as SessionRecord;
+    const h = makeHarness(OK_EVENTS, {
+      profile: profile({ defaultRole: "planner" }),
+      nativeResume: "yes",
+      existingSession,
+      existingTranscript: [{ kind: "user_message", turnId: "t0", at: 1, text: "旧话" }],
+    });
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start({ ...plannerRequest(), sessionId: existingSession.id });
+    await flushUntilEnd(h.published);
+
+    expect(h.captured[0]?.prompt).not.toContain("最近对话摘录");
+  });
+
+  it("回放本 / 标记写失败不影响本轮（记录不是轮次的前提）", async () => {
+    const h = makeHarness(OK_EVENTS, { profile: profile({ defaultRole: "planner" }) });
+    const deps: SessionOrchestratorDeps = {
+      ...h.deps,
+      appendTranscript: async () => {
+        throw new Error("disk full");
+      },
+      writeInflightMarker: async () => {
+        throw new Error("disk full");
+      },
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const orch = createSessionOrchestrator(deps);
+      const ack = await orch.start(plannerRequest());
+      await flushUntilEnd(h.published);
+
+      expect(ack.accepted).toBe(true);
+      expect(h.published.at(-1)).toMatchObject({ kind: "end", reason: "completed" });
+      expect(warn).toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  describe("partial 节流", () => {
+    it("累计 ≥ 2 KB 触发覆盖写；小于阈值且时间未到不写", async () => {
+      const small = "a".repeat(100);
+      const big = "b".repeat(2_100);
+      const h = makeHarness(
+        [
+          { kind: "session_start" },
+          { kind: "text", content: small, final: false, channel: "answer" },
+          { kind: "text", content: big, final: false, channel: "answer" },
+          { kind: "text", content: small, final: true, channel: "answer" },
+          { kind: "end", reason: "completed" },
+        ],
+        { profile: profile({ defaultRole: "planner" }) },
+      );
+      const orch = createSessionOrchestrator(h.deps);
+
+      await orch.start(plannerRequest());
+      await flushUntilEnd(h.published);
+
+      // 只有累计过阈值的那一次落盘；快照是当时的全部累计文本
+      expect(h.partialWrites).toHaveLength(1);
+      expect(h.partialWrites[0]).toEqual({ turnId: "t1", text: `${small}${big}` });
+    });
+
+    it("距上次落盘 ≥ 2 s 触发（慢速流靠时间兜底）", async () => {
+      const h = makeHarness([], { profile: profile({ defaultRole: "planner" }) });
+      // 用可推进时钟的适配器：每段文本之间把时钟拨快
+      const clock = h.clock;
+      const adapter: AgentAdapter = {
+        runtime: "fake",
+        displayName: "slow",
+        capabilities: () => ({
+          nativeResume: "no",
+          streaming: "yes",
+          fileChangeEvents: "yes",
+          commandEvents: "yes",
+          permissionForwarding: "no",
+          gracefulCancel: "yes",
+        }),
+        startTurn: () => ({
+          events: (async function* () {
+            yield { kind: "session_start" } as AgentEvent;
+            yield { kind: "text", content: "一", final: false, channel: "answer" } as AgentEvent;
+            clock.now += 2_500;
+            yield { kind: "text", content: "二", final: false, channel: "answer" } as AgentEvent;
+            yield { kind: "text", content: "三", final: true, channel: "answer" } as AgentEvent;
+            yield { kind: "end", reason: "completed" } as AgentEvent;
+          })(),
+          cancel: async () => {},
+        }),
+      };
+      const registry = createAdapterRegistry();
+      registry.register(adapter);
+      const orch = createSessionOrchestrator({ ...h.deps, registry });
+
+      await orch.start(plannerRequest());
+      await flushUntilEnd(h.published);
+
+      expect(h.partialWrites).toEqual([{ turnId: "t1", text: "一二" }]);
+    });
+  });
+
+  describe("prepareForQuit", () => {
+    it("Worker 轮在飞 → 写齐三件：transcript（partial + interrupted）、Run(interrupted)、任务 failed；标记删除；随后取消子进程", async () => {
+      const cancels = { cancels: 0 };
+      const h = makeHarness([], { adapter: hangingAdapter(cancels) });
+      const orch = createSessionOrchestrator(h.deps);
+
+      await orch.start(workerRequest());
+      // 让流吐出 session_start 与那段文本
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(orch.activeCount()).toBe(1);
+      expect(h.markers.has("t2")).toBe(true);
+
+      const report = await orch.prepareForQuit();
+      expect(report).toEqual({ interrupted: 1, cancelledInTime: true });
+      expect(cancels.cancels).toBe(1);
+
+      // ① transcript
+      expect(entriesOf(h)).toEqual([
+        { kind: "user_message", turnId: "t2", at: 1000, text: "do the thing", taskId: "task-1" },
+        { kind: "assistant_message", turnId: "t2", at: 1000, text: "才写了一半", partial: true },
+        {
+          kind: "turn_end",
+          turnId: "t2",
+          at: 1000,
+          role: "worker",
+          profileId: "prof-1",
+          runId: "run-1",
+          taskId: "task-1",
+          endReason: "interrupted",
+        },
+      ]);
+      // ② Run(interrupted)，report 为部分文本
+      expect(h.persistedRuns).toHaveLength(1);
+      expect(h.persistedRuns[0]).toMatchObject({
+        id: "run-1",
+        endReason: "interrupted",
+        report: "才写了一半",
+      });
+      // ③ 任务 running → failed
+      expect(h.savedTasks.map((t) => t.status)).toEqual(["running", "failed"]);
+      // 标记已删
+      expect(h.markers.size).toBe(0);
+      expect(h.published.at(-1)).toMatchObject({
+        kind: "end",
+        reason: "interrupted",
+        runId: "run-1",
+      });
+
+      // 流随后以 cancelled 收尾，正常 finalize 必须放手：不写第二条 Run / 第二个 turn_end
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(h.persistedRuns).toHaveLength(1);
+      expect(entriesOf(h).filter((e) => e.kind === "turn_end")).toHaveLength(1);
+      expect(orch.activeCount()).toBe(0);
+    });
+
+    it("Planner 轮在飞 → 只写 transcript（partial + interrupted）与删标记，不铸 Run", async () => {
+      const cancels = { cancels: 0 };
+      const h = makeHarness([], {
+        adapter: hangingAdapter(cancels),
+        profile: profile({ defaultRole: "planner" }),
+      });
+      const orch = createSessionOrchestrator(h.deps);
+
+      await orch.start(plannerMessageRequest("聊聊"));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const report = await orch.prepareForQuit();
+      expect(report.interrupted).toBe(1);
+      expect(h.persistedRuns).toHaveLength(0);
+      expect(h.savedTasks).toHaveLength(0);
+      expect(entriesOf(h).map((e) => e.kind)).toEqual([
+        "user_message",
+        "assistant_message",
+        "turn_end",
+      ]);
+      expect(entriesOf(h).at(-1)).toMatchObject({ role: "planner", endReason: "interrupted" });
+      expect(h.markers.size).toBe(0);
+    });
+
+    it("无在飞轮 → 空报告；重入不重复收尾", async () => {
+      const cancels = { cancels: 0 };
+      const h = makeHarness([], { adapter: hangingAdapter(cancels) });
+      const orch = createSessionOrchestrator(h.deps);
+      expect(await orch.prepareForQuit()).toEqual({ interrupted: 0, cancelledInTime: true });
+
+      await orch.start(workerRequest());
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const [first, second] = await Promise.all([orch.prepareForQuit(), orch.prepareForQuit()]);
+      expect(first.interrupted + second.interrupted).toBe(1);
+      expect(h.persistedRuns).toHaveLength(1);
+      expect(entriesOf(h).filter((e) => e.kind === "turn_end")).toHaveLength(1);
+    });
+
+    it("Run 落盘失败仍把任务拉回 failed（否则重启后永远「执行中」）", async () => {
+      const cancels = { cancels: 0 };
+      const h = makeHarness([], { adapter: hangingAdapter(cancels) });
+      const deps: SessionOrchestratorDeps = {
+        ...h.deps,
+        persistRun: async () => {
+          throw new Error("disk full");
+        },
+      };
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      try {
+        const orch = createSessionOrchestrator(deps);
+        await orch.start(workerRequest());
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        await orch.prepareForQuit();
+
+        expect(h.savedTasks.map((t) => t.status)).toEqual(["running", "failed"]);
+        // Run 没落成 → turn_end 不带 runId
+        expect(entriesOf(h).at(-1)).toMatchObject({ kind: "turn_end", endReason: "interrupted" });
+        expect(entriesOf(h).at(-1)).not.toHaveProperty("runId");
+      } finally {
+        warn.mockRestore();
+      }
+    });
   });
 });

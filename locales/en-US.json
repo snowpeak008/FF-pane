@@ -503,7 +503,8 @@
       "failed": "Failed",
       "cancelled": "Cancelled",
       "crashed": "Crashed",
-      "running": "Running"
+      "running": "Running",
+      "interrupted": "Interrupted (app quit)"
     },
     "knowledge": {
       "title": "Knowledge search",

@@ -18,6 +18,8 @@ const END_REASON_CLASS: Readonly<Record<RunEndReason, string>> = {
   completed: "bg-success-surface text-success-text",
   failed: "bg-danger-surface text-danger-text",
   crashed: "bg-danger-surface text-danger-text",
+  // 被工作台中断（T8.2b）：不是 Agent 出错，与取消同一中性色而非危险色
+  interrupted: "bg-surface-sunken text-fg-muted",
   cancelled: "bg-surface-sunken text-fg-muted",
 };
 

@@ -50,6 +50,7 @@ import type {
   SessionResumeKind,
   Task,
   TaskId,
+  TranscriptEntry,
 } from "@ff-pane/shared";
 
 /** 项目级请求基：一律携带项目根路径，主进程据此 resolveProjectLayout。 */
@@ -650,6 +651,32 @@ export interface HandoffPreview {
 }
 
 /**
+ * sessions:transcript 请求（T8.2b）：读某会话对话回放本的尾部。
+ * 尾部而不是全量：回放是打开会话页时的一次性加载，先给最近的、再按需翻更早的
+ * （b 单若要翻页，加 `before` 游标即可，契约形状不必推翻）。
+ */
+export interface SessionTranscriptRequest extends ProjectScopedRequest {
+  readonly sessionId: LocalSessionId;
+  /** 尾部条数上限（含 turn_end 元数据条目）；缺省 DEFAULT_TRANSCRIPT_LIMIT。 */
+  readonly limit?: number;
+}
+
+/** sessions:transcript 的缺省尾部条数（≈ 60 轮 × 3 条，百条消息级的会话一次取齐）。 */
+export const DEFAULT_TRANSCRIPT_LIMIT = 200;
+
+/**
+ * sessions:transcript 响应：条目 + 被跳过的坏行数。
+ * 坏行数单列而不是吞掉：一份读出 3 条、跳过 2 行的回放本，界面该如实说"有 2 条读不出来"，
+ * 而不是让用户以为对话就那么短。
+ */
+export interface SessionTranscriptView {
+  /** 按写入顺序（升序）的尾部条目。 */
+  readonly entries: readonly TranscriptEntry[];
+  /** 整个文件里无法解析而被跳过的行数（0 = 完好）。 */
+  readonly skippedLines: number;
+}
+
+/**
  * 会话执行输入（§12 十步流程）：Planner 讨论消息 或 Worker 任务派发。
  * role 由输入类别隐含：planner-message → planner；worker-task → worker。
  */
@@ -741,7 +768,10 @@ export type SessionStreamEvent =
       readonly kind: "started";
       readonly role: Role;
       readonly model?: ModelId;
-      /** 本轮所属会话（T4.3）。 */
+      /**
+       * 本轮所属会话（T4.3）。与 turnId 一起构成回放本条目的对齐键（T8.2b）：
+       * `TranscriptEntry.turnId` 与这里的 turnId 同源，渲染层据此把实时流与落盘记录接上。
+       */
       readonly sessionId: LocalSessionId;
       /**
        * 恢复方式（T4.3，§10.3）。缺省 = 全新会话首轮；否则为本次续接的方式
@@ -924,6 +954,13 @@ export interface IpcInvokeContracts {
   "plans:approve": { request: ApprovePlanRequest; response: Plan };
   /** 列出当前项目已登记的会话（T4.3 会话恢复；按最近活跃降序，供恢复选择）。 */
   "sessions:list": { request: ProjectScopedRequest; response: readonly SessionRecord[] };
+  /**
+   * 当前项目最近活跃的一条会话登记（T8.2b；按 lastActiveAt 取最大，无会话为 null）。
+   * 与 `sessions:list` 分开：进入项目时自动选中最近会话只要这一条，不必把整表搬过去再取首项。
+   */
+  "sessions:latest": { request: ProjectScopedRequest; response: SessionRecord | null };
+  /** 读某会话对话回放本的尾部（T8.2b，text-only：用户提示词 / assistant 文本 / 轮次收尾）。 */
+  "sessions:transcript": { request: SessionTranscriptRequest; response: SessionTranscriptView };
   /** 生成跨 Agent 交接包（T7.1，§10.4）：8 字段组装 + 渲染成可编辑的预览文本。 */
   "handoff:generate": { request: ProjectScopedRequest; response: HandoffPreview };
   /** 知识库总览（§8.3.6 来源管理：条目 + 文档数/块数 + 索引状态 + 嵌入能力）。 */
@@ -1049,6 +1086,8 @@ export const INVOKE_CHANNELS = [
   "plans:list",
   "plans:approve",
   "sessions:list",
+  "sessions:latest",
+  "sessions:transcript",
   "handoff:generate",
   "knowledge:list",
   "knowledge:pick-paths",

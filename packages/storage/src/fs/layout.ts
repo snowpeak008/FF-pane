@@ -71,6 +71,14 @@ export interface ProjectLayout {
   readonly projectFile: string;
   /** sessions.json —— 会话登记表（Local↔Native Session ID 映射，供原生恢复，§10.2 规则 3）。 */
   readonly sessionsFile: string;
+  /**
+   * sessions/ —— 对话回放本根目录（T8.2b，§10.2 规则 3 修订版）：
+   * `<localSessionId>/transcript.jsonl` + `inflight/`。目录按需创建（首次写入时），
+   * 与 sessions.json 一样不在 initProjectLayout 里预建——没聊过的项目不该多出空目录。
+   */
+  readonly sessionsDir: string;
+  /** sessions/inflight/ —— 在飞轮次标记（`<turnId>.json`）与部分文本（`<turnId>.partial.txt`）。 */
+  readonly sessionsInflightDir: string;
   /** plans/ —— 计划正文与 meta（plan-v<N>.md / plan-v<N>.meta.json，文件命名归 W1.2b）。 */
   readonly plansDir: string;
   /** tasks/ —— 任务合同 + 状态（task-<id>.json，文件命名归 W1.2b）。 */
@@ -118,6 +126,7 @@ export function resolveGlobalLayout(rootDir: string): GlobalLayout {
 export function resolveProjectLayout(projectRootDir: string): ProjectLayout {
   const workbenchDir = join(projectRootDir, WORKBENCH_DIR_NAME);
   const memoryDir = join(workbenchDir, "memory");
+  const sessionsDir = join(workbenchDir, "sessions");
   const memoryCategoryDirs = Object.fromEntries(
     Object.entries(MEMORY_DIR_NAMES).map(([category, dirName]) => [
       category,
@@ -129,6 +138,8 @@ export function resolveProjectLayout(projectRootDir: string): ProjectLayout {
     workbenchDir,
     projectFile: join(workbenchDir, "project.json"),
     sessionsFile: join(workbenchDir, "sessions.json"),
+    sessionsDir,
+    sessionsInflightDir: join(sessionsDir, "inflight"),
     plansDir: join(workbenchDir, "plans"),
     tasksDir: join(workbenchDir, "tasks"),
     runsDir: join(workbenchDir, "runs"),

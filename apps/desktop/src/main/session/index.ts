@@ -1,9 +1,15 @@
 /**
  * 会话执行层装配（T4.2）：把编排器接到真实的存取 / 密钥 / 适配器注册表 / 事件推送，
- * 并暴露为契约化的 invoke handlers（session:start / respond-permission / cancel）。
+ * 并暴露为契约化的 invoke handlers（session:start / respond-permission / cancel，
+ * T8.2b 起加 sessions:latest / sessions:transcript）。
  *
  * 与 data.ts 一样在全局根上装配自己的 store 实例（文件后端，读即命中磁盘，与数据层
  * 一致无副本问题）。事件推送经 publishEvent 打到当前主窗口的 webContents。
+ *
+ * 启动修正（T8.2b）：本层 handlers 首次触碰某项目布局时先跑一次 `ensureRepaired`
+ * （幂等、按项目去重），把上次被中断的轮次补齐；bootstrap 另对已登记项目扫一遍
+ * （见 `repairRegisteredProjects`）。渲染层并没有"选中项目"的主进程通道——选中是
+ * 渲染层 store 状态——故"打开项目时修正"落在会话层首次为该项目服务的那一刻。
  */
 
 import { randomUUID } from "node:crypto";
@@ -19,15 +25,19 @@ import type {
   RunId,
 } from "@ff-pane/shared";
 import {
+  appendTranscriptEntry,
   createConfigStore,
   createObservationStore,
   createProfileStore,
+  createProjectRegistry,
   createProjectSettingsStore,
   createProviderStore,
   createSessionStore,
+  deleteInflightMarker,
   initGlobalLayout,
   listEntries,
   listHabits,
+  listInflightMarkers,
   listRuns,
   listTasks,
   loadPlan,
@@ -35,14 +45,19 @@ import {
   loadStateSnapshot,
   loadTask,
   type ProjectLayout,
+  readInflightPartial,
+  readTranscript,
   resolveProjectLayout,
   saveHabit,
   savePlan,
   saveRun,
   saveTask,
+  writeInflightMarker,
+  writeInflightPartial,
   writeRunChangesDiff,
   writeRunRawLog,
 } from "@ff-pane/storage";
+import { DEFAULT_TRANSCRIPT_LIMIT } from "../../shared-ipc/contracts";
 import { type InvokeHandlers, publishEvent, type WebContentsLike } from "../../shared-ipc/server";
 import { resolveGlobalRoot } from "../data-root";
 import { createSafeStorageBackend, createSecretStore, resolveSecretsFile } from "../secrets";
@@ -51,31 +66,81 @@ import {
   readKnowledgeAudit,
   resolveKnowledgeMcpServer,
 } from "./knowledge-tool";
-import { createSessionOrchestrator } from "./orchestrator";
+import { createSessionOrchestrator, type SessionOrchestrator } from "./orchestrator";
 import { createDesktopAdapterRegistry } from "./registry";
+import { createProjectRepairer, type ProjectRepairer, type RepairDeps } from "./repair";
 
 export * from "./env";
 export * from "./event-map";
+export * from "./interrupted";
 export * from "./knowledge-tool";
 export * from "./orchestrator";
+export * from "./quit";
 export * from "./registry";
+export * from "./repair";
 
 /** 主进程模块目录：内置 MCP sidecar 与 main/index.js 同目录（见 electron.vite.config.ts）。 */
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 
 /** 本层负责的 invoke 通道集合。 */
-type SessionChannel = "session:start" | "session:respond-permission" | "session:cancel";
+type SessionChannel =
+  | "session:start"
+  | "session:respond-permission"
+  | "session:cancel"
+  | "sessions:latest"
+  | "sessions:transcript";
 
 /** 事件推送目标窗口取值器（惰性：窗口在装配后才创建，且可能已关闭）。 */
 export type SessionWindowGetter = () => { readonly webContents: WebContentsLike } | null;
 
+/** createSessionLayer 的产出：handler 表 + 供 main/index.ts 接退出钩子与启动修正的句柄。 */
+export interface SessionLayer {
+  readonly handlers: Pick<InvokeHandlers, SessionChannel>;
+  readonly orchestrator: SessionOrchestrator;
+  /** 按项目去重的启动修正入口（data.ts 的 sessions:list 亦可触发）。 */
+  readonly repairer: ProjectRepairer;
+  /** 对已登记的全部项目各扫一遍残留标记（bootstrap 调用；单个项目失败不阻断其余）。 */
+  repairRegisteredProjects(): Promise<void>;
+}
+
+/** 启动修正的真实存取绑定（与编排器 deps 同一套 storage 函数，只是形状不同）。 */
+function createRepairDeps(isTurnActive: (turnId: string) => boolean): RepairDeps {
+  return {
+    listInflightMarkers,
+    readInflightPartial,
+    deleteInflightMarker,
+    appendTranscript: appendTranscriptEntry,
+    loadTask: async (projectLayout, id) => {
+      const loaded = await loadTask(projectLayout, id);
+      return loaded.ok ? loaded.value : undefined;
+    },
+    saveTask: async (projectLayout, task) => {
+      await saveTask(projectLayout, task);
+    },
+    listRuns: async (projectLayout) => {
+      const result = await listRuns(projectLayout);
+      return result.ok ? result.value : [];
+    },
+    persistRun: async (projectLayout, run, rawLog, changesDiff) => {
+      await saveRun(projectLayout, run);
+      await writeRunRawLog(projectLayout, run.id, rawLog);
+      if (changesDiff.length > 0) {
+        await writeRunChangesDiff(projectLayout, run.id, changesDiff);
+      }
+    },
+    now: () => Date.now(),
+    newRunId: () => randomUUID() as RunId,
+    isTurnActive,
+    log: (message) => console.log(message),
+  };
+}
+
 /**
- * 装配会话执行 handlers。在 app.whenReady 之后、注册窗口之前调用一次。
+ * 装配会话执行层。在 app.whenReady 之后、注册窗口之前调用一次。
  */
-export async function createSessionHandlers(
-  getWindow: SessionWindowGetter,
-): Promise<Pick<InvokeHandlers, SessionChannel>> {
+export async function createSessionLayer(getWindow: SessionWindowGetter): Promise<SessionLayer> {
   const layout = await initGlobalLayout(resolveGlobalRoot());
+  const projects = createProjectRegistry(layout.projectsFile);
   const providers = createProviderStore(layout.providersFile);
   const profiles = createProfileStore(layout.profilesFile);
   const config = createConfigStore(layout.configFile);
@@ -246,14 +311,70 @@ export async function createSessionHandlers(
         readAudit: () => readKnowledgeAudit(auditPath),
       };
     },
+    // 对话回放本与在飞标记（T8.2b）：直接绑 storage 的 sessions/ 函数
+    appendTranscript: appendTranscriptEntry,
+    readRecentTranscript: async (projectLayout, sessionId, tail) =>
+      (await readTranscript(projectLayout, sessionId, { tail })).entries,
+    writeInflightMarker,
+    deleteInflightMarker: async (projectLayout, turnId) => {
+      await deleteInflightMarker(projectLayout, turnId);
+    },
+    writeInflightPartial,
     now: () => Date.now(),
     newRunId: () => randomUUID() as RunId,
     newLocalSessionId: () => randomUUID() as LocalSessionId,
   });
 
-  return {
-    "session:start": (request) => orchestrator.start(request),
+  const repairer = createProjectRepairer(
+    createRepairDeps((turnId) => orchestrator.hasActiveTurn(turnId)),
+  );
+
+  /** 首次为某项目服务前先修正残留（幂等；修正失败只记日志，不挡正常请求）。 */
+  async function touchProject(projectRoot: string): Promise<ProjectLayout> {
+    const projectLayout = resolveProjectLayout(projectRoot);
+    await repairer.ensureRepaired(projectLayout);
+    return projectLayout;
+  }
+
+  const handlers: Pick<InvokeHandlers, SessionChannel> = {
+    "session:start": async (request) => {
+      await touchProject(request.projectRoot);
+      return orchestrator.start(request);
+    },
     "session:respond-permission": (request) => orchestrator.respondPermission(request),
     "session:cancel": (request) => orchestrator.cancel(request),
+    "sessions:latest": async (request) => {
+      const projectLayout = await touchProject(request.projectRoot);
+      // listSessions 已按 lastActiveAt 降序，首项即最近
+      const [latest] = await createSessionStore(projectLayout.sessionsFile).listSessions();
+      return latest ?? null;
+    },
+    "sessions:transcript": async (request) => {
+      const projectLayout = await touchProject(request.projectRoot);
+      const limit =
+        request.limit !== undefined && Number.isFinite(request.limit) && request.limit >= 0
+          ? Math.floor(request.limit)
+          : DEFAULT_TRANSCRIPT_LIMIT;
+      return readTranscript(projectLayout, request.sessionId, { tail: limit });
+    },
+  };
+
+  return {
+    handlers,
+    orchestrator,
+    repairer,
+    async repairRegisteredProjects() {
+      let entries: Awaited<ReturnType<typeof projects.listProjects>>;
+      try {
+        entries = await projects.listProjects();
+      } catch (thrown) {
+        console.warn(`[repair] project registry unreadable: ${String(thrown)}`);
+        return;
+      }
+      for (const entry of entries) {
+        // ensureRepaired 自身吞掉单项目失败并记日志；这里串行扫，避免同时打开几十个目录
+        await repairer.ensureRepaired(resolveProjectLayout(entry.rootPath));
+      }
+    },
   };
 }

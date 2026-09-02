@@ -3,13 +3,24 @@
  * 上下文重建文本组装（各维度有/无事实、Run 取样与报告截断、全空兜底）。
  */
 
-import type { Plan, PlanVersion, Run, RunId, Task, TaskId } from "@ff-pane/shared";
+import type {
+  Plan,
+  PlanVersion,
+  ProfileId,
+  Run,
+  RunId,
+  Task,
+  TaskId,
+  TranscriptEntry,
+} from "@ff-pane/shared";
 import { describe, expect, it } from "vitest";
 import {
   assembleRebuildContext,
   DEFAULT_RECENT_RUNS,
+  DEFAULT_TRANSCRIPT_ENTRIES,
   decideResumeKind,
   REBUILD_CONTEXT_HEADING,
+  REBUILD_TRANSCRIPT_HEADING,
 } from "../src/index.js";
 
 describe("decideResumeKind", () => {
@@ -125,5 +136,93 @@ describe("assembleRebuildContext", () => {
     const text = assembleRebuildContext({});
     expect(text).toContain(REBUILD_CONTEXT_HEADING);
     expect(text).toContain("暂无可重建");
+  });
+
+  describe("最近对话摘录（T8.2b）", () => {
+    function transcript(turns: number): TranscriptEntry[] {
+      const entries: TranscriptEntry[] = [];
+      for (let i = 1; i <= turns; i += 1) {
+        entries.push(
+          { kind: "user_message", turnId: `t${i}`, at: i * 10, text: `用户第${i}问` },
+          { kind: "assistant_message", turnId: `t${i}`, at: i * 10 + 1, text: `助手第${i}答` },
+          {
+            kind: "turn_end",
+            turnId: `t${i}`,
+            at: i * 10 + 2,
+            role: "planner",
+            profileId: "prof-1" as ProfileId,
+            endReason: "completed",
+          },
+        );
+      }
+      return entries;
+    }
+
+    it("有摘录：用户 / 助手交替渲染，turn_end 元数据不进提示词", () => {
+      const text = assembleRebuildContext({ recentTranscript: transcript(1) });
+      expect(text).toContain(REBUILD_TRANSCRIPT_HEADING);
+      expect(text).toContain("- 用户：用户第1问");
+      expect(text).toContain("- 助手：助手第1答");
+      expect(text).not.toContain("turn_end");
+      expect(text).not.toContain("completed");
+      expect(text).not.toContain("暂无可重建");
+    });
+
+    it("只取末尾 maxTranscriptEntries 条（缺省 6 = 最近三轮），末尾即最近", () => {
+      const text = assembleRebuildContext({ recentTranscript: transcript(5) });
+      expect(text).toContain(`${REBUILD_TRANSCRIPT_HEADING}（${DEFAULT_TRANSCRIPT_ENTRIES}/10）`);
+      expect(text).toContain("用户第3问");
+      expect(text).toContain("助手第5答");
+      expect(text).not.toContain("用户第2问");
+    });
+
+    it("长文本按 maxTranscriptChars 截断并标注；被中断的部分答复如实标注", () => {
+      const text = assembleRebuildContext({
+        recentTranscript: [
+          { kind: "user_message", turnId: "t1", at: 1, text: "问" },
+          { kind: "assistant_message", turnId: "t1", at: 2, text: "y".repeat(50), partial: true },
+        ],
+        maxTranscriptChars: 10,
+      });
+      expect(text).toContain("- 助手（被中断，不完整）：yyyyyyyyyy…（已截断）");
+      expect(text).not.toContain("y".repeat(11));
+    });
+
+    it("无摘录（只有 turn_end / 空白文本 / 未传）→ 不渲染该节；全空时兜底句提到对话摘录", () => {
+      const onlyEnds = assembleRebuildContext({
+        recentTranscript: [
+          {
+            kind: "turn_end",
+            turnId: "t1",
+            at: 1,
+            role: "planner",
+            profileId: "prof-1" as ProfileId,
+            endReason: "interrupted",
+          },
+          { kind: "assistant_message", turnId: "t1", at: 2, text: "   " },
+        ],
+      });
+      expect(onlyEnds).not.toContain(REBUILD_TRANSCRIPT_HEADING);
+      expect(onlyEnds).toContain("暂无可重建的计划/任务/状态/执行记录/对话摘录");
+    });
+
+    it("与既有材料共存时顺序固定：计划 → 任务 → 状态 → 最近执行记录 → 最近对话摘录", () => {
+      const text = assembleRebuildContext({
+        plan: plan(),
+        tasks: [task()],
+        stateSnapshot: "正在实现工具函数",
+        recentRuns: [run()],
+        recentTranscript: transcript(1),
+      });
+      const order = [
+        text.indexOf("## 当前计划"),
+        text.indexOf("## 任务"),
+        text.indexOf("## 当前状态"),
+        text.indexOf("## 最近执行记录"),
+        text.indexOf(REBUILD_TRANSCRIPT_HEADING),
+      ];
+      expect(order.every((i) => i >= 0)).toBe(true);
+      expect([...order].sort((a, b) => a - b)).toEqual(order);
+    });
   });
 });

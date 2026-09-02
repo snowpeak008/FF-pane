@@ -115,8 +115,8 @@ export function endRun(run: Run, params: EndRunParams): EndedRun {
 /**
  * Run 终态对 Task 状态的联动规则（数据形式，W1.4b 设计决策）：
  * - completed → "complete"：候选 done，仍须过 completeTask 的证据校验，不自动 done；
- * - failed / crashed → "fail"：任务转 failed（可重试）；崩溃与失败对任务同义，
- *   差异只体现在 Run.endReason 供排查；
+ * - failed / crashed / interrupted → "fail"：任务转 failed（可重试）；崩溃、失败与
+ *   被工作台中断（T8.2b）对任务同义，差异只体现在 Run.endReason 供排查与界面文案；
  * - cancelled → "caller-decides"：由调用方在 cancelTask（放弃任务，终态）与
  *   failTask（视作一次未完成的尝试，任务保留且可重试）之间二选一。
  *   不提供"回 pending"：迁移表没有 running→pending 边，pending 专指"从未派发"；
@@ -126,6 +126,7 @@ export const RUN_END_TASK_LINKAGE = {
   completed: "complete",
   failed: "fail",
   crashed: "fail",
+  interrupted: "fail",
   cancelled: "caller-decides",
 } as const satisfies Record<RunEndReason, "complete" | "fail" | "caller-decides">;
 
@@ -154,6 +155,7 @@ export function settleTaskAfterRun(
       return completeTask(task, run);
     case "failed":
     case "crashed":
+    case "interrupted":
       return failTask(task);
     case "cancelled":
       return cancelledPolicy === "cancel-task" ? cancelTask(task) : failTask(task);

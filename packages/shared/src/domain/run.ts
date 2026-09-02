@@ -13,8 +13,21 @@ import type {
 } from "./common.js";
 import { createLiteralGuard } from "./common.js";
 
-/** 设计文档 §6.4 —— end_reason 结束原因。 */
-export const RUN_END_REASONS = ["completed", "failed", "cancelled", "crashed"] as const;
+/**
+ * 设计文档 §6.4 —— end_reason 结束原因。
+ *
+ * `interrupted`（T8.2b 增补）：工作台自身退出或崩溃导致轮次被中断——CLI 子进程是被
+ * FF-pane 连带终止的（T8.2 Job 嵌套语义，关应用即清场），不是它自己异常退出。
+ * 与 `crashed` 分开记是为了让执行记录页能如实说明「这次不是 Agent 出错，是你关了应用」；
+ * 对任务的联动两者同款（→ failed，可重试，见 core `RUN_END_TASK_LINKAGE`）。
+ */
+export const RUN_END_REASONS = [
+  "completed",
+  "failed",
+  "cancelled",
+  "crashed",
+  "interrupted",
+] as const;
 
 /** 设计文档 §6.4 —— Run 结束原因。 */
 export type RunEndReason = (typeof RUN_END_REASONS)[number];

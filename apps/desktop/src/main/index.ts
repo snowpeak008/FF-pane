@@ -5,7 +5,7 @@ import { registerInvokeHandlers } from "../shared-ipc/server";
 import { installCsp } from "./csp";
 import { createDataHandlers } from "./data";
 import { createKnowledgeHandlers } from "./knowledge";
-import { createSessionHandlers } from "./session";
+import { createQuitCoordinator, createSessionLayer } from "./session";
 import { startSmokeMode } from "./smoke";
 import { runSqliteCheck } from "./sqlite-check";
 import { loadWindowState, trackWindowState } from "./window-state";
@@ -132,8 +132,22 @@ async function bootstrap(): Promise<void> {
   // 会话执行层接线（T4.2）：适配器注册表 + 编排器 + 流式事件推送。
   // 独立 try：装配失败只让会话执行不可用，不牵连数据层与窗口。
   try {
-    const sessionHandlers = await createSessionHandlers(() => mainWindow);
-    registerInvokeHandlers(ipcMain, sessionHandlers);
+    const sessionLayer = await createSessionLayer(() => mainWindow);
+    registerInvokeHandlers(ipcMain, sessionLayer.handlers);
+
+    // 退出钩子（T8.2b）：有在飞轮次时先就地收尾（transcript / Run / 任务 / 标记）再退出，
+    // 总时长上限 QUIT_TOTAL_BUDGET_MS；无在飞轮次不拦截。子进程由 Job Object 兜底（T8.2）。
+    const quitCoordinator = createQuitCoordinator({
+      hasInflight: () => sessionLayer.orchestrator.activeCount() > 0,
+      prepare: () => sessionLayer.orchestrator.prepareForQuit(),
+      quit: () => app.quit(),
+      log: (message) => console.log(`[main] ${message}`),
+    });
+    app.on("before-quit", (event) => quitCoordinator.onBeforeQuit(event));
+
+    // 启动修正（T8.2b）：对已登记项目各扫一遍上次被中断的轮次。后台进行、不挡窗口；
+    // 会话层 handlers 首次触碰某项目时还会按项目再保证一次（幂等）。
+    void sessionLayer.repairRegisteredProjects();
   } catch (thrown) {
     const message = thrown instanceof Error ? thrown.message : String(thrown);
     console.error(`[main] session layer init failed: ${message}`);
