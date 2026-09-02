@@ -50,4 +50,8 @@ describe("IPC 通道契约", () => {
     // 尾部缺省 200 条 ≈ 60 轮 × 3 条，百条消息级会话一次取齐
     expect(DEFAULT_TRANSCRIPT_LIMIT).toBe(200);
   });
+
+  it("T8.3a 并发轮次查询通道已登记到运行时清单", () => {
+    expect(INVOKE_CHANNELS).toContain("sessions:active-turns");
+  });
 });

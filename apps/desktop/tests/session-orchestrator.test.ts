@@ -1759,3 +1759,99 @@ describe("T8.2b 对话回放本与中断收尾", () => {
     });
   });
 });
+
+describe("T8.3a 在飞轮次表（listActiveTurns）", () => {
+  /** 挂住的适配器：每轮独立 gate，cancel 才收尾（复用 T8.2b 的形态，支持多轮并存）。 */
+  function hangingAdapter(): AgentAdapter {
+    return {
+      runtime: "fake",
+      displayName: "hanging",
+      capabilities: () => ({
+        nativeResume: "no",
+        streaming: "yes",
+        fileChangeEvents: "yes",
+        commandEvents: "yes",
+        permissionForwarding: "no",
+        gracefulCancel: "yes",
+      }),
+      startTurn: () => {
+        let release: (() => void) | undefined;
+        const gate = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return {
+          events: (async function* () {
+            yield { kind: "session_start" } as AgentEvent;
+            await gate;
+            yield { kind: "end", reason: "cancelled" } as AgentEvent;
+          })(),
+          cancel: async () => {
+            release?.();
+          },
+        };
+      },
+    };
+  }
+
+  it("Worker 轮登记装配后信封的 writePaths（任务 writeScope 与角色默认的交集），Planner 轮为空集", async () => {
+    const h = makeHarness([], {
+      adapter: hangingAdapter(),
+      task: task({ writeScope: ["src/app"] }),
+    });
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start(workerRequest());
+    h.clock.now = 2000;
+    await orch.start({ ...plannerRequest(), input: { kind: "planner-message", text: "聊聊" } });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const turns = orch.listActiveTurns("/proj");
+    // 按 startedAt 升序：Worker（1000）在前、Planner（2000）在后
+    expect(turns.map((r) => [r.turnId, r.role, r.startedAt])).toEqual([
+      ["t2", "worker", 1000],
+      ["t1", "planner", 2000],
+    ]);
+    // writePaths 是装配后信封（"**" ∩ "src/app" = "src/app"），不是任务合同原文的照抄语义
+    expect(turns[0]).toMatchObject({
+      taskId: "task-1",
+      sessionId: "sess-new",
+      writePaths: ["src/app"],
+    });
+    // Planner 角色默认不可写 → 空集（= 无写权限，与任何轮可并行）
+    expect(turns[1]?.writePaths).toEqual([]);
+    expect(turns[1]).not.toHaveProperty("taskId");
+
+    await orch.prepareForQuit();
+  });
+
+  it("按项目根过滤：大小写 / 分隔符差异视为同一项目，别的项目看不到", async () => {
+    const h = makeHarness([], { adapter: hangingAdapter() });
+    const orch = createSessionOrchestrator(h.deps);
+    await orch.start(workerRequest());
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(orch.listActiveTurns("/proj")).toHaveLength(1);
+    // Windows 现实：同一路径的大小写 / 反斜杠写法应命中同一项目
+    expect(orch.listActiveTurns("\\PROJ")).toHaveLength(1);
+    expect(orch.listActiveTurns("/other")).toHaveLength(0);
+
+    await orch.prepareForQuit();
+  });
+
+  it("轮次结束（正常收尾）即从表中注销", async () => {
+    const events: AgentEvent[] = [
+      { kind: "session_start" },
+      { kind: "text", content: "ok", final: true, channel: "answer" },
+      { kind: "end", reason: "completed" },
+    ];
+    const h = makeHarness(events, { profile: profile({ defaultRole: "planner" }) });
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start(plannerRequest());
+    await flushUntilEnd(h.published);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(orch.listActiveTurns("/proj")).toEqual([]);
+    expect(orch.activeCount()).toBe(0);
+  });
+});

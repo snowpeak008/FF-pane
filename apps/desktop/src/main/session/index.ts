@@ -88,7 +88,8 @@ type SessionChannel =
   | "session:respond-permission"
   | "session:cancel"
   | "sessions:latest"
-  | "sessions:transcript";
+  | "sessions:transcript"
+  | "sessions:active-turns";
 
 /** 事件推送目标窗口取值器（惰性：窗口在装配后才创建，且可能已关闭）。 */
 export type SessionWindowGetter = () => { readonly webContents: WebContentsLike } | null;
@@ -357,6 +358,9 @@ export async function createSessionLayer(getWindow: SessionWindowGetter): Promis
           : DEFAULT_TRANSCRIPT_LIMIT;
       return readTranscript(projectLayout, request.sessionId, { tail: limit });
     },
+    // T8.3a：在飞轮次快照（纯内存态，不触碰磁盘，故不走 touchProject——
+    // 没有磁盘现场需要修正，也不该让一个只读内存的查询去扫 inflight/ 目录）
+    "sessions:active-turns": async (request) => orchestrator.listActiveTurns(request.projectRoot),
   };
 
   return {

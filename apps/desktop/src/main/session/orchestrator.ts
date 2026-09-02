@@ -42,6 +42,8 @@ import {
   toStoredRunEvidence,
 } from "@ff-pane/adapters";
 import {
+  type ActiveTurnRecord,
+  type ActiveTurnTable,
   assemblePrompt,
   assembleRebuildContext,
   assembleReviewMaterial,
@@ -51,22 +53,26 @@ import {
   createNextDraft,
   decideResumeKind,
   dispatchTask,
+  EMPTY_ACTIVE_TURN_TABLE,
   endRun,
   failTask,
   HABIT_FIRST_INSTRUCTION,
   hasActiveWorkflowHabit,
   intersectEnvelopes,
   isDirectExecuteRequest,
+  listActiveTurns as listActiveTurnRecords,
   PLAN_OUTPUT_CONTRACT,
   PLANNER_DEFAULT_ENVELOPE,
   parsePlannerPlanDraft,
   parseReviewConclusion,
   REVIEW_OUTPUT_CONTRACT,
   REVIEWER_DEFAULT_ENVELOPE,
+  registerActiveTurn,
   settleTaskAfterRun,
   startRun,
   supersedePlan,
   toRunEnvelope,
+  unregisterActiveTurn,
 } from "@ff-pane/core";
 import type {
   AgentProfile,
@@ -148,6 +154,12 @@ export interface SessionOrchestrator {
   activeCount(): number;
   /** 某轮是否仍在本进程在飞（启动修正据此跳过"活着的"标记）。 */
   hasActiveTurn(turnId: string): boolean;
+  /**
+   * 某项目在飞轮次的并行事实快照（T8.3a，`sessions:active-turns` 的数据源）：
+   * 按 startedAt 升序的 ActiveTurnRecord 列表（含装配后信封的 writePaths）。
+   * 只读内存态、不触碰磁盘；并行互斥的**裁决接入**（start 受理时拒绝相交轮）归 T8.3b。
+   */
+  listActiveTurns(projectRoot: string): readonly ActiveTurnRecord[];
   /**
    * 工作台即将退出（T8.2b）：对每个仍在飞的轮就地收尾——transcript 补
    * `assistant_message{partial}` + `turn_end{interrupted}`，Worker 轮补 Run(interrupted) 并把
@@ -358,8 +370,23 @@ interface TurnContexts {
   readonly knowledgeCtx?: KnowledgeContext;
 }
 
+/**
+ * 项目根的比较键（在飞轮次按项目过滤用）：分隔符归一 + 小写（Windows 路径大小写
+ * 不敏感）+ 去尾斜杠。只服务于"同一个项目根的两种写法应视为同一项目"，
+ * 不做 `..` 解析——projectRoot 来自项目注册表，是已归一的绝对路径。
+ */
+export function normalizeProjectRootKey(projectRoot: string): string {
+  const unified = projectRoot.replaceAll("\\", "/").toLowerCase();
+  return unified.endsWith("/") && unified.length > 1 ? unified.slice(0, -1) : unified;
+}
+
 export function createSessionOrchestrator(deps: SessionOrchestratorDeps): SessionOrchestrator {
   const active = new Map<string, ActiveTurn>();
+  // 在飞轮次的并行事实（T8.3a）：与 active 同生命周期的第二份登记——active 装进程
+  // 句柄与收尾上下文，这份装并行裁决要的 writePaths 快照（core 的不可变表 + 纯函数）。
+  // 登记 / 注销与 active.set / delete 同点发生，两表不会漂移。
+  let parallelTable: ActiveTurnTable = EMPTY_ACTIVE_TURN_TABLE;
+  const turnProjects = new Map<string, string>();
 
   function outputLanguageSettings(
     config: GlobalConfig,
@@ -739,6 +766,18 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         done: Promise.resolve(),
       };
       active.set(request.turnId, turn);
+      // 并行事实登记（T8.3a）：writePaths 取装配后信封（角色默认 ∩ Profile 预设 ∩
+      // 任务 writeScope 的交集）——这才是本轮真正被放行写入的范围。与 active 同点登记。
+      const parallelRecord: ActiveTurnRecord = {
+        turnId: request.turnId,
+        sessionId,
+        role,
+        ...(marker.taskId !== undefined ? { taskId: marker.taskId } : {}),
+        writePaths: guardCtx.envelope.writePaths,
+        startedAt,
+      };
+      parallelTable = registerActiveTurn(parallelTable, parallelRecord);
+      turnProjects.set(request.turnId, normalizeProjectRootKey(request.projectRoot));
       deps.publish({
         turnId: request.turnId,
         kind: "started",
@@ -751,6 +790,8 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
       // 事件流消费独立于受理应答（fire-and-forget，结束时清理登记）
       turn.done = drain(request.turnId, turn).finally(() => {
         active.delete(request.turnId);
+        parallelTable = unregisterActiveTurn(parallelTable, request.turnId);
+        turnProjects.delete(request.turnId);
       });
 
       return { accepted: true, turnId: request.turnId, sessionId };
@@ -1229,6 +1270,12 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
     cancel,
     activeCount: () => active.size,
     hasActiveTurn: (turnId) => active.has(turnId),
+    listActiveTurns: (projectRoot) => {
+      const rootKey = normalizeProjectRootKey(projectRoot);
+      return listActiveTurnRecords(parallelTable).filter(
+        (record) => turnProjects.get(record.turnId) === rootKey,
+      );
+    },
     prepareForQuit,
   };
 }

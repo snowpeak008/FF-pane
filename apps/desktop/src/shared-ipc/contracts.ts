@@ -12,10 +12,12 @@
  */
 
 import type {
+  ActiveTurnRecord,
   ConnectionTestResult,
   FetchModelsResult,
   HabitConflict,
   ProbeProviderInput,
+  WritePathsConflict,
 } from "@ff-pane/core";
 import type {
   AgentProfile,
@@ -731,7 +733,15 @@ export interface StartSessionRequest extends ProjectScopedRequest {
   readonly handoffText?: string;
 }
 
-/** session:start 应答：仅表示已受理（true）或拒绝受理（false + reason）。 */
+/**
+ * session:start 应答：仅表示已受理（true）或拒绝受理（false + reason）。
+ *
+ * 多轮在飞语义（T8.3a 定稿）：不同 turnId 的多轮可同时在飞（编排器按 turnId 隔离，
+ * 同 turnId 重复 start 拒绝）；writePaths 互斥核查（core `checkWritePathsExclusive`）
+ * 在 T8.3b 接入本通道的受理路径——候选轮与在飞轮的可写范围相交即拒绝，拒绝时
+ * `conflicts` 携带结构化明细（哪两个任务、哪两条路径、何种关系），任务页据此呈现
+ * 「因相交被拒绝并行及原因」；reason 仍为一句话概括，既有消费方不必理解新字段。
+ */
 export type StartSessionAck =
   | {
       readonly accepted: true;
@@ -739,7 +749,15 @@ export type StartSessionAck =
       /** 本轮所属的本地会话 ID（新建时为主进程生成值，供渲染层登记为当前会话）。 */
       readonly sessionId: LocalSessionId;
     }
-  | { readonly accepted: false; readonly reason: string };
+  | {
+      readonly accepted: false;
+      readonly reason: string;
+      /**
+       * writePaths 互斥拒绝的结构化明细（T8.3a 契约预留，T8.3b 产出）。
+       * 仅并行互斥这一种拒绝携带；Profile 不存在等其他拒绝只有 reason。
+       */
+      readonly conflicts?: readonly WritePathsConflict[];
+    };
 
 /** session:respond-permission 请求：回执一条上浮的权限请求（§7 用户二选一）。 */
 export interface RespondPermissionRequest {
@@ -761,6 +779,10 @@ export interface SessionActionAck {
 /**
  * 会话流式事件（main → renderer，§11.2 会话页 + §7 权限交互）。
  * 扁平判别联合：渲染层直接按 kind 分支，无需理解适配器 AgentEvent 内部形态。
+ *
+ * 并发路由核实（T8.3a）：每个变体都带 turnId，`started` 额外带 sessionId / role——
+ * 多轮在飞时渲染层足以把任意事件归属到轮与会话，**契约无需补字段**。
+ * 今日渲染层 store 是单活跃轮模型（非当前轮事件被忽略），多轮归并属 T8.3b 呈现层。
  */
 export type SessionStreamEvent =
   | {
@@ -961,6 +983,14 @@ export interface IpcInvokeContracts {
   "sessions:latest": { request: ProjectScopedRequest; response: SessionRecord | null };
   /** 读某会话对话回放本的尾部（T8.2b，text-only：用户提示词 / assistant 文本 / 轮次收尾）。 */
   "sessions:transcript": { request: SessionTranscriptRequest; response: SessionTranscriptView };
+  /**
+   * 当前项目在飞的全部轮次（T8.3a 契约定稿）：编排器在飞轮次表的快照（core
+   * `ActiveTurnRecord`：turnId / sessionId / role / taskId? / writePaths / startedAt，
+   * 按 startedAt 升序），不触碰磁盘。任务页并行状态呈现（T8.3b）据此回答
+   * 「哪些在飞、各自占着哪些写范围」。projectRoot 过滤：轮次归属项目由编排器
+   * 登记时的请求 projectRoot 决定（Windows 路径大小写不敏感比较归实现层）。
+   */
+  "sessions:active-turns": { request: ProjectScopedRequest; response: readonly ActiveTurnRecord[] };
   /** 生成跨 Agent 交接包（T7.1，§10.4）：8 字段组装 + 渲染成可编辑的预览文本。 */
   "handoff:generate": { request: ProjectScopedRequest; response: HandoffPreview };
   /** 知识库总览（§8.3.6 来源管理：条目 + 文档数/块数 + 索引状态 + 嵌入能力）。 */
@@ -1088,6 +1118,7 @@ export const INVOKE_CHANNELS = [
   "sessions:list",
   "sessions:latest",
   "sessions:transcript",
+  "sessions:active-turns",
   "handoff:generate",
   "knowledge:list",
   "knowledge:pick-paths",
