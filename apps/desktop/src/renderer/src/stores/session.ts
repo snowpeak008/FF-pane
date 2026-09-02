@@ -205,8 +205,11 @@ export const INITIAL_SESSION_UI_STATE: SessionUiState = {
  * 把结束的在飞轮固化成历史消息（fold-on-end）：answer 文本非空才成为 assistant 历史条目；
  * 结束原因为 interrupted 时带中断标注（正常路径不会——interrupted 只出现在退出/崩溃，
  * 但事件形状允许，如实处理）。user 侧的输入在发起时已由页面写入 historyMessages。
+ *
+ * 导出仅供单测直调：内部的同 turnId 去重守卫是防御码（正常路径经上游归属判定不可达，
+ * T8.2b-b 验收 §3-1），链路测试红不了它，须直调两次钉住（主管理员裁定，2026-09-02）。
  */
-function foldEndedTurn(
+export function foldEndedTurn(
   history: readonly SessionHistoryMessage[],
   turn: StreamingTurn,
   reason: RunEndReason,

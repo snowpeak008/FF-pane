@@ -17,6 +17,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { predictResumeKind } from "../src/renderer/src/pages/session/resume-view";
 import { mapTranscriptToMessages } from "../src/renderer/src/pages/session/transcript-view";
 import {
+  foldEndedTurn,
   INITIAL_SESSION_UI_STATE,
   type SessionHistoryMessage,
   useSessionStore,
@@ -271,6 +272,16 @@ describe("session store 回放与合流（T8.2b-b）", () => {
         interrupted: true,
       },
     ]);
+  });
+
+  it("foldEndedTurn 直调：同 turnId 已有 assistant 条目时第二次固化不追加（去重守卫，T8.2b-b 验收 §3-1）", () => {
+    // 直调而非走事件链路：链路上重复 end 会被 ingestSessionEvent 的归属判定挡掉，
+    // 该守卫是防御码，只有直调两次才能让"删守卫必红"成立（验收探针③的补测）。
+    const turn = { turnId: "t1", text: "答复", done: true } as const;
+    const once = foldEndedTurn([], turn, "completed");
+    expect(once).toEqual([{ id: "t1:assistant", turnId: "t1", role: "assistant", text: "答复" }]);
+    const twice = foldEndedTurn(once, { ...turn, text: "迟到的重复 end" }, "completed");
+    expect(twice).toEqual(once);
   });
 
   it("startNewSession：清空会话 / 历史 / 横幅 / 流式缓存，但保留 autoResumeDoneRoot", () => {
