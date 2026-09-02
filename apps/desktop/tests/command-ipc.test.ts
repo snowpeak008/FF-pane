@@ -847,7 +847,7 @@ describe("挂载入口：模块图在运行时可解析", () => {
     expect(source).toContain("CommandPaletteProvider");
   });
 
-  it("AppLayout 不再自建键盘监听（页面切换键位只由注册表处理，否则一次按键跳两页）", async () => {
+  it("AppLayout 不再自建键盘监听（页面切换键位只由注册表处理；第二个实现实测虽因捕获阶段停传而收不到按键，但留着就依赖远处实现细节）", async () => {
     const source = readFileSync(
       new URL("../src/renderer/src/layout/AppLayout.tsx", import.meta.url),
       "utf8",

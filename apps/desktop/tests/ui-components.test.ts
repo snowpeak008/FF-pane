@@ -34,7 +34,6 @@ import {
   NAV_IDS,
   NAV_ITEMS,
   navItemById,
-  navItemByShortcut,
   SETTINGS_NAV_ITEM,
 } from "../src/renderer/src/layout/nav";
 import { NAV_ICONS } from "../src/renderer/src/layout/nav-icons";
@@ -349,11 +348,6 @@ describe("导航表与路由表结构（项目设计计划 §11 / 设计系统 �
   it("Ctrl+1~7 连续覆盖七个主页面，设置页不占键位", () => {
     expect(NAV_ITEMS.map((item) => item.shortcut)).toEqual([1, 2, 3, 4, 5, 6, 7]);
     expect(SETTINGS_NAV_ITEM.shortcut).toBeUndefined();
-    for (let index = 1; index <= 7; index += 1) {
-      expect(navItemByShortcut(index)?.shortcut).toBe(index);
-    }
-    expect(navItemByShortcut(0)).toBeUndefined();
-    expect(navItemByShortcut(8)).toBeUndefined();
   });
 
   it("每条都有语言包 key、承接工单与图标", () => {
@@ -396,11 +390,19 @@ describe("页面顺序只此一份注册表（T8.1 收敛）", () => {
 
   it("布局层不再自带页面切换键位的匹配实现（键位判定唯一，归 command/ 注册表）", async () => {
     // T8.1 之前这里有 matchPageShortcut，与注册表的 nav-page-by-index 是同一组键位的
-    // 第二个实现，两处都监听会让一次按键跳两页。它随 AppLayout 的 keydown 监听一并删除。
+    // 第二个实现。实测两者并存并不会跳两页（注册表那条在捕获阶段停传，冒泡侧收不到），
+    // 但同一组键位留两个实现就是隐患。它随 AppLayout 的 keydown 监听一并删除。
     const layoutShortcuts: Record<string, unknown> = await import(
       "../src/renderer/src/layout/shortcuts"
     );
     expect(Object.keys(layoutShortcuts)).toEqual(["shortcutHint"]);
+  });
+
+  it("nav 表不再导出按键位序号反查条目的函数（唯一消费方 matchPageShortcut 已删，同判据一并删除）", async () => {
+    const nav: Record<string, unknown> = await import("../src/renderer/src/layout/nav");
+    expect(Object.keys(nav)).not.toContain("navItemByShortcut");
+    // 侧栏按 item.shortcut 正向渲染提示串，不需要反查
+    expect(typeof nav["navItemById"]).toBe("function");
   });
 });
 

@@ -16,6 +16,7 @@ import { PassThrough } from "node:stream";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   API_KEY_ENV_PATTERNS,
+  assignProcessToNewJob,
   ByteChunkQueue,
   buildAgentEnv,
   buildCmdShimCommandLine,
@@ -621,6 +622,35 @@ describe("Job Object 圈禁：被重父化的孙进程也带得走（T8.2）", (
     const reason = jobObjectUnavailableReason();
     expect(reason === null || typeof reason === "string").toBe(true);
   });
+
+  it.runIf(isWindows)(
+    "一次失败之后再圈禁成功，原因清回 null（语义是「当前可用」而非「最近一次失败」）",
+    async () => {
+      // 制造一次失败：对一个不可能存在的 pid 圈禁，OpenProcess 必然失败并留下原因。
+      // 这正是生产里会发生的形态——目标进程在 spawn 与 assign 之间就退出了。
+      const impossiblePid = 0xfffffffc;
+      expect(assignProcessToNewJob(impossiblePid)).toBeUndefined();
+      expect(jobObjectUnavailableReason()).toContain("OpenProcess failed");
+
+      // 随后一次真实的成功圈禁：T8.2 验收前这里仍会报上面那条旧原因
+      const child = spawn(NODE, ["-e", "setTimeout(() => {}, 30000)"], {
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      const exited = new Promise<void>((resolve) => {
+        child.once("exit", () => resolve());
+      });
+      expect(child.pid).toBeDefined();
+      const job = assignProcessToNewJob(child.pid as number);
+      expect(job).toBeDefined();
+      expect(jobObjectUnavailableReason()).toBeNull();
+
+      job?.terminate();
+      job?.close();
+      await exited;
+    },
+    30_000,
+  );
 
   it.runIf(isWindows)(
     "自然结束不牵连 CLI 故意留下的后台进程（close 前摘掉 KILL_ON_JOB_CLOSE）",

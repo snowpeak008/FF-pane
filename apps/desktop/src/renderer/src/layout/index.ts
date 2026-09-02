@@ -9,7 +9,6 @@ export {
   type NavId,
   type NavItem,
   navItemById,
-  navItemByShortcut,
   SETTINGS_NAV_ITEM,
 } from "./nav";
 export { NAV_ICONS } from "./nav-icons";

@@ -94,7 +94,6 @@ export function navItemById(id: AnyNavId): NavItem {
   return found;
 }
 
-/** 按快捷键序号（1~7）取条目；越界返回 undefined。 */
-export function navItemByShortcut(index: number): NavItem | undefined {
-  return NAV_ITEMS.find((item) => item.shortcut === index);
-}
+// 此前还有 navItemByShortcut（按序号反查条目）。它的唯一消费方是 layout/shortcuts.ts 的
+// matchPageShortcut，后者随 AppLayout 自建键盘监听在 T8.1 删除；按同一判据本函数亦删除
+// （v0.9.x 清债单）。序号→页面的判定只在 command/ 注册表（nav-page-by-index）一处。

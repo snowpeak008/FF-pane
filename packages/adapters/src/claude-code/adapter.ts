@@ -11,14 +11,17 @@
  * ```
  *
  * 三条设计决策：
- * 1. **取消先 interrupt 再树杀。** Windows 上 Bash 工具经 git-bash 执行，msys 的
- *    孙进程不在可枚举进程树上，硬杀会留孤儿（§5 实测，W2.1a 提醒 7）。故 cancel()
- *    先写 interrupt 控制请求，由 CLI 自己收拾工具进程；只有"CLI 未声明 interrupt
- *    能力 / 写不进 stdin / 超时未收尾"才退回 killProcessTree。
+ * 1. **取消先 interrupt 再树杀。** 硬杀（`taskkill /T`）遍历的是**当下的父子表**：
+ *    Bash 工具起的命令若中间层先退出，其子进程会被系统重父化、脱离这棵树，硬杀就会
+ *    留孤儿（§5 实测；归因更正见 T8.2——此前记作「msys 进程模型断父子链」，实测与
+ *    msys 无关，纯原生 node → node 同样逃逸，msys 只是常触发「中间层先退」这个形态）。
+ *    故 cancel() 先写 interrupt 控制请求，由 CLI 自己收拾工具进程；只有"CLI 未声明
+ *    interrupt 能力 / 写不进 stdin / 超时未收尾"才退回 killProcessTree。
  *    本工单真机冒烟的补充结论：interrupt 换来的是**完整的事件闭环**（工具记
  *    denied、result 给出 aborted_tools、会话已落盘可 resume）与"不必硬杀"，
- *    但 `sleep 60` 的 msys 孙进程实测仍会存活为孤儿——孤儿的根治要靠进程层的
- *    Windows Job Object（W2.1a），适配器层不该假装它已经解决。
+ *    但 `sleep 60` 这类被重父化的孙进程实测仍会存活为孤儿——孤儿的根治**已由进程层的
+ *    Windows Job Object 完成**（T8.2，`process/job-object.ts`：spawn 后立即圈禁、按 Job
+ *    归属终止而不看父子表），适配器层不必也不该自己再做一份。
  * 2. **result 到达即收束本轮。** 双向管道下 stdin 一直开着，CLI 报出 result 后仍
  *    可能等下一条输入；适配器在 end 事件后关 stdin、等宽限期、必要时树杀，
  *    保证"恰好一条 end 收尾"且不留常驻进程。
@@ -488,7 +491,7 @@ function startClaudeCodeTurn(ctx: AdapterTurnContext, resolved: ResolvedOptions)
       }
       // interrupt 协议由 init.capabilities 声明（漂移防御）；未声明 / stdin 不可写
       // 时没有优雅路径，直接树杀。此时 init 尚未到达也意味着还没有工具在跑，
-      // 硬杀不会留下 msys 孙进程。
+      // 没有可被重父化的孙进程可留（且进程层的 Job Object 圈禁本就兜着这一层）。
       if (!state.interruptReceiptSupported || handle.stdin === null || stdinClosed) {
         await handle.kill();
         return;

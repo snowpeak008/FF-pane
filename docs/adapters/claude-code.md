@@ -199,7 +199,8 @@ CLI 行为(实测):立即回执 `{"type":"control_response","response":{"subtype
 > **归因更正(T8.2,2026-09-01)**:本节原写「msys 的进程模型会断开父子链」,四变体对照实测表明**与 msys 无关**——
 > `bash → sleep` 只要中间层还活着就杀得干净;而**纯原生 `node → node`、中间层先退出**同样逃逸。
 > 真因是:`taskkill /T` 遍历的是**当下的父子表**,中间进程若在被杀前自己先退出,它的子进程会被系统
-> 重父化、脱离这棵树(taskkill 报退出码 128「目标不存在」)。msys 只是碰巧常触发「中间层先退出」这个形态。
+> 重父化、脱离这棵树——`/T` **沉默地不列出它**(对仍存活的顶层 taskkill 返回 0 并报告成功;退出码 128
+> 「目标不存在」只在对已不存在的 pid 下手时出现)。msys 只是碰巧常触发「中间层先退出」这个形态。
 > **已根治**:`packages/adapters/src/process/job-object.ts` 在 spawn 之后立即用 Windows Job Object 圈禁,
 > 按 Job 归属终止而非按父子表,重父化不改变 Job 归属。
 

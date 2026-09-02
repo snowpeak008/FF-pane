@@ -6,7 +6,8 @@
  * ════════════════════════════════════════════════════════════════════════════
  * 现行 `taskkill /PID <pid> /T /F` 遍历的是**当下的父子表**。若中间进程在被杀之前
  * 自己先退出，它的子进程会被系统重父化到别处——此刻那个孙进程已不在我们这棵树上，
- * `/T` 找不到它（taskkill 报退出码 128「目标不存在」），于是它作为孤儿继续跑。
+ * `/T` **沉默地不列出它**（对仍存活的顶层 taskkill 返回 0 并报告成功；128「目标不存在」
+ * 只在对已不存在的 pid 下手时出现），于是它作为孤儿继续跑。
  *
  * T8.2 开工前的四变体实测（本机 Windows 10.0.22631）：
  *   bash → sleep（中间层存活）           ☆ 未逃逸
@@ -19,6 +20,23 @@
  * Job Object 不看父子表，只看「谁被登记进了这个 Job」：进程一旦入 Job，其后代**自动**
  * 属于同一 Job（除非显式 breakaway，我们不开那个限制位），重父化不改变 Job 归属。
  * 故 `TerminateJobObject` 能带走 `/T` 带不走的那些。实测同一场景下确认有效。
+ *
+ * ════════════════════════════════════════════════════════════════════════════
+ * 与 libuv 全局 Job 的嵌套语义：关应用即清场（T8.2 验收发现，用户 2026-09-02 裁定为期望行为）
+ * ════════════════════════════════════════════════════════════════════════════
+ * libuv 在 Windows 上把每个非 detached 子进程放进一个**进程级全局 Job**
+ * （KILL_ON_JOB_CLOSE | SILENT_BREAKAWAY_OK | BREAKAWAY_OK）。T8.2 之前，CLI 的后代借该
+ * Job 的静默 breakaway **不在**任何 Job 内，FF-pane 退出时它们能活下来。本模块把 CLI
+ * 顶层再放进一个**不允许 breakaway** 的新 Job；按 Windows 嵌套 Job 规则「直接所属的 Job
+ * 不允许 breakaway，则子进程不从任何 Job 脱离」，CLI 的全部后代自此**同时留在 libuv
+ * 全局 Job 内**（验收方以 IsProcessInJob(h, NULL) 三变体实测）。后果两面：
+ *   - 崩溃兜底更全：即便本 Job 句柄已按设计 close()，FF-pane 主进程一退出（正常或崩溃），
+ *     CLI 留下的一切后代都被内核随 libuv 的 Job 收走；
+ *   - `close()` 那条「自然结束不牵连后台进程」的边界**仅在工作台存活期间成立**：用户关掉
+ *     FF-pane 时，本轮 CLI 起的开发服务器之类会被一并终止（T8.2 之前不会）。
+ * 裁定：无残留优先，「关应用即清场」是期望行为；close() 里摘 KILL_ON_JOB_CLOSE 的逻辑
+ * 保留——它仍是工作台存活期间「正常跑完不杀用户后台进程」的唯一保证。配套的会话续接
+ * 闭环另立工单 T8.2b。
  *
  * ════════════════════════════════════════════════════════════════════════════
  * 取舍：为什么引 koffi（经用户 2026-09-01 裁定）
@@ -51,11 +69,20 @@ export interface ProcessJob {
    * 为什么要刻意摘掉：本轮自然结束时，CLI 可能故意留了后台进程（Worker 的任务本身
    * 就可能是「起一个开发服务器再验证页面」）。取消要杀干净是一回事，正常跑完顺手
    * 把用户的后台进程杀了是另一回事，后者不在本单范围内，也不该静默发生。
+   *
+   * 这条「不牵连」**仅在工作台存活期间成立**：那些后台进程同时还留在 libuv 的全局
+   * Job 内（见文件头「嵌套语义」一节），FF-pane 退出时会被一并终止——用户裁定为期望行为。
    */
   readonly close: () => void;
 }
 
-/** 本模块不可用时的原因，供诊断日志（英文，check-i18n 约定）。 */
+/**
+ * 本模块不可用时的原因，供诊断日志（英文，check-i18n 约定）。
+ *
+ * 语义是「当前是否可用」而非「最近一次失败」：每次 `assignProcessToNewJob` 成功都会把它
+ * 清回 null（T8.2 验收登记——此前只在 koffi 首次加载成功时清，一次 OpenProcess 因目标
+ * 恰好已退出而失败后，即便之后每次 spawn 都圈禁成功，这里仍会一直报那条旧原因）。
+ */
 let unavailableReason: string | null = null;
 
 export function jobObjectUnavailableReason(): string | null {
@@ -185,6 +212,8 @@ export function assignProcessToNewJob(pid: number): ProcessJob | undefined {
     }
     // 进程句柄的使命到此为止（Job 已持有归属），提前还掉免得攥着一个多余句柄。
     api.CloseHandle(processHandle);
+    // 圈禁成立即「当前可用」，把此前可能残留的失败原因清掉
+    unavailableReason = null;
 
     let closed = false;
     return {
@@ -205,7 +234,8 @@ export function assignProcessToNewJob(pid: number): ProcessJob | undefined {
         closed = true;
         try {
           // 先摘掉 KILL_ON_JOB_CLOSE：本轮已收场，关句柄不该顺带杀掉 CLI 故意留下的
-          // 后台进程。摘不掉也只是回到「关句柄即终止」，不影响本轮正确性，故不检查返回值。
+          // 后台进程（仅在工作台存活期间成立，见文件头「嵌套语义」）。
+          // 摘不掉也只是回到「关句柄即终止」，不影响本轮正确性，故不检查返回值。
           const cleared = Buffer.alloc(EXTENDED_LIMIT_INFORMATION_SIZE);
           api.SetInformationJobObject(
             job,

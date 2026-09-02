@@ -23,9 +23,25 @@ npmRebuild: false
 # 应用源码只收 electron-vite 产物（out/main、out/preload、out/renderer）。
 # package.json 恒定收录；生产依赖（better-sqlite3 / i18next / react-i18next 及其传递依赖）
 # 由 electron-builder 的依赖收集器从仓库根 node_modules（pnpm hoisted 布局）解析收集，
-# 不走本 files 匹配器。
+# 不走本 files 匹配器——但 files 里的排除模式对收集到的依赖同样生效。
+#
+# koffi（T8.2 引入）的 npm 包把 C/C++ 源码、node-addon-api 头文件、文档与构建脚本一并发行。
+# 运行期真正需要的只有（v0.9.x 清债单逐文件核实，读 koffi/index.cjs 的 require 链）：
+#   index.cjs → src/koffi/index.cjs → src/koffi/src/static.cjs → @koromix/koffi-<platform>-<arch>
+# 即 koffi/{index,indirect}.{cjs,js}、package.json、src/koffi/{index,indirect}.{cjs,js}、
+# src/koffi/src/{static.cjs,static.js,trampolines.cjs}。**注意 src/ 不能整目录排除**——
+# 它同时装着运行期 JS 与 C++ 源码，只能按文件排。
+# 排除对象：doc/ lib/ vendor/ 三目录、cnoke.cjs（安装期构建脚本）、CMakeLists.txt、
+# src/koffi/src 下的 .hh/.inc/.def 头文件与 abi/ 汇编（.cc 已被 electron-builder 默认过滤）。
+# 排除前 asar 内 koffi 64 文件 941,157 B，排除后 13 文件（实测数字见 docs/开发进度.md §0）；
+# live-job-object.mjs 判据①专门验「排除之后 koffi 仍能从 app.asar 内加载」。
 files:
   - out/**
+  - "!node_modules/koffi/{doc,lib,vendor}/**"
+  - "!node_modules/koffi/cnoke.cjs"
+  - "!node_modules/koffi/src/koffi/CMakeLists.txt"
+  - "!node_modules/koffi/src/koffi/src/abi/**"
+  - "!node_modules/koffi/src/koffi/src/*.{cc,hh,inc,def}"
 
 asar: true
 # 原生 .node 无法从 asar 内 dlopen，必须解包到 app.asar.unpacked。

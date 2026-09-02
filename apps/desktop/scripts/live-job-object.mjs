@@ -14,7 +14,11 @@
  *   node apps/desktop/scripts/live-job-object.mjs
  *
  * 判据四条，全过才算通过：
- *   ① 打包产物里的 koffi 能加载（不是仓库 node_modules 里的那份）
+ *   ① 打包产物里的 koffi 能加载（不是仓库 node_modules 里的那份）——
+ *      **须核对 `require.resolve('koffi')` 的路径以 app.asar 为前缀**。release/ 在仓库树内，
+ *      asar 里若没有 koffi，Node 的向上解析会一路走到仓库根 node_modules/koffi 并照样成功，
+ *      只看「加载没抛」会假阳性（T8.2 验收 §5-7 登记，v0.9.x 清债单补上）。
+ *      electron-builder.yml 排除了 koffi 的源码/头文件/文档之后，这条同时证明「排除没伤到运行期 JS」。
  *   ② 能建 Job 并把进程圈进去
  *   ③ 被重父化、已脱离进程树的后台进程确实被 TerminateJobObject 带走
  *   ④ 对照：同一场景下 taskkill /T 带不走它（证明这条能力不是白加的）
@@ -93,14 +97,19 @@ if (!existsSync(electronExe)) {
 
 /**
  * 在**打包产物的 Electron** 里执行的脚本（ELECTRON_RUN_AS_NODE=1 走 Node 模式）。
- * 刻意从 app.asar.unpacked 里 require koffi —— 要验的就是那一份。
+ * 以 app.asar 内的 app 为解析基准按模块名 require koffi —— 要验的就是「asar 里那份 JS
+ * 壳 + 被解包到 app.asar.unpacked 的 .node」这条链路（布局见上方 appAsar 注释）。
  */
 const inAppScript = `
 const { createRequire } = require('node:module');
 const { spawn } = require('node:child_process');
 // 以 asar 内的 app 为解析基准按模块名 require —— 与产品运行时同一条路径
 const appRequire = createRequire(${JSON.stringify(join(appAsar, "index.js"))});
+// 判据①的路径核对：解析到的必须是 asar 里那份，而不是仓库根 node_modules 里的
+const koffiPath = appRequire.resolve('koffi');
 const koffi = appRequire('koffi');
+// 真正 dlopen 的 .node 应来自 @koromix/koffi-<platform>-<arch>（asarUnpack 解包目标）
+const nativePath = Object.keys(require.cache).find((k) => k.endsWith('koffi.node')) ?? null;
 const lib = koffi.load('kernel32.dll');
 const CreateJobObjectW = lib.func('void* CreateJobObjectW(void* a, const char16_t* n)');
 const AssignProcessToJobObject = lib.func('bool AssignProcessToJobObject(void* j, void* p)');
@@ -127,7 +136,7 @@ let orphanPid = 0;
 setTimeout(() => {
   orphanPid = Number(out.trim());
   console.log(JSON.stringify({
-    step: 'ready', koffiLoaded: true, assigned, topPid: top.pid, orphanPid,
+    step: 'ready', koffiLoaded: true, koffiPath, nativePath, assigned, topPid: top.pid, orphanPid,
   }));
   // 先让宿主用 taskkill /T 试一次（判据④），宿主再回来叫我们终止 Job
   process.stdin.once('data', () => {
@@ -190,7 +199,28 @@ if (ready === null) {
   child.kill();
   process.exit(1);
 }
-console.log(`[live-job] ✓ 判据① koffi 从 app.asar.unpacked 加载成功`);
+
+/**
+ * 判据①的路径核对。两个前缀都要成立：JS 壳解析自 app.asar 内，.node 来自 asarUnpack 的平台包。
+ * 路径分隔符统一成 / 再比，Electron 报的 asar 虚拟路径与 Node 的 require.cache 键都可能混用 \ 与 /。
+ */
+const normalizePath = (value) => String(value ?? "").replaceAll("\\", "/");
+const asarPrefix = `${normalizePath(join(appAsar, "node_modules", "koffi"))}/`;
+const koffiFromAsar = normalizePath(ready.koffiPath).startsWith(asarPrefix);
+const nativeFromPlatformPackage =
+  ready.nativePath !== null &&
+  normalizePath(ready.nativePath).includes("/node_modules/@koromix/koffi-") &&
+  normalizePath(ready.nativePath).startsWith(normalizePath(appAsar));
+console.log(
+  koffiFromAsar
+    ? `[live-job] ✓ 判据① koffi 从 app.asar 内加载成功（${ready.koffiPath}）`
+    : `[live-job] ✗ 判据① koffi 解析到了 asar 之外：${ready.koffiPath}（应以 ${asarPrefix} 为前缀；asar 里没有 koffi 时 Node 会向上解析到仓库 node_modules 并照样成功——这正是要防的假阳性）`,
+);
+console.log(
+  nativeFromPlatformPackage
+    ? `[live-job] ✓ 判据① .node 来自打包产物的平台包（${ready.nativePath}）`
+    : `[live-job] ✗ 判据① .node 路径不在预期位置：${ready.nativePath}`,
+);
 console.log(`[live-job] ✓ 判据② AssignProcessToJobObject = ${ready.assigned}`);
 
 const { topPid, orphanPid } = ready;
@@ -229,7 +259,13 @@ if (!goneAfterJob) {
 }
 child.kill();
 
-const allPass = ready.koffiLoaded && ready.assigned && survivedTaskkill && goneAfterJob;
+const allPass =
+  ready.koffiLoaded &&
+  koffiFromAsar &&
+  nativeFromPlatformPackage &&
+  ready.assigned &&
+  survivedTaskkill &&
+  goneAfterJob;
 console.log(
   allPass
     ? "\n[live-job] ALL PASS：打包产物里圈禁真实可用，且确实解决了 taskkill /T 解决不了的那类残留"

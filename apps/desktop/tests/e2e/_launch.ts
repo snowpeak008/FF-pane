@@ -8,6 +8,11 @@
  *
  * 语言固定：首窗加载后写入 localStorage 的 UI 语言键并 reload，使 i18n 以 en-US 初始化，
  * 让选择器（按钮英文名）稳定，无需在生产代码里散布 data-testid。
+ *
+ * 系统语言固定（可选 `lang`）：Electron 的 `--lang=<tag>` 开关会覆盖 `app.getLocale()`
+ * （本机实测：系统 zh-CN 下 `--lang=en-US` → `app.getLocale() === "en-US"`），从而固定
+ * `app:get-locale` 的返回。要断言「选跟随系统后界面当场变成系统语言」这类与跑测机器
+ * 语言相关的结论时用它，否则断言只能弱化为「是一种受支持语言」。
  */
 
 import { mkdtempSync, rmSync } from "node:fs";
@@ -41,11 +46,16 @@ function stringEnv(source: NodeJS.ProcessEnv): Record<string, string> {
   return out;
 }
 
+export interface LaunchOptions {
+  /** 固定 Electron 报告的系统语言（BCP 47，如 "zh-CN"），经 `--lang` 开关覆盖 `app.getLocale()`。 */
+  readonly lang?: string;
+}
+
 /**
  * 启动构建产物（out/main/index.js，经 package.json main 解析），返回首窗 Page。
  * 调用方负责在 finally 中 await cleanup()。
  */
-export async function launchApp(): Promise<LaunchedApp> {
+export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedApp> {
   const dataRoot = mkdtempSync(join(tmpdir(), "ffpane-e2e-data-"));
   const userDataDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-udata-"));
 
@@ -58,6 +68,7 @@ export async function launchApp(): Promise<LaunchedApp> {
     args: [
       ".",
       `--user-data-dir=${userDataDir}`,
+      ...(options.lang !== undefined ? [`--lang=${options.lang}`] : []),
       // CI 容器（Ubuntu）无 SUID sandbox，需显式关闭以启动 Chromium。
       ...(process.platform === "linux" ? ["--no-sandbox"] : []),
     ],

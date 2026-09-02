@@ -4,6 +4,7 @@
  */
 import i18next from "i18next";
 import { initReactI18next } from "react-i18next";
+import { type ChangeLanguage, createLanguageChanger } from "./change-language";
 import {
   type LanguageSetting,
   resolveLanguageSetting,
@@ -79,19 +80,28 @@ export async function initI18n(): Promise<void> {
   });
 }
 
-/**
- * 切换界面语言设置：立即生效（react-i18next 触发重渲染）并持久化。
- *
- * 选「跟随系统」时要现问一次系统语言再切——此刻不能只把键删掉了事：
- * 用户从 en-US 切回跟随系统，界面必须当场变成系统语言，而不是等下次启动。
- */
-export async function changeUiLanguage(setting: LanguageSetting): Promise<void> {
+function writeSavedLanguage(setting: LanguageSetting): void {
   try {
     window.localStorage.setItem(STORAGE_KEY, setting);
   } catch (thrown) {
     console.error("[renderer] language setting write failed:", thrown);
   }
-  const language =
-    setting === "system" ? resolveUiLanguage(null, await fetchSystemLocale()) : setting;
-  await i18next.changeLanguage(language);
 }
+
+/**
+ * 切换界面语言设置：立即生效（react-i18next 触发重渲染）并持久化。
+ *
+ * 选「跟随系统」时要现问一次系统语言再切——此刻不能只把键删掉了事：
+ * 用户从 en-US 切回跟随系统，界面必须当场变成系统语言，而不是等下次启动。
+ *
+ * 快速连续切换的竞态（T8.1 验收登记）由 change-language.ts 的序号守卫处理：等 IPC
+ * 期间用户又选了别的，过期的那次不再 changeLanguage（返回 false）。这里只做装配——
+ * 三件副作用（localStorage / IPC / i18next）注入进去，时序逻辑本身可在 node 环境单测。
+ */
+export const changeUiLanguage: ChangeLanguage = createLanguageChanger({
+  persist: writeSavedLanguage,
+  fetchSystemLocale,
+  applyLanguage: async (language) => {
+    await i18next.changeLanguage(language);
+  },
+});
