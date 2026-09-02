@@ -574,6 +574,12 @@
         "context_rebuild": "Context rebuild"
       }
     },
+    "replay": {
+      "banner": "Resumed last session · {{kind}}",
+      "newSession": "New session",
+      "interrupted": "This turn was interrupted because the app quit",
+      "skippedLines": "{{count}} unreadable line(s) in the transcript were skipped."
+    },
     "generatePlan": "Generate plan",
     "planGenerated": "Plan v{{version}} generated",
     "viewPlan": "View plan",

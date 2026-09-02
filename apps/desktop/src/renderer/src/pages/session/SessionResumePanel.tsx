@@ -6,6 +6,7 @@ import { Button } from "../../components/ui/Button";
 import { useInvokeQuery } from "../../ipc/useInvokeQuery";
 import { formatRelativeTime } from "../../lib/time";
 import { useSessionStore } from "../../stores/session";
+import { predictResumeKind } from "./resume-view";
 
 export interface SessionResumePanelProps {
   readonly projectRoot: string;
@@ -52,7 +53,8 @@ export function SessionResumePanel({
         <ul className="flex flex-col gap-1">
           {state.data.map((session) => {
             const isActive = session.id === activeSessionId;
-            const kindKey = session.native !== undefined ? "native" : "context_rebuild";
+            // 预判逻辑唯一来源：resume-view.ts（续接横幅共用同一份，T8.2b-b）
+            const kindKey = predictResumeKind(session);
             return (
               <li
                 key={session.id}

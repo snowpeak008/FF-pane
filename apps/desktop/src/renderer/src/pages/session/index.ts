@@ -12,5 +12,8 @@ export {
   type KnowledgeInsertDialogProps,
 } from "./KnowledgeInsertDialog";
 export { MessageStream } from "./MessageStream";
+export { type PredictedResumeKind, predictResumeKind } from "./resume-view";
 export { SessionPage } from "./SessionPage";
+export { SessionReplayBanner } from "./SessionReplayBanner";
 export { SessionStatusBar } from "./SessionStatusBar";
+export { mapTranscriptToMessages } from "./transcript-view";

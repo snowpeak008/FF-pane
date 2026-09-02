@@ -574,6 +574,12 @@
         "context_rebuild": "上下文重建"
       }
     },
+    "replay": {
+      "banner": "已续接上次会话 · {{kind}}",
+      "newSession": "新建会话",
+      "interrupted": "本轮因应用退出被中断",
+      "skippedLines": "回放本中有 {{count}} 行无法读取，未显示。"
+    },
     "generatePlan": "生成计划",
     "planGenerated": "已生成计划 v{{version}}",
     "viewPlan": "查看计划",

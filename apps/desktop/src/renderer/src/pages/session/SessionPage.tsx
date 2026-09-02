@@ -8,6 +8,7 @@ import { LoadingState } from "../../components/states/LoadingState";
 import { Button } from "../../components/ui/Button";
 import { useActiveProject } from "../../hooks/useActiveProject";
 import { useRoleProfile } from "../../hooks/useRoleProfile";
+import { invokeQuery } from "../../ipc/query";
 import { PageHeader } from "../../layout/PageHeader";
 import { cancelSessionTurn, startSessionTurn } from "../../lib/session-run";
 import { useSessionStore } from "../../stores/session";
@@ -17,14 +18,44 @@ import { Composer } from "./Composer";
 import { HandoffDialog } from "./HandoffDialog";
 import { MessageStream } from "./MessageStream";
 import { PermissionBanner } from "./PermissionBanner";
+import { predictResumeKind } from "./resume-view";
+import { SessionReplayBanner } from "./SessionReplayBanner";
 import { SessionResumePanel } from "./SessionResumePanel";
 import { SessionStatusBar } from "./SessionStatusBar";
+import { mapTranscriptToMessages } from "./transcript-view";
+
+/**
+ * 回放一条会话：读其回放本尾部 → 映射为历史消息 → 载入 store（含横幅上下文）。
+ * 自动续接 effect 与恢复列表的「续接」共用（选中即看到那份对话，不是只改个目标 ID）。
+ * 读失败返回 false，调用方决定是否提示（自动路径静默保持空态，不打扰）。
+ */
+async function replaySession(projectRoot: string, session: SessionRecord): Promise<boolean> {
+  const transcript = await invokeQuery("sessions:transcript", {
+    projectRoot,
+    sessionId: session.id,
+  });
+  if (transcript.status === "error") {
+    return false;
+  }
+  useSessionStore.getState().loadReplay({
+    projectRoot,
+    replay: {
+      sessionId: session.id,
+      predictedKind: predictResumeKind(session),
+      skippedLines: transcript.data.skippedLines,
+    },
+    messages: mapTranscriptToMessages(transcript.data.entries),
+  });
+  return true;
+}
 
 /**
  * 会话页（W3.4 / §11.2「我正在和谁讨论什么」）：状态条 + 消息流 + 权限横幅 + 输入区。
  *
- * 以当前项目为作用域。工作台不持久化会话历史（§10.2 规则 3）——消息由主进程 session:event
- * 流式喂入 session store 的 streamingTurn（全局 SessionEventBridge 唯一订阅）。
+ * 以当前项目为作用域。消息有两个来源（T8.2b-b）：历史消息（transcript 回放 + 已结束轮
+ * 的固化，session store 的 historyMessages）与在飞轮的流式缓存（streamingTurn，由全局
+ * SessionEventBridge 唯一订阅喂入）。进入页面时若无在飞轮，自动经 sessions:latest 选中
+ * 最近会话并回放其回放本（§10.2 规则 3 修订版）；被中断轮次显式标注。
  * T4.2 接通：输入区发送 = 发起一轮 Planner 讨论；任务页派发的 Worker 轮亦在此呈现与审批。
  */
 export function SessionPage(): ReactElement {
@@ -42,10 +73,48 @@ export function SessionPage(): ReactElement {
   const setActiveSessionId = useSessionStore((s) => s.setActiveSessionId);
   const endedTurnSeq = useSessionStore((s) => s.endedTurnSeq);
   const lastEndedTurn = useSessionStore((s) => s.lastEndedTurn);
+  const historyMessages = useSessionStore((s) => s.historyMessages);
+  const replay = useSessionStore((s) => s.replay);
+  const autoResumeDoneRoot = useSessionStore((s) => s.autoResumeDoneRoot);
   const [cancelling, setCancelling] = useState(false);
   // 跨 Agent 迁移（T7.1，§10.4）：对话框只在打开时挂载——交接包是"此刻的项目现状"快照，
   // 常驻会让它在项目推进后悄悄过期。
   const [handoffOpen, setHandoffOpen] = useState(false);
+
+  // 自动续接（T8.2b-b）：进入会话页且该项目尚未处理过时，取最近会话并回放其对话。
+  // 无历史会话时只记「已处理」保持空态。in-flight 守卫（loadReplay 内亦有）：用户已在
+  // 聊的现场绝不被回放覆盖。effect 期间响应到达时以 store 最新态为准（getState），
+  // 避免闭包里的陈旧 streamingTurn。
+  const projectRoot = entry?.rootPath ?? null;
+  useEffect(() => {
+    if (projectRoot === null || autoResumeDoneRoot === projectRoot) {
+      return;
+    }
+    if (useSessionStore.getState().streamingTurn !== null) {
+      return;
+    }
+    // 先清掉上一个项目残留的会话态（历史消息 / 横幅 / 当前会话都是项目级的），
+    // 再决定本项目回放什么——否则切到无会话的项目会看到上个项目的对话。
+    useSessionStore.getState().startNewSession();
+    let stale = false;
+    void (async () => {
+      const latest = await invokeQuery("sessions:latest", { projectRoot });
+      if (stale || latest.status === "error") {
+        return;
+      }
+      if (latest.data === null) {
+        useSessionStore.getState().markAutoResumeDone(projectRoot);
+        return;
+      }
+      const session = latest.data;
+      if (!stale) {
+        await replaySession(projectRoot, session);
+      }
+    })();
+    return () => {
+      stale = true;
+    };
+  }, [projectRoot, autoResumeDoneRoot]);
 
   // 计划生成轮结束：toast「已生成计划 vN」+ 一键跳计划页。以 endedTurnSeq 单调递增触发，
   // 仅处理一次（seq 去重）。planVersion 缺席 = 普通讨论轮，不打扰。
@@ -63,18 +132,28 @@ export function SessionPage(): ReactElement {
     }
   }, [endedTurnSeq, lastEndedTurn, navigate, t]);
 
-  // 目前唯一的消息源是流式缓存；无在飞轮次时为空。
+  // 消息合流（T8.2b-b）：历史消息（回放 + 固化）在前，在飞轮的流式缓存追加在后。
+  // 去重以 turnId：历史里已有本轮 assistant 条目（固化先于本渲染帧）就不再从流式缓存
+  // 派生第二份；流式条目 id 与固化后的历史条目同构（`${turnId}:assistant`），切换不重挂。
+  const history: readonly ChatMessageView[] = historyMessages.map((m) => ({
+    id: m.id,
+    role: m.role,
+    text: m.text,
+    ...(m.interrupted === true ? { interrupted: true } : {}),
+  }));
   const messages: readonly ChatMessageView[] =
-    streamingTurn !== null
+    streamingTurn !== null &&
+    !historyMessages.some((m) => m.turnId === streamingTurn.turnId && m.role === "assistant")
       ? [
+          ...history,
           {
-            id: streamingTurn.turnId,
+            id: `${streamingTurn.turnId}:assistant`,
             role: "assistant",
             text: streamingTurn.text,
             streaming: !streamingTurn.done,
           },
         ]
-      : [];
+      : history;
 
   const busy = turnStatus === "running" || turnStatus === "awaiting-permission";
 
@@ -105,10 +184,18 @@ export function SessionPage(): ReactElement {
     });
   };
 
-  // 从恢复列表选中一条历史会话作为续接目标：下一次发言即以该会话续接。
+  // 从恢复列表选中一条历史会话作为续接目标：回放那份对话（T8.2b-b：选中即看到内容），
+  // 下一次发言即以该会话续接。回放本读不出来时退回"只设目标"——续接能力不依赖回放。
   const onResume = (session: SessionRecord): void => {
-    setActiveSessionId(session.id);
-    toast.info(t("session.resume.readyToast"));
+    if (entry === null) {
+      return;
+    }
+    void replaySession(entry.rootPath, session).then((ok) => {
+      if (!ok) {
+        setActiveSessionId(session.id);
+      }
+      toast.info(t("session.resume.readyToast"));
+    });
   };
 
   const onCancel = (): void => {
@@ -169,7 +256,14 @@ export function SessionPage(): ReactElement {
               disabled={plannerProfile === null}
             />
           ) : null}
+          <SessionReplayBanner />
           <MessageStream messages={messages} emptyMessage={t("session.empty")} />
+          {/* 坏行如实标注（§1.4 红线 3）：读得出来的都在上面，读不出来的不假装不存在 */}
+          {replay !== null && replay.sessionId === activeSessionId && replay.skippedLines > 0 ? (
+            <p className="shrink-0 px-4 py-1 text-center text-[11px] text-fg-subtle">
+              {t("session.replay.skippedLines", { count: replay.skippedLines })}
+            </p>
+          ) : null}
           <PermissionBanner />
           {busy ? (
             <div className="shrink-0 border-t border-border px-3 py-2">

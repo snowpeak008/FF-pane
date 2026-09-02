@@ -67,6 +67,12 @@ export type RepairAction =
   | "task-only"
   /** Worker 轮：任务已不是 running，未动任务。 */
   | "task-already-settled"
+  /**
+   * Worker 轮：铸 Run 失败后连 failTask 落盘也失败——任务可能仍停在 running。
+   * 与 task-already-settled 语义相反（那是「无需动任务」，这是「动不了任务」），
+   * 单列取值让诊断者按字面即可判断现场（错误详情在 issues / 日志）。
+   */
+  | "task-save-failed"
   /** Worker 轮：任务记录不存在。 */
   | "task-missing"
   /** Planner / 审查轮：只补回放本。 */
@@ -165,7 +171,7 @@ export async function repairInterruptedTurns(
           const settled = await attempt(issues, marker.turnId, () =>
             deps.saveTask(layout, failTask(task)),
           );
-          action = settled ? "task-only" : "task-already-settled";
+          action = settled ? "task-only" : "task-save-failed";
           if (!settled) {
             log(`[repair] turn ${marker.turnId}: could not fail task ${taskId}`);
           }

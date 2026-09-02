@@ -38,7 +38,13 @@ export async function startSessionTurn(params: {
   const turnId = newTurnId();
   const role = params.input.kind === "worker-task" ? "worker" : "planner";
   const store = useSessionStore.getState();
-  store.startLocalTurn(turnId, role);
+  // 用户可见输入进历史消息（T8.2b-b）：讨论/计划补充指令是用户敲的那段话，与主进程
+  // transcript 的 user_message 同语义；worker/审查轮的"输入"是任务合同，任务页已可见，不重复。
+  const userText =
+    params.input.kind === "planner-message" || params.input.kind === "planner-plan"
+      ? params.input.text
+      : undefined;
+  store.startLocalTurn(turnId, role, userText);
 
   const settled = await invokeQuery("session:start", {
     turnId,

@@ -18,6 +18,8 @@ export interface ChatMessageView {
   readonly role: ChatRole;
   readonly text: string;
   readonly streaming?: boolean;
+  /** 该轮被中断（T8.2b-b 回放标注：应用退出时没说完），正文下方显式提示。 */
+  readonly interrupted?: boolean;
 }
 
 const COPIED_MS = 2_000;
@@ -146,6 +148,12 @@ export function ChatMessage({ message }: ChatMessageProps): ReactElement {
             aria-hidden
             className="inline-block h-4 w-1.5 animate-pulse bg-fg-muted align-text-bottom"
           />
+        ) : null}
+        {/* 中断标注（T8.2b-b）：中性色而非危险色——不是 Agent 出错，是应用退出打断了它 */}
+        {message.interrupted === true ? (
+          <p className="rounded bg-surface-sunken px-2 py-1 text-xs text-fg-muted">
+            {t("session.replay.interrupted")}
+          </p>
         ) : null}
       </div>
     </div>

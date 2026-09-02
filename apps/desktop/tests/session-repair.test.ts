@@ -324,6 +324,36 @@ describe("repairInterruptedTurns", () => {
     expect(remaining.markers).toEqual([]);
     expect(remaining.issues).toHaveLength(1);
   });
+
+  it("双重失败（铸 Run 失败且 failTask 落盘也失败）→ action 如实记 task-save-failed，不冒充已结清", async () => {
+    await saveTask(layout, task({ status: "running" }));
+    const m = marker({ role: "worker", taskId: "task-1" as TaskId });
+    await writeInflightMarker(layout, m);
+    const logs: string[] = [];
+
+    const report = await repairInterruptedTurns(
+      layout,
+      realDeps({
+        persistRun: async () => {
+          throw new Error("disk full");
+        },
+        saveTask: async () => {
+          throw new Error("disk still full");
+        },
+        log: (l) => logs.push(l),
+      }),
+    );
+
+    expect(report.repaired).toEqual([
+      { turnId: m.turnId, role: "worker", action: "task-save-failed" },
+    ]);
+    // 两次失败都进 issues（诊断现场齐全）
+    expect(report.issues.filter((i) => i.ref === m.turnId).length).toBeGreaterThanOrEqual(2);
+    expect(logs.some((l) => l.includes("could not fail task"))).toBe(true);
+    // 任务确实还停在 running——action 字面与现场一致，正是本取值存在的意义
+    const reloaded = await loadTask(layout, "task-1" as TaskId);
+    expect(reloaded.ok && reloaded.value.status).toBe("running");
+  });
 });
 
 describe("createProjectRepairer", () => {
