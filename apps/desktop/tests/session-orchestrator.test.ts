@@ -2111,6 +2111,43 @@ describe("T8.3b 并发受理与互斥拒绝", () => {
     await orch.prepareForQuit();
   });
 
+  it("释放时序：并行事实的释放先于 end 事件 publish（T8.3b 验收 §5 缺口补钉）", async () => {
+    // 渲染层以 end 事件为「重取 sessions:active-turns」的触发器：若释放晚于 publish
+    //（如留在 drain 的 finally），重取会拿到含死轮的快照且再无后续触发器纠正。
+    // 常规用例经 await flush 只能观察终态，钉不住这个窗口——故在注入的 publish
+    // 回调里同步查表：end 到达的瞬间该轮必须已不在登记表。
+    // 反向自证：把 finalize 入口的 releaseParallelFacts 挪回 publish 之后，本用例即红。
+    const controllers: ScriptController[] = [];
+    const h = makeHarness([], { adapter: scriptableAdapter(controllers), task: TASK_APP });
+    const inflightAtEndPublish: (readonly string[])[] = [];
+    let orchRef: ReturnType<typeof createSessionOrchestrator> | undefined;
+    const deps: SessionOrchestratorDeps = {
+      ...h.deps,
+      publish: (e) => {
+        h.published.push(e);
+        if (e.kind === "end") {
+          inflightAtEndPublish.push((orchRef?.listActiveTurns("/proj") ?? []).map((r) => r.turnId));
+        }
+      },
+    };
+    const orch = createSessionOrchestrator(deps);
+    orchRef = orch;
+
+    const ack = await orch.start(workerReq("tA", "task-app"));
+    expect(ack.accepted).toBe(true);
+    const a = controllers[0];
+    if (a === undefined) {
+      throw new Error("tA 该已 startTurn");
+    }
+    a.push({ kind: "text", content: "ok", final: true, channel: "answer" });
+    a.push({ kind: "end", reason: "completed" });
+    a.close();
+    await flush();
+
+    // end 恰 publish 一次，且那一瞬间登记表已不含 tA（释放先于 publish）
+    expect(inflightAtEndPublish).toEqual([[]]);
+  });
+
   it("僵尸注销根治：cancel 后事件流悬挂 → 宽限期后并行事实强制释放，相交任务可派发（T8.3a 验收 §2-2）", async () => {
     const { orch } = parallelHarness([TASK_APP, TASK_SUB], { cancelEndsStream: false });
 
