@@ -17,7 +17,9 @@ function newTurnId(): string {
 }
 
 /**
- * 发起一轮会话执行。返回受理结果；未受理时已把该轮标记为失败（页面据 store 呈现）。
+ * 发起一轮会话执行。返回受理结果；未受理 / IPC 失败时该轮已从在飞表移除
+ * （T8.3b：被拒轮不留占位），可见反馈由调用方据返回值 toast——拒绝原因在
+ * `ack.reason`（互斥拒绝另有 `ack.conflicts` 明细），IPC 错误在 `errorMessage`。
  */
 export async function startSessionTurn(params: {
   readonly projectRoot: string;
@@ -34,7 +36,12 @@ export async function startSessionTurn(params: {
    * （同时传入时 sessionId 被忽略，新 Agent 续不上旧 Agent 的会话）。
    */
   readonly handoffText?: string;
-}): Promise<{ readonly turnId: string; readonly ack: StartSessionAck | null }> {
+}): Promise<{
+  readonly turnId: string;
+  readonly ack: StartSessionAck | null;
+  /** IPC 层错误原文（ack === null 时给出）。 */
+  readonly errorMessage?: string;
+}> {
   const turnId = newTurnId();
   const role = params.input.kind === "worker-task" ? "worker" : "planner";
   const store = useSessionStore.getState();
@@ -56,7 +63,7 @@ export async function startSessionTurn(params: {
   });
   if (settled.status === "error") {
     store.failLocalTurn(turnId, settled.error.message);
-    return { turnId, ack: null };
+    return { turnId, ack: null, errorMessage: settled.error.message };
   }
   if (!settled.data.accepted) {
     store.failLocalTurn(turnId, settled.data.reason);
@@ -64,13 +71,13 @@ export async function startSessionTurn(params: {
   return { turnId, ack: settled.data };
 }
 
-/** 回执一条权限请求，并清空本地待批准态。 */
+/** 回执一条权限请求，并清空该轮的本地待批准态（多轮并发时按 turnId 路由，T8.3b）。 */
 export async function respondSessionPermission(params: {
   readonly turnId: string;
   readonly requestId: string;
   readonly decision: "allow" | "deny";
 }): Promise<void> {
-  useSessionStore.getState().clearPendingPermission();
+  useSessionStore.getState().clearPendingPermission(params.turnId);
   await invokeQuery("session:respond-permission", params);
 }
 

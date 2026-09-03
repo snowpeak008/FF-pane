@@ -547,7 +547,8 @@
       "plain": "code"
     },
     "turnFailed": "Turn failed",
-    "turnInProgress": "A turn is already in progress.",
+    "startRejected": "Turn was not started",
+    "turnInProgress": "A turn is already in progress in this session.",
     "noPlannerProfile": "No Planner profile configured. Add one in Settings.",
     "cancelTurn": "Cancel",
     "permissionTitle": "Permission requested",
@@ -649,6 +650,21 @@
     "retry": "Retry",
     "noWorkerProfile": "No Worker profile configured. Add one in Settings.",
     "dispatchError": "Dispatch failed",
+    "parallel": {
+      "activeTitle": "Turns in flight",
+      "startedAt": "started {{time}}",
+      "writes": "writes: {{paths}}",
+      "readOnly": "read-only (no write scope held)",
+      "rejectedTitle": "Task {{taskId}} was rejected for parallel run: write scopes overlap",
+      "conflictLine": "This task's \"{{candidatePath}}\" and in-flight task {{inflightId}}'s \"{{inflightPath}}\" {{relation}}",
+      "relation": {
+        "identical": "point to the same scope",
+        "containment": "are nested (one is a path prefix of the other)",
+        "may-overlap": "cannot be proven disjoint (conservative glob check; narrow the pattern to lift it)"
+      },
+      "retryHint": "Retry once the overlapping in-flight turn finishes.",
+      "retry": "Retry dispatch"
+    },
     "review": {
       "start": "Review",
       "again": "Review again",

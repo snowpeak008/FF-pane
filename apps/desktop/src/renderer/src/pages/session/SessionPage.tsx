@@ -11,7 +11,7 @@ import { useRoleProfile } from "../../hooks/useRoleProfile";
 import { invokeQuery } from "../../ipc/query";
 import { PageHeader } from "../../layout/PageHeader";
 import { cancelSessionTurn, startSessionTurn } from "../../lib/session-run";
-import { useSessionStore } from "../../stores/session";
+import { currentSessionTurns, sessionStatusView, useSessionStore } from "../../stores/session";
 import { NoActiveProject } from "../NoActiveProject";
 import type { ChatMessageView } from "./ChatMessage";
 import { Composer } from "./Composer";
@@ -53,10 +53,17 @@ async function replaySession(projectRoot: string, session: SessionRecord): Promi
  * 会话页（W3.4 / §11.2「我正在和谁讨论什么」）：状态条 + 消息流 + 权限横幅 + 输入区。
  *
  * 以当前项目为作用域。消息有两个来源（T8.2b-b）：历史消息（transcript 回放 + 已结束轮
- * 的固化，session store 的 historyMessages）与在飞轮的流式缓存（streamingTurn，由全局
+ * 的固化，session store 的 historyMessages）与在飞轮的流式缓存（activeTurns，由全局
  * SessionEventBridge 唯一订阅喂入）。进入页面时若无在飞轮，自动经 sessions:latest 选中
  * 最近会话并回放其回放本（§10.2 规则 3 修订版）；被中断轮次显式标注。
  * T4.2 接通：输入区发送 = 发起一轮 Planner 讨论；任务页派发的 Worker 轮亦在此呈现与审批。
+ *
+ * 多轮并发（T8.3b）：本页仍是**单会话视图**——只渲染当前会话的在飞轮，多条在飞轮按
+ * 开始序追加在历史之后（时间序交错：各轮的用户输入在发起时已按序进历史，其 assistant
+ * 流式条目跟在后面；不做按轮分组——单会话内并发轮极少见（Composer 在飞即禁发），
+ * 为它引入分组容器只会让常态的单轮阅读多一层框）。busy = 当前会话有在飞轮
+ * （sessionBusy）：别的会话的并发 Worker 轮不锁本会话的输入。权限横幅跨会话列出
+ * 全部待批请求（PermissionBanner 注释）。
  */
 export function SessionPage(): ReactElement {
   const { t } = useTranslation();
@@ -64,11 +71,7 @@ export function SessionPage(): ReactElement {
   const { profile: plannerProfile, loading: profileLoading } = useRoleProfile("planner");
 
   const navigate = useNavigate();
-  const streamingTurn = useSessionStore((s) => s.streamingTurn);
-  const turnRole = useSessionStore((s) => s.turnRole);
-  const turnModel = useSessionStore((s) => s.turnModel);
-  const turnStatus = useSessionStore((s) => s.turnStatus);
-  const turnResumeKind = useSessionStore((s) => s.turnResumeKind);
+  const activeTurns = useSessionStore((s) => s.activeTurns);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const setActiveSessionId = useSessionStore((s) => s.setActiveSessionId);
   const endedTurnSeq = useSessionStore((s) => s.endedTurnSeq);
@@ -76,6 +79,7 @@ export function SessionPage(): ReactElement {
   const historyMessages = useSessionStore((s) => s.historyMessages);
   const replay = useSessionStore((s) => s.replay);
   const autoResumeDoneRoot = useSessionStore((s) => s.autoResumeDoneRoot);
+  const lastEndedView = useSessionStore((s) => s.lastEndedView);
   const [cancelling, setCancelling] = useState(false);
   // 跨 Agent 迁移（T7.1，§10.4）：对话框只在打开时挂载——交接包是"此刻的项目现状"快照，
   // 常驻会让它在项目推进后悄悄过期。
@@ -84,13 +88,13 @@ export function SessionPage(): ReactElement {
   // 自动续接（T8.2b-b）：进入会话页且该项目尚未处理过时，取最近会话并回放其对话。
   // 无历史会话时只记「已处理」保持空态。in-flight 守卫（loadReplay 内亦有）：用户已在
   // 聊的现场绝不被回放覆盖。effect 期间响应到达时以 store 最新态为准（getState），
-  // 避免闭包里的陈旧 streamingTurn。
+  // 避免闭包里的陈旧在飞表。
   const projectRoot = entry?.rootPath ?? null;
   useEffect(() => {
     if (projectRoot === null || autoResumeDoneRoot === projectRoot) {
       return;
     }
-    if (useSessionStore.getState().streamingTurn !== null) {
+    if (useSessionStore.getState().activeTurns.size > 0) {
       return;
     }
     // 先清掉上一个项目残留的会话态（历史消息 / 横幅 / 当前会话都是项目级的），
@@ -132,30 +136,42 @@ export function SessionPage(): ReactElement {
     }
   }, [endedTurnSeq, lastEndedTurn, navigate, t]);
 
-  // 消息合流（T8.2b-b）：历史消息（回放 + 固化）在前，在飞轮的流式缓存追加在后。
+  // 消息合流（T8.2b-b → T8.3b 多轮）：历史消息（回放 + 固化）在前，当前会话的在飞轮
+  // 按开始序追加在后（时间序交错：各轮的用户输入在发起时已按序进历史）。
   // 去重以 turnId：历史里已有本轮 assistant 条目（固化先于本渲染帧）就不再从流式缓存
   // 派生第二份；流式条目 id 与固化后的历史条目同构（`${turnId}:assistant`），切换不重挂。
+  const sessionTurns = currentSessionTurns(activeTurns, activeSessionId);
   const history: readonly ChatMessageView[] = historyMessages.map((m) => ({
     id: m.id,
     role: m.role,
     text: m.text,
     ...(m.interrupted === true ? { interrupted: true } : {}),
   }));
-  const messages: readonly ChatMessageView[] =
-    streamingTurn !== null &&
-    !historyMessages.some((m) => m.turnId === streamingTurn.turnId && m.role === "assistant")
-      ? [
-          ...history,
-          {
-            id: `${streamingTurn.turnId}:assistant`,
-            role: "assistant",
-            text: streamingTurn.text,
-            streaming: !streamingTurn.done,
-          },
-        ]
-      : history;
+  const streamingMessages: readonly ChatMessageView[] = sessionTurns
+    .filter(
+      (turn) => !historyMessages.some((m) => m.turnId === turn.turnId && m.role === "assistant"),
+    )
+    .map((turn) => ({
+      id: `${turn.turnId}:assistant`,
+      role: "assistant" as const,
+      text: turn.text,
+      streaming: true,
+    }));
+  const messages: readonly ChatMessageView[] = [...history, ...streamingMessages];
 
-  const busy = turnStatus === "running" || turnStatus === "awaiting-permission";
+  // busy = 当前会话有在飞轮（T8.3b 语义）：别的会话的并发轮不禁用本会话输入
+  const busy = sessionTurns.length > 0;
+  const statusView = sessionStatusView(activeTurns, activeSessionId, lastEndedView);
+
+  // 发起被拒 / IPC 失败时 toast 提示（T8.3b）：被拒轮从在飞表移除、不留"已结束"占位，
+  // 拒绝原因（含并行互斥）须有一条可见反馈——此前的 turnError 单值随多轮改造移除，改 toast。
+  const toastIfRejected = (settled: Awaited<ReturnType<typeof startSessionTurn>>): void => {
+    const description =
+      settled.ack !== null && !settled.ack.accepted ? settled.ack.reason : settled.errorMessage;
+    if (description !== undefined) {
+      toast.error(t("session.startRejected"), { description });
+    }
+  };
 
   const onSend = (text: string, directExecute: boolean): void => {
     if (entry === null || plannerProfile === null) {
@@ -168,7 +184,7 @@ export function SessionPage(): ReactElement {
       input: { kind: "planner-message", text, ...(directExecute ? { directExecute: true } : {}) },
       // 有当前会话 = 续接（原生恢复 / 上下文重建）；无 = 开新会话（T4.3）
       ...(activeSessionId !== null ? { sessionId: activeSessionId } : {}),
-    });
+    }).then(toastIfRejected);
   };
 
   // 生成计划（T4.6，§12「出计划」）：据当前讨论发起一轮 planner-plan（续接当前会话以复用上下文）。
@@ -181,7 +197,7 @@ export function SessionPage(): ReactElement {
       profileId: plannerProfile.id,
       input: { kind: "planner-plan" },
       ...(activeSessionId !== null ? { sessionId: activeSessionId } : {}),
-    });
+    }).then(toastIfRejected);
   };
 
   // 从恢复列表选中一条历史会话作为续接目标：回放那份对话（T8.2b-b：选中即看到内容），
@@ -198,12 +214,16 @@ export function SessionPage(): ReactElement {
     });
   };
 
+  // 取消当前会话的全部在飞轮（并发时通常只有一条——Composer 在飞即禁发，
+  // 多条只会来自任务页对同一会话的续接派发；一键全取消与"取消"字面一致）。
   const onCancel = (): void => {
-    if (streamingTurn === null) {
+    if (sessionTurns.length === 0) {
       return;
     }
     setCancelling(true);
-    void cancelSessionTurn(streamingTurn.turnId).finally(() => setCancelling(false));
+    void Promise.all(sessionTurns.map((turn) => cancelSessionTurn(turn.turnId))).finally(() =>
+      setCancelling(false),
+    );
   };
 
   const composerDisabledReason =
@@ -224,10 +244,10 @@ export function SessionPage(): ReactElement {
         <>
           <SessionStatusBar
             projectName={entry.name}
-            role={turnRole}
-            model={turnModel}
-            status={turnStatus}
-            resumeKind={turnResumeKind}
+            role={statusView.role}
+            model={statusView.model}
+            status={statusView.status}
+            resumeKind={statusView.resumeKind}
             actions={
               <Button
                 variant="ghost"

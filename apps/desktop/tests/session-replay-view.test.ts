@@ -206,7 +206,7 @@ describe("session store 回放与合流（T8.2b-b）", () => {
     const s = useSessionStore.getState();
     expect(s.activeSessionId).toBeNull();
     expect(s.replay).toBeNull();
-    expect(s.streamingTurn?.turnId).toBe("live");
+    expect(s.activeTurns.get("live")?.turnId).toBe("live");
     expect(s.autoResumeDoneRoot).toBe("C:\\proj");
   });
 
@@ -220,10 +220,10 @@ describe("session store 回放与合流（T8.2b-b）", () => {
       role: "user",
       text: "接着说",
     });
-    expect(s.streamingTurn?.turnId).toBe("t2");
+    expect(s.activeTurns.has("t2")).toBe(true);
   });
 
-  it("fold-on-end：end 事件把在飞轮固化进历史并清空流式缓存，同 turnId 不双份", () => {
+  it("fold-on-end：end 事件把在飞轮固化进历史并移出在飞表，同 turnId 不双份", () => {
     loadReplay();
     const store = useSessionStore.getState();
     store.startLocalTurn("t2", "planner", "问题");
@@ -237,7 +237,7 @@ describe("session store 回放与合流（T8.2b-b）", () => {
     store.ingestSessionEvent({ turnId: "t2", kind: "end", reason: "completed" });
 
     const s = useSessionStore.getState();
-    expect(s.streamingTurn).toBeNull();
+    expect(s.activeTurns.size).toBe(0);
     const t2Assistant = s.historyMessages.filter(
       (m) => m.turnId === "t2" && m.role === "assistant",
     );
@@ -277,22 +277,20 @@ describe("session store 回放与合流（T8.2b-b）", () => {
   it("foldEndedTurn 直调：同 turnId 已有 assistant 条目时第二次固化不追加（去重守卫，T8.2b-b 验收 §3-1）", () => {
     // 直调而非走事件链路：链路上重复 end 会被 ingestSessionEvent 的归属判定挡掉，
     // 该守卫是防御码，只有直调两次才能让"删守卫必红"成立（验收探针③的补测）。
-    const turn = { turnId: "t1", text: "答复", done: true } as const;
+    const turn = { turnId: "t1", text: "答复" } as const;
     const once = foldEndedTurn([], turn, "completed");
     expect(once).toEqual([{ id: "t1:assistant", turnId: "t1", role: "assistant", text: "答复" }]);
     const twice = foldEndedTurn(once, { ...turn, text: "迟到的重复 end" }, "completed");
     expect(twice).toEqual(once);
   });
 
-  it("startNewSession：清空会话 / 历史 / 横幅 / 流式缓存，但保留 autoResumeDoneRoot", () => {
+  it("startNewSession：清空会话 / 历史 / 横幅，但保留 autoResumeDoneRoot", () => {
     loadReplay();
     useSessionStore.getState().startNewSession();
     const s = useSessionStore.getState();
     expect(s.activeSessionId).toBeNull();
     expect(s.historyMessages).toEqual([]);
     expect(s.replay).toBeNull();
-    expect(s.streamingTurn).toBeNull();
-    expect(s.turnStatus).toBe("idle");
     // 用户显式要求新会话：自动续接不得再把它拉回旧会话
     expect(s.autoResumeDoneRoot).toBe("C:\\proj");
   });

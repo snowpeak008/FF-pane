@@ -14,11 +14,29 @@ import { PageHeader } from "../../layout/PageHeader";
 import { startSessionTurn } from "../../lib/session-run";
 import { useSessionStore } from "../../stores/session";
 import { NoActiveProject } from "../NoActiveProject";
+import {
+  ActiveTurnsSection,
+  DispatchConflictNotice,
+  type DispatchConflictState,
+} from "./ActiveTurnsSection";
 import { ReviewerBar } from "./ReviewerBar";
 import { TaskCard } from "./TaskCard";
 import { BOARD_STATUSES, groupTasksByStatus } from "./task-board";
 import { deriveTaskReview } from "./task-review";
 
+/**
+ * 任务看板（T8.3b 增补并行呈现）。
+ *
+ * 排队 vs 「等待后重试」的取舍（工单允许自选，两案对比落档）：
+ * - 案 A（选定）被拒即止 + 常驻冲突提示 + 手动重试：被拒的派发不产生任何持久状态
+ *   （任务保持 pending/failed，编排器裁决通过前连 dispatchTask 都不发生），用户看着
+ *   在飞区判断"什么时候能派"，相交轮结束后点重试。语义与现状一致：派发从来是
+ *   显式用户动作，失败原因当场可读。
+ * - 案 B 轻量排队（被拒任务挂队列、相交轮结束自动派发）：要新增队列状态（存哪？
+ *   渲染层内存态会因刷新丢失、持久化则引入新的启动修正义务）、要回答"排队期间任务
+ *   改了/取消了怎么办"、自动派发还会在用户不在场时启动要花钱的 Agent 轮——复杂度
+ *   与「用户自己点一下重试」的成本完全不成比例，弃。
+ */
 function TaskBoard({ projectRoot }: { readonly projectRoot: string }): ReactElement {
   const { t } = useTranslation();
   const { state, refetch } = useInvokeQuery("tasks:list", { projectRoot });
@@ -28,17 +46,31 @@ function TaskBoard({ projectRoot }: { readonly projectRoot: string }): ReactElem
     "projects:get-settings",
     { projectRoot },
   );
+  // 在飞轮次区（T8.3b）：纯内存快照，挂载即取；轮的启停经下方两个 effect 触发重取。
+  const { state: activeTurnsState, refetch: refetchActiveTurns } = useInvokeQuery(
+    "sessions:active-turns",
+    { projectRoot },
+  );
   const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(new Set());
+  const [dispatchConflict, setDispatchConflict] = useState<DispatchConflictState | null>(null);
   const { profile: workerProfile } = useRoleProfile("worker");
   const navigate = useNavigate();
-  // 任一会话轮结束（含 Worker 执行完、审查轮出结论）→ 刷新看板与执行记录。
+  // 任一会话轮结束（含 Worker 执行完、审查轮出结论）→ 刷新看板、执行记录与在飞区。
   const endedTurnSeq = useSessionStore((s) => s.endedTurnSeq);
   useEffect(() => {
     if (endedTurnSeq > 0) {
       refetch();
       refetchRuns();
+      refetchActiveTurns();
     }
-  }, [endedTurnSeq, refetch, refetchRuns]);
+  }, [endedTurnSeq, refetch, refetchRuns, refetchActiveTurns]);
+  // 渲染层已知的在飞轮数变化（本页派发 / 会话页发起）→ 在飞区跟着刷。
+  // store 的 Map 是跨会话全量，size 变化即有轮启停；主进程快照才是事实源，这里只当触发器。
+  const knownTurnCount = useSessionStore((s) => s.activeTurns.size);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: knownTurnCount 是刻意的触发器依赖——轮启停即重取主进程快照
+  useEffect(() => {
+    refetchActiveTurns();
+  }, [knownTurnCount, refetchActiveTurns]);
 
   const runAction = useCallback(
     async (channel: "tasks:accept" | "tasks:cancel", task: Task) => {
@@ -79,16 +111,25 @@ function TaskBoard({ projectRoot }: { readonly projectRoot: string }): ReactElem
         input: { kind: "worker-task", taskId: task.id },
       });
       if (ack === null || !ack.accepted) {
+        // 并行互斥拒绝（T8.3b）：结构化明细进常驻提示条（与哪个在飞任务、哪两条
+        // 路径、何种相交 + 重试入口），一条 toast 装不下也留不住。其他拒绝维持 toast。
+        if (ack !== null && !ack.accepted && ack.conflicts !== undefined) {
+          setDispatchConflict({ taskId: task.id, conflicts: ack.conflicts });
+          refetchActiveTurns();
+          return;
+        }
         toast.error(t("tasks.dispatchError"), {
           ...(ack !== null && !ack.accepted ? { description: ack.reason } : {}),
         });
         return;
       }
+      setDispatchConflict((prev) => (prev?.taskId === task.id ? null : prev));
       refetch();
+      refetchActiveTurns();
       // 导航到会话页跟进流式执行与权限审批（§12 派发即进入执行视图）。
       navigate("/session");
     },
-    [projectRoot, workerProfile, navigate, refetch, t],
+    [projectRoot, workerProfile, navigate, refetch, refetchActiveTurns, t],
   );
 
   const settings = queryData(settingsState);
@@ -182,9 +223,29 @@ function TaskBoard({ projectRoot }: { readonly projectRoot: string }): ReactElem
     );
   }
 
+  // 在飞区数据：查询失败按空处理（并行呈现是增强，不该让看板跟着报错——
+  // 快照纯内存、失败仅意味着主进程未就绪，下次触发器重取即恢复）
+  const activeTurns = queryData(activeTurnsState) ?? [];
+
   return (
     <>
       {reviewerBar}
+      <ActiveTurnsSection turns={activeTurns} />
+      {dispatchConflict !== null ? (
+        <DispatchConflictNotice
+          conflict={dispatchConflict}
+          onRetry={() => {
+            const task = queryData(state)?.find((x) => x.id === dispatchConflict.taskId);
+            if (task !== undefined) {
+              void dispatch(task);
+              return;
+            }
+            // 任务已不在列表（被取消/接受）：冲突提示失去对象，收掉即可
+            setDispatchConflict(null);
+          }}
+          onDismiss={() => setDispatchConflict(null)}
+        />
+      ) : null}
       {board}
     </>
   );

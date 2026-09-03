@@ -17,7 +17,7 @@
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { _electron, type ElectronApplication, expect, type Page } from "@playwright/test";
 
@@ -49,6 +49,12 @@ function stringEnv(source: NodeJS.ProcessEnv): Record<string, string> {
 export interface LaunchOptions {
   /** 固定 Electron 报告的系统语言（BCP 47，如 "zh-CN"），经 `--lang` 开关覆盖 `app.getLocale()`。 */
   readonly lang?: string;
+  /**
+   * 前置到 PATH 的目录（T8.3b）：放假 Agent CLI（如挂起不结束的 codex 替身），
+   * 让「派发后轮次在飞」在不联网、无真机 CLI 的前提下可被 E2E 观察。
+   * Windows 下环境变量键可能是 Path / path，按大小写不敏感语义就地改写。
+   */
+  readonly pathPrepend?: string;
 }
 
 /**
@@ -63,6 +69,14 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
   env["FF_PANE_DATA_ROOT"] = dataRoot;
   // 确保走生产 loadFile 路径而非 dev server（helper 面向构建产物）。
   delete env["ELECTRON_RENDERER_URL"];
+  if (options.pathPrepend !== undefined) {
+    const pathKey = Object.keys(env).find((key) => key.toUpperCase() === "PATH") ?? "PATH";
+    const existing = env[pathKey];
+    env[pathKey] =
+      existing === undefined
+        ? options.pathPrepend
+        : `${options.pathPrepend}${delimiter}${existing}`;
+  }
 
   const app = await _electron.launch({
     args: [

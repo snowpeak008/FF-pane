@@ -16,6 +16,14 @@
  * 跨 Agent 迁移（T7.1，§10.4）：带 handoffText 的一轮强制开新会话，把用户确认过的交接包
  * 正文前置到提示词，会话类型标 handoff。
  *
+ * 任务并行（T8.3b，§14 M3）：`active` Map 本就按 turnId 隔离、天然支持多轮并发消费
+ * （start 对不同 turnId 从不互斥——T8.3b 前的"单轮"只是渲染层假设，编排器无闸门）。
+ * 本单接入的是**互斥裁决**：start 受理时以 checkTurnParallelism 对同项目在飞轮做
+ * writePaths 互斥核查，相交即拒绝（ack.conflicts 带明细）；裁决与登记同一同步段完成
+ * （admitParallelTurn），Worker 的 dispatchTask 推迟到裁决通过之后。Run 证据隔离无需
+ * 额外动作：evidence / answerText / partialChain 全部住在 per-turn 的 ActiveTurn 与
+ * GuardedTurn 闭包里，落盘路径按 runId / turnId 派生，多轮交错不共享任何可变缓冲。
+ *
  * 审查轮（T7.2，§3.1）：Reviewer 角色的一轮，第 4 层是「任务合同的验收标准 + 被审 Run 的
  * 证据」，权限为角色默认的只读 + verify_only；结论解析后写回**被审的那条 Run**，不铸新
  * Run、不改任务状态（done ≠ accepted 由 acceptTask 在状态机层锁死，§6.3）。
@@ -48,6 +56,7 @@ import {
   assembleRebuildContext,
   assembleReviewMaterial,
   assembleRunEnvelope,
+  checkTurnParallelism,
   compileHabitProfile,
   createInitialDraft,
   createNextDraft,
@@ -73,6 +82,7 @@ import {
   supersedePlan,
   toRunEnvelope,
   unregisterActiveTurn,
+  type WritePathsConflict,
 } from "@ff-pane/core";
 import type {
   AgentProfile,
@@ -129,6 +139,15 @@ export const PARTIAL_FLUSH_BYTES = 2_048;
 export const QUIT_CANCEL_WAIT_MS = 1_500;
 
 /**
+ * cancel 后等待 drain 自行注销并行事实的宽限（T8.3b 僵尸注销根治，T8.3a 验收 §2-2）。
+ * 适配器 cancel 等树杀确认才返回，返回即子进程已消亡；健康的事件流会在此后立刻以
+ * end 收尾、由 drain 的 finally 注销登记。若适配器缺陷导致 cancel 后事件流悬挂，
+ * 宽限期到就强制注销并行事实——否则残留记录会在 start 受理的互斥裁决里挡住后续
+ * 相交任务的派发（拒绝原因指向一个实际已死的轮）。
+ */
+export const CANCEL_UNREGISTER_GRACE_MS = 200;
+
+/**
  * 续接轮为对话摘录读回放本的尾部条数。摘录只取 6 条消息（core 缺省），但回放本里每轮
  * 还有一条 turn_end 元数据，故多读一些以保证足够多的消息条目进入取样窗口。
  */
@@ -157,7 +176,8 @@ export interface SessionOrchestrator {
   /**
    * 某项目在飞轮次的并行事实快照（T8.3a，`sessions:active-turns` 的数据源）：
    * 按 startedAt 升序的 ActiveTurnRecord 列表（含装配后信封的 writePaths）。
-   * 只读内存态、不触碰磁盘；并行互斥的**裁决接入**（start 受理时拒绝相交轮）归 T8.3b。
+   * 只读内存态、不触碰磁盘。同一份表也是 start 受理时互斥裁决的输入（T8.3b）：
+   * 候选轮与同项目在飞轮的可写范围相交即拒绝受理（ack 带 conflicts 明细）。
    */
   listActiveTurns(projectRoot: string): readonly ActiveTurnRecord[];
   /**
@@ -380,6 +400,20 @@ export function normalizeProjectRootKey(projectRoot: string): string {
   return unified.endsWith("/") && unified.length > 1 ? unified.slice(0, -1) : unified;
 }
 
+/**
+ * 互斥拒绝的一句话概括（T8.3b）：reason 面向既有消费方（toast 描述），
+ * 结构化明细另走 ack.conflicts。首条 conflict 的 reason 已含四要素
+ * （哪两个任务、哪两条路径、何种关系），多处相交时补一个总数。
+ */
+function conflictRejectionReason(conflicts: readonly WritePathsConflict[]): string {
+  const first = conflicts[0];
+  if (first === undefined) {
+    // checkWritePathsExclusive 拒绝时 conflicts 恒非空；此兜底只为类型完整
+    return "可写范围与在飞任务相交，已拒绝并行";
+  }
+  return conflicts.length > 1 ? `${first.reason}（共 ${conflicts.length} 处相交）` : first.reason;
+}
+
 export function createSessionOrchestrator(deps: SessionOrchestratorDeps): SessionOrchestrator {
   const active = new Map<string, ActiveTurn>();
   // 在飞轮次的并行事实（T8.3a）：与 active 同生命周期的第二份登记——active 装进程
@@ -434,6 +468,105 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
     }
   }
 
+  /**
+   * 并行互斥裁决 + 事实登记（T8.3b，同一同步段完成）。
+   *
+   * 裁决与登记之间**不允许有 await**——两轮并发受理时后到者必须看见先到者的登记，
+   * 否则两个相交任务会同时通过裁决（先检查后登记的竞态）。故受理路径在信封定形后
+   * 立即「裁决即登记」，此后任何一步失败由 start 的 catch 回滚登记。由此登记点
+   * 先于 active.set 若干个 await，start 入口的同 turnId 去重须两表都查。
+   *
+   * 只与**同项目**的在飞轮互斥（writePaths 是相对项目根的模式，跨项目同名路径
+   * 不是同一批文件）。项目归属缺失（登记在表但 turnProjects 没有）的记录按
+   * 宁拒勿并参与一切项目的裁决：正常路径两份登记同点增删不会漂移，该分支只在
+   * 注销点被部分破坏时可观察（T8.3a 验收 §3-④「单删 parallelTable 未红」的用例锚点）。
+   */
+  function admitParallelTurn(params: {
+    readonly turnId: string;
+    readonly projectRoot: string;
+    readonly sessionId: LocalSessionId;
+    readonly role: Role;
+    readonly taskId?: TaskId;
+    readonly writePaths: readonly string[];
+  }):
+    | { readonly admitted: true; readonly startedAt: number }
+    | { readonly admitted: false; readonly ack: StartSessionAck } {
+    const rootKey = normalizeProjectRootKey(params.projectRoot);
+    const sameProject = new Map(
+      [...parallelTable].filter(([turnId]) => {
+        const project = turnProjects.get(turnId);
+        return project === rootKey || project === undefined;
+      }),
+    );
+    const decision = checkTurnParallelism(sameProject, {
+      turnId: params.turnId,
+      ...(params.taskId !== undefined ? { taskId: params.taskId } : {}),
+      writePaths: params.writePaths,
+    });
+    if (!decision.canRunInParallel) {
+      return {
+        admitted: false,
+        ack: {
+          accepted: false,
+          reason: conflictRejectionReason(decision.conflicts),
+          conflicts: decision.conflicts,
+        },
+      };
+    }
+    const startedAt = deps.now();
+    parallelTable = registerActiveTurn(parallelTable, {
+      turnId: params.turnId,
+      sessionId: params.sessionId,
+      role: params.role,
+      ...(params.taskId !== undefined ? { taskId: params.taskId } : {}),
+      writePaths: params.writePaths,
+      startedAt,
+    });
+    turnProjects.set(params.turnId, rootKey);
+    return { admitted: true, startedAt };
+  }
+
+  /**
+   * 释放一轮的并行事实（幂等）。**必须先于该轮 end 事件的 publish 调用**：渲染层收到
+   * end 即重取 `sessions:active-turns`，若此时登记未删，重取拿到的是含死轮的快照、
+   * 且此后再无触发器纠正（一次可复现的 E2E 竞态）。进入 finalize / settleInterrupted
+   * 即释放在语义上成立——end 已到手，子进程不会再写任何文件。
+   * active 句柄表不在此清（收尾仍要经 turn 推进），归 drain 的 finally。
+   */
+  function releaseParallelFacts(turnId: string): void {
+    parallelTable = unregisterActiveTurn(parallelTable, turnId);
+    turnProjects.delete(turnId);
+  }
+
+  /**
+   * 僵尸注销根治（T8.3b，T8.3a 验收 §2-2 主管理员裁定）：cancel 返回即子进程已消亡，
+   * 健康的事件流会紧接着以 end 收尾、由 drain 的 finally 注销登记；若适配器缺陷让
+   * 流悬挂，宽限期到就强制注销并行事实——互斥裁决接入后，残留记录会拿一个实际
+   * 已死的轮去挡后续相交任务的派发。只清并行事实（裁决与呈现的数据源），
+   * active 句柄表留给 drain：流若日后终结，finally 的注销幂等。
+   */
+  async function unregisterAfterCancelGrace(turnId: string, turn: ActiveTurn): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const grace = new Promise<"grace">((resolve) => {
+      timer = setTimeout(() => resolve("grace"), CANCEL_UNREGISTER_GRACE_MS);
+    });
+    const outcome = await Promise.race([
+      turn.done.then(
+        () => "drained" as const,
+        () => "drained" as const,
+      ),
+      grace,
+    ]);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+    if (outcome === "grace" && parallelTable.has(turnId)) {
+      console.warn(`[session] turn ${turnId} stream hung after cancel; parallel facts released`);
+      parallelTable = unregisterActiveTurn(parallelTable, turnId);
+      turnProjects.delete(turnId);
+    }
+  }
+
   /** 落位会话登记（upsert）。binding 覆盖 ctx.native（session_start 报出新原生 ID 时）。 */
   async function registerSession(
     ctx: SessionContext,
@@ -453,9 +586,13 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
   }
 
   async function start(request: StartSessionRequest): Promise<StartSessionAck> {
-    if (active.has(request.turnId)) {
+    // 同 turnId 去重：active 之外还要查并行事实表——受理路径里登记先于 active.set
+    // 若干个 await（见下方「先裁决即登记」），只查 active 会留一个重复受理窗口。
+    if (active.has(request.turnId) || parallelTable.has(request.turnId)) {
       return { accepted: false, reason: "该轮次已在执行中" };
     }
+    // 本轮是否已写入并行事实表（受理失败时 catch 里据此回滚，不误删他轮登记）。
+    let parallelRegistered = false;
     try {
       const profile = await deps.loadProfile(request.profileId);
       if (profile === undefined) {
@@ -544,6 +681,8 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
       let workerCtx: WorkerContext | undefined;
       let planCtx: PlanTurnContext | undefined;
       let reviewCtx: ReviewTurnContext | undefined;
+      // Worker 轮待派发的任务合同（T8.3b：dispatchTask 推迟到互斥裁决通过后）。
+      let workerTaskToDispatch: Task | undefined;
       // 进回放本的用户输入（T8.2b）：只记用户可见的原始输入，见 TranscriptUserMessage 注释
       let transcriptUser: TranscriptUserInput;
 
@@ -606,15 +745,9 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
           outputLanguage,
           ...(habitProfile !== undefined ? { habitProfile } : {}),
         });
-        // 派发：pending|failed → running（非法态由状态机抛错，落入下方 catch）
-        const runningTask = dispatchTask(task);
-        await deps.saveTask(layout, runningTask);
-        workerCtx = {
-          layout,
-          runningTask,
-          profileId: profile.id,
-          startedAt: deps.now(),
-        };
+        // 派发（pending|failed → running）推迟到互斥裁决通过之后（T8.3b）：
+        // 被拒并行的派发不该把任务推进 running 再拉回来。此处只记要派发的合同。
+        workerTaskToDispatch = task;
         transcriptUser = { text: task.goal, taskId: task.id };
         guardCtx = {
           cwd: request.projectRoot,
@@ -667,6 +800,34 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
           envelope: plannerEnvelope,
           ...(Object.keys(env).length > 0 ? { secrets: env } : {}),
         };
+      }
+
+      // 并行互斥裁决（T8.3b，§14 M3「文件范围不重叠的任务同时派发」）：信封定形即
+      // 裁决，通过即在同一同步段登记并行事实（防两轮并发受理互不相见的竞态，见
+      // admitParallelTurn 注释）；拒绝走 ack.conflicts 预留分支，reason 人可读。
+      const parallelTaskId: TaskId | undefined =
+        workerTaskToDispatch?.id ?? reviewCtx?.reviewedRun.taskId;
+      const admission = admitParallelTurn({
+        turnId: request.turnId,
+        projectRoot: request.projectRoot,
+        sessionId,
+        role,
+        ...(parallelTaskId !== undefined ? { taskId: parallelTaskId } : {}),
+        writePaths: guardCtx.envelope.writePaths,
+      });
+      if (!admission.admitted) {
+        return admission.ack;
+      }
+      parallelRegistered = true;
+      const startedAt = admission.startedAt;
+
+      // 派发（pending|failed → running）在裁决通过后才发生：被拒并行的任务保持原状，
+      // 用户看到的是「没派出去」而不是「派出去又失败了一次」。非法态由状态机抛错，
+      // 落入下方 catch（并回滚并行登记）。
+      if (workerTaskToDispatch !== undefined) {
+        const runningTask = dispatchTask(workerTaskToDispatch);
+        await deps.saveTask(layout, runningTask);
+        workerCtx = { layout, runningTask, profileId: profile.id, startedAt };
       }
 
       // 上下文重建：把重建文本前置到提示词（native 恢复走原生会话，不注入）
@@ -722,7 +883,6 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
 
       // 在飞标记 + 回放本 user_message（T8.2b）：都在 spawn 之前落盘。标记先于子进程存在，
       // 才能保证"有子进程在跑却没有标记"这个窗口不存在——退出/崩溃后修正逻辑不会漏掉它。
-      const startedAt = deps.now();
       const marker: InflightTurnMarker = {
         turnId: request.turnId,
         sessionId,
@@ -766,18 +926,8 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         done: Promise.resolve(),
       };
       active.set(request.turnId, turn);
-      // 并行事实登记（T8.3a）：writePaths 取装配后信封（角色默认 ∩ Profile 预设 ∩
-      // 任务 writeScope 的交集）——这才是本轮真正被放行写入的范围。与 active 同点登记。
-      const parallelRecord: ActiveTurnRecord = {
-        turnId: request.turnId,
-        sessionId,
-        role,
-        ...(marker.taskId !== undefined ? { taskId: marker.taskId } : {}),
-        writePaths: guardCtx.envelope.writePaths,
-        startedAt,
-      };
-      parallelTable = registerActiveTurn(parallelTable, parallelRecord);
-      turnProjects.set(request.turnId, normalizeProjectRootKey(request.projectRoot));
+      // 并行事实已在裁决通过时登记（admitParallelTurn，writePaths 取装配后信封）——
+      // 登记先行是并发受理防竞态的要求，此处只补 active 句柄表。
       deps.publish({
         turnId: request.turnId,
         kind: "started",
@@ -796,6 +946,12 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
 
       return { accepted: true, turnId: request.turnId, sessionId };
     } catch (thrown) {
+      // 裁决通过后任何一步失败（派发状态机抛错 / spawn 同步抛错等）：回滚并行登记，
+      // 不让一个从未起飞的轮占着可写范围挡后续派发。
+      if (parallelRegistered) {
+        parallelTable = unregisterActiveTurn(parallelTable, request.turnId);
+        turnProjects.delete(request.turnId);
+      }
       const message = thrown instanceof Error ? thrown.message : String(thrown);
       return { accepted: false, reason: message };
     }
@@ -1010,6 +1166,9 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
       return;
     }
     turn.phase = "finalizing";
+    // 并行事实先于 end 事件释放（releaseParallelFacts 注释）：事件流已收尾，
+    // 该轮不再占任何可写范围；drain 的 finally 再删一次是幂等兜底。
+    releaseParallelFacts(turnId);
     try {
       const summary = await settleTurn(turnId, turn.guarded, turn.ctx, outcome);
       await recordTurnEnd(turnId, turn, summary, { partial: false });
@@ -1156,6 +1315,8 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
    * 推一条 end{interrupted}（窗口多半已关，无害）。任一步失败只记日志，不阻塞退出。
    */
   async function settleInterrupted(turnId: string, turn: ActiveTurn): Promise<void> {
+    // 与 finalize 同点释放并行事实：本轮已被退出钩子接手，不再占可写范围
+    releaseParallelFacts(turnId);
     const { workerCtx, reviewCtx } = turn.ctx;
     let summary: TurnEndSummary = { endReason: "interrupted" };
     if (reviewCtx !== undefined) {
@@ -1230,8 +1391,16 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
     await Promise.all(finalizing.map((turn) => turn.done.catch(() => undefined)));
 
     // 取消全部子进程，最多等 QUIT_CANCEL_WAIT_MS；等不到就放行（Job Object 会收走它们）
-    const cancels = [...active.values()].map((turn) =>
-      turn.guarded.cancel().catch(() => undefined),
+    // 每个 cancel 返回后同样挂僵尸注销兜底：正常退出流程里进程随后消亡、表无消费方，
+    // 但单测环境与「退出被用户取消」的 Electron 边角（before-quit 后窗口未关）下，
+    // 编排器可能继续存活服务派发，悬挂轮不该留在裁决表里。
+    const cancels = [...active.entries()].map(([turnId, turn]) =>
+      turn.guarded
+        .cancel()
+        .catch(() => undefined)
+        .then(() => {
+          void unregisterAfterCancelGrace(turnId, turn);
+        }),
     );
     let timer: ReturnType<typeof setTimeout> | undefined;
     const cancelledInTime = await Promise.race([
@@ -1261,6 +1430,9 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
       return { ok: false };
     }
     await turn.guarded.cancel();
+    // 僵尸注销兜底（T8.3b）：cancel 返回即进程已消亡；事件流若悬挂不 end，
+    // 宽限期后强制释放并行事实，避免死轮挡后续派发。不 await——回执不该等宽限。
+    void unregisterAfterCancelGrace(request.turnId, turn);
     return { ok: true };
   }
 

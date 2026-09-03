@@ -547,7 +547,8 @@
       "plain": "代码"
     },
     "turnFailed": "本轮失败",
-    "turnInProgress": "已有正在执行的轮次。",
+    "startRejected": "本轮未能发起",
+    "turnInProgress": "本会话已有正在执行的轮次。",
     "noPlannerProfile": "未配置 Planner Profile，请到设置中新建。",
     "cancelTurn": "取消",
     "permissionTitle": "权限请求",
@@ -649,6 +650,21 @@
     "retry": "重试",
     "noWorkerProfile": "未配置 Worker Profile，请到设置中新建。",
     "dispatchError": "派发失败",
+    "parallel": {
+      "activeTitle": "在飞轮次",
+      "startedAt": "开始于{{time}}",
+      "writes": "可写：{{paths}}",
+      "readOnly": "只读（不占可写范围）",
+      "rejectedTitle": "任务 {{taskId}} 因可写范围相交被拒绝并行",
+      "conflictLine": "本任务的「{{candidatePath}}」与在飞任务 {{inflightId}} 的「{{inflightPath}}」{{relation}}",
+      "relation": {
+        "identical": "指向相同范围",
+        "containment": "存在包含关系",
+        "may-overlap": "无法证明不相交（通配模式保守判定，收窄模式可解除）"
+      },
+      "retryHint": "等相交的在飞轮次结束后重试即可派发。",
+      "retry": "重试派发"
+    },
     "review": {
       "start": "审查",
       "again": "重新审查",

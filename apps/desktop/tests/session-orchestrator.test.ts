@@ -34,6 +34,7 @@ import type {
 import type { ProjectLayout } from "@ff-pane/storage";
 import { describe, expect, it, vi } from "vitest";
 import {
+  CANCEL_UNREGISTER_GRACE_MS,
   createSessionOrchestrator,
   type KnowledgeToolBinding,
   type SessionOrchestratorDeps,
@@ -1853,5 +1854,355 @@ describe("T8.3a 在飞轮次表（listActiveTurns）", () => {
 
     expect(orch.listActiveTurns("/proj")).toEqual([]);
     expect(orch.activeCount()).toBe(0);
+  });
+});
+
+describe("T8.3b 并发受理与互斥拒绝", () => {
+  /** 每轮一个可外部驱动的事件队列（并发交错测试用）。 */
+  interface ScriptController {
+    push(event: AgentEvent): void;
+    /** 关闭事件流（push 完 end 后调用；不 push end 直接 close = 模拟流截断）。 */
+    close(): void;
+  }
+
+  /**
+   * 可脚本化的多轮适配器：每次 startTurn 领一个 controller，测试侧按需交错推事件。
+   * cancelEndsStream=false 模拟「cancel 后事件流悬挂」的缺陷适配器（僵尸注销用例）。
+   */
+  function scriptableAdapter(
+    controllers: ScriptController[],
+    opts: { readonly cancelEndsStream?: boolean } = {},
+  ): AgentAdapter {
+    const cancelEnds = opts.cancelEndsStream ?? true;
+    return {
+      runtime: "fake",
+      displayName: "scriptable",
+      capabilities: () => ({
+        nativeResume: "no",
+        streaming: "yes",
+        fileChangeEvents: "yes",
+        commandEvents: "yes",
+        permissionForwarding: "no",
+        gracefulCancel: "yes",
+      }),
+      startTurn: () => {
+        const queue: AgentEvent[] = [];
+        let closed = false;
+        let wake: (() => void) | undefined;
+        const controller: ScriptController = {
+          push(event) {
+            queue.push(event);
+            wake?.();
+          },
+          close() {
+            closed = true;
+            wake?.();
+          },
+        };
+        controllers.push(controller);
+        return {
+          events: (async function* () {
+            for (;;) {
+              while (queue.length > 0) {
+                yield queue.shift() as AgentEvent;
+              }
+              if (closed) {
+                return;
+              }
+              await new Promise<void>((resolve) => {
+                wake = resolve;
+              });
+            }
+          })(),
+          cancel: async () => {
+            if (cancelEnds) {
+              controller.push({ kind: "end", reason: "cancelled" });
+              controller.close();
+            }
+          },
+        };
+      },
+    };
+  }
+
+  /** 多任务 + 递增 runId + rawLog 记录的并发测试架子。 */
+  function parallelHarness(
+    tasks: readonly Task[],
+    opts: { readonly cancelEndsStream?: boolean } = {},
+  ): {
+    readonly h: Harness;
+    readonly orch: ReturnType<typeof createSessionOrchestrator>;
+    readonly controllers: ScriptController[];
+    readonly rawLogs: Map<string, string>;
+  } {
+    const controllers: ScriptController[] = [];
+    const h = makeHarness([], { adapter: scriptableAdapter(controllers, opts) });
+    const rawLogs = new Map<string, string>();
+    let runSeq = 0;
+    const deps: SessionOrchestratorDeps = {
+      ...h.deps,
+      loadTask: async (_l, id) => tasks.find((t) => t.id === id),
+      newRunId: () => {
+        runSeq += 1;
+        return `run-${runSeq}` as unknown as Run["id"];
+      },
+      persistRun: async (_l, run, rawLog) => {
+        h.persistedRuns.push(run);
+        rawLogs.set(String(run.id), rawLog);
+      },
+    };
+    return { h, orch: createSessionOrchestrator(deps), controllers, rawLogs };
+  }
+
+  function workerReq(turnId: string, taskId: string, projectRoot = "/proj"): StartSessionRequest {
+    return {
+      turnId,
+      projectRoot,
+      profileId: "prof-1" as unknown as ProfileId,
+      input: { kind: "worker-task", taskId: taskId as unknown as TaskId },
+    };
+  }
+
+  const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 10));
+
+  const TASK_APP = task({ id: "task-app", writeScope: ["src/app"] });
+  const TASK_LIB = task({ id: "task-lib", writeScope: ["src/lib"] });
+  const TASK_SUB = task({ id: "task-sub", writeScope: ["src/app/sub"] });
+
+  it("writePaths 不相交的两个 Worker 轮真正并发：都受理、交错流式、Run 证据各自落盘不串", async () => {
+    const { h, orch, controllers, rawLogs } = parallelHarness([TASK_APP, TASK_LIB]);
+
+    const ackA = await orch.start(workerReq("tA", "task-app"));
+    const ackB = await orch.start(workerReq("tB", "task-lib"));
+    expect(ackA.accepted).toBe(true);
+    expect(ackB.accepted).toBe(true);
+    expect(orch.activeCount()).toBe(2);
+    expect(orch.listActiveTurns("/proj").map((r) => r.taskId)).toEqual(["task-app", "task-lib"]);
+
+    const [a, b] = controllers;
+    if (a === undefined || b === undefined) {
+      throw new Error("两轮都该已 startTurn");
+    }
+    // 两轮事件交错到达：文本与文件改动互相穿插
+    a.push({ kind: "session_start" });
+    b.push({ kind: "session_start" });
+    a.push({
+      kind: "file_change",
+      path: "src/app/a.ts",
+      changeKind: "add",
+      status: "completed",
+      diff: "@@ +A",
+    });
+    b.push({ kind: "text", content: "B 报告", final: false, channel: "answer" });
+    a.push({ kind: "text", content: "A 报告", final: false, channel: "answer" });
+    b.push({
+      kind: "file_change",
+      path: "src/lib/b.ts",
+      changeKind: "add",
+      status: "completed",
+      diff: "@@ +B",
+    });
+    a.push({ kind: "end", reason: "completed" });
+    b.push({ kind: "end", reason: "completed" });
+    a.close();
+    b.close();
+    await flush();
+
+    // 两条 Run 各自成立，证据不串：A 的 Run 只有 A 的文件与报告，B 同理
+    expect(h.persistedRuns).toHaveLength(2);
+    const runA = h.persistedRuns.find((r) => r.taskId === ("task-app" as unknown as TaskId));
+    const runB = h.persistedRuns.find((r) => r.taskId === ("task-lib" as unknown as TaskId));
+    expect(runA?.fileChanges.map((c) => c.path)).toEqual(["src/app/a.ts"]);
+    expect(runB?.fileChanges.map((c) => c.path)).toEqual(["src/lib/b.ts"]);
+    expect(runA?.report).toBe("A 报告");
+    expect(runB?.report).toBe("B 报告");
+    expect(runA?.id).not.toBe(runB?.id);
+    // raw.log 按 runId 隔离（persistRun 逐 Run 单独收到各自的原始文本）
+    expect(rawLogs.get(String(runA?.id))).toBe("A 报告");
+    expect(rawLogs.get(String(runB?.id))).toBe("B 报告");
+    // 两轮都注销
+    expect(orch.activeCount()).toBe(0);
+    expect(orch.listActiveTurns("/proj")).toEqual([]);
+  });
+
+  it("相交任务被拒绝并行：ack 走 conflicts 分支、reason 人可读；任务不被推进 running、不写在飞标记", async () => {
+    const { h, orch } = parallelHarness([TASK_APP, TASK_SUB]);
+
+    await orch.start(workerReq("tA", "task-app"));
+    const savedBefore = h.savedTasks.length;
+    const ack = await orch.start(workerReq("tB", "task-sub"));
+
+    expect(ack.accepted).toBe(false);
+    if (ack.accepted) {
+      throw new Error("unreachable");
+    }
+    expect(ack.conflicts).toBeDefined();
+    expect(ack.conflicts?.[0]).toMatchObject({
+      candidateId: "task-sub",
+      inflightId: "task-app",
+      candidatePath: "src/app/sub",
+      inflightPath: "src/app",
+      relation: "containment",
+    });
+    // reason 四要素齐备（哪两个任务、哪两条路径、何种关系）
+    expect(ack.reason).toContain("task-sub");
+    expect(ack.reason).toContain("task-app");
+    expect(ack.reason).toContain("src/app/sub");
+    // 被拒的派发无副作用：任务保持原状（dispatchTask 推迟到裁决通过后）、无标记、无登记
+    expect(h.savedTasks.length).toBe(savedBefore);
+    expect(h.markers.has("tB")).toBe(false);
+    expect(orch.activeCount()).toBe(1);
+    expect(orch.listActiveTurns("/proj").map((r) => r.turnId)).toEqual(["tA"]);
+
+    await orch.prepareForQuit();
+  });
+
+  it("Planner 轮与 Worker 轮可并行（空 writePaths = 无写权限，天然放行）", async () => {
+    const { orch } = parallelHarness([TASK_APP]);
+
+    await orch.start(workerReq("tA", "task-app"));
+    const ack = await orch.start({
+      turnId: "tP",
+      projectRoot: "/proj",
+      profileId: "prof-1" as unknown as ProfileId,
+      input: { kind: "planner-message", text: "聊聊" },
+    });
+    expect(ack.accepted).toBe(true);
+    expect(orch.activeCount()).toBe(2);
+
+    await orch.prepareForQuit();
+  });
+
+  it("并发受理防竞态：两个相交派发同时进入 start，恰好一个被受理", async () => {
+    const { orch } = parallelHarness([TASK_APP, TASK_SUB]);
+
+    const [ackA, ackB] = await Promise.all([
+      orch.start(workerReq("tA", "task-app")),
+      orch.start(workerReq("tB", "task-sub")),
+    ]);
+    const accepted = [ackA, ackB].filter((a) => a.accepted);
+    expect(accepted).toHaveLength(1);
+    expect(orch.activeCount()).toBe(1);
+
+    await orch.prepareForQuit();
+  });
+
+  it("在飞轮正常结束后其并行事实即释放：此前被拒的相交任务重派即放行（T8.3a 验收 §3-④ 覆盖缺口）", async () => {
+    const { orch, controllers } = parallelHarness([TASK_APP, TASK_SUB]);
+
+    await orch.start(workerReq("tA", "task-app"));
+    const rejected = await orch.start(workerReq("tB", "task-sub"));
+    expect(rejected.accepted).toBe(false);
+
+    // A 正常收尾 → drain 的 finally 注销并行事实（单删 parallelTable 注销行即此处显形：
+    // 残留登记会让下面的重派仍被拒绝）
+    const a = controllers[0];
+    if (a === undefined) {
+      throw new Error("tA 该已 startTurn");
+    }
+    a.push({ kind: "text", content: "ok", final: true, channel: "answer" });
+    a.push({ kind: "end", reason: "completed" });
+    a.close();
+    await flush();
+
+    const retried = await orch.start(workerReq("tB2", "task-sub"));
+    expect(retried.accepted).toBe(true);
+
+    await orch.prepareForQuit();
+  });
+
+  it("僵尸注销根治：cancel 后事件流悬挂 → 宽限期后并行事实强制释放，相交任务可派发（T8.3a 验收 §2-2）", async () => {
+    const { orch } = parallelHarness([TASK_APP, TASK_SUB], { cancelEndsStream: false });
+
+    await orch.start(workerReq("tA", "task-app"));
+    expect(await orch.cancel({ turnId: "tA" })).toEqual({ ok: true });
+
+    // 悬挂流不产生 end → drain 不完成；等 CANCEL_UNREGISTER_GRACE_MS 过后兜底注销
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, CANCEL_UNREGISTER_GRACE_MS + 100));
+      expect(orch.listActiveTurns("/proj")).toEqual([]);
+      // 句柄表如实保留（流理论上还能终结，届时 finally 的注销幂等）——只清裁决事实
+      expect(orch.hasActiveTurn("tA")).toBe(true);
+
+      const ack = await orch.start(workerReq("tB", "task-sub"));
+      expect(ack.accepted).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("健康适配器 cancel 后即刻 end：注销走 drain 正常路径，不触发强制释放告警", async () => {
+    const { orch } = parallelHarness([TASK_APP]);
+
+    await orch.start(workerReq("tA", "task-app"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      await orch.cancel({ turnId: "tA" });
+      await new Promise((resolve) => setTimeout(resolve, CANCEL_UNREGISTER_GRACE_MS + 100));
+      expect(orch.listActiveTurns("/proj")).toEqual([]);
+      expect(orch.activeCount()).toBe(0);
+      const forced = warn.mock.calls.filter((call) =>
+        String(call[0]).includes("parallel facts released"),
+      );
+      expect(forced).toHaveLength(0);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("权限请求并发：多轮同时 blocked 时按 turnId 路由，deny 只取消那一轮", async () => {
+    const { h, orch, controllers } = parallelHarness([TASK_APP, TASK_LIB]);
+
+    await orch.start(workerReq("tA", "task-app"));
+    await orch.start(workerReq("tB", "task-lib"));
+    const [a, b] = controllers;
+    if (a === undefined || b === undefined) {
+      throw new Error("两轮都该已 startTurn");
+    }
+    // 两轮各自越出自己的 writePaths（项目内）→ guard 各自合成 permission_request 上浮
+    a.push({ kind: "file_change", path: "docs/a.md", changeKind: "update", status: "started" });
+    b.push({ kind: "file_change", path: "docs/b.md", changeKind: "update", status: "started" });
+    await flush();
+
+    const requests = h.published.filter((e) => e.kind === "permission-request");
+    expect(requests.map((e) => e.turnId).sort()).toEqual(["tA", "tB"]);
+    const requestA = requests.find((e) => e.turnId === "tA");
+    if (requestA === undefined || requestA.kind !== "permission-request") {
+      throw new Error("tA 的权限请求该已上浮");
+    }
+
+    // 只 deny A：guard 的 cancelOnDeny 取消 A 那一轮；B 不受牵连、其待批仍挂着
+    expect(
+      await orch.respondPermission({
+        turnId: "tA",
+        requestId: requestA.requestId,
+        decision: "deny",
+      }),
+    ).toEqual({ ok: true });
+    await flush();
+
+    expect(orch.activeCount()).toBe(1);
+    expect(orch.listActiveTurns("/proj").map((r) => r.turnId)).toEqual(["tB"]);
+    // B 照常收尾
+    b.push({ kind: "text", content: "B done", final: true, channel: "answer" });
+    b.push({ kind: "end", reason: "completed" });
+    b.close();
+    await flush();
+    expect(orch.activeCount()).toBe(0);
+  });
+
+  it("互斥只在同项目内：别的项目的相交 writeScope 不挡派发；同项目根的写法差异（大小写/分隔符）仍互斥", async () => {
+    const { orch } = parallelHarness([TASK_APP, TASK_SUB]);
+
+    await orch.start(workerReq("tA", "task-app", "/proj"));
+    // 别的项目：writePaths 是相对项目根的模式，跨项目同名路径不是同一批文件
+    const other = await orch.start(workerReq("tOther", "task-sub", "/other"));
+    expect(other.accepted).toBe(true);
+    // 同一项目根的另一种写法（Windows 现实）：仍是同一项目，照拒
+    const samePath = await orch.start(workerReq("tSame", "task-sub", "\\PROJ"));
+    expect(samePath.accepted).toBe(false);
+
+    await orch.prepareForQuit();
   });
 });

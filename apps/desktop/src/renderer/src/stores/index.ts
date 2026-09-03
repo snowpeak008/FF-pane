@@ -55,14 +55,19 @@ export {
   shortcutIndexOfPage,
 } from "./pages";
 export {
+  type ActiveTurnView,
+  currentSessionTurns,
   type EndedTurnMarker,
+  type EndedTurnView,
   INITIAL_SESSION_UI_STATE,
   type PendingPermission,
+  pendingPermissionsOf,
   type SessionSidePanelTab,
   type SessionStore,
   type SessionUiActions,
   type SessionUiState,
-  type StreamingTurn,
+  sessionBusy,
+  sessionStatusView,
   type TurnStatus,
   useSessionStore,
 } from "./session";

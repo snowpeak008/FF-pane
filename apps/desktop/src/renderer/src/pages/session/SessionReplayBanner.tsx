@@ -2,7 +2,7 @@ import { MessageSquarePlus } from "lucide-react";
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../components/ui/Button";
-import { useSessionStore } from "../../stores/session";
+import { sessionBusy, useSessionStore } from "../../stores/session";
 
 /**
  * 续接横幅（T8.2b-b，§10.3）：自动选中最近会话并回放后，消息区顶部说明
@@ -19,15 +19,16 @@ export function SessionReplayBanner(): ReactElement | null {
   const { t } = useTranslation();
   const replay = useSessionStore((s) => s.replay);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
-  const turnStatus = useSessionStore((s) => s.turnStatus);
+  const activeTurns = useSessionStore((s) => s.activeTurns);
   const startNewSession = useSessionStore((s) => s.startNewSession);
 
   if (replay === null || replay.sessionId !== activeSessionId) {
     return null;
   }
 
-  // 在飞轮期间禁用：startNewSession 会清掉流式缓存，正在输出的轮不该被"新建"悄悄丢弃
-  const busy = turnStatus === "running" || turnStatus === "awaiting-permission";
+  // 本会话有在飞轮时禁用（T8.3b busy 语义）：startNewSession 会切走当前视图，
+  // 正在输出的轮不该被"新建"悄悄藏起；别的会话的并发轮不受影响、也不影响此按钮
+  const busy = sessionBusy(activeTurns, activeSessionId);
 
   return (
     <div className="shrink-0 border-b border-border bg-surface-sunken px-4 py-2">
