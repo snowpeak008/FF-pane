@@ -3,7 +3,6 @@ import {
   AI_OUTPUT_LANGUAGES,
   DEFAULT_PERMISSION_PRESET,
   ROLES,
-  type Role,
 } from "@ff-pane/shared";
 import { type ReactElement, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -58,6 +57,9 @@ export function ProfileEditorDialog({
   const { t } = useTranslation();
   const { state: providersState } = useInvokeQuery("providers:list");
   const { state: configState } = useInvokeQuery("config:get");
+  // 自定义角色（T8.4）：默认角色下拉在内置三项之外列出全部自定义角色
+  const { state: rolesState } = useInvokeQuery("roles:list");
+  const customRoles = queryData(rolesState) ?? [];
   const providers = queryData(providersState) ?? [];
   const config = queryData(configState);
   const defaultPreset = config?.defaultPermissionPreset ?? DEFAULT_PERMISSION_PRESET;
@@ -187,13 +189,22 @@ export function ProfileEditorDialog({
                 id="profile-role"
                 className={selectClass}
                 value={form.defaultRole}
-                onChange={(e) => patch({ defaultRole: e.target.value as Role })}
+                onChange={(e) => patch({ defaultRole: e.target.value })}
               >
                 {ROLES.map((role) => (
                   <option key={role} value={role}>
                     {t(`settings.profiles.role.${role}`)}
                   </option>
                 ))}
+                {customRoles.length > 0 ? (
+                  <optgroup label={t("settings.roles.title")}>
+                    {customRoles.map((role) => (
+                      <option key={role.id} value={role.id}>
+                        {role.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                ) : null}
               </select>
             </Field>
             <Field htmlFor="profile-output" label={t("settings.profiles.field.outputLanguage")}>

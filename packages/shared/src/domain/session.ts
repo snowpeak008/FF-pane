@@ -16,7 +16,7 @@ import type {
   TaskId,
 } from "./common.js";
 import { createLiteralGuard } from "./common.js";
-import type { Role } from "./profile.js";
+import type { RoleRef } from "./profile.js";
 import type { RunEndReason } from "./run.js";
 
 /**
@@ -56,8 +56,8 @@ export interface SessionRecord {
   readonly id: LocalSessionId;
   /** 设计文档 §11.2 —— 会话由哪个 Profile 承载（状态条显示 Profile 名/模型）。 */
   readonly profileId: ProfileId;
-  /** 设计文档 §11.2 —— 会话角色（状态条第一项）。 */
-  readonly role: Role;
+  /** 设计文档 §11.2 —— 会话角色（状态条第一项；T8.4 起可为自定义角色 ID）。 */
+  readonly role: RoleRef;
   /** 设计文档 §10.2 规则 3 —— 原生会话绑定（Runtime 不支持原生恢复时缺省）。 */
   readonly native?: NativeSessionBinding;
   /**
@@ -124,8 +124,8 @@ export interface TranscriptTurnEnd {
   readonly kind: "turn_end";
   readonly turnId: string;
   readonly at: EpochMillis;
-  /** 本轮角色。 */
-  readonly role: Role;
+  /** 本轮角色（T8.4 起可为自定义角色 ID；旧数据只含内置三字面量，向后兼容）。 */
+  readonly role: RoleRef;
   /** 承载本轮的 Profile。 */
   readonly profileId: ProfileId;
   /**
@@ -157,7 +157,7 @@ export interface InflightTurnMarker {
   readonly turnId: string;
   /** 所属本地会话（定位 transcript 文件）。 */
   readonly sessionId: LocalSessionId;
-  readonly role: Role;
+  readonly role: RoleRef;
   readonly profileId: ProfileId;
   /** 轮开始时刻（epoch 毫秒；补写 Run 时作为 startedAt）。 */
   readonly startedAt: EpochMillis;

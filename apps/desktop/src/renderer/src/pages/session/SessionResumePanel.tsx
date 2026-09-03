@@ -3,6 +3,7 @@ import { RotateCcw } from "lucide-react";
 import { type ReactElement, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../components/ui/Button";
+import { useRoleLabel } from "../../hooks/useRoleLabel";
 import { useInvokeQuery } from "../../ipc/useInvokeQuery";
 import { formatRelativeTime } from "../../lib/time";
 import { useSessionStore } from "../../stores/session";
@@ -33,6 +34,7 @@ export function SessionResumePanel({
   disabled,
 }: SessionResumePanelProps): ReactElement | null {
   const { t, i18n } = useTranslation();
+  const roleLabel = useRoleLabel();
   const { state, refetch } = useInvokeQuery("sessions:list", { projectRoot });
   // 任一会话轮结束即刷新：新登记 / 更新的会话及时进入可恢复列表。
   const endedTurnSeq = useSessionStore((s) => s.endedTurnSeq);
@@ -60,7 +62,7 @@ export function SessionResumePanel({
                 key={session.id}
                 className="flex items-center gap-2 rounded border border-border bg-surface px-2 py-1 text-xs"
               >
-                <span className="text-fg-muted">{t(`session.role.${session.role}`)}</span>
+                <span className="text-fg-muted">{roleLabel(session.role)}</span>
                 <span
                   className="text-fg-subtle"
                   title={new Date(session.lastActiveAt).toLocaleString(i18n.language)}

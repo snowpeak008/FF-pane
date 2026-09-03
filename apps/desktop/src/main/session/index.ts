@@ -32,6 +32,7 @@ import {
   createProjectRegistry,
   createProjectSettingsStore,
   createProviderStore,
+  createRoleStore,
   createSessionStore,
   deleteInflightMarker,
   initGlobalLayout,
@@ -144,6 +145,7 @@ export async function createSessionLayer(getWindow: SessionWindowGetter): Promis
   const projects = createProjectRegistry(layout.projectsFile);
   const providers = createProviderStore(layout.providersFile);
   const profiles = createProfileStore(layout.profilesFile);
+  const roles = createRoleStore(layout.rolesFile);
   const config = createConfigStore(layout.configFile);
   const secrets = createSecretStore({
     backend: createSafeStorageBackend(),
@@ -177,6 +179,8 @@ export async function createSessionLayer(getWindow: SessionWindowGetter): Promis
     },
     loadProfile: (id) => profiles.getProfile(id),
     loadProvider: (id) => providers.getProvider(id),
+    // 自定义角色（T8.4）：Profile.defaultRole 为 CustomRoleId 的讨论轮按该角色行事
+    loadCustomRole: (id) => roles.getRole(id),
     revealSecret: (ref) => secrets.revealSecret(ref),
     resolveLayout: (root) => resolveProjectLayout(root),
     loadActiveMemory: async (projectLayout) => {

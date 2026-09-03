@@ -22,6 +22,8 @@ import type {
 import type {
   AgentProfile,
   ApiKeyRef,
+  CustomRole,
+  CustomRoleId,
   GlobalConfig,
   HabitCategory,
   HabitEntry,
@@ -44,7 +46,7 @@ import type {
   Provider,
   ProviderId,
   ReviewVerdict,
-  Role,
+  RoleRef,
   Run,
   RunEndReason,
   RunId,
@@ -302,6 +304,29 @@ export interface UpdateProfileRequest {
 /** profiles:remove 请求。 */
 export interface RemoveProfileRequest {
   readonly id: ProfileId;
+}
+
+/**
+ * 自定义角色创建 / 更新草稿（T8.4）：名称 + 角色提示词 + 权限预设
+ * （id 与时间戳由 store 维护）。与 storage 层 CustomRoleDraft 同构，
+ * 此处按 shared 的 CustomRole 就地派生（契约不依赖 node-only 的 storage）。
+ */
+export type CustomRoleDraftWire = Omit<CustomRole, "id" | "createdAt" | "updatedAt">;
+
+/** roles:create 请求。 */
+export interface CreateRoleRequest {
+  readonly draft: CustomRoleDraftWire;
+}
+
+/** roles:update 请求：整表单替换（id / createdAt 不变）。 */
+export interface UpdateRoleRequest {
+  readonly id: CustomRoleId;
+  readonly draft: CustomRoleDraftWire;
+}
+
+/** roles:remove 请求。被 Profile 引用（defaultRole 指向它）时拒删（RoleInUseError）。 */
+export interface RemoveRoleRequest {
+  readonly id: CustomRoleId;
 }
 
 /** 任务操作请求（接受 / 取消）：项目根 + 任务 ID。 */
@@ -788,7 +813,8 @@ export type SessionStreamEvent =
   | {
       readonly turnId: string;
       readonly kind: "started";
-      readonly role: Role;
+      /** 本轮角色（T8.4 起可为自定义角色 ID）。 */
+      readonly role: RoleRef;
       readonly model?: ModelId;
       /**
        * 本轮所属会话（T4.3）。与 turnId 一起构成回放本条目的对齐键（T8.2b）：
@@ -934,6 +960,14 @@ export interface IpcInvokeContracts {
   "profiles:update": { request: UpdateProfileRequest; response: AgentProfile };
   /** 删除 Profile。 */
   "profiles:remove": { request: RemoveProfileRequest; response: { readonly removed: true } };
+  /** 列出全部自定义角色（T8.4，§3.1 自定义角色）。 */
+  "roles:list": { request: undefined; response: readonly CustomRole[] };
+  /** 新建自定义角色（经 core 校验：名称/提示词非空、预设不出项目根、§7 清单不可关）。 */
+  "roles:create": { request: CreateRoleRequest; response: CustomRole };
+  /** 整表单更新自定义角色。 */
+  "roles:update": { request: UpdateRoleRequest; response: CustomRole };
+  /** 删除自定义角色（被 Profile 引用时拒删——先解绑再删）。 */
+  "roles:remove": { request: RemoveRoleRequest; response: { readonly removed: true } };
   /** 列出当前项目的全部任务（§11.4 任务看板）。 */
   "tasks:list": { request: ProjectScopedRequest; response: readonly Task[] };
   /**
@@ -1098,6 +1132,10 @@ export const INVOKE_CHANNELS = [
   "profiles:create",
   "profiles:update",
   "profiles:remove",
+  "roles:list",
+  "roles:create",
+  "roles:update",
+  "roles:remove",
   "tasks:list",
   "tasks:accept",
   "tasks:cancel",

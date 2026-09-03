@@ -8,7 +8,8 @@
  * 上限默认 20，超出按「类别优先级 + 更新时间」截断。
  */
 
-import type { MemoryCategory, MemoryEntry, Role, TaskContract } from "@ff-pane/shared";
+import type { MemoryCategory, MemoryEntry, RoleRef, TaskContract } from "@ff-pane/shared";
+import { isRole } from "@ff-pane/shared";
 
 /** 注入条数上限缺省值（§8.1）。 */
 export const DEFAULT_INJECTION_LIMIT = 20;
@@ -21,13 +22,21 @@ const CATEGORY_PRIORITY: Readonly<Record<MemoryCategory, number>> = {
   lesson: 3,
 };
 
-/** 按角色策略从 active 记忆中选条（不截断）。 */
+/**
+ * 按角色策略从 active 记忆中选条（不截断）。
+ * 自定义角色（T8.4）走 planner 同款（decision + rule）：它们是"对任何角色都成立的
+ * 项目共识"，而 worker 的 contextRefs 策略依赖任务合同、reviewer 的 rule-only 依赖
+ * 审查语义——自定义角色没有这两种结构化管线，取通用共识是唯一不臆测的选择。
+ */
 export function selectMemoryForRole(
-  role: Role,
+  role: RoleRef,
   memory: readonly MemoryEntry[],
   task?: TaskContract,
 ): readonly MemoryEntry[] {
   const active = memory.filter((entry) => entry.status === "active");
+  if (!isRole(role)) {
+    return active.filter((e) => e.category === "decision" || e.category === "rule");
+  }
   switch (role) {
     case "planner":
       return active.filter((e) => e.category === "decision" || e.category === "rule");

@@ -54,4 +54,10 @@ describe("IPC 通道契约", () => {
   it("T8.3a 并发轮次查询通道已登记到运行时清单", () => {
     expect(INVOKE_CHANNELS).toContain("sessions:active-turns");
   });
+
+  it("T8.4 自定义角色 CRUD 四通道已登记到运行时清单（preload 据此放行）", () => {
+    for (const channel of ["roles:list", "roles:create", "roles:update", "roles:remove"]) {
+      expect(INVOKE_CHANNELS, `缺通道：${channel}`).toContain(channel);
+    }
+  });
 });

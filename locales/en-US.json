@@ -444,6 +444,28 @@
       "builtIn": "(built-in server)",
       "saved": "Saved",
       "error": "Could not save"
+    },
+    "roles": {
+      "title": "Custom roles",
+      "subtitle": "Roles beyond the built-in Planner/Worker/Reviewer: name + role prompt + permission preset.",
+      "new": "New role",
+      "empty": "No custom roles yet. Create one and bind it in a Profile to use it.",
+      "loadError": "Failed to load custom roles",
+      "saved": "Saved \"{{name}}\"",
+      "removed": "Deleted \"{{name}}\"",
+      "removeError": "Failed to delete custom role",
+      "editLabel": "Edit \"{{name}}\"",
+      "removeLabel": "Delete \"{{name}}\"",
+      "edit": {
+        "title": "Edit role",
+        "description": "The role prompt is layer 1 of this role's system prompt; the permission preset is its default permission ceiling. Dangerous-operation confirmation cannot be disabled."
+      },
+      "field": {
+        "name": "Name",
+        "systemPrompt": "Role prompt",
+        "systemPromptHint": "The role definition sent to the agent verbatim (prompt layer 1; not affected by UI language).",
+        "permission": "Permission preset"
+      }
     }
   },
   "memory": {
@@ -603,7 +625,8 @@
       "confirm": "Confirm and hand off",
       "kickoff": "Read the handoff package above. First restate your understanding of the current progress and constraints, then say what you intend to do next. Do not start working yet.",
       "migrated": "Handed off. The package was injected into a new session."
-    }
+    },
+    "discussionProfile": "Discussion profile"
   },
   "shortcut": {
     "scope": {

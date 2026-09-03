@@ -76,4 +76,19 @@ describe("formFromProfile round-trip", () => {
     const { id: _id, ...rest } = profile;
     expect(draft).toEqual(rest);
   });
+
+  it("自定义角色 ID 作为 defaultRole 同样 round-trip（T8.4）", () => {
+    const profile = {
+      id: "profile-2",
+      name: "文档 Agent",
+      runtime: "codex",
+      providerId: "provider-1",
+      defaultRole: "role-a1b2c3d4e5f6",
+      permissionPreset: PRESET,
+    } as AgentProfile;
+    const form = formFromProfile(profile);
+    expect(form.defaultRole).toBe("role-a1b2c3d4e5f6");
+    const draft = buildProfileDraft(form);
+    expect(draft.defaultRole).toBe("role-a1b2c3d4e5f6");
+  });
 });

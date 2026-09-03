@@ -4,6 +4,7 @@ import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
+import { useRoleLabel } from "../../hooks/useRoleLabel";
 import { formatRelativeTime } from "../../lib/time";
 
 export interface ActiveTurnsSectionProps {
@@ -19,6 +20,7 @@ export interface ActiveTurnsSectionProps {
  */
 export function ActiveTurnsSection({ turns }: ActiveTurnsSectionProps): ReactElement | null {
   const { t, i18n } = useTranslation();
+  const roleLabel = useRoleLabel();
   if (turns.length === 0) {
     return null;
   }
@@ -28,7 +30,7 @@ export function ActiveTurnsSection({ turns }: ActiveTurnsSectionProps): ReactEle
       <div className="mt-1.5 flex flex-col gap-1">
         {turns.map((turn) => (
           <div key={turn.turnId} className="flex flex-wrap items-center gap-2 text-xs">
-            <Badge>{t(`session.role.${turn.role}`)}</Badge>
+            <Badge>{roleLabel(turn.role)}</Badge>
             {turn.taskId !== undefined ? (
               <span className="font-mono text-fg-muted">{turn.taskId}</span>
             ) : null}

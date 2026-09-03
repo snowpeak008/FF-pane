@@ -6,7 +6,7 @@
  * 回执权限、取消，不订阅事件。
  */
 
-import type { LocalSessionId, ProfileId } from "@ff-pane/shared";
+import type { LocalSessionId, ProfileId, RoleRef } from "@ff-pane/shared";
 import type { SessionInput, StartSessionAck } from "../../../shared-ipc/contracts";
 import { invokeQuery } from "../ipc/query";
 import { useSessionStore } from "../stores/session";
@@ -36,6 +36,11 @@ export async function startSessionTurn(params: {
    * （同时传入时 sessionId 被忽略，新 Agent 续不上旧 Agent 的会话）。
    */
   readonly handoffText?: string;
+  /**
+   * 本地预置轮的角色回显（T8.4）：绑定自定义角色的 Profile 发起讨论轮时传其角色 ID，
+   * 状态条在 started 事件到达前就显示正确角色。权威值仍是 started.role（到达即覆盖）。
+   */
+  readonly localRole?: RoleRef;
 }): Promise<{
   readonly turnId: string;
   readonly ack: StartSessionAck | null;
@@ -43,7 +48,8 @@ export async function startSessionTurn(params: {
   readonly errorMessage?: string;
 }> {
   const turnId = newTurnId();
-  const role = params.input.kind === "worker-task" ? "worker" : "planner";
+  const role: RoleRef =
+    params.localRole ?? (params.input.kind === "worker-task" ? "worker" : "planner");
   const store = useSessionStore.getState();
   // 用户可见输入进历史消息（T8.2b-b）：讨论/计划补充指令是用户敲的那段话，与主进程
   // transcript 的 user_message 同语义；worker/审查轮的"输入"是任务合同，任务页已可见，不重复。

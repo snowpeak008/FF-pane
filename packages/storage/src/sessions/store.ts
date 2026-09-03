@@ -17,7 +17,7 @@
  */
 
 import type { SessionRecord } from "@ff-pane/shared";
-import { isRole, isSessionResumeKind } from "@ff-pane/shared";
+import { isRoleRef, isSessionResumeKind } from "@ff-pane/shared";
 import { readJson, writeJsonAtomic } from "../fs/index.js";
 import { SessionsFileInvalidError } from "./errors.js";
 
@@ -46,7 +46,7 @@ export interface SessionStore {
 
 /** 读入边界字段校验：仅校验会破坏后续消费的判别字段（role / resumeKind）。 */
 function validateRecord(record: SessionRecord, path: string): SessionRecord {
-  if (!isRole(record.role)) {
+  if (!isRoleRef(record.role)) {
     throw new SessionsFileInvalidError(
       path,
       `会话 ${record.id} 的 role 非法：${String(record.role)}`,

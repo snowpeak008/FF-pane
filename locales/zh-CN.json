@@ -444,6 +444,28 @@
       "builtIn": "（内置服务端）",
       "saved": "已保存",
       "error": "保存失败"
+    },
+    "roles": {
+      "title": "自定义角色",
+      "subtitle": "内置规划者/执行者/审查者之外的角色：名称 + 角色提示词 + 权限预设。",
+      "new": "新建角色",
+      "empty": "还没有自定义角色。新建一个并在 Profile 里绑定即可使用。",
+      "loadError": "读取自定义角色列表失败",
+      "saved": "已保存「{{name}}」",
+      "removed": "已删除「{{name}}」",
+      "removeError": "删除自定义角色失败",
+      "editLabel": "编辑「{{name}}」",
+      "removeLabel": "删除「{{name}}」",
+      "edit": {
+        "title": "编辑角色",
+        "description": "角色提示词是该角色系统提示的第 1 层；权限预设是其默认权限上界，危险操作确认不可关闭。"
+      },
+      "field": {
+        "name": "名称",
+        "systemPrompt": "角色提示词",
+        "systemPromptHint": "发给 Agent 的角色定义原文（进 Prompt 第 1 层，不随界面语言变化）。",
+        "permission": "权限预设"
+      }
     }
   },
   "memory": {
@@ -603,7 +625,8 @@
       "confirm": "确认并迁移",
       "kickoff": "请阅读以上交接包，先复述你对当前进度与约束的理解，再说明你打算接下来做什么。不要直接动手。",
       "migrated": "已迁移到新 Agent，交接包已注入新会话。"
-    }
+    },
+    "discussionProfile": "讨论 Profile"
   },
   "shortcut": {
     "scope": {

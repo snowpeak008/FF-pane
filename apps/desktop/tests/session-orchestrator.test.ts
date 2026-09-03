@@ -2243,3 +2243,134 @@ describe("T8.3b 并发受理与互斥拒绝", () => {
     await orch.prepareForQuit();
   });
 });
+
+describe("T8.4 自定义角色轮次", () => {
+  const CUSTOM_ROLE_ID = "role-a1b2c3d4e5f6";
+  const CUSTOM_ROLE = {
+    id: CUSTOM_ROLE_ID,
+    name: "文档撰写者",
+    systemPrompt: "你是文档撰写者。只改 docs/ 下的文档，不碰源码。",
+    permissionPreset: {
+      readPaths: ["**"],
+      writePaths: ["docs/**"],
+      shell: "forbidden",
+      network: false,
+      dangerousOpsRequireApproval: true as const,
+    },
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  const DONE_EVENTS: AgentEvent[] = [
+    { kind: "session_start" },
+    { kind: "text", content: "done", final: true, channel: "answer" },
+    { kind: "end", reason: "completed" },
+  ];
+
+  /** 绑定自定义角色的 Profile（预设与角色预设同形）。 */
+  function customProfile(): AgentProfile {
+    return profile({
+      defaultRole: CUSTOM_ROLE_ID,
+      permissionPreset: CUSTOM_ROLE.permissionPreset,
+    });
+  }
+
+  function withCustomRole(h: Harness): SessionOrchestratorDeps {
+    return {
+      ...h.deps,
+      loadCustomRole: async (id) =>
+        (id as string) === CUSTOM_ROLE_ID
+          ? (CUSTOM_ROLE as unknown as Awaited<
+              ReturnType<NonNullable<SessionOrchestratorDeps["loadCustomRole"]>>
+            >)
+          : undefined,
+    };
+  }
+
+  it("讨论轮按自定义角色行事：第 1 层为 systemPrompt 原文、事件与登记 role 均为角色 ID、信封为角色预设 ∩ Profile 预设", async () => {
+    const h = makeHarness(DONE_EVENTS, { profile: customProfile() });
+    const orch = createSessionOrchestrator(withCustomRole(h));
+
+    const ack = await orch.start(plannerRequest());
+    expect(ack.accepted).toBe(true);
+    // 在飞表登记：role 为角色 ID，writePaths 为交集后的 docs 子树（forbidden shell 不影响写范围）
+    expect(orch.listActiveTurns("/proj")[0]).toMatchObject({
+      role: CUSTOM_ROLE_ID,
+      writePaths: ["docs"],
+    });
+    await flushUntilEnd(h.published);
+
+    // started 事件与会话登记的 role 都是自定义角色 ID（RoleRef 联合）
+    expect(h.published[0]).toMatchObject({ kind: "started", role: CUSTOM_ROLE_ID });
+    expect(h.savedSessions[0]?.role).toBe(CUSTOM_ROLE_ID);
+    // Prompt 第 1 层是角色提示词原文，不是内置 planner 定义
+    const prompt = h.captured[0]?.prompt ?? "";
+    expect(prompt).toContain("# 角色\n你是文档撰写者。只改 docs/ 下的文档，不碰源码。");
+    expect(prompt).not.toContain("你是规划者");
+    // turn_end 的 role 同样是角色 ID（transcript 落盘）
+    const turnEnd = [...h.transcripts.values()][0]?.find((e) => e.kind === "turn_end");
+    expect(turnEnd).toMatchObject({ role: CUSTOM_ROLE_ID });
+  });
+
+  it("自定义角色不存在（被删 / 宿主未接）：受理拒绝并给出原因，不 spawn", async () => {
+    const h = makeHarness(DONE_EVENTS, { profile: customProfile() });
+    // 宿主接了 loadCustomRole 但查无此角色
+    const orch = createSessionOrchestrator({
+      ...h.deps,
+      loadCustomRole: async () => undefined,
+    });
+    const ack = await orch.start(plannerRequest());
+    expect(ack.accepted).toBe(false);
+    if (!ack.accepted) {
+      expect(ack.reason).toContain("自定义角色不存在");
+    }
+    expect(h.captured).toHaveLength(0);
+
+    // 宿主完全未注入 loadCustomRole：同样拒绝
+    const h2 = makeHarness(DONE_EVENTS, { profile: customProfile() });
+    const orch2 = createSessionOrchestrator(h2.deps);
+    const ack2 = await orch2.start(plannerRequest());
+    expect(ack2.accepted).toBe(false);
+  });
+
+  it("计划生成轮恒按 planner 执行：自定义角色 Profile 发起 planner-plan 时第 1 层仍是内置 planner", async () => {
+    const h = makeHarness(DONE_EVENTS, { profile: customProfile() });
+    const orch = createSessionOrchestrator(withCustomRole(h));
+    const ack = await orch.start({
+      turnId: "t-plan",
+      projectRoot: "/proj",
+      profileId: "prof-1" as unknown as ProfileId,
+      input: { kind: "planner-plan" },
+    });
+    expect(ack.accepted).toBe(true);
+    await flushUntilEnd(h.published);
+    expect(h.published[0]).toMatchObject({ kind: "started", role: "planner" });
+    const prompt = h.captured[0]?.prompt ?? "";
+    expect(prompt).toContain("你是规划者");
+    expect(prompt).not.toContain("文档撰写者");
+  });
+
+  it("内置角色行为逐字不变：planner Profile 的讨论轮不受 loadCustomRole 注入影响", async () => {
+    const h = makeHarness(DONE_EVENTS, { profile: profile({ defaultRole: "planner" }) });
+    const orch = createSessionOrchestrator(withCustomRole(h));
+    await orch.start(plannerRequest());
+    await flushUntilEnd(h.published);
+    expect(h.published[0]).toMatchObject({ kind: "started", role: "planner" });
+    expect(h.captured[0]?.prompt ?? "").toContain("你是规划者");
+  });
+
+  it("信封交集生效：自定义角色 shell=forbidden 时轮内命令判违规、整轮被掐断（§7 公式同款）", async () => {
+    // 事件流里发一条命令：guardTurn 依交集后的信封裁决，forbidden 策略下判 violation，
+    // 事前拦截取消整轮——与审查轮"合同外命令掐断整轮"同一机制。
+    const events: AgentEvent[] = [
+      { kind: "session_start" },
+      { kind: "command", command: "npm run build", status: "completed", exitCode: 0 },
+      { kind: "text", content: "done", final: true, channel: "answer" },
+      { kind: "end", reason: "completed" },
+    ];
+    const h = makeHarness(events, { profile: customProfile() });
+    const orch = createSessionOrchestrator(withCustomRole(h));
+    await orch.start(plannerRequest());
+    await flushUntilEnd(h.published);
+    expect(h.published.at(-1)).not.toMatchObject({ reason: "completed" });
+  });
+});

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import type {
   AgentProfile,
   ApiKeyRef,
+  CustomRole,
+  CustomRoleId,
   Handoff,
   InflightTurnMarker,
   KnowledgeChunkId,
@@ -34,6 +36,7 @@ import type {
 import {
   AI_OUTPUT_LANGUAGES,
   CLARIFICATION_ANSWERED_BY,
+  CUSTOM_ROLE_ID_PREFIX,
   createLiteralGuard,
   DANGEROUS_OPERATIONS,
   FALLBACK_UI_LANGUAGE,
@@ -42,6 +45,7 @@ import {
   HABIT_SOURCE_KINDS,
   isAiOutputLanguage,
   isClarificationAnsweredBy,
+  isCustomRoleId,
   isDangerousOperation,
   isHabitCategory,
   isHabitSourceKind,
@@ -56,6 +60,7 @@ import {
   isPlanStatus,
   isProviderType,
   isRole,
+  isRoleRef,
   isRunEndReason,
   isSessionResumeKind,
   isShellPolicy,
@@ -423,6 +428,47 @@ describe("聚合结构冒烟（品牌 ID 断言 + 字段形态）", () => {
     };
     expect(isRole(profile.defaultRole)).toBe(true);
     expect(profile.permissionPreset.dangerousOpsRequireApproval).toBe(true);
+  });
+
+  it("自定义角色（T8.4）：CUSTOM_ROLE_ID_PREFIX 判别、RoleRef 联合与旧数据向后兼容", () => {
+    // isCustomRoleId：`role-` 前缀 + 非空随机段才是自定义角色 ID
+    expect(isCustomRoleId("role-a1b2c3d4e5f6")).toBe(true);
+    expect(isCustomRoleId(`${CUSTOM_ROLE_ID_PREFIX}x`)).toBe(true);
+    expect(isCustomRoleId("role-")).toBe(false);
+    expect(isCustomRoleId("planner")).toBe(false);
+    expect(isCustomRoleId("profile-abc")).toBe(false);
+    expect(isCustomRoleId(42)).toBe(false);
+    // 内置三字面量与 `role-` 前缀无冲突：isRole 与 isCustomRoleId 无交集
+    for (const role of ROLES) {
+      expect(isCustomRoleId(role)).toBe(false);
+    }
+    // isRoleRef：旧序列化数据（内置字面量）原样放行——向后兼容无需迁移
+    for (const role of ROLES) {
+      expect(isRoleRef(role)).toBe(true);
+    }
+    expect(isRoleRef("role-a1b2c3d4e5f6")).toBe(true);
+    expect(isRoleRef("architect")).toBe(false);
+    // CustomRole 聚合形态（§3.1：名称 + 角色提示词 + 权限预设）
+    const custom: CustomRole = {
+      id: "role-a1b2c3d4e5f6" as CustomRoleId,
+      name: "文档撰写者",
+      systemPrompt: "你是文档撰写者。",
+      permissionPreset: envelope,
+      createdAt: 1_756_000_000_000,
+      updatedAt: 1_756_000_000_000,
+    };
+    expect(custom.permissionPreset.dangerousOpsRequireApproval).toBe(true);
+    // AgentProfile.defaultRole 可为 CustomRoleId（Profile 与自定义角色的绑定字段）
+    const bound: AgentProfile = {
+      id: profileId,
+      name: "文档 Agent",
+      runtime: "codex",
+      providerId,
+      defaultRole: custom.id,
+      permissionPreset: envelope,
+    };
+    expect(isRoleRef(bound.defaultRole)).toBe(true);
+    expect(isRole(bound.defaultRole)).toBe(false);
   });
 
   it("Project 角色绑定：planner/worker 必绑，reviewer 可选", () => {

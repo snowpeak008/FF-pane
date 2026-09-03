@@ -20,7 +20,7 @@ import { appendFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { LocalSessionId, TranscriptEntry } from "@ff-pane/shared";
 import {
-  isRole,
+  isRoleRef,
   isRunEndReason,
   isSessionResumeKind,
   isTranscriptEntryKind,
@@ -149,7 +149,7 @@ function parseTranscriptLine(line: string): TranscriptEntry | undefined {
       break;
     case "turn_end":
       if (
-        !isRole(record["role"]) ||
+        !isRoleRef(record["role"]) ||
         !hasStringField(record, "profileId") ||
         !isRunEndReason(record["endReason"]) ||
         (record["resumeKind"] !== undefined && !isSessionResumeKind(record["resumeKind"])) ||

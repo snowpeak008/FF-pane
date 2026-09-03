@@ -28,7 +28,7 @@ import type {
   LocalSessionId,
   ModelId,
   PlanVersion,
-  Role,
+  RoleRef,
   RunEndReason,
   RunId,
   SessionResumeKind,
@@ -59,7 +59,8 @@ export interface PendingPermission {
 export interface ActiveTurnView {
   readonly turnId: string;
   readonly sessionId: LocalSessionId | null;
-  readonly role: Role;
+  /** 本轮角色（T8.4 起可为自定义角色 ID，显示名经 useRoleLabel 解析）。 */
+  readonly role: RoleRef;
   readonly model: ModelId | null;
   readonly resumeKind: SessionResumeKind | null;
   /** 已累积的 answer 文本（增量追加，不整段替换）。 */
@@ -79,7 +80,7 @@ export interface EndedTurnMarker {
 
 /** 状态条在最近一轮结束后仍要展示的摘要（角色 / 模型 / 会话类型 + "已结束"）。 */
 export interface EndedTurnView {
-  readonly role: Role;
+  readonly role: RoleRef;
   readonly model: ModelId | null;
   readonly resumeKind: SessionResumeKind | null;
 }
@@ -157,7 +158,7 @@ export interface SessionUiActions {
    * started 事件报出真值后覆盖）。userText（T8.2b-b）：用户可见的本轮输入，给出即
    * 追加进历史消息（与主进程 transcript 的 user_message 同源同语义）。
    */
-  readonly startLocalTurn: (turnId: string, role: Role, userText?: string) => void;
+  readonly startLocalTurn: (turnId: string, role: RoleRef, userText?: string) => void;
   /** 发起被拒 / 立即失败：该轮从未起飞，直接移出在飞 Map（失败原因由调用方 toast）。 */
   readonly failLocalTurn: (turnId: string, message: string) => void;
   /** 订阅回调调用：归并一条主进程会话事件（按 turnId 分桶，T8.3b）。 */
@@ -253,7 +254,7 @@ export function sessionStatusView(
   activeSessionId: LocalSessionId | null,
   lastEndedView: EndedTurnView | null,
 ): {
-  readonly role: Role | null;
+  readonly role: RoleRef | null;
   readonly model: ModelId | null;
   readonly resumeKind: SessionResumeKind | null;
   readonly status: TurnStatus;

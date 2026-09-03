@@ -8,6 +8,7 @@ import { KnowledgeToolSection } from "./KnowledgeToolSection";
 import { LanguageSection } from "./LanguageSection";
 import { ProfilesSection } from "./profiles/ProfilesSection";
 import { ProvidersSection } from "./providers/ProvidersSection";
+import { RolesSection } from "./roles/RolesSection";
 
 /**
  * 设置页（T3.2 / 项目设计计划 §11）。
@@ -29,6 +30,8 @@ export function SettingsPage(): ReactElement {
           <ProvidersSection />
           <Separator />
           <ProfilesSection />
+          <Separator />
+          <RolesSection />
           <Separator />
           <DefaultPermissionSection />
           <Separator />

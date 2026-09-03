@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { LoadingState } from "../../components/states/LoadingState";
 import { Button } from "../../components/ui/Button";
 import { useActiveProject } from "../../hooks/useActiveProject";
-import { useRoleProfile } from "../../hooks/useRoleProfile";
+import { useDiscussionProfiles } from "../../hooks/useRoleProfile";
 import { invokeQuery } from "../../ipc/query";
 import { PageHeader } from "../../layout/PageHeader";
 import { cancelSessionTurn, startSessionTurn } from "../../lib/session-run";
@@ -68,7 +68,20 @@ async function replaySession(projectRoot: string, session: SessionRecord): Promi
 export function SessionPage(): ReactElement {
   const { t } = useTranslation();
   const { entry, loading } = useActiveProject();
-  const { profile: plannerProfile, loading: profileLoading } = useRoleProfile("planner");
+  // 讨论轮 Profile（T8.4）：planner 与自定义角色 Profile 都可承载讨论；多个可选时
+  // 状态条给下拉。缺省取第一个 planner Profile（与 T8.4 前行为一致），否则取列表首个。
+  const { profiles: discussionProfiles, loading: profileLoading } = useDiscussionProfiles();
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+  const activeProfile =
+    discussionProfiles.find((p) => p.id === selectedProfileId) ??
+    discussionProfiles.find((p) => p.defaultRole === "planner") ??
+    discussionProfiles[0] ??
+    null;
+  // 发起时的本地角色回显：自定义角色 Profile 传其角色 ID（权威值仍是 started.role）
+  const localRole =
+    activeProfile !== null && activeProfile.defaultRole !== "planner"
+      ? activeProfile.defaultRole
+      : undefined;
 
   const navigate = useNavigate();
   const activeTurns = useSessionStore((s) => s.activeTurns);
@@ -174,27 +187,31 @@ export function SessionPage(): ReactElement {
   };
 
   const onSend = (text: string, directExecute: boolean): void => {
-    if (entry === null || plannerProfile === null) {
+    if (entry === null || activeProfile === null) {
       return;
     }
     void startSessionTurn({
       projectRoot: entry.rootPath,
-      profileId: plannerProfile.id,
+      profileId: activeProfile.id,
       // directExecute（T5.3）：本轮「直接做」跳过习惯整形；缺省不带该字段
       input: { kind: "planner-message", text, ...(directExecute ? { directExecute: true } : {}) },
       // 有当前会话 = 续接（原生恢复 / 上下文重建）；无 = 开新会话（T4.3）
       ...(activeSessionId !== null ? { sessionId: activeSessionId } : {}),
+      // 自定义角色 Profile（T8.4）：本地预置轮回显其角色（权威值仍是 started.role）
+      ...(localRole !== undefined ? { localRole } : {}),
     }).then(toastIfRejected);
   };
 
   // 生成计划（T4.6，§12「出计划」）：据当前讨论发起一轮 planner-plan（续接当前会话以复用上下文）。
   const onGeneratePlan = (): void => {
-    if (entry === null || plannerProfile === null) {
+    if (entry === null || activeProfile === null) {
       return;
     }
+    // 计划生成轮恒按 planner 执行（编排器 T8.4 口径：结构化输出合同只属于 planner），
+    // 故不传 localRole——即便当前选的是自定义角色 Profile。
     void startSessionTurn({
       projectRoot: entry.rootPath,
-      profileId: plannerProfile.id,
+      profileId: activeProfile.id,
       input: { kind: "planner-plan" },
       ...(activeSessionId !== null ? { sessionId: activeSessionId } : {}),
     }).then(toastIfRejected);
@@ -227,7 +244,7 @@ export function SessionPage(): ReactElement {
   };
 
   const composerDisabledReason =
-    plannerProfile === null && !profileLoading
+    activeProfile === null && !profileLoading
       ? t("session.noPlannerProfile")
       : busy
         ? t("session.turnInProgress")
@@ -249,15 +266,34 @@ export function SessionPage(): ReactElement {
             status={statusView.status}
             resumeKind={statusView.resumeKind}
             actions={
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={busy}
-                onClick={() => setHandoffOpen(true)}
-              >
-                <ArrowLeftRight aria-hidden size={14} />
-                {t("session.handoff.action")}
-              </Button>
+              <div className="flex items-center gap-2">
+                {/* 讨论 Profile 选择（T8.4）：仅当有多个可选（planner + 自定义角色）时呈现；
+                    在飞时禁用——正在进行的轮不换承载者 */}
+                {discussionProfiles.length > 1 ? (
+                  <select
+                    className="h-6 cursor-pointer rounded border border-border bg-surface px-1 text-xs text-fg"
+                    aria-label={t("session.discussionProfile")}
+                    value={activeProfile?.id ?? ""}
+                    disabled={busy}
+                    onChange={(e) => setSelectedProfileId(e.target.value)}
+                  >
+                    {discussionProfiles.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => setHandoffOpen(true)}
+                >
+                  <ArrowLeftRight aria-hidden size={14} />
+                  {t("session.handoff.action")}
+                </Button>
+              </div>
             }
           />
           {handoffOpen ? (
@@ -265,7 +301,7 @@ export function SessionPage(): ReactElement {
               open
               onOpenChange={setHandoffOpen}
               projectRoot={entry.rootPath}
-              currentProfile={plannerProfile}
+              currentProfile={activeProfile}
             />
           ) : null}
           {!busy ? (
@@ -273,7 +309,7 @@ export function SessionPage(): ReactElement {
               projectRoot={entry.rootPath}
               activeSessionId={activeSessionId}
               onResume={onResume}
-              disabled={plannerProfile === null}
+              disabled={activeProfile === null}
             />
           ) : null}
           <SessionReplayBanner />
@@ -297,7 +333,7 @@ export function SessionPage(): ReactElement {
           <Composer
             onSend={onSend}
             onGeneratePlan={onGeneratePlan}
-            disabled={busy || plannerProfile === null}
+            disabled={busy || activeProfile === null}
             {...(composerDisabledReason !== undefined
               ? { disabledReason: composerDisabledReason }
               : {})}

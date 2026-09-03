@@ -11,7 +11,7 @@
  * （AdapterTurnContext.prompt）。
  */
 
-import type { AiOutputLanguageSettings, MemoryEntry, Role, TaskContract } from "@ff-pane/shared";
+import type { AiOutputLanguageSettings, MemoryEntry, RoleRef, TaskContract } from "@ff-pane/shared";
 import {
   DEFAULT_INJECTION_LIMIT,
   renderMemoryEntry,
@@ -19,7 +19,7 @@ import {
   truncateByPriority,
 } from "./inject.js";
 import { outputLanguageInstruction, resolveOutputLanguage } from "./language.js";
-import { ROLE_DEFINITIONS } from "./roles.js";
+import { resolveRoleDefinition } from "./roles.js";
 
 /** 第 4 层当前输入：用户消息（Planner 讨论）或任务合同（Worker/Reviewer 执行）。 */
 export type PromptInput =
@@ -28,7 +28,9 @@ export type PromptInput =
 
 /** 组装入参。 */
 export interface AssemblePromptParams {
-  readonly role: Role;
+  readonly role: RoleRef;
+  /** 自定义角色的提示词原文（Prompt 第 1 层，T8.4）；内置角色缺省。 */
+  readonly customRoleDefinition?: string;
   readonly input: PromptInput;
   /** active 项目记忆条目（decision / rule / lesson）。 */
   readonly projectMemory: readonly MemoryEntry[];
@@ -86,7 +88,7 @@ export function assemblePrompt(params: AssemblePromptParams): string {
   const language = resolveOutputLanguage(params.outputLanguage);
 
   const sections: string[] = [
-    `# 角色\n${ROLE_DEFINITIONS[params.role]}`,
+    `# 角色\n${resolveRoleDefinition(params.role, params.customRoleDefinition)}`,
     `# 用户习惯\n${habit !== undefined && habit.length > 0 ? habit : "（暂无）"}`,
     `# 项目记忆\n${memoryLines.length > 0 ? memoryLines.join("\n") : "（暂无）"}`,
     `# 当前输入\n${renderInput(params.input)}`,

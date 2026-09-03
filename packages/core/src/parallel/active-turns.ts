@@ -13,7 +13,7 @@
  * 编排器同时维护两份：ActiveTurn 管生命周期，ActiveTurnRecord 管并行事实。
  */
 
-import type { EpochMillis, LocalSessionId, Role, TaskId } from "@ff-pane/shared";
+import type { EpochMillis, LocalSessionId, RoleRef, TaskId } from "@ff-pane/shared";
 import {
   checkWritePathsExclusive,
   type ParallelWriteDecision,
@@ -32,7 +32,8 @@ import {
 export interface ActiveTurnRecord {
   readonly turnId: string;
   readonly sessionId: LocalSessionId;
-  readonly role: Role;
+  /** 本轮角色（T8.4 起可为自定义角色 ID——类型放宽，字段语义与裁决逻辑不变）。 */
+  readonly role: RoleRef;
   /** Worker / 审查轮关联的任务；Planner 讨论 / 计划生成轮缺席。 */
   readonly taskId?: TaskId;
   /** 本轮装配后信封的可写范围（并行裁决的输入）。 */

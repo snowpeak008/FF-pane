@@ -9,7 +9,7 @@ import type {
   ModelId,
   PermissionEnvelope,
   ProviderId,
-  Role,
+  RoleRef,
   RuntimeId,
 } from "@ff-pane/shared";
 import type { ProfileDraftWire } from "../../../../../shared-ipc/contracts";
@@ -21,7 +21,8 @@ export interface ProfileFormState {
   readonly providerId: string;
   /** 空串 = 用 Provider 默认模型。 */
   readonly model: string;
-  readonly defaultRole: Role;
+  /** 内置角色字面量或自定义角色 ID（T8.4；select 受控值，与其他字段同为 string）。 */
+  readonly defaultRole: string;
   /** 空串 = 跟随全局输出语言。 */
   readonly outputLanguage: string;
   readonly permission: PermissionEnvelope;
@@ -55,7 +56,8 @@ export function formFromProfile(profile: AgentProfile): ProfileFormState {
 
 /**
  * 表单态 → 线上草稿。exactOptionalPropertyTypes：可选字段有值才带。
- * 品牌类型在此系统边界收窄一次（providerId / model / runtime）。
+ * 品牌类型在此系统边界收窄一次（providerId / model / runtime / defaultRole——
+ * select 选项只来自 ROLES 与 roles:list，合法性权威在 core validateProfileDraft）。
  */
 export function buildProfileDraft(form: ProfileFormState): ProfileDraftWire {
   const model = form.model.trim();
@@ -64,7 +66,7 @@ export function buildProfileDraft(form: ProfileFormState): ProfileDraftWire {
     name: form.name.trim(),
     runtime: form.runtime.trim() as RuntimeId,
     providerId: form.providerId as ProviderId,
-    defaultRole: form.defaultRole,
+    defaultRole: form.defaultRole as RoleRef,
     permissionPreset: form.permission,
     ...(model.length > 0 ? { model: model as ModelId } : {}),
     ...(outputLanguage.length > 0 ? { outputLanguage: outputLanguage as AiOutputLanguage } : {}),

@@ -89,6 +89,8 @@ import type {
   AiOutputLanguageSettings,
   ApiKeyRef,
   CommandRecord,
+  CustomRole,
+  CustomRoleId,
   FileChange,
   GlobalConfig,
   HabitEntry,
@@ -102,7 +104,7 @@ import type {
   PlanVersion,
   Provider,
   ReviewRecord,
-  Role,
+  RoleRef,
   Run,
   RunEndReason,
   RunId,
@@ -113,6 +115,7 @@ import type {
   TranscriptEntry,
   VerifyResult,
 } from "@ff-pane/shared";
+import { isCustomRoleId } from "@ff-pane/shared";
 import type { ProjectLayout } from "@ff-pane/storage";
 import type {
   CancelSessionRequest,
@@ -196,6 +199,11 @@ export interface SessionOrchestratorDeps {
   readonly publish: (event: SessionStreamEvent) => void;
   readonly loadProfile: (id: AgentProfile["id"]) => Promise<AgentProfile | undefined>;
   readonly loadProvider: (id: Provider["id"]) => Promise<Provider | undefined>;
+  /**
+   * 按 id 读取自定义角色（T8.4；Profile.defaultRole 为 CustomRoleId 的轮次解析用）。
+   * 缺省 = 宿主未接自定义角色（一切 CustomRoleId 视为不存在，受理被拒并给出原因）。
+   */
+  readonly loadCustomRole?: (id: CustomRoleId) => Promise<CustomRole | undefined>;
   readonly revealSecret: (ref: ApiKeyRef) => Promise<string | undefined>;
   readonly resolveLayout: (projectRoot: string) => ProjectLayout;
   /** 项目 active 记忆条目（供 Prompt 注入）。 */
@@ -342,7 +350,7 @@ interface TurnEndSummary {
 interface SessionContext {
   readonly layout: ProjectLayout;
   readonly sessionId: LocalSessionId;
-  readonly role: Role;
+  readonly role: RoleRef;
   readonly profileId: AgentProfile["id"];
   /** 会话首次创建时间（续接时沿用原值）。 */
   readonly createdAt: number;
@@ -485,7 +493,7 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
     readonly turnId: string;
     readonly projectRoot: string;
     readonly sessionId: LocalSessionId;
-    readonly role: Role;
+    readonly role: RoleRef;
     readonly taskId?: TaskId;
     readonly writePaths: readonly string[];
   }):
@@ -607,12 +615,29 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         return { accepted: false, reason: "Provider 不存在" };
       }
 
-      const role: Role =
-        request.input.kind === "worker-task"
-          ? "worker"
-          : request.input.kind === "reviewer-review"
-            ? "reviewer"
-            : "planner";
+      // 角色解析（T8.4）：Worker / 审查轮由派发管线决定角色；讨论轮（planner-message）
+      // 在 Profile 绑定自定义角色（defaultRole 为 CustomRoleId）时以该角色行事——
+      // Prompt 第 1 层用其 systemPrompt，信封 = 角色预设 ∩ Profile 预设（同款交集公式）。
+      // 计划生成轮（planner-plan）是结构化管线（PLAN_OUTPUT_CONTRACT 解析落盘），恒按
+      // planner 执行——自定义角色没有计划解析的输出合同，放进去只会产出解析不了的文本。
+      let role: RoleRef;
+      let customRole: CustomRole | undefined;
+      if (request.input.kind === "worker-task") {
+        role = "worker";
+      } else if (request.input.kind === "reviewer-review") {
+        role = "reviewer";
+      } else if (request.input.kind === "planner-message" && isCustomRoleId(profile.defaultRole)) {
+        customRole =
+          deps.loadCustomRole !== undefined
+            ? await deps.loadCustomRole(profile.defaultRole)
+            : undefined;
+        if (customRole === undefined) {
+          return { accepted: false, reason: `自定义角色不存在：${profile.defaultRole}` };
+        }
+        role = profile.defaultRole;
+      } else {
+        role = "planner";
+      }
       const layout = deps.resolveLayout(request.projectRoot);
       const [memory, config, habits] = await Promise.all([
         deps.loadActiveMemory(layout),
@@ -765,8 +790,11 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
             : request.input.text;
         // 计划生成轮无补充指令时记的是那句缺省指令——它就是 Agent 实际收到的用户层输入
         transcriptUser = { text: messageText };
+        // 第 1 层（T8.4）：自定义角色轮用其 systemPrompt 原文（resolveRoleDefinition），
+        // 内置 planner 轮走 ROLE_DEFINITIONS 静态文本，逐字不变。
         prompt = assemblePrompt({
-          role: "planner",
+          role,
+          ...(customRole !== undefined ? { customRoleDefinition: customRole.systemPrompt } : {}),
           input: { kind: "message", text: messageText },
           projectMemory: memory,
           outputLanguage,
@@ -791,13 +819,17 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         if (request.input.kind === "planner-message") {
           deps.observeMessage?.(request.input.text);
         }
-        // Planner 只读：角色默认 ∩ Profile 预设
-        const plannerEnvelope = toRunEnvelope(
-          intersectEnvelopes(PLANNER_DEFAULT_ENVELOPE, profile.permissionPreset),
+        // 信封：角色默认 ∩ Profile 预设。自定义角色（T8.4）的「角色默认」层是其
+        // permissionPreset（照 T7.2 Reviewer 款式直接相交，不走 assembleRunEnvelope——
+        // 讨论轮没有任务合同）；交集公式不变，§7 危险清单由类型 + 校验器 + 裁决层三重锁死。
+        const roleDefault =
+          customRole !== undefined ? customRole.permissionPreset : PLANNER_DEFAULT_ENVELOPE;
+        const turnEnvelope = toRunEnvelope(
+          intersectEnvelopes(roleDefault, profile.permissionPreset),
         );
         guardCtx = {
           cwd: request.projectRoot,
-          envelope: plannerEnvelope,
+          envelope: turnEnvelope,
           ...(Object.keys(env).length > 0 ? { secrets: env } : {}),
         };
       }

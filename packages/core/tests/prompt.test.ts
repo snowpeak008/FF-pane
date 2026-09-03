@@ -5,6 +5,7 @@
 
 import type {
   AiOutputLanguageSettings,
+  CustomRoleId,
   MemoryCategory,
   MemoryEntry,
   TaskContract,
@@ -14,7 +15,9 @@ import {
   assemblePrompt,
   DEFAULT_INJECTION_LIMIT,
   outputLanguageInstruction,
+  ROLE_DEFINITIONS,
   resolveOutputLanguage,
+  resolveRoleDefinition,
   selectMemoryForRole,
   truncateByPriority,
 } from "../src/index.js";
@@ -88,6 +91,10 @@ describe("selectMemoryForRole", () => {
   });
   it("Reviewer：仅 rule", () => {
     expect(selectMemoryForRole("reviewer", memory).map((e) => e.id)).toEqual(["r1"]);
+  });
+  it("自定义角色（T8.4）：planner 同款 decision + rule（通用项目共识）", () => {
+    const ids = selectMemoryForRole("role-abc123def456" as CustomRoleId, memory).map((e) => e.id);
+    expect(ids.sort()).toEqual(["d1", "r1"]);
   });
 });
 
@@ -166,5 +173,44 @@ describe("assemblePrompt（四层结构）", () => {
     });
     const injected = out.split("\n").filter((l) => l.startsWith("- [rule]")).length;
     expect(injected).toBe(5);
+  });
+});
+
+describe("自定义角色第 1 层（T8.4）", () => {
+  const customId = "role-abc123def456" as CustomRoleId;
+
+  it("resolveRoleDefinition：内置角色逐字返回 ROLE_DEFINITIONS，自定义角色返回提示词原文（去首尾空白）", () => {
+    expect(resolveRoleDefinition("planner")).toBe(ROLE_DEFINITIONS.planner);
+    expect(resolveRoleDefinition("worker")).toBe(ROLE_DEFINITIONS.worker);
+    expect(resolveRoleDefinition("reviewer")).toBe(ROLE_DEFINITIONS.reviewer);
+    expect(resolveRoleDefinition(customId, "  你是文档撰写者。\n")).toBe("你是文档撰写者。");
+  });
+
+  it("自定义角色缺定义抛错（空第 1 层宁可当场失败）", () => {
+    expect(() => resolveRoleDefinition(customId)).toThrow(/未提供角色提示词/);
+    expect(() => resolveRoleDefinition(customId, "  \n ")).toThrow(/未提供角色提示词/);
+  });
+
+  it("assemblePrompt：自定义角色第 1 层为其提示词原文，其余层照常", () => {
+    const out = assemblePrompt({
+      role: customId,
+      customRoleDefinition: "你是文档撰写者。只改 docs/。",
+      input: { kind: "message", text: "写一份 README" },
+      projectMemory: [mem({ id: "d1", category: "decision", title: "用 pnpm" })],
+      outputLanguage: LANG,
+    });
+    expect(out).toContain("# 角色\n你是文档撰写者。只改 docs/。");
+    expect(out).toContain("用 pnpm");
+    expect(out).toContain("写一份 README");
+  });
+
+  it("内置角色行为逐字不变：worker 组装含 ROLE_DEFINITIONS.worker 原文", () => {
+    const out = assemblePrompt({
+      role: "worker",
+      input: { kind: "task", contract: contract({}) },
+      projectMemory: [],
+      outputLanguage: LANG,
+    });
+    expect(out).toContain(`# 角色\n${ROLE_DEFINITIONS.worker}`);
   });
 });

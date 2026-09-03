@@ -17,6 +17,7 @@ import {
   acceptTask,
   approvePlan,
   buildHandoff,
+  CustomRoleValidationError,
   cancelTask,
   deriveAcceptanceCandidates,
   detectHabitConflicts,
@@ -24,6 +25,7 @@ import {
   ProfileValidationError,
   renderHandoff,
   testConnection,
+  validateCustomRoleDraft,
   validateProfileDraft,
 } from "@ff-pane/core";
 import type {
@@ -40,6 +42,7 @@ import {
   createProjectRegistry,
   createProjectSettingsStore,
   createProviderStore,
+  createRoleStore,
   createSessionStore,
   deleteEntry,
   deleteHabit,
@@ -55,6 +58,8 @@ import {
   type ProjectLayout,
   type ProviderDraft,
   profileReferencesProvider,
+  profileReferencesRole,
+  type RoleDraftValidator,
   resolveProjectLayout,
   saveEntry,
   saveHabit,
@@ -95,6 +100,10 @@ type DataChannel =
   | "profiles:create"
   | "profiles:update"
   | "profiles:remove"
+  | "roles:list"
+  | "roles:create"
+  | "roles:update"
+  | "roles:remove"
   | "tasks:list"
   | "tasks:accept"
   | "tasks:cancel"
@@ -130,16 +139,28 @@ export async function createDataHandlers(
   const registry = createProjectRegistry(layout.projectsFile);
   const providers = createProviderStore(layout.providersFile);
   const profiles = createProfileStore(layout.profilesFile);
+  const roles = createRoleStore(layout.rolesFile);
   const config = createConfigStore(layout.configFile);
 
-  // Profile 落盘前的校验（W1.6）：provider 引用 / 模型 kind / 角色 / 权限预设 vs 角色默认。
+  // Profile 落盘前的校验（W1.6，T8.4 扩展）：provider 引用 / 模型 kind / 角色
+  // （内置字面量或已存在的自定义角色）/ 权限预设 vs 角色默认（自定义角色以其预设为默认层）。
   // 拒绝以抛错表达，violations 随 ProfileValidationError 上行到 IPC / 界面。
   const validateProfile: ProfileDraftValidator = async (draft) => {
     const result = await validateProfileDraft(draft, {
       getProvider: (id) => providers.getProvider(id),
+      getCustomRole: (id) => roles.getRole(id),
     });
     if (!result.ok) {
       throw new ProfileValidationError(result.violations);
+    }
+  };
+
+  // 自定义角色落盘前的校验（T8.4）：名称/提示词非空、预设不出项目根、§7 危险清单不可关闭。
+  // 校验落 core（界面层只是表单），拒绝抛 CustomRoleValidationError 上行。
+  const validateRole: RoleDraftValidator = (draft) => {
+    const result = validateCustomRoleDraft(draft);
+    if (!result.ok) {
+      throw new CustomRoleValidationError(result.violations);
     }
   };
   const secrets = createSecretStore({
@@ -366,6 +387,20 @@ export async function createDataHandlers(
 
     "profiles:remove": async (request) => {
       await profiles.deleteProfile(request.id);
+      return { removed: true } as const;
+    },
+
+    "roles:list": () => roles.listRoles(),
+
+    "roles:create": (request) => roles.createRole(request.draft, validateRole),
+
+    "roles:update": (request) => roles.updateRole(request.id, request.draft, validateRole),
+
+    "roles:remove": async (request) => {
+      // 删除保护（T8.4 口径）：被 Profile 引用（defaultRole 指向它）即拒删，先解绑再删
+      await roles.deleteRole(request.id, async (roleId) =>
+        profileReferencesRole(await profiles.listProfiles(), roleId),
+      );
       return { removed: true } as const;
     },
 

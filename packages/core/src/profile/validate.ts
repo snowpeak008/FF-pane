@@ -17,10 +17,18 @@
  *   其余字段的 typeof 级完整性由 TypeScript 类型负责（与 W1.5a 同边界）。
  */
 
-import type { AgentProfile, PermissionEnvelope, Provider, ProviderId, Role } from "@ff-pane/shared";
+import type {
+  AgentProfile,
+  CustomRole,
+  CustomRoleId,
+  PermissionEnvelope,
+  Provider,
+  ProviderId,
+} from "@ff-pane/shared";
 import {
   AI_OUTPUT_LANGUAGES,
   isAiOutputLanguage,
+  isCustomRoleId,
   isRole,
   isShellPolicy,
   ROLES,
@@ -38,6 +46,13 @@ export type ProfileDraft = Omit<AgentProfile, "id">;
 export interface ProfileValidationDeps {
   /** 按 id 查询 Provider。不存在返回 undefined（与 W1.5a 约定一致，不抛错）。 */
   readonly getProvider: (id: ProviderId) => Provider | undefined | Promise<Provider | undefined>;
+  /**
+   * 按 id 查询自定义角色（T8.4：defaultRole 可为 CustomRoleId，须校验引用存在、
+   * 预设 ⊆ 该角色的默认信封）。缺省 = 宿主未接自定义角色，一切 CustomRoleId 视为不存在。
+   */
+  readonly getCustomRole?: (
+    id: CustomRoleId,
+  ) => CustomRole | undefined | Promise<CustomRole | undefined>;
 }
 
 /** 单条校验违规：field 指向 Profile 领域字段（camelCase，嵌套字段用点号路径）。 */
@@ -71,9 +86,9 @@ function sameScopeSet(a: readonly string[], b: readonly string[]): boolean {
  */
 function collectPresetViolations(
   preset: PermissionEnvelope,
-  role: Role,
+  role: string,
+  roleDefault: PermissionEnvelope,
 ): ProfileValidationViolation[] {
-  const roleDefault = ROLE_DEFAULT_ENVELOPES[role];
   const canonical = intersectEnvelopes(preset, preset);
   const clamped = intersectEnvelopes(preset, roleDefault);
   const violations: ProfileValidationViolation[] = [];
@@ -146,10 +161,26 @@ export async function validateProfileDraft(
     }
   }
 
-  if (!isRole(draft.defaultRole)) {
+  // defaultRole：内置字面量或已存在的自定义角色 ID（T8.4）。自定义角色的默认信封
+  // 供下方预设合规检查使用（预设 ⊆ 角色默认，公式对两类角色一致）。
+  let roleDefault: PermissionEnvelope | undefined;
+  if (isRole(draft.defaultRole)) {
+    roleDefault = ROLE_DEFAULT_ENVELOPES[draft.defaultRole];
+  } else if (isCustomRoleId(draft.defaultRole)) {
+    const customRole =
+      deps.getCustomRole !== undefined ? await deps.getCustomRole(draft.defaultRole) : undefined;
+    if (customRole === undefined) {
+      violations.push({
+        field: "defaultRole",
+        reason: `自定义角色不存在：${String(draft.defaultRole)}`,
+      });
+    } else {
+      roleDefault = customRole.permissionPreset;
+    }
+  } else {
     violations.push({
       field: "defaultRole",
-      reason: `未知角色：${String(draft.defaultRole)}（应为 ${ROLES.join(" / ")}）`,
+      reason: `未知角色：${String(draft.defaultRole)}（应为 ${ROLES.join(" / ")} 或自定义角色 ID）`,
     });
   }
 
@@ -173,8 +204,10 @@ export async function validateProfileDraft(
       field: "permissionPreset.shell",
       reason: `未知 shell 策略：${String(draft.permissionPreset.shell)}`,
     });
-  } else if (isRole(draft.defaultRole)) {
-    violations.push(...collectPresetViolations(draft.permissionPreset, draft.defaultRole));
+  } else if (roleDefault !== undefined) {
+    violations.push(
+      ...collectPresetViolations(draft.permissionPreset, String(draft.defaultRole), roleDefault),
+    );
   }
 
   return violations.length === 0 ? { ok: true } : { ok: false, violations };

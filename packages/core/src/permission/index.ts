@@ -5,5 +5,6 @@
  */
 
 export * from "./command.js";
+export * from "./custom-role.js";
 export * from "./envelope.js";
 export * from "./paths.js";

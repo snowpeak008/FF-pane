@@ -1,12 +1,13 @@
-import type { ModelId, Role, SessionResumeKind } from "@ff-pane/shared";
+import type { ModelId, RoleRef, SessionResumeKind } from "@ff-pane/shared";
 import type { ReactElement, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { useRoleLabel } from "../../hooks/useRoleLabel";
 import type { TurnStatus } from "../../stores/session";
 
 export interface SessionStatusBarProps {
   readonly projectName: string;
-  /** 当前轮角色（null = 无进行中会话）。 */
-  readonly role: Role | null;
+  /** 当前轮角色（null = 无进行中会话；T8.4 起可为自定义角色 ID）。 */
+  readonly role: RoleRef | null;
   readonly model: ModelId | null;
   readonly status: TurnStatus;
   /** 本轮恢复方式（T4.3，§10.3）：null = 全新会话，不显示徽标。 */
@@ -32,6 +33,7 @@ export function SessionStatusBar({
   actions,
 }: SessionStatusBarProps): ReactElement {
   const { t } = useTranslation();
+  const roleLabel = useRoleLabel();
   const hasTurn = role !== null && status !== "idle";
 
   return (
@@ -39,7 +41,7 @@ export function SessionStatusBar({
       <span className="truncate text-xs font-medium text-fg">{projectName}</span>
       {hasTurn ? (
         <>
-          <span className="text-xs text-fg-muted">{t(`session.role.${role}`)}</span>
+          <span className="text-xs text-fg-muted">{roleLabel(role)}</span>
           {model !== null ? (
             <span className="truncate font-mono text-xs text-fg-subtle">{model}</span>
           ) : null}

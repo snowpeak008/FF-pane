@@ -8,6 +8,8 @@
 import type {
   AiOutputLanguage,
   ApiKeyRef,
+  CustomRole,
+  CustomRoleId,
   PermissionEnvelope,
   Provider,
   ProviderId,
@@ -279,6 +281,82 @@ describe("权限预设合规：预设 ∩ 角色默认 = 预设（W1.1 非法组
       "permissionPreset.writePaths",
       "permissionPreset.shell",
     ]);
+  });
+});
+
+describe("自定义角色 defaultRole（T8.4）", () => {
+  const CUSTOM_ROLE: CustomRole = {
+    id: "role-a1b2c3d4e5f6" as CustomRoleId,
+    name: "文档撰写者",
+    systemPrompt: "你是文档撰写者。",
+    permissionPreset: {
+      readPaths: ["**"],
+      writePaths: ["docs/**"],
+      shell: "forbidden",
+      network: false,
+      dangerousOpsRequireApproval: true,
+    },
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  const DEPS_WITH_ROLES = {
+    ...DEPS,
+    getCustomRole: (id: CustomRoleId): CustomRole | undefined =>
+      id === CUSTOM_ROLE.id ? CUSTOM_ROLE : undefined,
+  };
+
+  it("defaultRole 为已存在的自定义角色 ID 且预设 ⊆ 角色预设：通过", async () => {
+    const draft = workerDraft({
+      defaultRole: CUSTOM_ROLE.id,
+      permissionPreset: {
+        readPaths: ["**"],
+        writePaths: ["docs/guide"],
+        shell: "forbidden",
+        network: false,
+        dangerousOpsRequireApproval: true,
+      },
+    });
+    expect(await validateProfileDraft(draft, DEPS_WITH_ROLES)).toEqual({ ok: true });
+  });
+
+  it("预设宽于自定义角色的预设（角色默认层）：违规", async () => {
+    const draft = workerDraft({
+      defaultRole: CUSTOM_ROLE.id,
+      permissionPreset: {
+        readPaths: ["**"],
+        writePaths: ["src/**"], // 角色只许写 docs/**
+        shell: "allowed", // 角色 shell 为 forbidden
+        network: false,
+        dangerousOpsRequireApproval: true,
+      },
+    });
+    expectViolationFields(await validateProfileDraft(draft, DEPS_WITH_ROLES), [
+      "permissionPreset.writePaths",
+      "permissionPreset.shell",
+    ]);
+  });
+
+  it("自定义角色 ID 不存在：defaultRole 违规，预设合规检查跳过", async () => {
+    const draft = workerDraft({ defaultRole: "role-000000000000" as CustomRoleId });
+    expectViolationFields(await validateProfileDraft(draft, DEPS_WITH_ROLES), ["defaultRole"]);
+  });
+
+  it("宿主未注入 getCustomRole：一切 CustomRoleId 视为不存在", async () => {
+    const draft = workerDraft({ defaultRole: CUSTOM_ROLE.id });
+    expectViolationFields(await validateProfileDraft(draft, DEPS), ["defaultRole"]);
+  });
+
+  it("异步 getCustomRole（RoleStore 的实际签名）同样生效", async () => {
+    const asyncDeps = {
+      ...DEPS,
+      getCustomRole: async (id: CustomRoleId): Promise<CustomRole | undefined> =>
+        id === CUSTOM_ROLE.id ? CUSTOM_ROLE : undefined,
+    };
+    const draft = workerDraft({
+      defaultRole: CUSTOM_ROLE.id,
+      permissionPreset: CUSTOM_ROLE.permissionPreset,
+    });
+    expect(await validateProfileDraft(draft, asyncDeps)).toEqual({ ok: true });
   });
 });
 

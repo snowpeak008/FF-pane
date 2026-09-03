@@ -13,7 +13,7 @@
 import { readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { InflightTurnMarker } from "@ff-pane/shared";
-import { isRole, isSessionResumeKind } from "@ff-pane/shared";
+import { isRoleRef, isSessionResumeKind } from "@ff-pane/shared";
 import {
   errnoCodeOf,
   type ProjectLayout,
@@ -122,7 +122,7 @@ function validateMarker(raw: unknown): InflightTurnMarker | undefined {
   if (
     typeof record["turnId"] !== "string" ||
     typeof record["sessionId"] !== "string" ||
-    !isRole(record["role"]) ||
+    !isRoleRef(record["role"]) ||
     typeof record["profileId"] !== "string" ||
     typeof record["startedAt"] !== "number" ||
     (record["resumeKind"] !== undefined && !isSessionResumeKind(record["resumeKind"])) ||
