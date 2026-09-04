@@ -86,21 +86,41 @@ describe("generic-exec 按 Profile 实例化（复合键 <runtime>@<profileId>�
     expect(registry.list().map((a) => a.runtime)).not.toContain("generic-exec");
   });
 
-  it("同 Profile 重复解析复用缓存实例；配置变更按指纹重建", () => {
+  it("同 Profile 重复解析复用缓存实例", () => {
     const registry = makeRegistry();
     const p = profile({ runtime: "generic-exec", genericExec: GX });
     const first = registry.resolveForProfile(p);
     const second = registry.resolveForProfile(p);
     expect(first.ok && second.ok && first.adapter === second.adapter).toBe(true);
+  });
 
-    const updated = profile({
-      runtime: "generic-exec",
-      genericExec: { ...GX, command: "othertool" },
-    });
-    const third = registry.resolveForProfile(updated);
-    expect(third.ok).toBe(true);
-    if (first.ok && third.ok) {
-      expect(third.adapter).not.toBe(first.adapter);
+  // T8.4b 验收 §2-2 补钉：指纹须收 GenericExecProfileConfig 全部三字段——任何一维
+  // 单独变更都要触发重建，不得复用旧实例（反向自证过：registry.ts 指纹削掉
+  // taskDelivery / args 时对应维恰红，已还原）。taskDelivery 维只改这一个字段
+  // （argv 与 stdin 对 {task} 占位符的要求相斥，合法配置不可能只差该维），重建被
+  // 触发的观察点是「构造期校验拒绝」——若指纹漏收 taskDelivery，会静默复用旧的
+  // argv 实例（ok 且同实例），恰是要防的缺陷形态。
+  it.each<[keyof GenericExecProfileConfig, Partial<GenericExecProfileConfig>, "重建" | "拒绝"]>([
+    ["command", { command: "othertool" }, "重建"],
+    ["args", { args: ["--run", "--verbose", "{task}"] }, "重建"],
+    ["taskDelivery", { taskDelivery: "stdin" }, "拒绝"],
+  ])("配置变更按指纹重建：改 %s 不复用旧实例（观察点：%s）", (_dimension, patch, outcome) => {
+    const registry = makeRegistry();
+    const first = registry.resolveForProfile(profile({ runtime: "generic-exec", genericExec: GX }));
+    expect(first.ok).toBe(true);
+    const changed = registry.resolveForProfile(
+      profile({ runtime: "generic-exec", genericExec: { ...GX, ...patch } }),
+    );
+    if (outcome === "重建") {
+      expect(changed.ok).toBe(true);
+      if (first.ok && changed.ok) {
+        expect(changed.adapter).not.toBe(first.adapter);
+      }
+      return;
+    }
+    expect(changed.ok).toBe(false);
+    if (!changed.ok) {
+      expect(changed.reason).toContain("generic-exec 配置非法");
     }
   });
 
