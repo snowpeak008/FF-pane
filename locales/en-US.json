@@ -399,6 +399,19 @@
         "outputLanguage": "Output language",
         "outputFollowGlobal": "Follow global",
         "permission": "Permission preset"
+      },
+      "genericExec": {
+        "title": "Generic command config",
+        "command": "Command",
+        "commandHint": "Executable name or absolute path; {task} is not substituted here.",
+        "delivery": "Task delivery",
+        "deliveryHint": "argv substitutes {task} in args; stdin pipes the task text (use for long text).",
+        "deliveryOption": {
+          "argv": "argv (placeholder in args)",
+          "stdin": "stdin (standard input)"
+        },
+        "args": "Argument template",
+        "argsHint": "One argument per line; argv mode requires a {task} placeholder."
       }
     },
     "permission": {

@@ -5,6 +5,7 @@ import {
   emptyProfileForm,
   formFromProfile,
   type ProfileFormState,
+  parseGenericExecArgs,
 } from "../src/renderer/src/pages/settings/profiles/profile-form";
 
 const PRESET: PermissionEnvelope = {
@@ -58,6 +59,39 @@ describe("buildProfileDraft", () => {
     expect("model" in draft).toBe(false);
     expect("outputLanguage" in draft).toBe(false);
   });
+
+  it("非 generic-exec：genericExec 不进草稿（即使表单留有残值）", () => {
+    const draft = buildProfileDraft(
+      form({ name: "P", runtime: "codex", providerId: "provider-x", gxCommand: "leftover" }),
+    );
+    expect("genericExec" in draft).toBe(false);
+  });
+
+  it("generic-exec：命令去空白、参数按行拆分、投递方式随表单（T8.4b）", () => {
+    const draft = buildProfileDraft(
+      form({
+        name: "回声",
+        runtime: "generic-exec",
+        providerId: "provider-x",
+        gxCommand: " node ",
+        gxArgs: "-e\nconsole.log(1)\n\n  {task}  \n",
+        gxDelivery: "argv",
+      }),
+    );
+    expect(draft.genericExec).toEqual({
+      command: "node",
+      args: ["-e", "console.log(1)", "{task}"],
+      taskDelivery: "argv",
+    });
+  });
+});
+
+describe("parseGenericExecArgs", () => {
+  it("按行拆分、去首尾空白、丢弃空行；CRLF 同样处理", () => {
+    expect(parseGenericExecArgs("a\r\n  b  \r\n\r\nc\n")).toEqual(["a", "b", "c"]);
+    expect(parseGenericExecArgs("")).toEqual([]);
+    expect(parseGenericExecArgs("  \n \n")).toEqual([]);
+  });
 });
 
 describe("formFromProfile round-trip", () => {
@@ -72,6 +106,21 @@ describe("formFromProfile round-trip", () => {
       permissionPreset: PRESET,
       outputLanguage: "en-US",
     } as AgentProfile;
+    const draft = buildProfileDraft(formFromProfile(profile));
+    const { id: _id, ...rest } = profile;
+    expect(draft).toEqual(rest);
+  });
+
+  it("generic-exec Profile（含命令配置）round-trip（T8.4b）", () => {
+    const profile = {
+      id: "profile-3",
+      name: "回声工具",
+      runtime: "generic-exec",
+      providerId: "provider-1",
+      defaultRole: "worker",
+      permissionPreset: PRESET,
+      genericExec: { command: "node", args: ["-e", "{task}"], taskDelivery: "argv" },
+    } as unknown as AgentProfile;
     const draft = buildProfileDraft(formFromProfile(profile));
     const { id: _id, ...rest } = profile;
     expect(draft).toEqual(rest);

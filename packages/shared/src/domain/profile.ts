@@ -81,6 +81,44 @@ export interface CustomRole {
 }
 
 /**
+ * generic-exec 的任务文本投递方式（T8.4b）。镜像 @ff-pane/adapters 的
+ * GENERIC_EXEC_TASK_DELIVERIES——shared 不依赖 adapters（依赖方向相反），
+ * 而 Profile 领域形状要在 renderer / core / storage 三处流动，故此处自持一份；
+ * 两处字面量的一致性由 desktop 装配层单测钉住（session-registry.test.ts）。
+ */
+export const GENERIC_EXEC_DELIVERIES = ["argv", "stdin"] as const;
+
+/** generic-exec 任务投递方式。 */
+export type GenericExecDelivery = (typeof GENERIC_EXEC_DELIVERIES)[number];
+
+/** GenericExecDelivery 运行时守卫（JSON / IPC 边界用）。 */
+export const isGenericExecDelivery = createLiteralGuard(GENERIC_EXEC_DELIVERIES);
+
+/**
+ * 任务文本占位符（镜像 adapters 的 TASK_PLACEHOLDER，一致性同上由装配层单测钉住）。
+ * 只在 args 数组的元素内部做值替换，不参与 command——校验器（core）与适配器
+ * （adapters renderGenericExecArgs）对此各自把关。
+ */
+export const GENERIC_EXEC_TASK_PLACEHOLDER = "{task}";
+
+/**
+ * generic-exec Profile 的命令配置（T8.4b，多实例装配）：按适配器构造期选项
+ * （GenericExecConfig）反推的最小必填集——command / args / taskDelivery 三项是
+ * createGenericExecAdapter 的必填项，其余（cwd / env / timeoutMs / outputFormat 等）
+ * 全部保留适配器缺省，需要时再随后续工单扩展。纯 JSON 可序列化（随 Profile 落
+ * profiles.json）。校验权威在 core validateProfileDraft（占位符与投递方式的配套等），
+ * 装配层再以 adapters 的 validateGenericExecConfig 兜底。
+ */
+export interface GenericExecProfileConfig {
+  /** 命令名或绝对路径（不做 {task} 替换——防止任务文本换掉可执行文件）。 */
+  readonly command: string;
+  /** 参数模板数组。argv 模式下元素内的 {task} 被任务文本整体值替换。 */
+  readonly args: readonly string[];
+  /** 任务文本投递方式（argv 替换占位符 / stdin 写入并 EOF）。 */
+  readonly taskDelivery: GenericExecDelivery;
+}
+
+/**
  * 设计文档 §4.4 —— Agent Profile：用户实际选用的完整运行配置。
  * 项目里的角色绑定即 Role → ProfileId（见 project.ts），换 AI = 换绑定。
  */
@@ -110,4 +148,11 @@ export interface AgentProfile {
    * （三级设置的 Profile 层不覆盖，见 language.ts）。
    */
   readonly outputLanguage?: AiOutputLanguage;
+  /**
+   * generic-exec 的命令配置（T8.4b）。仅 runtime === "generic-exec" 时有意义且必填
+   * （core 校验器把关：该 runtime 缺配置 / 其他 runtime 带配置均拒绝）；
+   * 旧序列化数据不含本字段——它们也不可能是 generic-exec Profile
+   * （此前该 runtime 派发必收「Runtime 未注册」，无可用存量），零迁移。
+   */
+  readonly genericExec?: GenericExecProfileConfig;
 }

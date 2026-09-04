@@ -10,6 +10,7 @@ import type {
   ApiKeyRef,
   CustomRole,
   CustomRoleId,
+  GenericExecProfileConfig,
   PermissionEnvelope,
   Provider,
   ProviderId,
@@ -357,6 +358,95 @@ describe("自定义角色 defaultRole（T8.4）", () => {
       permissionPreset: CUSTOM_ROLE.permissionPreset,
     });
     expect(await validateProfileDraft(draft, asyncDeps)).toEqual({ ok: true });
+  });
+});
+
+describe("generic-exec 命令配置（T8.4b 多实例装配）", () => {
+  const GX = {
+    command: "mytool",
+    args: ["--run", "{task}"],
+    taskDelivery: "argv",
+  } as const satisfies GenericExecProfileConfig;
+
+  it("generic-exec Profile 带合法配置（argv + 占位符）：通过", async () => {
+    const draft = workerDraft({ runtime: "generic-exec", genericExec: GX });
+    expect(await validateProfileDraft(draft, DEPS)).toEqual({ ok: true });
+  });
+
+  it("stdin 模式（args 无占位符）同样通过", async () => {
+    const draft = workerDraft({
+      runtime: "generic-exec",
+      genericExec: { command: "mytool", args: ["--quiet"], taskDelivery: "stdin" },
+    });
+    expect(await validateProfileDraft(draft, DEPS)).toEqual({ ok: true });
+  });
+
+  it("generic-exec Profile 缺配置：genericExec 违规（实例化无米下锅）", async () => {
+    const draft = workerDraft({ runtime: "generic-exec" });
+    expectViolationFields(await validateProfileDraft(draft, DEPS), ["genericExec"]);
+  });
+
+  it("非 generic-exec Profile 带配置：genericExec 违规（脏数据拒收）", async () => {
+    const draft = workerDraft({ genericExec: GX });
+    expectViolationFields(await validateProfileDraft(draft, DEPS), ["genericExec"]);
+  });
+
+  it("命令为空 / 命令含 {task}：genericExec.command 违规", async () => {
+    expectViolationFields(
+      await validateProfileDraft(
+        workerDraft({ runtime: "generic-exec", genericExec: { ...GX, command: "  " } }),
+        DEPS,
+      ),
+      ["genericExec.command"],
+    );
+    expectViolationFields(
+      await validateProfileDraft(
+        workerDraft({ runtime: "generic-exec", genericExec: { ...GX, command: "run-{task}" } }),
+        DEPS,
+      ),
+      ["genericExec.command"],
+    );
+  });
+
+  it("argv 模式无占位符：genericExec.args 违规（任务文本无处可去）", async () => {
+    const draft = workerDraft({
+      runtime: "generic-exec",
+      genericExec: { command: "mytool", args: ["--run"], taskDelivery: "argv" },
+    });
+    expectViolationFields(await validateProfileDraft(draft, DEPS), ["genericExec.args"]);
+  });
+
+  it("stdin 模式残留占位符：genericExec.args 违规（两处投递会重复）", async () => {
+    const draft = workerDraft({
+      runtime: "generic-exec",
+      genericExec: { command: "mytool", args: ["{task}"], taskDelivery: "stdin" },
+    });
+    expectViolationFields(await validateProfileDraft(draft, DEPS), ["genericExec.args"]);
+  });
+
+  it("投递方式非法（JSON / IPC 边界防线）：genericExec.taskDelivery 违规，占位符检查跳过", async () => {
+    const draft = workerDraft({
+      runtime: "generic-exec",
+      genericExec: {
+        command: "mytool",
+        args: [],
+        taskDelivery: "clipboard" as GenericExecProfileConfig["taskDelivery"],
+      },
+    });
+    expectViolationFields(await validateProfileDraft(draft, DEPS), ["genericExec.taskDelivery"]);
+  });
+
+  it("配置违规与其他违规一次全部收集", async () => {
+    const draft = workerDraft({
+      runtime: "generic-exec",
+      model: "gpt-99",
+      genericExec: { command: "", args: [], taskDelivery: "argv" },
+    });
+    expectViolationFields(await validateProfileDraft(draft, DEPS), [
+      "model",
+      "genericExec.command",
+      "genericExec.args",
+    ]);
   });
 });
 

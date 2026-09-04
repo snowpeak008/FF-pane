@@ -399,6 +399,19 @@
         "outputLanguage": "输出语言",
         "outputFollowGlobal": "跟随全局",
         "permission": "权限预设"
+      },
+      "genericExec": {
+        "title": "通用命令配置",
+        "command": "命令",
+        "commandHint": "可执行文件名或绝对路径；不做 {task} 替换。",
+        "delivery": "任务投递方式",
+        "deliveryHint": "argv 替换参数里的 {task}；stdin 经标准输入传入（长文本用它）。",
+        "deliveryOption": {
+          "argv": "argv（参数占位符）",
+          "stdin": "stdin（标准输入）"
+        },
+        "args": "参数模板",
+        "argsHint": "一行一个参数；argv 模式须含 {task} 占位符。"
       }
     },
     "permission": {

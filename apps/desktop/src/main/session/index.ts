@@ -13,7 +13,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { detectHabitConflicts, observeCorrection } from "@ff-pane/core";
 import type {
@@ -151,7 +151,12 @@ export async function createSessionLayer(getWindow: SessionWindowGetter): Promis
     backend: createSafeStorageBackend(),
     secretsFile: resolveSecretsFile(layout.rootDir),
   });
-  const registry = createDesktopAdapterRegistry();
+  // 多实例装配（T8.4b）：aider 按 Profile 的 transcript 落
+  // `<全局数据根>/agent-sessions/<profileId>/`（出 tmpdir，重启后仍在；目录由
+  // 适配器 startTurn 按需 mkdirSync -p，无需预建）。
+  const registry = createDesktopAdapterRegistry({
+    agentSessionsDir: join(layout.rootDir, "agent-sessions"),
+  });
 
   // 最新计划版本：v1..vN 连续，逐版加载到 not-found 为止，返回末版（与 data.ts plans:list 同构）
   async function loadLatestPlan(projectLayout: ProjectLayout): Promise<Plan | undefined> {

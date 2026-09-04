@@ -41,7 +41,6 @@
  */
 
 import {
-  type AdapterRegistry,
   type AdapterTurnContext,
   type GuardedTurn,
   type GuardTurnContext,
@@ -128,6 +127,7 @@ import type {
 import { resolveRuntimeConfigOverrides, resolveRuntimeEnv } from "./env";
 import { mapAgentEvent } from "./event-map";
 import { buildInterruptedRun } from "./interrupted";
+import type { ProfileAdapterResolver } from "./registry";
 
 /**
  * partial 文本的节流参数（T8.2b）：距上次落盘 ≥ 2 s **或** 新增 ≥ 2 KB 就覆盖写一次。
@@ -194,7 +194,12 @@ export interface SessionOrchestrator {
 
 /** 编排器依赖（全部注入，便于测试替身）。 */
 export interface SessionOrchestratorDeps {
-  readonly registry: AdapterRegistry;
+  /**
+   * 按 Profile 解析适配器（T8.4b 多实例装配）：复合键 `<runtime>@<profileId>` 专属
+   * 实例优先（generic-exec / aider 这类构造期带配置的 runtime），零配置 runtime
+   * 退回裸键单例。拒绝分支的 reason 人可读，编排器原样进 ack.reason。
+   */
+  readonly registry: ProfileAdapterResolver;
   /** 推送一条会话事件到渲染层（窗口不存在时静默丢弃）。 */
   readonly publish: (event: SessionStreamEvent) => void;
   readonly loadProfile: (id: AgentProfile["id"]) => Promise<AgentProfile | undefined>;
@@ -606,10 +611,13 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
       if (profile === undefined) {
         return { accepted: false, reason: "Profile 不存在" };
       }
-      const adapter = deps.registry.get(profile.runtime);
-      if (adapter === undefined) {
-        return { accepted: false, reason: `Runtime 未注册：${profile.runtime}` };
+      // 按 Profile 解析适配器（T8.4b）：复合键专属实例或裸键单例；拒绝原因人可读
+      // （「Runtime 未注册」或 generic-exec 配置缺失/非法的指引）。
+      const resolution = deps.registry.resolveForProfile(profile);
+      if (!resolution.ok) {
+        return { accepted: false, reason: resolution.reason };
       }
+      const adapter = resolution.adapter;
       const provider = await deps.loadProvider(profile.providerId);
       if (provider === undefined) {
         return { accepted: false, reason: "Provider 不存在" };

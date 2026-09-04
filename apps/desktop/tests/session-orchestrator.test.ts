@@ -39,6 +39,7 @@ import {
   type KnowledgeToolBinding,
   type SessionOrchestratorDeps,
 } from "../src/main/session/orchestrator";
+import type { ProfileAdapterResolver } from "../src/main/session/registry";
 import type { SessionStreamEvent, StartSessionRequest } from "../src/shared-ipc/contracts";
 
 /** 记录每次 startTurn 收到的上下文（断言 resume 绑定是否透传）。 */
@@ -85,6 +86,22 @@ function fakeAdapter(
         })(),
         cancel: async () => {},
       };
+    },
+  };
+}
+
+/**
+ * 裸键注册表 → ProfileAdapterResolver（T8.4b）：编排器单测不关心复合键装配
+ * （那归 session-registry.test.ts），这里按 profile.runtime 直查裸键，
+ * 未注册的拒绝文案与真实装配层一致。
+ */
+function bareResolver(registry: ReturnType<typeof createAdapterRegistry>): ProfileAdapterResolver {
+  return {
+    resolveForProfile: (p) => {
+      const adapter = registry.get(p.runtime);
+      return adapter === undefined
+        ? { ok: false, reason: `Runtime 未注册：${p.runtime}` }
+        : { ok: true, adapter };
     },
   };
 }
@@ -208,7 +225,7 @@ function makeHarness(
   const layout = {} as ProjectLayout;
 
   const deps: SessionOrchestratorDeps = {
-    registry,
+    registry: bareResolver(registry),
     publish: (e) => {
       published.push(e);
     },
@@ -1632,7 +1649,7 @@ describe("T8.2b 对话回放本与中断收尾", () => {
       };
       const registry = createAdapterRegistry();
       registry.register(adapter);
-      const orch = createSessionOrchestrator({ ...h.deps, registry });
+      const orch = createSessionOrchestrator({ ...h.deps, registry: bareResolver(registry) });
 
       await orch.start(plannerRequest());
       await flushUntilEnd(h.published);

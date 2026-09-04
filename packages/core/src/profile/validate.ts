@@ -21,14 +21,18 @@ import type {
   AgentProfile,
   CustomRole,
   CustomRoleId,
+  GenericExecProfileConfig,
   PermissionEnvelope,
   Provider,
   ProviderId,
 } from "@ff-pane/shared";
 import {
   AI_OUTPUT_LANGUAGES,
+  GENERIC_EXEC_DELIVERIES,
+  GENERIC_EXEC_TASK_PLACEHOLDER,
   isAiOutputLanguage,
   isCustomRoleId,
+  isGenericExecDelivery,
   isRole,
   isShellPolicy,
   ROLES,
@@ -124,6 +128,50 @@ function collectPresetViolations(
 }
 
 /**
+ * generic-exec 配置字段的校验（T8.4b）。与 adapters 的 validateGenericExecConfig
+ * 同口径的子集（core 不依赖 adapters，规则就地实现）：命令非空且不含占位符、
+ * 投递方式合法、argv 模式必须有 {task} 落点、stdin 模式不得残留占位符。
+ * 装配层构造适配器时 adapters 侧校验兜底（GenericExecConfigError），
+ * 走到那一步还非法即装配 bug。
+ */
+function collectGenericExecViolations(
+  config: GenericExecProfileConfig,
+): ProfileValidationViolation[] {
+  const violations: ProfileValidationViolation[] = [];
+  if (config.command.trim() === "") {
+    violations.push({ field: "genericExec.command", reason: "命令不得为空" });
+  } else if (config.command.includes(GENERIC_EXEC_TASK_PLACEHOLDER)) {
+    violations.push({
+      field: "genericExec.command",
+      reason: `${GENERIC_EXEC_TASK_PLACEHOLDER} 只在参数模板中替换；命令本身不做替换（防止任务文本换掉可执行文件）`,
+    });
+  }
+  if (!isGenericExecDelivery(config.taskDelivery)) {
+    violations.push({
+      field: "genericExec.taskDelivery",
+      reason: `投递方式非法：${String(config.taskDelivery)}（应为 ${GENERIC_EXEC_DELIVERIES.join(" / ")}）`,
+    });
+    return violations;
+  }
+  const placeholders = config.args.filter((arg) =>
+    arg.includes(GENERIC_EXEC_TASK_PLACEHOLDER),
+  ).length;
+  if (config.taskDelivery === "argv" && placeholders === 0) {
+    violations.push({
+      field: "genericExec.args",
+      reason: `argv 模式的参数模板必须含至少一个 ${GENERIC_EXEC_TASK_PLACEHOLDER} 占位符，否则任务文本无处可去`,
+    });
+  }
+  if (config.taskDelivery === "stdin" && placeholders > 0) {
+    violations.push({
+      field: "genericExec.args",
+      reason: `stdin 模式的参数模板不应含 ${GENERIC_EXEC_TASK_PLACEHOLDER}（任务文本走 stdin，两处投递会重复）`,
+    });
+  }
+  return violations;
+}
+
+/**
  * 校验 Profile 草稿（create / update 共用）。
  * 返回判别联合，收集全部违规（不快速失败）；依赖检查跳过规则：
  * Provider 不存在时不再查模型；defaultRole 非法时无从取角色默认信封，
@@ -181,6 +229,24 @@ export async function validateProfileDraft(
     violations.push({
       field: "defaultRole",
       reason: `未知角色：${String(draft.defaultRole)}（应为 ${ROLES.join(" / ")} 或自定义角色 ID）`,
+    });
+  }
+
+  // generic-exec 配置的成对约束（T8.4b）：该 runtime 必带配置（否则实例化无米下锅、
+  // 派发只能拒绝），其他 runtime 不得带（配置只对 generic-exec 有语义，留着是脏数据）。
+  if (draft.runtime === "generic-exec") {
+    if (draft.genericExec === undefined) {
+      violations.push({
+        field: "genericExec",
+        reason: "generic-exec Profile 必须配置命令（command / args / taskDelivery）",
+      });
+    } else {
+      violations.push(...collectGenericExecViolations(draft.genericExec));
+    }
+  } else if (draft.genericExec !== undefined) {
+    violations.push({
+      field: "genericExec",
+      reason: `命令配置仅对 generic-exec 有效（当前 runtime：${draft.runtime}）`,
     });
   }
 

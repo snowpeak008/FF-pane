@@ -2,6 +2,8 @@ import {
   type AgentProfile,
   AI_OUTPUT_LANGUAGES,
   DEFAULT_PERMISSION_PRESET,
+  GENERIC_EXEC_DELIVERIES,
+  type GenericExecDelivery,
   ROLES,
 } from "@ff-pane/shared";
 import { type ReactElement, useCallback, useEffect, useMemo, useState } from "react";
@@ -14,7 +16,7 @@ import {
   DialogFooter,
   DialogHeader,
 } from "../../../components/ui/Dialog";
-import { Field, Input } from "../../../components/ui/Input";
+import { Field, Input, Textarea } from "../../../components/ui/Input";
 import { inputVariants } from "../../../components/ui/input.variants";
 import { invokeQuery, queryData } from "../../../ipc/query";
 import { useInvokeQuery } from "../../../ipc/useInvokeQuery";
@@ -110,7 +112,12 @@ export function ProfileEditorDialog({
   }, [form, onOpenChange, onSaved, profile]);
 
   const selectClass = cn(inputVariants({}), "cursor-pointer");
-  const canSave = form.name.trim().length > 0 && form.providerId.length > 0 && !saving;
+  const isGenericExec = form.runtime === "generic-exec";
+  const canSave =
+    form.name.trim().length > 0 &&
+    form.providerId.length > 0 &&
+    (!isGenericExec || form.gxCommand.trim().length > 0) &&
+    !saving;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -223,6 +230,58 @@ export function ProfileEditorDialog({
               </select>
             </Field>
           </div>
+
+          {isGenericExec ? (
+            <div className="flex flex-col gap-3 rounded border border-border p-3">
+              <span className="text-xs text-fg-muted">
+                {t("settings.profiles.genericExec.title")}
+              </span>
+              <div className="grid grid-cols-2 gap-3">
+                <Field
+                  htmlFor="profile-gx-command"
+                  label={t("settings.profiles.genericExec.command")}
+                  required
+                  hint={t("settings.profiles.genericExec.commandHint")}
+                >
+                  <Input
+                    id="profile-gx-command"
+                    value={form.gxCommand}
+                    onChange={(e) => patch({ gxCommand: e.target.value })}
+                  />
+                </Field>
+                <Field
+                  htmlFor="profile-gx-delivery"
+                  label={t("settings.profiles.genericExec.delivery")}
+                  hint={t("settings.profiles.genericExec.deliveryHint")}
+                >
+                  <select
+                    id="profile-gx-delivery"
+                    className={selectClass}
+                    value={form.gxDelivery}
+                    onChange={(e) => patch({ gxDelivery: e.target.value as GenericExecDelivery })}
+                  >
+                    {GENERIC_EXEC_DELIVERIES.map((delivery) => (
+                      <option key={delivery} value={delivery}>
+                        {t(`settings.profiles.genericExec.deliveryOption.${delivery}`)}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+              <Field
+                htmlFor="profile-gx-args"
+                label={t("settings.profiles.genericExec.args")}
+                hint={t("settings.profiles.genericExec.argsHint")}
+              >
+                <Textarea
+                  id="profile-gx-args"
+                  rows={3}
+                  value={form.gxArgs}
+                  onChange={(e) => patch({ gxArgs: e.target.value })}
+                />
+              </Field>
+            </div>
+          ) : null}
 
           <div className="flex flex-col gap-1">
             <span className="text-xs text-fg-muted">{t("settings.profiles.field.permission")}</span>
