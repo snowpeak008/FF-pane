@@ -604,6 +604,7 @@
       "skippedLines": "回放本中有 {{count}} 行无法读取，未显示。"
     },
     "generatePlan": "生成计划",
+    "generatePlanHint": "计划生成始终以内置 Planner 身份执行（结构化计划合同只属于 Planner），与当前所选讨论角色无关。",
     "planGenerated": "已生成计划 v{{version}}",
     "viewPlan": "查看计划",
     "directExecute": "直接做",

@@ -604,6 +604,7 @@
       "skippedLines": "{{count}} unreadable line(s) in the transcript were skipped."
     },
     "generatePlan": "Generate plan",
+    "generatePlanHint": "Plan generation always runs as the built-in Planner (the structured plan contract belongs to Planner), regardless of the currently selected discussion role.",
     "planGenerated": "Plan v{{version}} generated",
     "viewPlan": "View plan",
     "directExecute": "Just do it",

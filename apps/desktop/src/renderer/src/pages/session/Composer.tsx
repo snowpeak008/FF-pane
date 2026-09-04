@@ -112,15 +112,20 @@ export function Composer({
           aria-label={t("session.composerLabel")}
         />
         {onGeneratePlan !== undefined ? (
-          <Button
-            variant="secondary"
-            size="md"
-            disabled={disabled}
-            onClick={onGeneratePlan}
-            className="shrink-0"
-          >
-            {t("session.generatePlan")}
-          </Button>
+          // 计划生成轮恒按内置 Planner 执行（编排器 T8.4 口径：结构化输出合同只属于
+          // planner），即便当前选的是自定义角色 Profile——主管理员裁定按钮旁以提示
+          // 文案说明，与「直接做」的 Tooltip 同款呈现（§1.5）。
+          <Tooltip content={t("session.generatePlanHint")} wrapTrigger>
+            <Button
+              variant="secondary"
+              size="md"
+              disabled={disabled}
+              onClick={onGeneratePlan}
+              className="shrink-0"
+            >
+              {t("session.generatePlan")}
+            </Button>
+          </Tooltip>
         ) : null}
         {disabled && disabledReason !== undefined ? (
           <Tooltip content={disabledReason} wrapTrigger>
