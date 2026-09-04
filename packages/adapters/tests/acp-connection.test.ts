@@ -510,7 +510,7 @@ describe("cancel 语义", () => {
 });
 
 describe("分帧边界（NDJSON 经 events 行解码器）", () => {
-  it("半包：一帧被切成任意小块仍完整解析", async () => {
+  it("半包：一帧被切成任意小块仍完整解析（真跨 chunk：字符间 await 宏任务）", async () => {
     const harness = makeHarness();
     const prompting = harness.connection.prompt({ sessionId: "s-1", prompt: [] });
     await settle();
@@ -520,10 +520,12 @@ describe("分帧边界（NDJSON 经 events 行解码器）", () => {
       id: request["id"],
       result: { stopReason: "end_turn" },
     })}\n`;
+    // 每字符间 await 宏任务，强制 PassThrough 逐 chunk 投递——同步循环 write 会被
+    // 流合并成一个 chunk，帧仍以整块到达，测不到跨 chunk 缓冲（T8.5a 验收 §2-1）。
     for (const char of frame) {
       harness.emit(char);
+      await settle();
     }
-    await settle();
     expect((await prompting).stopReason).toBe("end_turn");
   });
 
