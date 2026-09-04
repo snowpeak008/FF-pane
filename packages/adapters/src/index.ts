@@ -1,4 +1,7 @@
 /** Agent Runtime 适配器（codex / claude / gemini / opencode / generic-exec，T2.x 落地）。 */
+
+/** ACP 协议层（T8.5a）：stdio JSON-RPC 双工通道、会话语义类型、编解码（零 spawn）。 */
+export * from "./acp/index.js";
 /** AgentAdapter 统一接口、turn 模型与注册表（W2.1c）。 */
 export * from "./adapter.js";
 /** Aider 适配器（T7.3b）：纯文本 stdout 行扫描 + git 快照 diff 自补。 */
