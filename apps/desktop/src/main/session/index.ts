@@ -68,7 +68,7 @@ import {
   resolveKnowledgeMcpServer,
 } from "./knowledge-tool";
 import { createSessionOrchestrator, type SessionOrchestrator } from "./orchestrator";
-import { createDesktopAdapterRegistry } from "./registry";
+import { createDesktopAdapterRegistry, type DesktopAdapterRegistry } from "./registry";
 import { createProjectRepairer, type ProjectRepairer, type RepairDeps } from "./repair";
 
 export * from "./env";
@@ -99,6 +99,8 @@ export type SessionWindowGetter = () => { readonly webContents: WebContentsLike 
 export interface SessionLayer {
   readonly handlers: Pick<InvokeHandlers, SessionChannel>;
   readonly orchestrator: SessionOrchestrator;
+  /** 注册表（T8.5c：退出钩子经 hasRuntimeResources / closeRuntimes 关停 opencode server）。 */
+  readonly registry: DesktopAdapterRegistry;
   /** 按项目去重的启动修正入口（data.ts 的 sessions:list 亦可触发）。 */
   readonly repairer: ProjectRepairer;
   /** 对已登记的全部项目各扫一遍残留标记（bootstrap 调用；单个项目失败不阻断其余）。 */
@@ -375,6 +377,7 @@ export async function createSessionLayer(getWindow: SessionWindowGetter): Promis
   return {
     handlers,
     orchestrator,
+    registry,
     repairer,
     async repairRegisteredProjects() {
       let entries: Awaited<ReturnType<typeof projects.listProjects>>;

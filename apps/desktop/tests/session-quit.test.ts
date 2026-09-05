@@ -70,9 +70,9 @@ function event(): { preventDefault: () => void; prevented: number } {
   return e;
 }
 
-/** 让微任务队列跑空（prepare 解决后 race → finishAndQuit 都是微任务）。 */
+/** 让微任务队列跑空（prepare 解决后 race → closeRuntimes → finishAndQuit 都是微任务）。 */
 async function flushMicrotasks(): Promise<void> {
-  for (let i = 0; i < 10; i += 1) {
+  for (let i = 0; i < 30; i += 1) {
     await Promise.resolve();
   }
 }
@@ -182,5 +182,100 @@ describe("createQuitCoordinator", () => {
     await flushMicrotasks();
 
     expect(h.quits).toHaveLength(1);
+  });
+});
+
+describe("常驻 Runtime 资源关停（T8.5c，opencode server）", () => {
+  it("无在飞轮但 server 活着 → 拦截一次，只关 server 不跑 prepare，再 quit", async () => {
+    const h = makeHarness({ inflight: false });
+    const order: string[] = [];
+    let releaseClose: () => void = () => undefined;
+    const coordinator = createQuitCoordinator({
+      ...h.deps,
+      hasRuntimeResources: () => true,
+      closeRuntimes: () => {
+        order.push("close");
+        return new Promise<void>((resolve) => {
+          releaseClose = resolve;
+        });
+      },
+    });
+    const e = event();
+    coordinator.onBeforeQuit(e);
+    expect(e.prevented).toBe(1);
+    // closeRuntimes 在收尾链的微任务里被调到：先等它挂上再放行
+    await flushMicrotasks();
+    expect(h.prepares).toBe(0); // 无在飞轮：不跑 prepareForQuit
+    expect(order).toEqual(["close"]);
+    expect(h.quits).toHaveLength(0); // server 未关完不退
+
+    releaseClose();
+    await flushMicrotasks();
+    await flushMicrotasks();
+    expect(h.quits).toHaveLength(1);
+  });
+
+  it("有在飞轮且 server 活着 → 先 prepare 后 close（取消波要经 server 的 /abort）", async () => {
+    const order: string[] = [];
+    const h = makeHarness({ inflight: true });
+    const coordinator = createQuitCoordinator({
+      ...h.deps,
+      prepare: () => {
+        order.push("prepare");
+        return Promise.resolve();
+      },
+      hasRuntimeResources: () => true,
+      closeRuntimes: () => {
+        order.push("close");
+        return Promise.resolve();
+      },
+    });
+    coordinator.onBeforeQuit(event());
+    await flushMicrotasks();
+    expect(order).toEqual(["prepare", "close"]);
+    expect(h.quits).toHaveLength(1);
+  });
+
+  it("server 关停超出小预算 → 照样 quit（Job Object 兜底），日志留痕", async () => {
+    const h = makeHarness({ inflight: false });
+    const coordinator = createQuitCoordinator({
+      ...h.deps,
+      hasRuntimeResources: () => true,
+      closeRuntimes: () => new Promise(() => {}), // 永不落定
+      runtimeCloseBudgetMs: 50,
+    });
+    coordinator.onBeforeQuit(event());
+    await vi.advanceTimersByTimeAsync(50);
+    await flushMicrotasks();
+    expect(h.quits).toHaveLength(1);
+    expect(h.logs.some((line) => line.includes("runtime close budget"))).toBe(true);
+  });
+
+  it("closeRuntimes 抛错视同完成：仍然退出", async () => {
+    const h = makeHarness({ inflight: false });
+    const coordinator = createQuitCoordinator({
+      ...h.deps,
+      hasRuntimeResources: () => true,
+      closeRuntimes: () => Promise.reject(new Error("close failed")),
+    });
+    coordinator.onBeforeQuit(event());
+    await flushMicrotasks();
+    expect(h.quits).toHaveLength(1);
+    expect(h.logs.some((line) => line.includes("closeRuntimes failed"))).toBe(true);
+  });
+
+  it("无在飞轮且 server 从未起过（惰性未触发）→ 零成本路径不拦截", async () => {
+    const h = makeHarness({ inflight: false });
+    const coordinator = createQuitCoordinator({
+      ...h.deps,
+      hasRuntimeResources: () => false,
+      closeRuntimes: () => Promise.resolve(),
+    });
+    const e = event();
+    coordinator.onBeforeQuit(e);
+    await flushMicrotasks();
+    expect(e.prevented).toBe(0);
+    expect(h.quits).toHaveLength(0); // 放行 Electron 自己退，我们不调 quit
+    expect(coordinator.phase()).toBe("quitting");
   });
 });

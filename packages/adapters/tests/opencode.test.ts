@@ -833,6 +833,26 @@ describe("Server 生命周期（假 serve 子进程）", () => {
     }
   });
 
+  it("启动进行中 close：等 launch 落定再收，进程不从退出路径漏出（T8.5c 退出收敛）", async () => {
+    const server = createOpenCodeServer({
+      command: process.execPath,
+      leadingArgs: [scriptPath],
+      healthIntervalMs: 20,
+      readyTimeoutMs: 20_000,
+    });
+    // 不 await：让 close 在 starting 阶段到达
+    const starting = server.ensureReady();
+    await server.close();
+    expect(server.status().state).toBe("closed");
+    // 进程真被收掉的观察点：lastExit 已落定（修复前 close 只清引用，
+    // 进行中的 launch 稍后把 running 写回来，进程从退出路径漏出）
+    expect(server.status().lastExit).toBeDefined();
+    // 启动 promise 已落定（成功或被关停），不悬挂
+    await starting.catch(() => undefined);
+    // 关停后 ensureReady 拒绝（closed 是终态）
+    await expect(server.ensureReady()).rejects.toBeInstanceOf(OpenCodeServerError);
+  });
+
   it("公告缺席且未指定端口 → 就绪超时并给出可诊断的错误", async () => {
     const server = createOpenCodeServer({
       command: process.execPath,

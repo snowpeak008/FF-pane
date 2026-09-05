@@ -14,7 +14,7 @@
  *
  * **按 Profile 逐实例化，注册键为 `<runtime>@<profileId>` 复合键**（如
  * `generic-exec@prof-abc`）；无构造期配置的适配器（codex / claude-code / gemini-cli /
- * grok-build）维持裸 runtime 键单例不变。规则：
+ * grok-build / opencode（T8.5c 起））维持裸 runtime 键单例不变。规则：
  * 1. 编排层取用一律走 resolveForProfile：带构造期配置的 runtime（generic-exec /
  *    aider）按 `<profile.runtime>@<profile.id>` 命中专属实例，其余退回裸
  *    `profile.runtime`——零配置适配器一行不改（resolveForProfile 对它们就是
@@ -58,9 +58,34 @@
  * transcript——本次接线保证的是「文件寿命可控、不再被系统清理」，是否放宽
  * partial 进 native 恢复归主管理员另裁。
  *
- * OpenCode（需常驻 server + close 生命周期）暂不默认注册，就绪评估见
- * `docs/开发进度.md` §0 T8.4b 节（before-quit 钩子已就位，尚缺 server close
- * 接线与退出预算合并等，注册实现留待其工单）。
+ * ## OpenCode（T8.5c 注册接入，T8.4b 就绪评估四缺口收口）
+ *
+ * 裸键单例注册（零构造期配置——与 codex 等同款），但**server 进程惰性**：
+ * `createOpenCodeAdapter()` / `createOpenCodeServer()` 只是轻量闭包，首次派发的
+ * `ensureReady()` 才 spawn `opencode serve`——注册本身零成本，与 T8.4b 惰性构造
+ * 款式同精神（差别只在惰性落在 server 层而非适配器层，因为适配器无按 Profile
+ * 的构造期配置）。
+ *
+ * **server 共享决策（两案对比，维持主管理员方向）**：
+ * - 案 A（选定）**进程级单 server 共享**：OpenCode 一个 serve 实例本就服务多项目
+ *   多会话（调研 §2.2：请求带 directory 参数；§5：会话库全局 SQLite 单库），按
+ *   Profile 各起一个只是复数份端口 + 内存 + 3~5 s 冷启动，换不来任何隔离收益。
+ *   调研核实**无「全局配置绑定 Profile」问题**：Provider 凭证经 spawn 期环境变量
+ *   吸收（§4.3），而 desktop 对 opencode **零 env 注入**（env.ts 默认分支——
+ *   Provider 在 OpenCode 自身配置内声明），全部轮次 env 指纹相同，共享 server
+ *   永不触发指纹冲突。将来若按 Profile 注入凭证（OPENCODE_CONFIG_CONTENT），
+ *   server 层的 env 指纹绑定会拒绝有活跃轮次时的抢占（server.ts 头注）——届时
+ *   再改按 Profile 实例化，本注册表已有现成款式（resolveGenericExec/resolveAider）。
+ * - 案 B 按 Profile 各起 server：唯一收益是 env 指纹天然隔离，但当前零注入用不上；
+ *   代价是每 Profile 一个常驻进程 + 端口 + 退出时逐个关停。弃。
+ *
+ * **退出收敛（T8.4b 缺口 ①②）**：`closeRuntimes()` 关停 server（幂等），由
+ * quit 协调器在 prepareForQuit **之后**调用——取消波经 HTTP /abort 打到 server，
+ * 先关 server 会让 abort 失败并触发适配器的 restart 兜底（退出期间重启是反向
+ * 操作）。`hasRuntimeResources()` 供 quit 协调器判断「无在飞轮但 server 还活着」
+ * 时也要拦截一次退出来关停。崩溃兜底：server 经 spawnAgentProcess 起，spawn 后
+ * 即入 Job（KILL_ON_JOB_CLOSE）且在 libuv 全局 Job 内——FF-pane 崩溃时内核代为
+ * 收尾（T8.2 关应用即清场语义，§4.5 已落档）。
  */
 
 import path from "node:path";
@@ -74,6 +99,8 @@ import {
   createGeminiCliAdapter,
   createGenericExecAdapter,
   createGrokBuildAdapter,
+  createOpenCodeAdapter,
+  type OpenCodeAdapter,
 } from "@ff-pane/adapters";
 import type { AgentProfile } from "@ff-pane/shared";
 
@@ -84,6 +111,11 @@ export interface DesktopAdapterRegistryOptions {
    * 每个 aider Profile 的实例注入 `tempDir = <本目录>/<profileId>`。
    */
   readonly agentSessionsDir: string;
+  /**
+   * OpenCode 适配器注入口（单测替身用；缺省 `createOpenCodeAdapter()`——
+   * 零构造期配置、server 惰性，见模块头 OpenCode 一节）。
+   */
+  readonly openCodeAdapter?: OpenCodeAdapter | undefined;
 }
 
 /** 按 Profile 解析适配器的结果：命中实例或人可读拒绝原因（经 ack.reason 上行）。 */
@@ -97,8 +129,19 @@ export interface ProfileAdapterResolver {
   resolveForProfile(profile: AgentProfile): ProfileAdapterResolution;
 }
 
-/** 桌面注册表：裸键 AdapterRegistry + 按 Profile 的复合键解析。 */
-export interface DesktopAdapterRegistry extends AdapterRegistry, ProfileAdapterResolver {}
+/** 桌面注册表：裸键 AdapterRegistry + 按 Profile 的复合键解析 + 常驻资源生命周期。 */
+export interface DesktopAdapterRegistry extends AdapterRegistry, ProfileAdapterResolver {
+  /**
+   * 是否有需要退出前关停的常驻 Runtime 资源（T8.5c：opencode serve 起过且
+   * 尚未关停）。quit 协调器据此在「无在飞轮次」时也拦截一次退出来关 server。
+   */
+  hasRuntimeResources(): boolean;
+  /**
+   * 关停全部常驻 Runtime 资源（幂等）。当前仅 OpenCode server；由退出路径在
+   * prepareForQuit（取消波经 HTTP /abort 打到 server）**之后**调用。
+   */
+  closeRuntimes(): Promise<void>;
+}
 
 /** 复合键缓存条目：构造期配置的指纹 + 实例（指纹失配即重建，见模块头第 2 条）。 */
 interface CachedInstance {
@@ -128,6 +171,11 @@ export function createDesktopAdapterRegistry(
   // 裸键 aider 保留注册（registry.get("aider") 的既有行为不变——零参、tmpdir 缺省）；
   // 编排层经 resolveForProfile 取用的恒是复合键的按 Profile 实例（tempDir 已注入）。
   registry.register(createAiderAdapter());
+  // OpenCode（T8.5c）：裸键单例，进程级单 server 共享（构造是轻量闭包，serve
+  // 进程惰性——首次派发的 ensureReady 才 spawn）。能力声明按 Server 路径六项
+  // 全 yes（adapter.ts OPENCODE_SERVER_CAPABILITIES），选路决策见模块头。
+  const openCode = options.openCodeAdapter ?? createOpenCodeAdapter();
+  registry.register(openCode);
 
   const instances = new Map<string, CachedInstance>();
 
@@ -198,5 +246,12 @@ export function createDesktopAdapterRegistry(
     get: (runtime) => registry.get(runtime),
     list: () => registry.list(),
     resolveForProfile,
+    hasRuntimeResources: (): boolean => {
+      const state = openCode.server.status().state;
+      // stopped = 从未起过（惰性未触发）或已被 idle 关停；closed = 已收尾。
+      // 其余（starting / ready / crashed）都可能有进程或启动中的 promise 要收。
+      return state !== "stopped" && state !== "closed";
+    },
+    closeRuntimes: (): Promise<void> => openCode.close(),
   };
 }

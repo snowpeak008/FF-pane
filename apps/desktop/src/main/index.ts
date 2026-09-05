@@ -135,11 +135,14 @@ async function bootstrap(): Promise<void> {
     const sessionLayer = await createSessionLayer(() => mainWindow);
     registerInvokeHandlers(ipcMain, sessionLayer.handlers);
 
-    // 退出钩子（T8.2b）：有在飞轮次时先就地收尾（transcript / Run / 任务 / 标记）再退出，
-    // 总时长上限 QUIT_TOTAL_BUDGET_MS；无在飞轮次不拦截。子进程由 Job Object 兜底（T8.2）。
+    // 退出钩子（T8.2b；T8.5c 增补 opencode server 关停）：有在飞轮次时先就地收尾
+    // （transcript / Run / 任务 / 标记）再退出，总时长上限 QUIT_TOTAL_BUDGET_MS；
+    // 常驻 server 在收尾之后、退出之前关停（独立小预算）。子进程由 Job Object 兜底（T8.2）。
     const quitCoordinator = createQuitCoordinator({
       hasInflight: () => sessionLayer.orchestrator.activeCount() > 0,
       prepare: () => sessionLayer.orchestrator.prepareForQuit(),
+      hasRuntimeResources: () => sessionLayer.registry.hasRuntimeResources(),
+      closeRuntimes: () => sessionLayer.registry.closeRuntimes(),
       quit: () => app.quit(),
       log: (message) => console.log(`[main] ${message}`),
     });

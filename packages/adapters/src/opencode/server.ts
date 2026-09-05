@@ -519,6 +519,14 @@ export function createOpenCodeServer(options: OpenCodeServerOptions = {}): OpenC
       if (state === "closed") {
         return;
       }
+      // 启动进行中（T8.5c 退出收敛核实）：先等 launch 落定再关。直接 stop 只会清掉
+      // startPromise 引用，进行中的 launch 稍后完成时会把 running/ready 写回来——
+      // 进程从 close 漏出。等落定后：成功则 running 已就位、下方 stop 收掉进程；
+      // 失败则 launch 自行清理，stop 只负责置终态。
+      const pending = startPromise;
+      if (pending !== undefined) {
+        await pending.catch(() => undefined);
+      }
       await stop("closed");
     },
   };

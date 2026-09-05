@@ -55,6 +55,10 @@ export const OPENCODE_SERVER_CAPABILITIES: AdapterCapabilities = {
  * 本工单不实现该路径；此常量是**降级契约的显式记录**：任何将来以 CLI 方式接
  * OpenCode 的实现（离线环境、serve 起不来的兜底）必须按这一份声明，不得沿用
  * Server 的六项全是——否则 UI 会承诺做不到的事（打字机效果、一键批准）。
+ * **T8.5c 注册接入时核实：CLI 降级路径自 T2.6 起从未接线**（capabilities()
+ * 恒返回 Server 声明，本常量在 src 无消费方，仅测试钉住两份声明的区别）——
+ * 注册按 Server 声明选路，serve 起不来时轮次以 end(failed/crashed) 如实收尾
+ * 而非静默换 CLI 路径。
  * 依据调研 §7：流式为"部分"（只有整块 text，无 token 级增量），权限转发为"否"
  * （无事件、默认自动拒绝、`--auto` 自动批准），取消为"部分"（只能杀进程树）。
  */
