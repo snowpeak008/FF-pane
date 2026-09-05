@@ -398,6 +398,9 @@ describe("环境变量清洗", () => {
     expect(isApiKeyEnvName("ANTHROPIC_AUTH_TOKEN")).toBe(true);
     expect(isApiKeyEnvName("SOMEVENDOR_API_KEY")).toBe(true);
     expect(isApiKeyEnvName("AWS_SECRET_ACCESS_KEY")).toBe(true);
+    // QWEN_MODEL 单点钉子（T8.6a 验收 §2-1 覆盖缺口）：OPENAI_MODEL 的别名，
+    // 前缀型样例盖不住它——删掉 /^QWEN_MODEL$/ 清洗条目本行必须红。
+    expect(isApiKeyEnvName("QWEN_MODEL")).toBe(true);
     expect(isApiKeyEnvName("GOOGLE_GENAI_USE_GCA")).toBe(false);
     expect(isApiKeyEnvName("PATH")).toBe(false);
     expect(isApiKeyEnvName("FF_PANE_HOME")).toBe(false);

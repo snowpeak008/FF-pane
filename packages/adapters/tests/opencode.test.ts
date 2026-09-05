@@ -783,7 +783,13 @@ describe("Server 生命周期（假 serve 子进程）", () => {
     await server.close();
   });
 
-  it("env 指纹变化：无活跃轮次时自动重启，有活跃轮次时拒绝抢占", async () => {
+  // 时序钉子（T8.6a 验收遗留，主管理员裁定加固）：本用例是本组唯一做两次完整真实
+  // 启动的用例（k1 启动 → k2 指纹失配重启，各含 spawn node 子进程 + stdout 公告 +
+  // 健康轮询），全量负载下（多 worker fork 同时 spawn）两次启动串行可超 vitest 默认
+  // 5 s 测试超时——§4.5 第四条 flake 的失败形态即此（复跑即绿、文件耗时 12 s+）。
+  // 显式 45 s：大于内部 readyTimeoutMs（20 s）× 2 次启动，让真失败先经 launch 的
+  // deadline 以可诊断的 OpenCodeServerError 呈现，而不是裸测试超时。
+  it("env 指纹变化：无活跃轮次时自动重启，有活跃轮次时拒绝抢占", { timeout: 45_000 }, async () => {
     const server = createOpenCodeServer({
       command: process.execPath,
       leadingArgs: [scriptPath],
