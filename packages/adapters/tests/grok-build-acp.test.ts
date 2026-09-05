@@ -597,6 +597,37 @@ describe("grok-build ACP 模式：权限往返", () => {
     );
   });
 
+  it("同类 once 缺席退回 always 类选项时留档 raw（pickWithAudit 退路留档，T8.5b 验收 §2-1）", async () => {
+    let outcome: Record<string, unknown> | undefined;
+    const fake = createFakeAcpProcess({
+      onPrompt: async (agent) => {
+        outcome = await agent.requestPermission({
+          ...PERMISSION_PARAMS,
+          // 真机选项面恒含 once（fixture 实证），此为将来 grok 改选项面的防御形态
+          options: [
+            { optionId: "allow-edits-session", name: "Yes, allow all", kind: "allow_always" },
+            { optionId: "reject-once", name: "No", kind: "reject_once" },
+          ],
+        });
+        return { stopReason: "end_turn" };
+      },
+    });
+    const adapter = createGrokBuildAdapter({ spawn: createSpawnRig([fake]).spawn });
+    const turn = adapter.startTurn({ cwd: CWD, prompt: "x" });
+    const events: AgentEvent[] = [];
+    for await (const event of turn.events) {
+      events.push(event);
+      if (event.kind === "permission_request") {
+        await turn.respondPermission?.(event.nativeRequestId, "allow");
+      }
+    }
+    // 退路生效：选了 always 类选项，但留下了 raw 证据（不静默豁免）
+    expect(outcome).toEqual({
+      outcome: { outcome: "selected", optionId: "allow-edits-session" },
+    });
+    expect(only(events, "raw").some((event) => (event.note ?? "").includes("留档备查"))).toBe(true);
+  });
+
   it("重复回执 / 未知凭据 → GrokAcpProtocolError", async () => {
     const fake = createFakeAcpProcess({
       onPrompt: async (agent) => {
@@ -739,6 +770,61 @@ describe("grok-build ACP 模式：降级链与能力声明条件式", () => {
     const headlessArgs = rig.specs[1]?.args ?? [];
     expect(headlessArgs).toContain("-r");
     expect(headlessArgs).toContain(SESSION_ID);
+  });
+
+  it("auto：initialize 静默超时（Agent 不回帧）→ 同一降级链降级 headless（T8.5b 验收 §2-3 缺口①）", async () => {
+    const acp = createFakeAcpProcess({ initialize: "silent" });
+    const headless = createFakeHeadlessProcess(HEADLESS_NDJSON);
+    const rig = createSpawnRig([acp, headless]);
+    const adapter = createGrokBuildAdapter({ spawn: rig.spawn, acpHandshakeTimeoutMs: 30 });
+    const events = await collect(adapter.startTurn({ cwd: CWD, prompt: "x" }).events);
+    expect(events[0]?.kind).toBe("raw");
+    expect((events[0] as { note?: string }).note).toContain("降级现行 streaming-json");
+    expect(only(events, "end")[0]).toMatchObject({ reason: "completed" });
+    expect(acp.killed()).toBe(true); // 静默超时同样 close + 收进程
+    expect(rig.specs).toHaveLength(2);
+  });
+
+  it("auto：spawn 直接失败（stdin 为 null 的恒抛写口）→ 同一降级链降级 headless（缺口②）", async () => {
+    // spawn 失败的句柄形态：stdin null、stdout 空结束、exitPromise 即刻 spawn-failed
+    const stdout = new PassThrough();
+    stdout.end();
+    const stderr = new PassThrough();
+    stderr.end();
+    const exit: AgentProcessExit = {
+      kind: "spawn-failed",
+      exitCode: null,
+      signal: null,
+      error: "spawn grok ENOENT",
+      errorCode: "ENOENT",
+    };
+    let killed = false;
+    const failedHandle: AgentProcessHandle = {
+      pid: undefined,
+      stdout,
+      stderr,
+      stdin: null,
+      exitPromise: Promise.resolve(exit),
+      resolvedCommand: "grok",
+      viaCmdShim: false,
+      strippedEnvNames: [],
+      kill: async () => {
+        killed = true;
+        return exit;
+      },
+    };
+    const headless = createFakeHeadlessProcess(HEADLESS_NDJSON);
+    const rig = createSpawnRig([
+      { handle: failedHandle, agent: undefined as never, killed: () => killed },
+      headless,
+    ]);
+    const adapter = createGrokBuildAdapter({ spawn: rig.spawn });
+    const events = await collect(adapter.startTurn({ cwd: CWD, prompt: "x" }).events);
+    expect(events[0]?.kind).toBe("raw");
+    expect((events[0] as { note?: string }).note).toContain("降级现行 streaming-json");
+    expect((events[0] as { note?: string }).note).toContain("stdin 不可用");
+    expect(only(events, "end")[0]).toMatchObject({ reason: "completed" });
+    expect(rig.specs).toHaveLength(2);
   });
 
   it("显式 transport=acp：握手失败不降级，如实 end(failed)", async () => {

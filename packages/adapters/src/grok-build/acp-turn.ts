@@ -262,7 +262,9 @@ export function toGrokAcpPermissionPayload(
  * 用户裁决 → Agent 提供的选项。**刻意优先 `*_once`**：FF-pane 的裁决是逐次的，
  * 选 allow_always/reject_always 会让 grok 后续同类操作不再询问——那等于把一次
  * 放行升格成会话级豁免，绕开权限层的逐次裁决。同类 once 缺席时才退回同前缀
- * 的其他选项（此时留档由调用方负责）。
+ * 的其他选项（此时留档由调用方负责——startGrokAcpAttempt 的 pickWithAudit
+ * 在命中该退路时 push 一条 raw 留档；真机选项面恒含 once（fixture 两帧实证），
+ * 退路目前不可达，留档是为将来 grok 改选项面时保住证据）。
  */
 export function pickAcpPermissionOption(
   options: readonly AcpPermissionOptionView[],
@@ -374,6 +376,30 @@ export function startGrokAcpAttempt(
   const handle = config.spawn(spec);
   const stderrTail = readStderrTail(handle.stderr).catch(() => "");
 
+  /**
+   * 选项挑选 + 退路留档（pickAcpPermissionOption 注释的「留档由调用方负责」）：
+   * 命中非 `*_once` 选项时 push raw 证据——always 类会改变 grok 会话内后续
+   * 询问行为，真机选项面恒含 once（fixture 实证）故当前不可达，留档是为将来
+   * grok 改选项面时不静默豁免。
+   */
+  function pickWithAudit(
+    request: AcpPermissionRequestView,
+    decision: PermissionDecision,
+  ): AcpPermissionOptionView | undefined {
+    const pick = pickAcpPermissionOption(request.options, decision);
+    if (pick !== undefined && !pick.optionKind.endsWith("_once")) {
+      sink.push([
+        toRawEvent(
+          GROK_BUILD_RUNTIME,
+          request.raw,
+          `同类 *_once 选项缺席，退回「${pick.optionKind}」（${pick.optionId}）` +
+            "——该选项可能改变 grok 会话内后续询问行为，留档备查",
+        ),
+      ]);
+    }
+    return pick;
+  }
+
   function onSessionUpdate(notification: AcpSessionNotificationView): void {
     if (sessionId !== undefined && notification.sessionId !== sessionId) {
       // --no-leader 下不该发生；真发生就是对端缺陷证据，留档不映射
@@ -397,7 +423,7 @@ export function startGrokAcpAttempt(
     const payload = toGrokAcpPermissionPayload(request.toolCall, ctx.cwd);
     if (payload === undefined) {
       sink.push([toRawEvent(GROK_BUILD_RUNTIME, request.raw, GROK_ACP_UNMAPPED_TOOL_NOTE)]);
-      const reject = pickAcpPermissionOption(request.options, "deny");
+      const reject = pickWithAudit(request, "deny");
       return reject === undefined
         ? { kind: "cancelled" }
         : { kind: "selected", optionId: reject.optionId };
@@ -421,7 +447,7 @@ export function startGrokAcpAttempt(
       ]);
     });
     pendingPermissions.delete(nativeRequestId);
-    const pick = pickAcpPermissionOption(request.options, decision);
+    const pick = pickWithAudit(request, decision);
     if (pick === undefined) {
       sink.push([
         toRawEvent(
