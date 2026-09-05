@@ -325,7 +325,7 @@ describe("grok-build fixture 回放：错误与截断", () => {
 });
 
 describe("grok-build 适配器本体", () => {
-  it("能力声明与调研结论一致（六项，逐项有据）", () => {
+  it("headless 能力声明与调研结论一致（六项，逐项有据）", () => {
     expect(GROK_BUILD_CAPABILITIES).toEqual({
       nativeResume: "yes",
       streaming: "yes",
@@ -336,8 +336,8 @@ describe("grok-build 适配器本体", () => {
     });
   });
 
-  it("不实现 respondPermission（headless 无审批回执通道）", () => {
-    const adapter = createGrokBuildAdapter();
+  it("headless 模式不实现 respondPermission（单向流无审批回执通道）", () => {
+    const adapter = createGrokBuildAdapter({ transport: "streaming-json" });
     const turn = adapter.startTurn({ cwd: process.cwd(), prompt: "x", timeoutMs: 1 });
     expect(turn.respondPermission).toBeUndefined();
     void turn.cancel();

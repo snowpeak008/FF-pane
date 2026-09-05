@@ -39,13 +39,16 @@ import { firstDiffPath, renderGrokDiffFromContent } from "./diff.js";
 
 /**
  * 「这次工具调用没有真的执行」的文本标记（真机录制原文，见 fixtures 的
- * headless-noapprove / deny-rule 两份）。命中即把 failed 改判为 denied。
- * 用文本匹配是无奈但唯一的路：grok 在结构上不区分「失败」与「被拒」。
+ * headless-noapprove / deny-rule 两份；第四条出自 ACP 模式的 real-acp-deny——
+ * 用户经 session/request_permission 拒绝时 grok 报「User rejected the execution」，
+ * 与 headless 无审批路径的「User cancelled」措辞不同）。命中即把 failed 改判为
+ * denied。用文本匹配是无奈但唯一的路：grok 在结构上不区分「失败」与「被拒」。
  */
 const DENIAL_MARKERS = [
   "Denied by permission policy",
   "User cancelled the execution",
   "was not executed",
+  "User rejected the execution",
 ] as const;
 
 /** grok 工具状态 → 统一动作状态（`null` = 中间进度，见 §2.1）。 */
@@ -116,6 +119,12 @@ export interface GrokEventMapperOptions {
   readonly cwd: string;
   /** 本轮请求的模型；grok 的 streaming-json 流不报模型，只能由调用方给。 */
   readonly model?: ModelId | undefined;
+  /**
+   * `stopReason=cancelled` 的 end.message 覆盖（T8.5b）。缺省是 headless 口径
+   * （指向 --always-approve，§7.3 坑 1）；ACP 模式有真审批通道，那句话是误导，
+   * 由 acp-turn 换成本模式的如实措辞。cancelled ≠ 成功的语义不随措辞变。
+   */
+  readonly cancelledMessage?: string | undefined;
 }
 
 function asString(value: unknown): string | undefined {
@@ -386,8 +395,9 @@ export function createGrokEventMapper(options: GrokEventMapperOptions): GrokEven
         reason: "cancelled",
         ...base,
         message:
+          options.cancelledMessage ??
           "grok 以 stopReason=cancelled 收尾：本轮有工具调用未获批准而未执行" +
-          "（headless 下无审批通道，须以 --always-approve 运行，见 grok-build.md §7.3 坑 1）",
+            "（headless 下无审批通道，须以 --always-approve 运行，见 grok-build.md §7.3 坑 1）",
       };
       return;
     }

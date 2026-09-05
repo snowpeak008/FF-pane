@@ -87,6 +87,43 @@ function permissionArgs(mode: GrokPermissionMode): string[] {
   return mode === "always-approve" ? ["--always-approve"] : ["--permission-mode", mode];
 }
 
+/** buildGrokAcpArgs 的输入（T8.5b ACP 模式）。 */
+export interface GrokAcpArgsInput {
+  /** 指定模型（`-m`，须挂在 `agent` 层——`stdio` 子命令不收）。 */
+  readonly model?: ModelId | undefined;
+  /** `--reasoning-effort` 推理强度（同上，agent 层参数）。 */
+  readonly reasoningEffort?: string | undefined;
+}
+
+/**
+ * 组装 `grok agent stdio` 参数表（T8.5b，1.0.13 真机核对）。
+ *
+ * 与 headless 参数面的差异（`grok agent --help` 实测）：
+ * - `-m` / `--reasoning-effort` 在 `agent` 层，必须放在 `stdio` 子命令**之前**
+ *   （放后面报 `unexpected argument`，真机踩过）；
+ * - **恒带 `--no-leader`**：leader 模式会连到共享后端进程，一轮的生命周期不再随
+ *   本子进程走（树杀杀不到真正干活的 agent），且会话与用户自己终端里的 grok 端
+ *   互相可见——与「一轮一进程、kill 即收场」的既有语义相抵，必须关掉；
+ * - **不带 `--always-approve`**：ACP 模式要的就是 session/request_permission
+ *   转发（权限裁决归 FF-pane 权限层，逐次回执）；
+ * - 无 `--cwd`：agent 层没有该参数，工作目录经 spawn cwd + session/new 的 cwd
+ *   参数双重指定；
+ * - `--no-subagents` / `--allow` / `--deny` / `--tools` / `--max-turns` 等均为
+ *   headless 专属参数，agent 层不存在。子代理派生（spawn_subagent 工具）在
+ *   ACP 模式下由权限桥兜底：该工具无法映射为信封语义 → fail-closed 自动拒绝。
+ */
+export function buildGrokAcpArgs(input: GrokAcpArgsInput): string[] {
+  const args: string[] = ["agent"];
+  if (input.model !== undefined && input.model !== "") {
+    args.push("-m", input.model);
+  }
+  if (input.reasoningEffort !== undefined && input.reasoningEffort !== "") {
+    args.push("--reasoning-effort", input.reasoningEffort);
+  }
+  args.push("--no-leader", "stdio");
+  return args;
+}
+
 /**
  * 组装 grok headless 参数表（不含可执行文件本身）。
  * 纯函数，参数顺序稳定，便于单测与日志比对。

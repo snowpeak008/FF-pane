@@ -1,9 +1,9 @@
-# Grok Build 适配器调研（T7.3）
+# Grok Build 适配器调研（T7.3；T8.5b 增 ACP 实测节 §7.5）
 
 - **调研版本：** grok 1.0.13（`5e9a58528b76`），Windows 11，安装于 `~/.grok/bin/grok.exe`（原生 PE 可执行文件，非 npm 垫片）
-- **调研日期：** 2026-08-31
+- **调研日期：** 2026-08-31（headless）；2026-09-05（ACP 路径实测，§7.5，同版本 1.0.13）
 - **调研方式：** 真机运行 + CLI 随装官方文档（`~/.grok/docs/user-guide/`，与 1.0.13 同版本发布）逐项核对
-- **fixture：** `packages/adapters/fixtures/grok-build/`（**全部真机录制**，模型端替换说明见该目录 README）
+- **fixture：** `packages/adapters/fixtures/grok-build/`（**全部真机录制**，模型端替换说明见该目录 README；ACP 补录三份见 README-acp.md）
 
 > **关于「真机」的口径**：本机 grok 未登录（`grok models` 报 not authenticated）。为录到成功
 > 路径，用一个本地假 OpenAI 兼容服务端替换了模型这一环（`fixtures/tools/fake-openai-server.mjs`），
@@ -25,8 +25,8 @@ grok --prompt-file <PATH> [OPTIONS]
 
 - 交互式 TUI 与 headless 是同一个二进制：给了 `-p` / `--prompt-file` / `--prompt-json` 就进 headless。
 - **一次进程 = 一轮**，与 codex exec 同构；多轮靠 `-r/--resume <session_id>` 反复 spawn。
-- 另有 `grok agent stdio`（ACP over stdio 的常驻双工通道）。那是 M3 的 ACP 路线，不在本工单范围；
-  L1 适配器走 headless turn 模型，与既有四家保持同一个接口形状。
+- 另有 `grok agent stdio`（ACP over stdio 的双工通道）——**T8.5b 已实测并作为适配器首选
+  路径**（headless 降级保留），详见 §7.5；本节以下为 headless（streaming-json）模式的调研。
 
 ### 1.2 关键参数（1.0.13 实测存在）
 
@@ -192,14 +192,20 @@ NDJSON，每行一个带 `type` 的对象，由 grok 的 ACP session update 投�
 
 ## 6. 六项能力声明核对（对照设计文档 §5.1）
 
-| # | 能力 | 结论 | 依据 |
+**T8.5b 起能力声明按传输模式条件式给出**（`adapter.ts` 两份常量，capabilities() 随
+当前选路返回）：下表「结论」列为 headless（streaming-json）模式；**ACP 模式**下第 5 项
+转 **是**、第 6 项转 **是**（依据见 §7.5，1.0.13 真机实测 + fixtures real-acp-*.jsonl），
+其余四项两模式同源同值。auto 模式在首轮探测前按 ACP 报，探测（首轮 initialize 握手）
+后即与实际选路一致。
+
+| # | 能力 | 结论（headless） | 依据 |
 |---|---|---|---|
-| 1 | 原生会话恢复 | **是** | `-r <session_id>` 真机验证：sessionId 不变、上下文 12 条消息完整回填（§3） |
-| 2 | 流式输出 | **是** | `text` 事件是**真增量**（实测一句话被切成两片投递），非整条到达。四家里唯一够格 |
-| 3 | 文件修改事件 | **是** | `tool_call_update.content[].type === "diff"` 直接给 oldText/newText 全文 + 路径 + 状态，无需 git 快照自补（§2.1） |
-| 4 | 命令执行事件 | **是** | `rawOutput` 含退出码、命令、cwd、截断/超时标志、输出（§2.2），信息量四家最全 |
-| 5 | 权限请求转发 | **否** | headless 是单向流，无审批回执通道；待批工具直接以 `failed` +「User cancelled」落地。转发审批须走 `grok agent stdio`（ACP 双工，M3 范围） |
-| 6 | 中途取消 | **部分** | 无优雅协议，只能树杀；无终止事件需自判；副作用不回滚但会话可续（§4） |
+| 1 | 原生会话恢复 | **是** | `-r <session_id>` 真机验证：sessionId 不变、上下文 12 条消息完整回填（§3）。ACP 模式走 session/load，与 `-r` 消费同一份会话存储（§7.5 互通实测） |
+| 2 | 流式输出 | **是** | `text` 事件是**真增量**（实测一句话被切成两片投递），非整条到达。四家里唯一够格。ACP 的 agent_message_chunk 同源 |
+| 3 | 文件修改事件 | **是** | `tool_call_update.content[].type === "diff"` 直接给 oldText/newText 全文 + 路径 + 状态，无需 git 快照自补（§2.1）。ACP wire 同一形态（§7.5） |
+| 4 | 命令执行事件 | **是** | `rawOutput` 含退出码、命令、cwd、截断/超时标志、输出（§2.2），信息量四家最全。ACP wire 同一形态 |
+| 5 | 权限请求转发 | **否**（ACP 模式：**是**） | headless 是单向流，无审批回执通道；待批工具直接以 `failed` +「User cancelled」落地。ACP 模式经 session/request_permission 请求/回执闭环**实测成立**（§7.5） |
+| 6 | 中途取消 | **部分**（ACP 模式：**是**） | headless 无优雅协议，只能树杀；无终止事件需自判；副作用不回滚但会话可续（§4）。ACP 模式 session/cancel 通知后 grok 自己收工、prompt 以 stopReason=cancelled 优雅落定**实测成立**（§7.5），树杀仅兜底 |
 
 **额外一项（本产品自加）：MCP 注入 = 否。** grok 的 MCP 只能配在
 `~/.grok/config.toml`（用户全局）或 `<cwd>/.grok/config.toml`（写进用户仓库），
@@ -286,3 +292,77 @@ NDJSON，每行一个带 `type` 的对象，由 grok 的 ACP session update 投�
 `cli_login` 类型的 Provider 立刻失效，只剩 API key 一条路；② 会话目录跟着搬家，
 用户在自己终端里跑的 grok 会话与本产品里的互相看不见——这是个会让人困惑的隐性割裂。
 留作日后「按 Provider 类型分流」的可选项，届时需要 UI 上说清楚。
+
+### 7.5 ACP 路径（`grok agent stdio`）——T8.5b 实测与实现状态
+
+T7.3a 时仅探明存在，本单转为实测（同版本 1.0.13，Windows 10；协议层为 T8.5a 的
+`packages/adapters/src/acp/`；实现 `grok-build/acp-turn.ts` + `adapter.ts` 双模式门面；
+录制 `fixtures/grok-build/real-acp-*.jsonl` 三份，性质说明见该目录 README-acp.md）。
+
+#### 7.5.1 模式决策：ACP 首选 + headless 降级（两案对比）
+
+- **案 A（选定）ACP 为首选路径、现行 streaming-json 保留为降级**：三点实质收益——
+  ① 权限请求真转发（session/request_permission 逐次审批，`--always-approve` 全放行
+  不再是唯一选项，§7.3 坑 1 的「安全全押 FF-pane 事后拦截」升级为「事前逐次裁决」）；
+  ② 优雅取消（session/cancel 协议级收工，副作用停在已完成的工具调用，树杀只兜底）；
+  ③ sessionId 开轮即得（session/new 响应就带，§7.3 坑 5 在本模式**不存在**——中断轮
+  也留得下续接凭据）。代价：旧版 grok 无 `agent stdio` 时需降级链；双模式并存的维护面。
+- **案 B（弃）ACP 直接替换 headless**：代码面最小，但把「旧版 grok / agent stdio 回归」
+  的兼容性风险全数转嫁给用户（headless 是 T7.3 已验收的真机路径，扔掉一条已证实
+  可靠的通道换不来任何新能力）；且 headless 的 `--deny`/`--tools`/`--max-turns` 纵深
+  防御参数在 agent 层不存在，替换即失去这层。降级保留的维护成本可控（映射器与
+  resume 校验两模式共用，见 7.5.3），**维持主管理员倾向：案 A**。
+
+#### 7.5.2 通道与参数（真机核对）
+
+- 启动：`grok agent [-m <model>] [--reasoning-effort <e>] --no-leader stdio`。
+  **`-m` 等在 `agent` 层**，放 `stdio` 后面报 `unexpected argument`（踩过）。
+  `stdio` 子命令自身只有 `--debug` / `--debug-file` / `--leader-socket`。
+- **恒带 `--no-leader`**：leader 模式连共享后端进程，轮次生命周期不随本子进程走
+  （树杀杀不到真正干活的 agent）。`--always-approve` / `--cwd` / `--no-subagents` /
+  `--deny` / `--max-turns` 等 headless 参数在 agent 层**不存在**；cwd 经 spawn cwd +
+  session/new 的 cwd 参数指定；子代理派生由权限桥 fail-closed 兜底（spawn_subagent
+  映射不进信封 5 类 → 自动拒绝）。
+- 握手：initialize 回 protocolVersion 1、`agentCapabilities.loadSession: true`、
+  authMethods（登录/配了 api_key 时含 `xai.api_key`，浏览器 OAuth 为 `grok.com`）。
+  未认证时 session/new 回 **-32000 Authentication required**；实现只对 `xai.api_key`
+  方式 authenticate 一次重试（`grok.com` 是浏览器 OAuth，服务进程里触发只会假死）。
+- **wire 与 headless 投影的两处差异**（逆投影 acpUpdateToNativeRecord 补齐后复用
+  现行 mapper，denial 改判 / diff 渲染 / end 语义零重写）：① chunk 文本在
+  `content.text`（headless 提升为顶层 `data`）；② `tool_call` 顶层**不带**
+  `kind`/`toolName`，权威值在 `_meta["x.ai/tool"]` 的 kind/name。
+- 权限选项实测形态：write 给 allow_always/allow_once/reject_once 三枚，命令类多一枚
+  reject_always。**适配器恒选 `*_once`**——always 类会改变 grok 会话内后续询问行为
+  （don't ask again），等于把逐次裁决升格为会话级豁免。
+- 拒绝措辞：ACP 路径是「**User rejected the execution** for tool `write`」（与 headless
+  的「User cancelled the execution」不同句），DENIAL_MARKERS 第四条据此补入。
+- 取消：session/cancel 通知后 grok 自己收工（`cancellationCategory: "MidTurnAbort"`），
+  prompt 响应 stopReason=cancelled；权限拒绝路径同为 cancelled
+  （category `PermissionRejected`）——**cancelled 不是成功**的映射纪律两模式一致。
+- usage：prompt 响应的 `_meta.usage` 为 **camelCase**（inputTokens…），与 headless
+  end 的 snake_case 不同源，映射时换键。
+
+#### 7.5.3 降级链与会话互通
+
+- **检测方式**：不做 version 探测（版本号推不出子命令存在性，还多一次 spawn）。
+  auto 模式首轮直接试 ACP，**initialize 握手失败即降级**（此刻零事件已发出、进程已收
+  ——acp-turn 的降级合同），本轮当场以 headless 重跑并留 raw 档；**缓存口径**：探测
+  结果缓存在适配器实例上（进程内存不落盘），同实例后续轮次直走 headless；grok 升级
+  后重启工作台即重新探测。显式 `transport: "acp"` 不降级（点名要的路径不静默换掉），
+  显式 `"streaming-json"` 恒走现行。
+- **nativeSessionId 互通性（三向实测，1.0.13）**：ACP session/new 建的 sessionId →
+  headless `-r` 恢复成功（上下文完整）→ ACP session/load 再加载成功，同一 UUID 全程
+  有效——两模式读写同一份 `$GROK_HOME/sessions/` 存储，**降级不损失续接**（Agent 不声明
+  loadSession 时带 resume 的轮次亦直接降级走 `-r`）。
+- MCP 注入：ACP 的 session/new 收 `mcpServers` 参数（且 initialize 报 http/sse 能力），
+  形状与注入语义**未实测**，本单不接——能力声明维持「MCP 注入 = 否」如实口径，
+  留作后续工单（这是把 §6 附加项翻案的可行路径，比 §7.4 的 GROK_HOME 方案干净）。
+
+#### 7.5.4 待真机补验（登记）
+
+本机 grok 未登录（`grok models` 报 not authenticated），模型端为假服务端（口径同
+headless fixtures）。**CLI 侧行为全部真机实测**（握手 / 审批往返 / 优雅取消 / 互通），
+真实 xAI 后端特有项待登录后补录：`agent_thought_chunk` 形状、`plan` 更新、
+authenticate 对 `grok.com` OAuth 的实际流程、`stopReason` 的 refusal/max_tokens 取值。
+续验命令：`node packages/adapters/scripts/live-grok-acp.mjs`（默认假模型；
+`LIVE_REAL_MODEL=1` 走真实后端，会产生费用）。
