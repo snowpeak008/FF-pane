@@ -25,5 +25,7 @@ export * from "./guard/index.js";
 export * from "./opencode/index.js";
 /** Agent CLI 子进程管理层（W2.1a）：spawn 封装、环境变量清洗、进程树终止。 */
 export * from "./process/index.js";
+/** Qwen Code 适配器（T8.6a）：Claude 风格信封映射 + 三坑防线（伪装成功/退出期崩溃）。 */
+export * from "./qwen-code/index.js";
 
 export const PACKAGE_NAME = "@ff-pane/adapters";

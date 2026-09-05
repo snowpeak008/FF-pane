@@ -27,6 +27,8 @@ describe("runtimeApiKeyEnvVar", () => {
     expect(runtimeApiKeyEnvVar("codex")).toBe("OPENAI_API_KEY");
     expect(runtimeApiKeyEnvVar("claude-code")).toBe("ANTHROPIC_API_KEY");
     expect(runtimeApiKeyEnvVar("gemini-cli")).toBe("GEMINI_API_KEY");
+    // qwen-code 走 --auth-type openai 兼容协议（qwen-code.md §6）
+    expect(runtimeApiKeyEnvVar("qwen-code")).toBe("OPENAI_API_KEY");
     expect(runtimeApiKeyEnvVar("opencode")).toBeUndefined();
     expect(runtimeApiKeyEnvVar("generic-exec")).toBeUndefined();
   });
@@ -58,6 +60,21 @@ describe("resolveRuntimeEnv", () => {
       apiKeyPlaintext: "k",
     });
     expect(env).toEqual({ OPENAI_API_KEY: "k", OPENAI_BASE_URL: "https://x.test" });
+  });
+
+  it("qwen-code 同走 OPENAI_API_KEY + OPENAI_BASE_URL（openai 兼容协议）", () => {
+    const env = resolveRuntimeEnv({
+      runtime: "qwen-code",
+      provider: provider({
+        type: "openai_compatible",
+        baseUrl: "https://dashscope.example/compatible-mode/v1",
+      }),
+      apiKeyPlaintext: "sk-q",
+    });
+    expect(env).toEqual({
+      OPENAI_API_KEY: "sk-q",
+      OPENAI_BASE_URL: "https://dashscope.example/compatible-mode/v1",
+    });
   });
 
   it("无明文时该密钥变量缺席（不塞空串）", () => {

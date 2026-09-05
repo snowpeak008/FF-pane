@@ -30,6 +30,11 @@ export function runtimeApiKeyEnvVar(runtime: RuntimeId): string | undefined {
     // 浏览器（§7.3 坑 1），故适配器在 startTurn 里对它做启动前快速失败。
     case "aider":
       return "OPENAI_API_KEY";
+    // qwen-code 走 --auth-type openai 兼容协议（适配器默认下发；qwen OAuth 免费层
+    // 2026-04-15 已废止，qwen-code.md §6）：密钥变量与 codex/aider 同名，覆盖
+    // ModelStudio/Dashscope/OpenRouter 等一切 OpenAI 兼容端点。
+    case "qwen-code":
+      return "OPENAI_API_KEY";
     // opencode 的 Provider 在其自身配置内声明；generic-exec 由 Profile 的自定义
     // 配置决定，均不由本层按固定变量名注入。
     default:
@@ -43,9 +48,13 @@ export function runtimeApiKeyEnvVar(runtime: RuntimeId): string | undefined {
  * aider 也用 `OPENAI_BASE_URL` 而非 `OPENAI_API_BASE`：实测（aider.md §5.2）
  * litellm 优先取 `OPENAI_BASE_URL`，它**会压过** aider 自己的 `--openai-api-base`
  * 参数。既然优先级最高的那个就是它，注入它才能保证路由确定。
+ * qwen-code 同用 `OPENAI_BASE_URL`（真机实测生效，qwen-code.md §6——指向
+ * Dashscope/ModelStudio/OpenRouter 等端点的唯一 env 通道）。
  */
 function runtimeBaseUrlEnvVar(runtime: RuntimeId): string | undefined {
-  return runtime === "codex" || runtime === "aider" ? "OPENAI_BASE_URL" : undefined;
+  return runtime === "codex" || runtime === "aider" || runtime === "qwen-code"
+    ? "OPENAI_BASE_URL"
+    : undefined;
 }
 
 /** 单 Provider 每轮临时装配的 codex model_provider 槽名（无跨轮共享，故固定即可）。 */

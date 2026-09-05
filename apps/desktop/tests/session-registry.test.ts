@@ -61,8 +61,8 @@ const GX: GenericExecProfileConfig = {
 };
 
 describe("零配置 runtime：裸键单例逐字不变", () => {
-  // opencode 自 T8.5c 起并入零配置裸键单例（server 惰性，注册即轻量闭包）
-  it.each(["codex", "claude-code", "gemini-cli", "grok-build", "opencode"])(
+  // opencode 自 T8.5c、qwen-code 自 T8.6a 起并入零配置裸键单例
+  it.each(["codex", "claude-code", "gemini-cli", "grok-build", "opencode", "qwen-code"])(
     "%s：resolveForProfile 返回 registry.get 的同一实例",
     (runtime) => {
       const registry = makeRegistry();
@@ -76,9 +76,9 @@ describe("零配置 runtime：裸键单例逐字不变", () => {
 
   it("未注册 runtime：拒绝文案与既有「Runtime 未注册」一致", () => {
     const registry = makeRegistry();
-    // qwen-code 归 T8.6a，当前确实未注册——恰作未注册样例（T8.5c 前此处用 opencode）
-    const resolution = registry.resolveForProfile(profile({ runtime: "qwen-code" }));
-    expect(resolution).toEqual({ ok: false, reason: "Runtime 未注册：qwen-code" });
+    // iflow 归 T8.6b，当前确实未注册——恰作未注册样例（T8.6a 前此处用 qwen-code）
+    const resolution = registry.resolveForProfile(profile({ runtime: "iflow" }));
+    expect(resolution).toEqual({ ok: false, reason: "Runtime 未注册：iflow" });
   });
 });
 

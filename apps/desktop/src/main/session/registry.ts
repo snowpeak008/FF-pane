@@ -14,7 +14,7 @@
  *
  * **按 Profile 逐实例化，注册键为 `<runtime>@<profileId>` 复合键**（如
  * `generic-exec@prof-abc`）；无构造期配置的适配器（codex / claude-code / gemini-cli /
- * grok-build / opencode（T8.5c 起））维持裸 runtime 键单例不变。规则：
+ * grok-build / opencode（T8.5c 起）/ qwen-code（T8.6a 起））维持裸 runtime 键单例不变。规则：
  * 1. 编排层取用一律走 resolveForProfile：带构造期配置的 runtime（generic-exec /
  *    aider）按 `<profile.runtime>@<profile.id>` 命中专属实例，其余退回裸
  *    `profile.runtime`——零配置适配器一行不改（resolveForProfile 对它们就是
@@ -100,6 +100,7 @@ import {
   createGenericExecAdapter,
   createGrokBuildAdapter,
   createOpenCodeAdapter,
+  createQwenCodeAdapter,
   type OpenCodeAdapter,
 } from "@ff-pane/adapters";
 import type { AgentProfile } from "@ff-pane/shared";
@@ -176,6 +177,10 @@ export function createDesktopAdapterRegistry(
   // 全 yes（adapter.ts OPENCODE_SERVER_CAPABILITIES），选路决策见模块头。
   const openCode = options.openCodeAdapter ?? createOpenCodeAdapter();
   registry.register(openCode);
+  // Qwen Code（T8.6a）：裸键单例，零构造期配置（codex 款式）。凭 env 注入的
+  // OPENAI_API_KEY（+ OPENAI_BASE_URL）即可运行——--auth-type openai 是适配器
+  // 默认下发；一轮一 spawn 无常驻资源，不参与 hasRuntimeResources/closeRuntimes。
+  registry.register(createQwenCodeAdapter());
 
   const instances = new Map<string, CachedInstance>();
 

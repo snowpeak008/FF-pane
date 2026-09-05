@@ -35,6 +35,9 @@ export const API_KEY_ENV_PATTERNS: readonly RegExp[] = [
   /^GEMINI_API_KEY$/i,
   /^GOOGLE_(?:API_KEY|APPLICATION_CREDENTIALS|GENAI_USE_VERTEXAI|CLOUD_PROJECT|CLOUD_LOCATION)$/i,
   /^VERTEXAI_/i,
+  // qwen-code 的 OPENAI_MODEL 别名（qwen-code.md §7）：OPENAI_MODEL 已被 ^OPENAI_
+  // 剥掉，别名不剥等于留后门——密钥来自 FF-pane 注入、模型却来自用户 shell。
+  /^QWEN_MODEL$/i,
   /^OPENROUTER_/i,
   /^DEEPSEEK_/i,
   /^MOONSHOT_/i,
