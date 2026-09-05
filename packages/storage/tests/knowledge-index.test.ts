@@ -135,10 +135,11 @@ function seedEntry(
 }
 
 describe("迁移 v2", () => {
-  it("打开库即升到 v2，知识库表齐备", () => {
+  it("打开库即升到最新版本（≥v2），知识库表齐备", () => {
     const db = openDb();
 
-    expect(readUserVersion(db)).toBe(2);
+    // 对齐迁移清单长度而不是写死 2：T8.7 追加了 v3，本断言只关心「v2 已执行」
+    expect(readUserVersion(db)).toBeGreaterThanOrEqual(2);
     const tables = (
       db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table','view')").all() as {
         readonly name: string;

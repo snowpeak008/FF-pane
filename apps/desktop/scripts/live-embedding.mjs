@@ -172,18 +172,28 @@ try {
   }
 
   // 「补齐向量」与「断点续传」是同一段代码（T6.5）：这里走的正是
-  // 「用户刚配上嵌入模型，要给已导入的旧文档补向量」这条正常升级路线
-  log("3", "补齐向量（rebuild，真机嵌入，视文档量约数分钟）…");
+  // 「用户刚配上嵌入模型，要给已导入的旧文档补向量」这条正常升级路线。
+  // 入口是**再次 import**（增量跳过 + 嵌入阶段按 existingRowids 只补差额），
+  // 不是 rebuild——rebuild 走 force，replaceEntryChunks 整条换新块（rowid 全部换新、
+  // 旧向量随旧块删除），rebuild 之后向量必然全量重算，测不出续传。
+  // （T8.7 真机首跑发现并修正：此前本脚本从未在真实嵌入器上跑过，该差别未暴露。）
+  log("3", "补齐向量（增量 import，真机嵌入，视文档量约数分钟）…");
   const t0 = Date.now();
-  const rebuilt = await invoke("knowledge:rebuild", { importId: "live-embed-rebuild" });
+  const rebuilt = await invoke("knowledge:import", {
+    importId: "live-embed-backfill",
+    paths: [join(repoRoot, "packages"), join(repoRoot, "docs")],
+  });
   const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
   console.log(
-    `  ${elapsed}s | indexed=${rebuilt.indexed} chunks=${rebuilt.chunks}` +
+    `  ${elapsed}s | indexed=${rebuilt.indexed} skipped=${rebuilt.skipped}` +
       ` embedded=${rebuilt.embedded} embedSkipped=${rebuilt.embedSkipped} embedFailed=${rebuilt.embedFailed}`,
   );
   if (rebuilt.embedFatal !== undefined) findings.push(`嵌入致命错：${rebuilt.embedFatal}`);
   if (rebuilt.embedded === 0) findings.push("一条向量都没算出来");
   if (rebuilt.embedFailed > 0) findings.push(`有 ${rebuilt.embedFailed} 个块嵌入失败`);
+  if (rebuilt.indexed !== 0) {
+    findings.push(`补齐向量不该重新索引任何文件（实际重索引 ${rebuilt.indexed} 个）`);
+  }
   if (rebuilt.failures.length > 0) {
     console.log("  失败:", JSON.stringify(rebuilt.failures.slice(0, 3)));
   }
@@ -240,12 +250,18 @@ try {
   }
   if (keyword.hits.length === 0) findings.push("开了向量之后关键词检索反而查不到了（回归）");
 
-  // 断点续传：再 rebuild 一次，已有向量的块不该重算
-  log("5", "断点续传：再跑一次，已有向量的块应当整体跳过…");
-  const again = await invoke("knowledge:rebuild", { importId: "live-embed-rebuild-2" });
+  // 断点续传：再增量 import 一次，已有向量的块不该重算（理由见步骤 3 的注释）
+  log("5", "断点续传：再跑一次增量 import，已有向量的块应当整体跳过…");
+  const again = await invoke("knowledge:import", {
+    importId: "live-embed-backfill-2",
+    paths: [join(repoRoot, "packages"), join(repoRoot, "docs")],
+  });
   console.log(`  embedded=${again.embedded} embedSkipped=${again.embedSkipped}`);
   if (again.embedded > 0) {
     findings.push(`第二轮仍重算了 ${again.embedded} 个块的向量（续传判据失效）`);
+  }
+  if (again.embedSkipped === 0) {
+    findings.push("续传轮 embedSkipped=0——差额判定没找到已有向量");
   }
 
   log("结论", findings.length === 0 ? "向量路真机验收全部通过" : `有 ${findings.length} 项未通过`);

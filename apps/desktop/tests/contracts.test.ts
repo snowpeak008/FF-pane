@@ -60,4 +60,8 @@ describe("IPC 通道契约", () => {
       expect(INVOKE_CHANNELS, `缺通道：${channel}`).toContain(channel);
     }
   });
+
+  it("T8.7 记忆混合检索通道已登记到运行时清单（preload 据此放行）", () => {
+    expect(INVOKE_CHANNELS).toContain("memory:search");
+  });
 });

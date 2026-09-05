@@ -484,7 +484,7 @@
   "memory": {
     "loadError": "读取记忆失败",
     "searchLabel": "搜索记忆",
-    "searchPlaceholder": "搜索标题、正文、标签…",
+    "searchPlaceholder": "搜索关键词，或用一句话描述要找的记忆…",
     "emptyProject": "这个项目还没有记忆。会话与任务验收后会沉淀出来。",
     "emptyCandidates": "没有待审核的候选。",
     "sharedPlaceholder": "共享记忆（用户习惯）在 Phase 5 接入。",

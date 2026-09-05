@@ -66,6 +66,7 @@ export {
   type EnsureVectorIndexOptions,
   encodeVector,
   ensureVectorIndex,
+  KNOWLEDGE_VECTOR_TABLES,
   loadVectorExtension,
   openVectorIndex,
   readVectorState,
@@ -77,6 +78,7 @@ export {
   type VectorIndexResult,
   type VectorNeighbor,
   type VectorSearchParams,
+  type VectorTableSpec,
 } from "./knowledge-vector.js";
 export {
   DEFAULT_SEARCH_LIMIT,
@@ -90,6 +92,11 @@ export {
 } from "./memory-index.js";
 export {
   MEMORY_FTS_MIN_QUERY_CODE_POINTS,
+  MEMORY_RECALL_MULTIPLIER,
+  type MemoryHybridHit,
+  type MemoryHybridMatchSource,
+  type MemoryHybridSearchOptions,
+  type MemoryHybridSearchResult,
   type MemoryHydrateIssue,
   type MemoryMatchKind,
   type MemorySearchBaseOptions,
@@ -97,14 +104,37 @@ export {
   type MemorySearchOptions,
   type MemorySearchResult,
   searchMemory,
+  searchMemoryHybrid,
 } from "./memory-search.js";
 export {
   type RebuildIndexFromStoreResult,
   rebuildIndexFromStore,
+  reconcileIndexFromStore,
   syncEntryDeleted,
   syncEntrySaved,
   syncEntryStatusChanged,
 } from "./memory-sync.js";
+export {
+  countMemoryEmbeddingState,
+  dropMemoryVectorIndex,
+  ensureMemoryVectorIndex,
+  findMemoryEntryRowid,
+  listMemoryRowsForEmbedding,
+  MEMORY_VECTOR_TABLES,
+  type MemoryEmbeddingRow,
+  memoryEmbeddingText,
+  memoryTextHash,
+  openMemoryVectorIndex,
+  readMemoryVectorState,
+  storeMemoryVector,
+} from "./memory-vector.js";
+export {
+  MEMORY_EMBEDDING_STATE_TABLE,
+  MEMORY_VEC0_TABLE,
+  MEMORY_VECTOR_FALLBACK_TABLE,
+  MEMORY_VECTOR_MIGRATION_V3,
+  MEMORY_VECTOR_STATE_TABLE,
+} from "./memory-vector-schema.js";
 export {
   type IndexDbMigration,
   IndexDbVersionError,

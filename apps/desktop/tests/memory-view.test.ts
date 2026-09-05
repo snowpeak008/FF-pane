@@ -1,6 +1,7 @@
 import type { MemoryEntry } from "@ff-pane/shared";
 import { describe, expect, it } from "vitest";
 import {
+  applyMemorySearch,
   groupByCategory,
   MEMORY_CATEGORY_ORDER,
   matchesMemorySearch,
@@ -34,6 +35,34 @@ describe("matchesMemorySearch", () => {
   });
   it("不命中返回 false", () => {
     expect(matchesMemorySearch(entry({ title: "a", body: "b" }), "zzz")).toBe(false);
+  });
+});
+
+describe("applyMemorySearch（T8.7：混合检索结果 + 本地回退）", () => {
+  const entries = [
+    entry({ id: "a", title: "执行 vitest 命令" }),
+    entry({ id: "b", title: "部署流程" }),
+    entry({ id: "c", title: "错误处理约定" }),
+  ];
+
+  it("空查询原样返回全部条目", () => {
+    expect(applyMemorySearch(entries, "  ", undefined)).toEqual(entries);
+    expect(applyMemorySearch(entries, "", ["b"])).toEqual(entries);
+  });
+
+  it("命中列表可用时按命中顺序返回（保留 RRF 融合排序）", () => {
+    const matched = applyMemorySearch(entries, "语义查询", ["c", "a"]);
+    expect(matched.map((e) => e.id)).toEqual(["c", "a"]);
+  });
+
+  it("命中里引用了本地没有的 id（列表间隙）：静默跳过", () => {
+    const matched = applyMemorySearch(entries, "查询", ["b", "mem-gone"]);
+    expect(matched.map((e) => e.id)).toEqual(["b"]);
+  });
+
+  it("ids 为 undefined（在飞 / 失败）回退本地子串过滤", () => {
+    const matched = applyMemorySearch(entries, "vitest", undefined);
+    expect(matched.map((e) => e.id)).toEqual(["a"]);
   });
 });
 

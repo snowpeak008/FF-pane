@@ -484,7 +484,7 @@
   "memory": {
     "loadError": "Failed to load memory",
     "searchLabel": "Search memory",
-    "searchPlaceholder": "Search title, body, tags…",
+    "searchPlaceholder": "Type keywords, or describe the memory in a sentence…",
     "emptyProject": "This project has no memory yet. It accrues from sessions and accepted tasks.",
     "emptyCandidates": "No candidates awaiting review.",
     "sharedPlaceholder": "Shared memory (user habits) arrives in Phase 5.",

@@ -26,6 +26,33 @@ import {
   KNOWLEDGE_VECTOR_STATE_TABLE,
 } from "./knowledge-schema.js";
 
+/**
+ * 一套向量索引挂靠的表名（T8.7 起知识库与记忆索引各一套，行为完全同款）。
+ * 参数化表名而不是复制实现：vec0 的三个坑（rowid 必须 BigInt / 虚表无 UPSERT /
+ * 单元素 IN 静默漏结果）的防线只该存在一份，抄一份等于给回归留两处漏改点。
+ */
+export interface VectorTableSpec {
+  /** vec0 虚表名。 */
+  readonly vec0Table: string;
+  /** 退路普通表名。 */
+  readonly fallbackTable: string;
+  /** 后端状态单行表名。 */
+  readonly stateTable: string;
+  /** 退路表的属主列名（vec0 恒用 rowid，不需要）。 */
+  readonly fallbackOwnerColumn: string;
+  /** 退路表属主列的外键目标（`表(列)` 形式）。 */
+  readonly fallbackReferences: string;
+}
+
+/** 知识库向量表组（T6.4 原有的一套，各公开函数的缺省绑定）。 */
+export const KNOWLEDGE_VECTOR_TABLES: VectorTableSpec = {
+  vec0Table: KNOWLEDGE_VEC0_TABLE,
+  fallbackTable: KNOWLEDGE_VECTOR_FALLBACK_TABLE,
+  stateTable: KNOWLEDGE_VECTOR_STATE_TABLE,
+  fallbackOwnerColumn: "chunk_rowid",
+  fallbackReferences: `${KNOWLEDGE_CHUNK_TABLE}(chunk_rowid)`,
+};
+
 /** 向量后端标识（写进 knowledge_vector_state.backend）。 */
 export const VECTOR_BACKENDS = ["vec0", "fallback"] as const;
 
@@ -187,11 +214,16 @@ function queryExistingRowids(
 }
 
 /** vec0 后端：虚表 KNN。 */
-function createVec0Index(db: Database.Database, dimensions: number, model: string): VectorIndex {
+function createVec0Index(
+  db: Database.Database,
+  dimensions: number,
+  model: string,
+  tables: VectorTableSpec,
+): VectorIndex {
   // vec0 是虚表，不支持 UPSERT（实测 "UPSERT not implemented for virtual table"），
   // 故覆盖写只能「先删再插」。两条语句包在事务里，中途失败不会留下空洞。
-  const insert = db.prepare(`INSERT INTO ${KNOWLEDGE_VEC0_TABLE}(rowid, embedding) VALUES (?, ?)`);
-  const remove = db.prepare(`DELETE FROM ${KNOWLEDGE_VEC0_TABLE} WHERE rowid = ?`);
+  const insert = db.prepare(`INSERT INTO ${tables.vec0Table}(rowid, embedding) VALUES (?, ?)`);
+  const remove = db.prepare(`DELETE FROM ${tables.vec0Table} WHERE rowid = ?`);
   const upsert = db.transaction((rowid: bigint, blob: Buffer) => {
     remove.run(rowid);
     insert.run(rowid, blob);
@@ -214,16 +246,16 @@ function createVec0Index(db: Database.Database, dimensions: number, model: strin
       run(chunkRowids);
     },
     clear() {
-      db.prepare(`DELETE FROM ${KNOWLEDGE_VEC0_TABLE}`).run();
+      db.prepare(`DELETE FROM ${tables.vec0Table}`).run();
     },
     count() {
-      const row = db.prepare(`SELECT COUNT(*) AS n FROM ${KNOWLEDGE_VEC0_TABLE}`).get() as {
+      const row = db.prepare(`SELECT COUNT(*) AS n FROM ${tables.vec0Table}`).get() as {
         readonly n: number;
       };
       return row.n;
     },
     existingRowids(chunkRowids) {
-      return queryExistingRowids(db, KNOWLEDGE_VEC0_TABLE, "rowid", chunkRowids, toSqliteInteger);
+      return queryExistingRowids(db, tables.vec0Table, "rowid", chunkRowids, toSqliteInteger);
     },
     search(params) {
       assertDimensions(params.vector, dimensions);
@@ -255,7 +287,7 @@ function createVec0Index(db: Database.Database, dimensions: number, model: strin
       const rows = db
         .prepare(
           `SELECT rowid AS chunkRowid, distance
-           FROM ${KNOWLEDGE_VEC0_TABLE}
+           FROM ${tables.vec0Table}
            WHERE ${conditions.join(" AND ")}
            ORDER BY distance`,
         )
@@ -293,11 +325,13 @@ function createFallbackIndex(
   db: Database.Database,
   dimensions: number,
   model: string,
+  tables: VectorTableSpec,
 ): VectorIndex {
-  const table = KNOWLEDGE_VECTOR_FALLBACK_TABLE;
+  const table = tables.fallbackTable;
+  const owner = tables.fallbackOwnerColumn;
   const insert = db.prepare(
-    `INSERT INTO ${table}(chunk_rowid, embedding) VALUES (?, ?)
-     ON CONFLICT(chunk_rowid) DO UPDATE SET embedding = excluded.embedding`,
+    `INSERT INTO ${table}(${owner}, embedding) VALUES (?, ?)
+     ON CONFLICT(${owner}) DO UPDATE SET embedding = excluded.embedding`,
   );
 
   return {
@@ -309,7 +343,7 @@ function createFallbackIndex(
       insert.run(chunkRowid, encodeVector(vector));
     },
     deleteMany(chunkRowids) {
-      const remove = db.prepare(`DELETE FROM ${table} WHERE chunk_rowid = ?`);
+      const remove = db.prepare(`DELETE FROM ${table} WHERE ${owner} = ?`);
       const run = db.transaction((rowids: readonly number[]) => {
         for (const rowid of rowids) {
           remove.run(rowid);
@@ -325,7 +359,7 @@ function createFallbackIndex(
       return row.n;
     },
     existingRowids(chunkRowids) {
-      return queryExistingRowids(db, table, "chunk_rowid", chunkRowids, (rowid) => rowid);
+      return queryExistingRowids(db, table, owner, chunkRowids, (rowid) => rowid);
     },
     search(params) {
       assertDimensions(params.vector, dimensions);
@@ -333,10 +367,10 @@ function createFallbackIndex(
         return [];
       }
       const limit = Math.max(1, params.limit);
-      let sql = `SELECT chunk_rowid AS chunkRowid, embedding FROM ${table}`;
+      let sql = `SELECT ${owner} AS chunkRowid, embedding FROM ${table}`;
       const bindings: number[] = [];
       if (params.candidates !== undefined) {
-        sql += ` WHERE chunk_rowid IN (${params.candidates.map(() => "?").join(", ")})`;
+        sql += ` WHERE ${owner} IN (${params.candidates.map(() => "?").join(", ")})`;
         bindings.push(...params.candidates);
       }
 
@@ -370,14 +404,13 @@ export type VectorIndexResult =
   | { readonly ok: true; readonly index: VectorIndex }
   | { readonly ok: false; readonly reason: string };
 
-/** 读向量状态行（未建过索引则 undefined）。 */
+/** 读向量状态行（未建过索引则 undefined）。表组缺省绑知识库那套。 */
 export function readVectorState(
   db: Database.Database,
+  tables: VectorTableSpec = KNOWLEDGE_VECTOR_TABLES,
 ): { readonly backend: string; readonly dimensions: number; readonly model: string } | undefined {
   return db
-    .prepare(
-      `SELECT backend, dimensions, model FROM ${KNOWLEDGE_VECTOR_STATE_TABLE} WHERE singleton = 1`,
-    )
+    .prepare(`SELECT backend, dimensions, model FROM ${tables.stateTable} WHERE singleton = 1`)
     .get() as
     | { readonly backend: string; readonly dimensions: number; readonly model: string }
     | undefined;
@@ -389,27 +422,28 @@ function createVectorTable(
   backend: VectorBackend,
   dimensions: number,
   model: string,
+  tables: VectorTableSpec,
 ): void {
   db.transaction(() => {
     if (backend === "vec0") {
       // 维度写死在 DDL 里（vec0 的硬性要求），故本表只能在维度已知时建——
-      // 这正是它不在迁移 v2 里的原因
+      // 这正是它不在迁移 v2/v3 里的原因
       db.exec(
-        `CREATE VIRTUAL TABLE IF NOT EXISTS ${KNOWLEDGE_VEC0_TABLE} USING vec0(
+        `CREATE VIRTUAL TABLE IF NOT EXISTS ${tables.vec0Table} USING vec0(
            embedding float[${dimensions}] distance_metric=cosine
          )`,
       );
     } else {
       db.exec(
-        `CREATE TABLE IF NOT EXISTS ${KNOWLEDGE_VECTOR_FALLBACK_TABLE} (
-           chunk_rowid INTEGER PRIMARY KEY
-             REFERENCES ${KNOWLEDGE_CHUNK_TABLE}(chunk_rowid) ON DELETE CASCADE,
+        `CREATE TABLE IF NOT EXISTS ${tables.fallbackTable} (
+           ${tables.fallbackOwnerColumn} INTEGER PRIMARY KEY
+             REFERENCES ${tables.fallbackReferences} ON DELETE CASCADE,
            embedding   BLOB NOT NULL
          )`,
       );
     }
     db.prepare(
-      `INSERT INTO ${KNOWLEDGE_VECTOR_STATE_TABLE}(singleton, backend, dimensions, model)
+      `INSERT INTO ${tables.stateTable}(singleton, backend, dimensions, model)
        VALUES (1, ?, ?, ?)
        ON CONFLICT(singleton) DO UPDATE SET
          backend = excluded.backend,
@@ -439,6 +473,7 @@ export interface EnsureVectorIndexOptions {
 export function ensureVectorIndex(
   db: Database.Database,
   options: EnsureVectorIndexOptions,
+  tables: VectorTableSpec = KNOWLEDGE_VECTOR_TABLES,
 ): VectorIndexResult {
   const { dimensions, model, extensionLoaded } = options;
   if (!Number.isInteger(dimensions) || dimensions <= 0) {
@@ -449,7 +484,7 @@ export function ensureVectorIndex(
   }
 
   const desired: VectorBackend = extensionLoaded ? "vec0" : "fallback";
-  const state = readVectorState(db);
+  const state = readVectorState(db, tables);
 
   if (state !== undefined) {
     if (state.backend !== desired) {
@@ -475,7 +510,7 @@ export function ensureVectorIndex(
   }
 
   try {
-    createVectorTable(db, desired, dimensions, model);
+    createVectorTable(db, desired, dimensions, model, tables);
   } catch (error) {
     return { ok: false, reason: error instanceof Error ? error.message : String(error) };
   }
@@ -483,8 +518,8 @@ export function ensureVectorIndex(
     ok: true,
     index:
       desired === "vec0"
-        ? createVec0Index(db, dimensions, model)
-        : createFallbackIndex(db, dimensions, model),
+        ? createVec0Index(db, dimensions, model, tables)
+        : createFallbackIndex(db, dimensions, model, tables),
   };
 }
 
@@ -495,8 +530,9 @@ export function ensureVectorIndex(
 export function openVectorIndex(
   db: Database.Database,
   extensionLoaded: boolean,
+  tables: VectorTableSpec = KNOWLEDGE_VECTOR_TABLES,
 ): VectorIndexResult {
-  const state = readVectorState(db);
+  const state = readVectorState(db, tables);
   if (state === undefined) {
     return { ok: false, reason: "尚未建立向量索引" };
   }
@@ -511,16 +547,19 @@ export function openVectorIndex(
     ok: true,
     index:
       state.backend === "vec0"
-        ? createVec0Index(db, state.dimensions, state.model)
-        : createFallbackIndex(db, state.dimensions, state.model),
+        ? createVec0Index(db, state.dimensions, state.model, tables)
+        : createFallbackIndex(db, state.dimensions, state.model, tables),
   };
 }
 
 /** 丢弃向量索引（换嵌入模型 / 换后端时的重建第一步）。表与状态行一并清掉。 */
-export function dropVectorIndex(db: Database.Database): void {
+export function dropVectorIndex(
+  db: Database.Database,
+  tables: VectorTableSpec = KNOWLEDGE_VECTOR_TABLES,
+): void {
   db.transaction(() => {
-    db.exec(`DROP TABLE IF EXISTS ${KNOWLEDGE_VEC0_TABLE}`);
-    db.exec(`DROP TABLE IF EXISTS ${KNOWLEDGE_VECTOR_FALLBACK_TABLE}`);
-    db.prepare(`DELETE FROM ${KNOWLEDGE_VECTOR_STATE_TABLE}`).run();
+    db.exec(`DROP TABLE IF EXISTS ${tables.vec0Table}`);
+    db.exec(`DROP TABLE IF EXISTS ${tables.fallbackTable}`);
+    db.prepare(`DELETE FROM ${tables.stateTable}`).run();
   })();
 }

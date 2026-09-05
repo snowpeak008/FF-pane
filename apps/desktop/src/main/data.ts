@@ -73,6 +73,7 @@ import {
 import { type BrowserWindow, dialog, type OpenDialogOptions } from "electron";
 import type { InvokeHandlers } from "../shared-ipc/server";
 import { resolveGlobalRoot } from "./data-root";
+import { createMemoryIndexService } from "./memory-index";
 import { type ProjectSummarySources, summarizeProjects } from "./project-summary";
 import { resolveProbeOutlet } from "./provider-proxy";
 import { createSafeStorageBackend, createSecretStore, resolveSecretsFile } from "./secrets";
@@ -112,6 +113,7 @@ type DataChannel =
   | "memory:approve"
   | "memory:reject"
   | "memory:update"
+  | "memory:search"
   | "habits:list"
   | "habits:create"
   | "habits:update"
@@ -166,6 +168,13 @@ export async function createDataHandlers(
   const secrets = createSecretStore({
     backend: createSafeStorageBackend(),
     secretsFile: resolveSecretsFile(layout.rootDir),
+  });
+
+  // 记忆语义检索（T8.7）：项目级索引连接惰性打开；嵌入配置与知识库共用同一 Provider 面。
+  const memoryIndex = createMemoryIndexService({
+    listProviders: () => providers.listProviders(),
+    revealSecret: (ref) => secrets.revealSecret(ref),
+    log: (message) => console.log(message),
   });
 
   // 测试连接 / 拉取模型的共用取密逻辑：优先明文（未保存表单），否则用引用解密（已保存）。
@@ -439,6 +448,7 @@ export async function createDataHandlers(
         });
         for (const candidate of candidates) {
           await saveEntry(layout, candidate);
+          await memoryIndex.entrySaved(request.projectRoot, candidate);
         }
         candidateCount = candidates.length;
       } catch {
@@ -483,12 +493,17 @@ export async function createDataHandlers(
       if (!result.ok) {
         throw result.error;
       }
+      // 先写真实源成功、再调索引钩子（W1.3b 纪律）；钩子失败由下次对账自愈
+      await memoryIndex.entrySaved(request.projectRoot, result.value);
       return result.value;
     },
 
     "memory:reject": async (request) => {
       const layout = resolveProjectLayout(request.projectRoot);
       const removed = await deleteEntry(layout, request.id);
+      if (removed) {
+        await memoryIndex.entryDeleted(request.projectRoot, request.id);
+      }
       return { removed };
     },
 
@@ -496,8 +511,12 @@ export async function createDataHandlers(
       const layout = resolveProjectLayout(request.projectRoot);
       // saveEntry 按 status 落位并自愈旧址副本（编辑后通过：内容 + 状态一并写回）
       await saveEntry(layout, request.entry);
+      await memoryIndex.entrySaved(request.projectRoot, request.entry);
       return request.entry;
     },
+
+    // T8.7 记忆混合检索：FTS/LIKE + 向量 → RRF 融合；未配嵌入来源退化纯关键词
+    "memory:search": (request) => memoryIndex.search(request),
 
     // ── 习惯（共享记忆，§8.2）：全局作用域，绑定 GlobalLayout（无 projectRoot）──
 

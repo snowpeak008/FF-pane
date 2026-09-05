@@ -16,11 +16,15 @@
  * 清空时不该看到异常。
  */
 
+// 走 ./retrieve 子路径而非 rag 的 barrel（同 knowledge-search 的理由）：
+// barrel 连带载入解析层并在 import 时拉起 pdfjs-dist，融合排序是纯函数，不该背这笔开销。
+import { fuseByRrf, type RankedList } from "@ff-pane/rag/retrieve";
 import type { MemoryCategory, MemoryEntry, MemoryEntryId, MemoryStatus } from "@ff-pane/shared";
 import type Database from "better-sqlite3";
 import type { ProjectLayout } from "../fs/index.js";
 import type { MemoryEntryLoadError } from "../memory/index.js";
 import { loadEntry } from "../memory/index.js";
+import type { VectorIndex } from "./knowledge-vector.js";
 import type { MemoryIndexSearchOptions } from "./memory-index.js";
 import { DEFAULT_SEARCH_LIMIT, quoteFtsQueryLiteral, searchMemoryIndex } from "./memory-index.js";
 import { MEMORY_CONTENT_TABLE } from "./schema.js";
@@ -221,4 +225,215 @@ export async function searchMemory(
     return { hits, issues: [] };
   }
   return await hydrateHits(options.layout, hits);
+}
+
+// ── 混合检索（T8.7）：关键词 + 向量双路召回 → RRF 融合，照 knowledge-search 款式 ──
+
+/**
+ * 单路召回的取数倍率（同 knowledge-search 的 RECALL_MULTIPLIER）：
+ * 每路各取 limit × 本值再融合，免得「A 路第 21 名但 B 路第 1 名」的强结果进不了融合池。
+ */
+export const MEMORY_RECALL_MULTIPLIER = 4;
+
+/** 混合检索里一条命中可能来自的路：关键词两态 + 向量。 */
+export type MemoryHybridMatchSource = MemoryMatchKind | "vector";
+
+/** 混合检索的一条命中。融合结果只带索引列，完整条目由调用方凭 id 取。 */
+export interface MemoryHybridHit {
+  readonly id: MemoryEntryId;
+  readonly category: MemoryCategory;
+  readonly status: MemoryStatus;
+  readonly title: string;
+  /** RRF 融合分（越大越靠前）。 */
+  readonly score: number;
+  /** 命中它的召回路径。两路都有说明关键词与语义一致，通常最可信。 */
+  readonly sources: readonly MemoryHybridMatchSource[];
+  /** 各路名次（从 1 起），未命中的路缺席。 */
+  readonly ranks: Readonly<Record<string, number>>;
+}
+
+/** searchMemoryHybrid 的参数。 */
+export interface MemoryHybridSearchOptions extends MemorySearchBaseOptions {
+  /**
+   * 查询向量（调用方用与建索引同一嵌入模型对 query 编码）。
+   * 省略即向量路整条缺席，退化为纯关键词检索——「未配嵌入模型」的表达（§8.3.3 同款）。
+   */
+  readonly queryVector?: readonly number[];
+  /** 记忆向量索引；省略同上。 */
+  readonly vectorIndex?: VectorIndex;
+}
+
+/** 混合检索结果 + 本次实际走了哪些路（界面据此说明「语义检索未启用」）。 */
+export interface MemoryHybridSearchResult {
+  readonly hits: readonly MemoryHybridHit[];
+  /** 关键词路是否走了 FTS（false = 查询过短、回退 LIKE 子串扫描）。 */
+  readonly usedFts: boolean;
+  /** 向量路是否参与。 */
+  readonly usedVector: boolean;
+}
+
+/** 命中行的展示列（融合后按 rowid/id 批量回读用）。 */
+interface HybridMetaRow {
+  readonly id: MemoryEntryId;
+  readonly category: MemoryCategory;
+  readonly status: MemoryStatus;
+  readonly title: string;
+}
+
+/** 过滤条件编译成影子表上的 WHERE 片段（向量路预过滤与元数据回读共用）。 */
+function compileMemoryFilters(options: MemorySearchBaseOptions): {
+  readonly conditions: readonly string[];
+  readonly bindings: readonly string[];
+} {
+  const conditions: string[] = [];
+  const bindings: string[] = [];
+  for (const [column, values] of [
+    ["category", options.categories],
+    ["status", options.statuses],
+  ] as const) {
+    if (values !== undefined && values.length > 0) {
+      conditions.push(`${column} IN (${values.map(() => "?").join(", ")})`);
+      bindings.push(...values);
+    }
+  }
+  return { conditions, bindings };
+}
+
+/**
+ * 向量路召回：过滤先于召回（精确前置，同 knowledge-search 决策 1）。
+ * 记忆量级在百到千条（§8.2.5 软上限），候选集恒在绑定参数上限之内，
+ * 不需要知识库那条「超额召回 + 事后过滤」的退路。返回按距离升序的条目 id。
+ */
+function recallByVector(
+  db: Database.Database,
+  vectorIndex: VectorIndex,
+  queryVector: readonly number[],
+  options: MemorySearchBaseOptions,
+  limit: number,
+): MemoryEntryId[] {
+  const compiled = compileMemoryFilters(options);
+  let candidates: number[] | undefined;
+  if (compiled.conditions.length > 0) {
+    candidates = (
+      db
+        .prepare(
+          `SELECT entry_rowid AS rowid FROM ${MEMORY_CONTENT_TABLE}
+           WHERE ${compiled.conditions.join(" AND ")}`,
+        )
+        .all(...compiled.bindings) as { readonly rowid: number }[]
+    ).map((row) => row.rowid);
+  }
+  const neighbors = vectorIndex.search({
+    vector: queryVector,
+    limit,
+    ...(candidates === undefined ? {} : { candidates }),
+  });
+  if (neighbors.length === 0) {
+    return [];
+  }
+  const rows = db
+    .prepare(
+      `SELECT entry_rowid AS rowid, id FROM ${MEMORY_CONTENT_TABLE}
+       WHERE entry_rowid IN (${neighbors.map(() => "?").join(", ")})`,
+    )
+    .all(...neighbors.map((neighbor) => neighbor.chunkRowid)) as {
+    readonly rowid: number;
+    readonly id: MemoryEntryId;
+  }[];
+  const idByRowid = new Map(rows.map((row) => [row.rowid, row.id]));
+  const ids: MemoryEntryId[] = [];
+  for (const neighbor of neighbors) {
+    const id = idByRowid.get(neighbor.chunkRowid);
+    if (id !== undefined) {
+      // 向量存在但影子行已删（钩子漏调的陈旧向量）：跳过而不是命中空气
+      ids.push(id);
+    }
+  }
+  return ids;
+}
+
+/** 融合后批量回读展示列（保持 id 键控，顺序由融合结果决定）。 */
+function loadHybridMeta(
+  db: Database.Database,
+  ids: readonly MemoryEntryId[],
+): Map<MemoryEntryId, HybridMetaRow> {
+  const found = new Map<MemoryEntryId, HybridMetaRow>();
+  if (ids.length === 0) {
+    return found;
+  }
+  const rows = db
+    .prepare(
+      `SELECT id, category, status, title FROM ${MEMORY_CONTENT_TABLE}
+       WHERE id IN (${ids.map(() => "?").join(", ")})`,
+    )
+    .all(...ids) as HybridMetaRow[];
+  for (const row of rows) {
+    found.set(row.id, row);
+  }
+  return found;
+}
+
+/**
+ * 混合检索：关键词（FTS / LIKE 回退）与向量双路召回 → RRF 融合（rag 的 fuseByRrf，
+ * 与知识库同一融合规则，不另写一套）。
+ *
+ * 未配嵌入来源（queryVector / vectorIndex 缺席）时向量路整条缺席，结果顺序即
+ * 关键词顺序——功能完整可用，纯 FTS 是一等状态不是缺陷（§8.3.3）。
+ * 空白查询返回空结果（搜索框清空不该看到异常）。
+ */
+export function searchMemoryHybrid(
+  db: Database.Database,
+  options: MemoryHybridSearchOptions,
+): MemoryHybridSearchResult {
+  const query = options.query.trim();
+  const limit = Math.max(0, options.limit ?? DEFAULT_SEARCH_LIMIT);
+  if (query === "" || limit === 0) {
+    return { hits: [], usedFts: false, usedVector: false };
+  }
+  const recallLimit = Math.max(limit * MEMORY_RECALL_MULTIPLIER, limit);
+  const recallOptions: MemorySearchBaseOptions = { ...options, limit: recallLimit };
+
+  const useFts = [...query].length >= MEMORY_FTS_MIN_QUERY_CODE_POINTS;
+  const keywordHits = useFts
+    ? searchByFts(db, query, recallOptions)
+    : searchByLike(db, query, recallOptions);
+
+  const lists: RankedList<MemoryEntryId>[] = [
+    { source: useFts ? "fts" : "like-fallback", ids: keywordHits.map((hit) => hit.id) },
+  ];
+
+  let usedVector = false;
+  if (options.vectorIndex !== undefined && options.queryVector !== undefined) {
+    const vectorIds = recallByVector(
+      db,
+      options.vectorIndex,
+      options.queryVector,
+      options,
+      recallLimit,
+    );
+    lists.push({ source: "vector", ids: vectorIds });
+    usedVector = true;
+  }
+
+  const fused = fuseByRrf(lists, { limit });
+  const meta = loadHybridMeta(
+    db,
+    fused.map((hit) => hit.id),
+  );
+
+  const hits: MemoryHybridHit[] = [];
+  for (const entry of fused) {
+    const row = meta.get(entry.id);
+    if (row === undefined) {
+      // 融合池里的 id 读不回影子行：索引内部不一致，跳过而不是让整次检索失败
+      continue;
+    }
+    hits.push({
+      ...row,
+      score: entry.score,
+      sources: entry.sources as readonly MemoryHybridMatchSource[],
+      ranks: entry.ranks,
+    });
+  }
+  return { hits, usedFts: useFts, usedVector };
 }

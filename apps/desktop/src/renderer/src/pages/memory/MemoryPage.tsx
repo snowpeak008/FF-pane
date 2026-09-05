@@ -1,5 +1,5 @@
 import type { MemoryEntry, ProjectId } from "@ff-pane/shared";
-import { type ReactElement, useCallback, useState } from "react";
+import { type ReactElement, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { EmptyState } from "../../components/states/EmptyState";
@@ -17,7 +17,46 @@ import { EditCandidateDialog } from "./EditCandidateDialog";
 import { type HabitCreateSeed, HabitEditDialog } from "./HabitEditDialog";
 import { HabitsPanel } from "./HabitsPanel";
 import { MemoryEntryCard } from "./MemoryEntryCard";
-import { groupByCategory, MEMORY_CATEGORY_ORDER, matchesMemorySearch } from "./memory-view";
+import { applyMemorySearch, groupByCategory, MEMORY_CATEGORY_ORDER } from "./memory-view";
+
+/** 搜索防抖毫秒数：混合检索含一次查询嵌入（本地 Ollama 数十毫秒级），逐键发请求纯属浪费。 */
+const SEARCH_DEBOUNCE_MS = 250;
+
+/**
+ * 搜索框接主进程 `memory:search`（T8.7 混合检索：关键词 + 语义 → RRF 融合）。
+ *
+ * UI 决策：**同一个搜索框走混合检索，不做「语义/关键词」的模式切换**——RRF 融合的
+ * 意义就是用户不必知道命中来自哪路；knowledge 页同款。返回值 `ids` 三态：
+ * undefined = 结果不可用（空查询 / 在飞 / 失败，本地子串过滤兜底），
+ * 数组 = 融合排序后的命中 id。检索失败静默回退不打扰（搜索框不该弹错误 toast）。
+ */
+function useMemorySearch(projectRoot: string, query: string): readonly string[] | undefined {
+  const [ids, setIds] = useState<readonly string[] | undefined>(undefined);
+  const requestSeq = useRef(0);
+
+  useEffect(() => {
+    requestSeq.current += 1;
+    const seq = requestSeq.current;
+    const trimmed = query.trim();
+    if (trimmed === "") {
+      setIds(undefined);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void invokeQuery("memory:search", { projectRoot, query: trimmed }).then((settled) => {
+        if (requestSeq.current !== seq) {
+          return;
+        }
+        setIds(settled.status === "success" ? settled.data.hits.map((hit) => hit.id) : undefined);
+      });
+    }, SEARCH_DEBOUNCE_MS);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [projectRoot, query]);
+
+  return query.trim() === "" ? undefined : ids;
+}
 
 function MemoryView({
   projectRoot,
@@ -29,6 +68,7 @@ function MemoryView({
   const { t } = useTranslation();
   const { state, refetch } = useInvokeQuery("memory:list", { projectRoot });
   const [search, setSearch] = useState("");
+  const searchIds = useMemorySearch(projectRoot, search);
   const [editing, setEditing] = useState<MemoryEntry | null>(null);
   // 来源二提炼（§8.2.4）：把选中的项目记忆提炼为共享习惯（distilled，带溯源）。
   const [distilling, setDistilling] = useState<{ readonly seed: HabitCreateSeed } | null>(null);
@@ -125,7 +165,7 @@ function MemoryView({
     return <LoadingState variant="list" />;
   }
 
-  const matched = state.data.filter((e) => matchesMemorySearch(e, search));
+  const matched = applyMemorySearch(state.data, search, searchIds);
   const active = matched.filter((e) => e.status === "active");
   const candidates = matched.filter((e) => e.status === "candidate");
   const groups = groupByCategory(active);

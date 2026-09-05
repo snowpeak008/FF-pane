@@ -34,8 +34,10 @@ import type {
   KnowledgeFormat,
   KnowledgeQueryRecord,
   LocalSessionId,
+  MemoryCategory,
   MemoryEntry,
   MemoryEntryId,
+  MemoryStatus,
   ModelId,
   Plan,
   PlanStatus,
@@ -349,6 +351,44 @@ export interface MemoryActionRequest extends ProjectScopedRequest {
 /** 记忆条目整条写回请求（编辑后通过：内容 + 状态一并落盘）。 */
 export interface UpdateMemoryRequest extends ProjectScopedRequest {
   readonly entry: MemoryEntry;
+}
+
+/** memory:search 请求（T8.7 混合检索）：项目根 + 查询 + 可选过滤。 */
+export interface MemorySearchRequest extends ProjectScopedRequest {
+  /** 用户原始输入（首尾空白由主进程去除；空白查询返回空结果）。 */
+  readonly query: string;
+  /** 类别过滤（OR 语义）；省略或空数组不过滤。 */
+  readonly categories?: readonly MemoryCategory[];
+  /** 状态过滤：同上。 */
+  readonly statuses?: readonly MemoryStatus[];
+  /** 返回条数上限；缺省由存储层决定（DEFAULT_SEARCH_LIMIT）。 */
+  readonly limit?: number;
+}
+
+/** memory:search 的一条命中（索引列；完整条目由渲染层凭 id 从 memory:list 数据取）。 */
+export interface MemorySearchHitView {
+  readonly id: MemoryEntryId;
+  readonly category: MemoryCategory;
+  readonly status: MemoryStatus;
+  readonly title: string;
+  /** RRF 融合分（越大越靠前）。 */
+  readonly score: number;
+  /** 命中它的召回路径（"fts" | "like-fallback" | "vector"）。两路都有通常最可信。 */
+  readonly sources: readonly string[];
+}
+
+/**
+ * memory:search 响应：命中 + 本次实际走了哪几路（同 knowledge:search 的口径，
+ * 界面据此说明「当前为纯关键词检索」而不是静默少一路召回）。
+ */
+export interface MemorySearchResponse {
+  readonly hits: readonly MemorySearchHitView[];
+  /** 关键词路是否走了 FTS（false = 查询过短、回退 LIKE 子串扫描）。 */
+  readonly usedFts: boolean;
+  /** 向量路是否参与。 */
+  readonly usedVector: boolean;
+  /** 向量路缺席的原因码；usedVector 为真时缺席（复用知识库的原因码集合）。 */
+  readonly embeddingBlocker?: KnowledgeEmbeddingBlocker;
 }
 
 /** 计划批准请求：项目根 + 版本号（批准只能由用户触发）。 */
@@ -987,6 +1027,11 @@ export interface IpcInvokeContracts {
   "memory:reject": { request: MemoryActionRequest; response: { readonly removed: boolean } };
   /** 整条写回（编辑后通过：内容 + 状态一并保存）。 */
   "memory:update": { request: UpdateMemoryRequest; response: MemoryEntry };
+  /**
+   * 记忆混合检索（T8.7）：FTS/LIKE 关键词路 + 向量语义路 → RRF 融合。
+   * 未配嵌入来源时向量路整条缺席、退化为纯关键词检索（§8.3.3 同款一等状态）。
+   */
+  "memory:search": { request: MemorySearchRequest; response: MemorySearchResponse };
   /** 列出全部习惯条目（§8.2 共享记忆，全局；含 active / candidate / archived）。 */
   "habits:list": { request: undefined; response: readonly HabitEntry[] };
   /** 新建习惯（草稿校验后落盘；手写来源默认 active）。 */
@@ -1144,6 +1189,7 @@ export const INVOKE_CHANNELS = [
   "memory:approve",
   "memory:reject",
   "memory:update",
+  "memory:search",
   "habits:list",
   "habits:create",
   "habits:update",
