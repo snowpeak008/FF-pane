@@ -336,7 +336,14 @@ describe("grok-build 适配器本体", () => {
     });
   });
 
-  it("headless 模式不实现 respondPermission（单向流无审批回执通道）", () => {
+  // 时序钉子（T8.6b 验收 §2-2 登记，主管理员裁定加固）：本用例是本文件唯一做真实
+  // spawn 的用例（startTurn 默认 spawnAgentProcess 真起子进程；resume 两用例是
+  // 启动前快速失败不 spawn，其余全是纯函数组装 / fixture 回放）。全量首跑负载下
+  // （多 worker fork 同时 spawn + transform/import 耗时膨胀，验收实测该轮
+  // transform 39 s / import 133 s）可撞 vitest 默认 5 s 测试超时——单独复跑
+  // 28/28 即绿、随后三次全量均未复现，负载型 flake。显式 45 s，与 `09b28ec`
+  // 对 opencode env 指纹用例的同款处置（详见进度 §4.5）。
+  it("headless 模式不实现 respondPermission（单向流无审批回执通道）", { timeout: 45_000 }, () => {
     const adapter = createGrokBuildAdapter({ transport: "streaming-json" });
     const turn = adapter.startTurn({ cwd: process.cwd(), prompt: "x", timeoutMs: 1 });
     expect(turn.respondPermission).toBeUndefined();
