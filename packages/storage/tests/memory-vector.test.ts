@@ -293,6 +293,24 @@ describe("嵌入状态记账与差额判定（断点续传语义）", () => {
     expect(index.count()).toBe(1);
   });
 
+  it("崩溃语义守卫：put 抛错（维度不符）后记账零残留、条目留在差额（先向量后记账 + 同事务）", () => {
+    const { db, index } = openWithFallbackIndex();
+    upsertMemoryEntry(db, makeEntry({ id: "mem-guard", body: "崩溃语义守卫正文" }));
+    const [row] = listMemoryRowsForEmbedding(db);
+    if (row === undefined) {
+      throw new Error("差额为空");
+    }
+    // 维度不符（3 维 vs 索引 4 维）令 put 抛 RangeError——此刻记账语句尚未执行，
+    // 事务整体回滚后不得出现「记了账没向量」的假完成
+    expect(() => storeMemoryVector(db, index, row.entryRowid, [1, 0, 0], row.textHash)).toThrow(
+      RangeError,
+    );
+    expect(countMemoryEmbeddingState(db)).toBe(0);
+    expect(index.count()).toBe(0);
+    // 条目仍在差额里，下轮幂等重算
+    expect(listMemoryRowsForEmbedding(db).map((pending) => pending.id)).toEqual(["mem-guard"]);
+  });
+
   it("编辑条目正文 → 旧向量作废、重新进差额（哈希失配即重嵌入）", () => {
     const { db, index } = openWithFallbackIndex();
     const entry = makeEntry({ id: "mem-edit", body: "初版正文" });
