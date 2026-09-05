@@ -1,0 +1,4 @@
+Model ffpane-fixture-model does not support thinking mode
+Model ffpane-fixture-model does not support thinking mode
+Model ffpane-fixture-model does not support thinking mode
+I created hello.txt containing 'hello' and verified node -v prints v24.15.0.

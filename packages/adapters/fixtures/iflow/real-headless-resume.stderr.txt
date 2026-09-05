@@ -1,0 +1,16 @@
+
+ℹ️  Resuming session session-e06bbd16-086a-47b2-8903-c9c250e3c2f7 (6 messages loaded)
+
+<Execution Info>
+{
+  "session-id": "session-e06bbd16-086a-47b2-8903-c9c250e3c2f7",
+  "conversation-id": "406ddf44-6317-4ba5-9d8f-475a09708f6b",
+  "assistantRounds": 1,
+  "executionTimeMs": 1286,
+  "tokenUsage": {
+    "input": 812,
+    "output": 45,
+    "total": 857
+  }
+}
+</Execution Info>

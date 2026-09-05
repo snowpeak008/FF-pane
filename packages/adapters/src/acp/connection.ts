@@ -62,6 +62,8 @@ import type {
   AcpPromptParams,
   AcpPromptResult,
   AcpSessionNotificationView,
+  AcpSetModeParams,
+  AcpSetModeResult,
 } from "./types.js";
 import { ACP_AGENT_METHODS, ACP_CLIENT_METHODS, ACP_PROTOCOL_VERSION } from "./types.js";
 
@@ -169,6 +171,11 @@ export interface AcpConnection {
   ): Promise<AcpLoadSessionResult>;
   /** session/prompt 轮次。缺省**不限时**（模块头第 2 条），overrides 可加看门狗。 */
   prompt(params: AcpPromptParams, overrides?: AcpRequestOverrides): Promise<AcpPromptResult>;
+  /**
+   * session/set_mode（控制面请求，T8.6b 起消费）。modeId 取自 session/new 响应的
+   * availableModes；Agent 不支持该方法或模式非法时经错误响应上抛（AcpRemoteError）。
+   */
+  setMode(params: AcpSetModeParams, overrides?: AcpRequestOverrides): Promise<AcpSetModeResult>;
   /**
    * session/cancel 通知（无响应）。同会话未决权限请求立即以 cancelled 回执；
    * 轮次的真正终结以 prompt 响应 stopReason === "cancelled" 为准。
@@ -471,6 +478,20 @@ export function createAcpConnection(options: AcpConnectionOptions): AcpConnectio
         throw new AcpHandshakeError("session/prompt 响应缺 stopReason");
       }
       return view;
+    },
+
+    async setMode(params, overrides = {}) {
+      const result = await sendRequest(
+        ACP_AGENT_METHODS.sessionSetMode,
+        { sessionId: params.sessionId, modeId: params.modeId },
+        overrides.timeoutMs ?? defaultTimeoutMs,
+      );
+      return {
+        raw:
+          typeof result === "object" && result !== null && !Array.isArray(result)
+            ? (result as Record<string, unknown>)
+            : {},
+      };
     },
 
     cancel(sessionId) {

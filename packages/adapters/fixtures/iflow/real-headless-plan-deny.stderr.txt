@@ -1,0 +1,15 @@
+Error executing tool write_file: Tool "write_file" not found in registry.
+
+<Execution Info>
+{
+  "session-id": "session-52fb444f-6c59-4a2f-bf6e-fbcd6a85a273",
+  "conversation-id": "18325cbe-103f-4e87-9224-5950fecdabfd",
+  "assistantRounds": 2,
+  "executionTimeMs": 1775,
+  "tokenUsage": {
+    "input": 812,
+    "output": 45,
+    "total": 857
+  }
+}
+</Execution Info>

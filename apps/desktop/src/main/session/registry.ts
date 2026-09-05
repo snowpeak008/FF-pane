@@ -14,7 +14,9 @@
  *
  * **按 Profile 逐实例化，注册键为 `<runtime>@<profileId>` 复合键**（如
  * `generic-exec@prof-abc`）；无构造期配置的适配器（codex / claude-code / gemini-cli /
- * grok-build / opencode（T8.5c 起）/ qwen-code（T8.6a 起））维持裸 runtime 键单例不变。规则：
+ * grok-build / opencode（T8.5c 起）/ qwen-code（T8.6a 起）/ iflow（T8.6b 起——
+ * managedHome 是进程级常量非按 Profile 配置，见下方注册处注释））维持裸 runtime
+ * 键单例不变。规则：
  * 1. 编排层取用一律走 resolveForProfile：带构造期配置的 runtime（generic-exec /
  *    aider）按 `<profile.runtime>@<profile.id>` 命中专属实例，其余退回裸
  *    `profile.runtime`——零配置适配器一行不改（resolveForProfile 对它们就是
@@ -99,6 +101,7 @@ import {
   createGeminiCliAdapter,
   createGenericExecAdapter,
   createGrokBuildAdapter,
+  createIFlowAdapter,
   createOpenCodeAdapter,
   createQwenCodeAdapter,
   type OpenCodeAdapter,
@@ -117,6 +120,14 @@ export interface DesktopAdapterRegistryOptions {
    * 零构造期配置、server 惰性，见模块头 OpenCode 一节）。
    */
   readonly openCodeAdapter?: OpenCodeAdapter | undefined;
+  /**
+   * iFlow 受管 HOME 目录（`<全局数据根>/iflow-home`，T8.6b）。spawn 时替换子进程
+   * USERPROFILE/HOME 指向它——iFlow 的 settings 恒在 `os.homedir()/.iflow/`、不受
+   * IFLOW_HOME 影响（iflow.md §5.4 坑 5），这是唯一能同时隔离 settings 与会话
+   * 存储、且不碰用户真实 `~/.iflow` 的路径。目录与静态 settings 由适配器
+   * startTurn 按需建出，装配层不必预建。
+   */
+  readonly iflowHomeDir: string;
 }
 
 /** 按 Profile 解析适配器的结果：命中实例或人可读拒绝原因（经 ack.reason 上行）。 */
@@ -181,6 +192,12 @@ export function createDesktopAdapterRegistry(
   // OPENAI_API_KEY（+ OPENAI_BASE_URL）即可运行——--auth-type openai 是适配器
   // 默认下发；一轮一 spawn 无常驻资源，不参与 hasRuntimeResources/closeRuntimes。
   registry.register(createQwenCodeAdapter());
+  // iFlow（T8.6b）：裸键单例。managedHome 是进程级常量（全局数据根派生、不随
+  // Profile 变），不构成「按 Profile 构造期配置」——与 aider 的 tempDir（按
+  // profileId 派生、须复合键）不同类；模型经 ctx.model、密钥经 ctx.env 均是
+  // 轮次级通道，故维持裸键（codex 款式）。ACP 一轮一 spawn 无常驻资源，
+  // 不参与 hasRuntimeResources/closeRuntimes。
+  registry.register(createIFlowAdapter({ managedHome: options.iflowHomeDir }));
 
   const instances = new Map<string, CachedInstance>();
 

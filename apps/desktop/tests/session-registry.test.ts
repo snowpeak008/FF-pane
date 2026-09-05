@@ -31,9 +31,10 @@ import { describe, expect, it } from "vitest";
 import { createDesktopAdapterRegistry } from "../src/main/session/registry";
 
 const SESSIONS_DIR = ["C:", "fake-root", "agent-sessions"].join(sep);
+const IFLOW_HOME = ["C:", "fake-root", "iflow-home"].join(sep);
 
 function makeRegistry() {
-  return createDesktopAdapterRegistry({ agentSessionsDir: SESSIONS_DIR });
+  return createDesktopAdapterRegistry({ agentSessionsDir: SESSIONS_DIR, iflowHomeDir: IFLOW_HOME });
 }
 
 function profile(overrides: Partial<Record<keyof AgentProfile, unknown>>): AgentProfile {
@@ -61,8 +62,9 @@ const GX: GenericExecProfileConfig = {
 };
 
 describe("零配置 runtime：裸键单例逐字不变", () => {
-  // opencode 自 T8.5c、qwen-code 自 T8.6a 起并入零配置裸键单例
-  it.each(["codex", "claude-code", "gemini-cli", "grok-build", "opencode", "qwen-code"])(
+  // opencode 自 T8.5c、qwen-code 自 T8.6a、iflow 自 T8.6b 起并入裸键单例
+  // （iflow 的 managedHome 是进程级常量非按 Profile 配置，registry.ts 注册处注释）
+  it.each(["codex", "claude-code", "gemini-cli", "grok-build", "opencode", "qwen-code", "iflow"])(
     "%s：resolveForProfile 返回 registry.get 的同一实例",
     (runtime) => {
       const registry = makeRegistry();
@@ -76,9 +78,10 @@ describe("零配置 runtime：裸键单例逐字不变", () => {
 
   it("未注册 runtime：拒绝文案与既有「Runtime 未注册」一致", () => {
     const registry = makeRegistry();
-    // iflow 归 T8.6b，当前确实未注册——恰作未注册样例（T8.6a 前此处用 qwen-code）
-    const resolution = registry.resolveForProfile(profile({ runtime: "iflow" }));
-    expect(resolution).toEqual({ ok: false, reason: "Runtime 未注册：iflow" });
+    // KNOWN_RUNTIMES 七家零配置均已注册（T8.6b 收齐），未注册样例改用手改
+    // profiles.json 才会出现的任意开放字符串（RuntimeId 是开放 string）
+    const resolution = registry.resolveForProfile(profile({ runtime: "some-future-cli" }));
+    expect(resolution).toEqual({ ok: false, reason: "Runtime 未注册：some-future-cli" });
   });
 });
 
@@ -279,6 +282,7 @@ describe("OpenCode 注册接入（T8.5c：裸键单例 + 进程级共享 server 
     let current: OpenCodeServerState = "ready";
     const registry = createDesktopAdapterRegistry({
       agentSessionsDir: SESSIONS_DIR,
+      iflowHomeDir: IFLOW_HOME,
       openCodeAdapter: stubAdapter(() => current),
     });
     for (const state of ["starting", "ready", "crashed"] as const) {

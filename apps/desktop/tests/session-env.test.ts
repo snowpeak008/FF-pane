@@ -29,6 +29,9 @@ describe("runtimeApiKeyEnvVar", () => {
     expect(runtimeApiKeyEnvVar("gemini-cli")).toBe("GEMINI_API_KEY");
     // qwen-code 走 --auth-type openai 兼容协议（qwen-code.md §6）
     expect(runtimeApiKeyEnvVar("qwen-code")).toBe("OPENAI_API_KEY");
+    // iflow 的 openai-compatible 三件套必须 IFLOW_ 前缀（iflow.md §5.3——
+    // CLI 错误提示里的裸 apiKey 写法是坑）
+    expect(runtimeApiKeyEnvVar("iflow")).toBe("IFLOW_API_KEY");
     expect(runtimeApiKeyEnvVar("opencode")).toBeUndefined();
     expect(runtimeApiKeyEnvVar("generic-exec")).toBeUndefined();
   });
@@ -75,6 +78,15 @@ describe("resolveRuntimeEnv", () => {
       OPENAI_API_KEY: "sk-q",
       OPENAI_BASE_URL: "https://dashscope.example/compatible-mode/v1",
     });
+  });
+
+  it("iflow 走 IFLOW_API_KEY + IFLOW_BASE_URL（openai-compatible 的 IFLOW_ 前缀形态）", () => {
+    const env = resolveRuntimeEnv({
+      runtime: "iflow",
+      provider: provider({ type: "openai_compatible", baseUrl: "https://apis.iflow.cn/v1" }),
+      apiKeyPlaintext: "sk-i",
+    });
+    expect(env).toEqual({ IFLOW_API_KEY: "sk-i", IFLOW_BASE_URL: "https://apis.iflow.cn/v1" });
   });
 
   it("无明文时该密钥变量缺席（不塞空串）", () => {

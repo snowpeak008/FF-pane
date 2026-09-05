@@ -36,6 +36,7 @@ const RUNTIME_OPTIONS = [
   "grok-build",
   "aider",
   "qwen-code",
+  "iflow",
   "generic-exec",
 ] as const;
 

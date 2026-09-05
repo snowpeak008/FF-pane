@@ -79,6 +79,8 @@ export {
   type AcpSessionNotificationView,
   type AcpSessionUpdateType,
   type AcpSessionUpdateView,
+  type AcpSetModeParams,
+  type AcpSetModeResult,
   type AcpStopReason,
   type AcpTextBlock,
   type AcpToolCallContentView,

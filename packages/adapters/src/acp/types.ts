@@ -39,6 +39,9 @@ export const ACP_AGENT_METHODS = {
   sessionLoad: "session/load",
   sessionPrompt: "session/prompt",
   sessionCancel: "session/cancel",
+  // 会话模式切换（schema SetSessionModeRequest；T8.6b 起消费——iFlow 的
+  // session/new 默认 currentModeId=yolo，要走权限转发必须先切 default）。
+  sessionSetMode: "session/set_mode",
 } as const;
 
 /**
@@ -199,6 +202,20 @@ export interface AcpLoadSessionParams {
 export interface AcpPromptParams {
   readonly sessionId: string;
   readonly prompt: readonly AcpOutgoingContentBlock[];
+}
+
+/**
+ * session/set_mode 请求参数（schema SetSessionModeRequest）。modeId 取自
+ * session/new 响应 `modes.availableModes[].id`（Agent 自报的模式清单，本层不枚举）。
+ */
+export interface AcpSetModeParams {
+  readonly sessionId: string;
+  readonly modeId: string;
+}
+
+/** session/set_mode 响应视图（正文按 Agent 实现差异全部留在 raw）。 */
+export interface AcpSetModeResult {
+  readonly raw: Readonly<Record<string, unknown>>;
 }
 
 /**

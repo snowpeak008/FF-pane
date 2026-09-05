@@ -32,6 +32,7 @@ export const KNOWN_RUNTIMES = [
   "grok-build",
   "aider",
   "qwen-code",
+  "iflow",
   "generic-exec",
 ] as const;
 

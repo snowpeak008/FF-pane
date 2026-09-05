@@ -1,0 +1,5 @@
+>>> {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{"fs":{"readTextFile":false,"writeTextFile":false}}}}
+<<< [iFlow ACP Agent] ACP adapter factory initialized
+<<< {"jsonrpc":"2.0","id":1,"result":{"isAuthenticated":false,"protocolVersion":1,"authMethods":[{"id":"oauth-iflow","name":"Log in with IFLOW","description":null},{"id":"iflow","name":"Use iFlow API key","description":"Requires setting the `IFLOW_API_KEY` environment variable"},{"id":"openai-compatible","name":"OpenAI Compatible API","description":"OpenAI Compatible API"}],"agentCapabilities":{"loadSession":true,"promptCapabilities":{"image":true,"audio":false,"embeddedContext":true}},"agentInfo":{"name":"iflow-agent","title":"iFlow Agent","version":"0.5.19"}}}
+>>> {"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"C:\\Users\\USER\\AppData\\Local\\Temp\\ffpane-iflow-probe\\bare","mcpServers":[]}}
+<<< {"jsonrpc":"2.0","id":2,"error":{"code":-32000,"message":"Authentication required"}}

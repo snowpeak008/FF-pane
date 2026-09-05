@@ -1,0 +1,1 @@
+Please set an Auth method in your C:\Users\USER\.iflow\settings.json or specify one of the following environment variables before running:\n  - apiKey, APIKEY, API_KEY, api_key \n  - baseUrl, BASEURL, BASE_URL, base_url \n  - modelName, MODELNAME, MODEL_NAME, model_name 

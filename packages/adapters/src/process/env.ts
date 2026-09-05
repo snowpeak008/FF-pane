@@ -38,6 +38,11 @@ export const API_KEY_ENV_PATTERNS: readonly RegExp[] = [
   // qwen-code 的 OPENAI_MODEL 别名（qwen-code.md §7）：OPENAI_MODEL 已被 ^OPENAI_
   // 剥掉，别名不剥等于留后门——密钥来自 FF-pane 注入、模型却来自用户 shell。
   /^QWEN_MODEL$/i,
+  // iFlow 全前缀剥（iflow.md §5.5）：认证/路由五形态（API_KEY/BASE_URL/MODEL_NAME/
+  // MODEL/URL——CT() 认大小写四形态，大小写不敏感正则双杀）、IFLOW_HOME/IFLOW_CONFIG_DIR
+  // 数据目录劫持、IFLOW_CLI_SYSTEM_SETTINGS_PATH 配置劫持、IFLOW_CLI_NO_RELAUNCH
+  // 行为开关，调研清单要求全剥。适配器注入的三件套经「注入优先于清洗」放行。
+  /^IFLOW_/i,
   /^OPENROUTER_/i,
   /^DEEPSEEK_/i,
   /^MOONSHOT_/i,

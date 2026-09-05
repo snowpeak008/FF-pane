@@ -35,6 +35,11 @@ export function runtimeApiKeyEnvVar(runtime: RuntimeId): string | undefined {
     // ModelStudio/Dashscope/OpenRouter 等一切 OpenAI 兼容端点。
     case "qwen-code":
       return "OPENAI_API_KEY";
+    // iflow 仅 openai-compatible 认证类型可用（2026-04-16 日期开关后，iflow.md §5.2），
+    // 但变量名必须是 IFLOW_ 前缀（CT() 查找序，§5.3——错误提示里的裸 apiKey 写法无效）。
+    // 受管 settings 只钉 selectedAuthType，三件套全走本通道（密钥不落盘，§4.3）。
+    case "iflow":
+      return "IFLOW_API_KEY";
     // opencode 的 Provider 在其自身配置内声明；generic-exec 由 Profile 的自定义
     // 配置决定，均不由本层按固定变量名注入。
     default:
@@ -50,8 +55,13 @@ export function runtimeApiKeyEnvVar(runtime: RuntimeId): string | undefined {
  * 参数。既然优先级最高的那个就是它，注入它才能保证路由确定。
  * qwen-code 同用 `OPENAI_BASE_URL`（真机实测生效，qwen-code.md §6——指向
  * Dashscope/ModelStudio/OpenRouter 等端点的唯一 env 通道）。
+ * iflow 是 `IFLOW_BASE_URL`（iflow.md §5.3 的 CT() 变量名；缺席时 CLI 缺省
+ * `https://apis.iflow.cn/v1`——iFlow 官方后端本就说 OpenAI 兼容协议）。
  */
 function runtimeBaseUrlEnvVar(runtime: RuntimeId): string | undefined {
+  if (runtime === "iflow") {
+    return "IFLOW_BASE_URL";
+  }
   return runtime === "codex" || runtime === "aider" || runtime === "qwen-code"
     ? "OPENAI_BASE_URL"
     : undefined;

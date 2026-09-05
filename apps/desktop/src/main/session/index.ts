@@ -158,6 +158,9 @@ export async function createSessionLayer(getWindow: SessionWindowGetter): Promis
   // 适配器 startTurn 按需 mkdirSync -p，无需预建）。
   const registry = createDesktopAdapterRegistry({
     agentSessionsDir: join(layout.rootDir, "agent-sessions"),
+    // iFlow 受管 HOME（T8.6b）：settings 与会话存储全部落此（USERPROFILE/HOME
+    // 替换，用户真实 ~/.iflow 零触碰）；目录由适配器 startTurn 按需建出。
+    iflowHomeDir: join(layout.rootDir, "iflow-home"),
   });
 
   // 最新计划版本：v1..vN 连续，逐版加载到 not-found 为止，返回末版（与 data.ts plans:list 同构）

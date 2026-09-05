@@ -1,0 +1,3 @@
+Model ffpane-fixture-model does not support thinking mode
+Model ffpane-fixture-model does not support thinking mode
+I attempted to write deny.txt.

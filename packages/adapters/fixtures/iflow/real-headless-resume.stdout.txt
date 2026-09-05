@@ -1,0 +1,2 @@
+Model ffpane-fixture-model does not support thinking mode
+Resumed OK. I remember creating hello.txt earlier.

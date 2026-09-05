@@ -21,6 +21,8 @@ export * from "./generic-exec/index.js";
 export * from "./grok-build/index.js";
 /** 运行时权限拦截桥接（W2.7b）：把 core 的 run-guard 裁决接到真实事件流上。 */
 export * from "./guard/index.js";
+/** iFlow 适配器（T8.6b）：ACP 单通道 + 受管 HOME 隔离 + 审批拒绝自记账。 */
+export * from "./iflow/index.js";
 /** OpenCode 适配器（W2.6）：`opencode serve` + HTTP/SSE 接入路径。 */
 export * from "./opencode/index.js";
 /** Agent CLI 子进程管理层（W2.1a）：spawn 封装、环境变量清洗、进程树终止。 */
