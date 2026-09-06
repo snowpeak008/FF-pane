@@ -61,10 +61,10 @@ export function ProfileEditorDialog({
   onSaved,
 }: ProfileEditorDialogProps): ReactElement {
   const { t } = useTranslation();
-  const { state: providersState } = useInvokeQuery("providers:list");
+  const { state: providersState, refetch: refetchProviders } = useInvokeQuery("providers:list");
   const { state: configState } = useInvokeQuery("config:get");
   // 自定义角色（T8.4）：默认角色下拉在内置三项之外列出全部自定义角色
-  const { state: rolesState } = useInvokeQuery("roles:list");
+  const { state: rolesState, refetch: refetchRoles } = useInvokeQuery("roles:list");
   const customRoles = queryData(rolesState) ?? [];
   const providers = queryData(providersState) ?? [];
   const config = queryData(configState);
@@ -85,6 +85,22 @@ export function ProfileEditorDialog({
     setSaveError(undefined);
     // defaultPreset 仅在新建且 config 已到时作为初值，故依赖它
   }, [open, profile, defaultPreset]);
+
+  /**
+   * 列表新鲜度（T9.3 ①）：对话框常驻挂载、open 只是显隐 prop，useInvokeQuery
+   * 的「挂载即拉取」只发生一次——期间在 Provider / 角色区新建的档案不会出现在
+   * 下拉里（跨区无失效通知，ProvidersSection.handleSaved 只刷它自己那份 hook
+   * 实例）。取最小修复面：每次打开时 refetch 两份清单（refetch 走 refreshing
+   * 态不清已有内容，闪动为零；全局查询失效总线对两个下拉而言不成比例）。
+   * refetch 引用稳定（useCallback[channel, stableArgs]），不会引发 effect 重跑。
+   */
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    refetchProviders();
+    refetchRoles();
+  }, [open, refetchProviders, refetchRoles]);
 
   const patch = useCallback((next: Partial<typeof form>) => {
     setForm((prev) => ({ ...prev, ...next }));

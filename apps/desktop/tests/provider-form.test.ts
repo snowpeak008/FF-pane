@@ -41,6 +41,11 @@ describe("字段显隐规则", () => {
     expect(supportsProbe("openai_compatible")).toBe(true);
     expect(supportsProbe("cli_login")).toBe(false);
   });
+
+  it("custom 不支持探测（T9.3 ③ 警示条的事实前提：测试连接与拉取模型对 custom 隐藏）", () => {
+    expect(supportsProbe("custom")).toBe(false);
+    expect(supportsProbe("anthropic")).toBe(true);
+  });
 });
 
 describe("cleanModels", () => {

@@ -494,11 +494,23 @@ export function ProviderEditorDialog({
             </Field>
           ) : null}
 
+          {form.type === "custom" ? (
+            // 自定义类型警示（T9.3 ③）：探测按钮对 custom 隐藏是既有行为，但零解释
+            // ——用户不知道是「没有」还是「坏了」，这里把边界说清楚
+            <p
+              className="rounded-md border border-warning-border bg-warning-surface p-2 text-xs text-warning-text"
+              data-testid="custom-type-notice"
+            >
+              {t("settings.providers.field.customTypeNotice")}
+            </p>
+          ) : null}
+
           {usesRequestTemplate(form.type) ? (
             <Field
               htmlFor="provider-template"
               label={t("settings.providers.field.requestTemplate")}
               required
+              hint={t("settings.providers.field.requestTemplateHint")}
             >
               <Input
                 id="provider-template"

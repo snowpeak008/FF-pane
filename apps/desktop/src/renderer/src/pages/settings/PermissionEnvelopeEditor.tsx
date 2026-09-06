@@ -1,5 +1,5 @@
 import { type PermissionEnvelope, SHELL_POLICIES, type ShellPolicy } from "@ff-pane/shared";
-import { Lock } from "lucide-react";
+import { Layers, Lock } from "lucide-react";
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { Field, Textarea } from "../../components/ui/Input";
@@ -80,6 +80,15 @@ export function PermissionEnvelopeEditor({
       <div className="flex items-center gap-1.5 text-xs text-fg-subtle">
         <Lock aria-hidden size={12} />
         {t("settings.permission.dangerousOpsNote")}
+      </div>
+
+      {/* 分层说明（T9.3 ⑤）：多处可填路径以谁为准——此处填的是上限，实际取各层交集 */}
+      <div
+        className="flex items-start gap-1.5 text-xs text-fg-subtle"
+        data-testid="permission-layering-note"
+      >
+        <Layers aria-hidden className="mt-0.5 shrink-0" size={12} />
+        {t("settings.permission.layeringNote")}
       </div>
     </div>
   );

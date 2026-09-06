@@ -404,7 +404,9 @@
         "embeddingModel": "默认嵌入模型",
         "none": "（无）",
         "timeout": "超时（秒）",
-        "enabled": "启用"
+        "enabled": "启用",
+        "requestTemplateHint": "仅供不兼容标准 API 格式的特殊服务使用；标准 OpenAI 兼容服务（如 DeepSeek）请选「OpenAI 兼容」类型。当前版本运行时尚未消费该模板。",
+        "customTypeNotice": "自定义类型不支持「测试连接」与「拉取模型」。"
       }
     },
     "appearance": {
@@ -487,7 +489,8 @@
         "verify_only": "仅验证命令"
       },
       "network": "允许网络",
-      "dangerousOpsNote": "危险操作（删除越界、git push、发布部署等）恒需逐次确认，不可关闭。"
+      "dangerousOpsNote": "危险操作（删除越界、git push、发布部署等）恒需逐次确认，不可关闭。",
+      "layeringNote": "此为上限；每轮实际范围 = 各层交集，任务合同由 Planner 派发时进一步收窄。"
     },
     "defaultPermission": {
       "title": "默认权限预设",

@@ -23,7 +23,7 @@ export function ProfilesSection(): ReactElement {
   const { t } = useTranslation();
   const roleLabel = useRoleLabel();
   const { state, refetch } = useInvokeQuery("profiles:list");
-  const { state: providersState } = useInvokeQuery("providers:list");
+  const { state: providersState, refetch: refetchProviders } = useInvokeQuery("providers:list");
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<AgentProfile | undefined>(undefined);
   const [removingIds, setRemovingIds] = useState<ReadonlySet<string>>(new Set());
@@ -51,9 +51,12 @@ export function ProfilesSection(): ReactElement {
   const handleSaved = useCallback(
     (profile: AgentProfile) => {
       refetch();
+      // Provider 名称映射与 Profile 列表同步刷新（T9.3 ① 同类）：新 Profile 可能
+      // 引用编辑器打开期间新建的 Provider，本区那份 providers:list 快照未必已见过它
+      refetchProviders();
       toast.success(t("settings.profiles.saved", { name: profile.name }));
     },
-    [refetch, t],
+    [refetch, refetchProviders, t],
   );
 
   const handleRemove = useCallback(

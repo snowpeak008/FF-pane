@@ -404,7 +404,9 @@
         "embeddingModel": "Default embedding model",
         "none": "(none)",
         "timeout": "Timeout (s)",
-        "enabled": "Enabled"
+        "enabled": "Enabled",
+        "requestTemplateHint": "Only for special services incompatible with the standard API formats; for standard OpenAI-compatible services (e.g. DeepSeek), pick the OpenAI-compatible type. The current version does not consume this template at runtime yet.",
+        "customTypeNotice": "The custom type supports neither connection tests nor model fetching."
       }
     },
     "appearance": {
@@ -487,7 +489,8 @@
         "verify_only": "Verify commands only"
       },
       "network": "Allow network",
-      "dangerousOpsNote": "Dangerous ops (delete out of scope, git push, deploy…) always require per-time confirmation and cannot be disabled."
+      "dangerousOpsNote": "Dangerous ops (delete out of scope, git push, deploy…) always require per-time confirmation and cannot be disabled.",
+      "layeringNote": "This is an upper bound; each turn's effective scope is the intersection of all layers, further narrowed by the task contract the Planner dispatches."
     },
     "defaultPermission": {
       "title": "Default permission preset",
