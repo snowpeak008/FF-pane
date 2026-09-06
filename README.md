@@ -19,7 +19,19 @@ A local-first, vendor-agnostic, pluggable multi-agent project workbench.
 
 ## 项目状态
 
-**设计阶段。** 开发启动时将发布 0.1.0。
+**v0.9.0（M3 完成）。** 进度事实源见 [docs/开发进度.md](docs/开发进度.md)。
+
+## 启动方式
+
+| 方式 | 命令 / 操作 | 说明 |
+|---|---|---|
+| 开发模式 | 仓库根运行 `pnpm dev` | electron-vite 热更新，日常开发用 |
+| 打包 | 仓库根运行 `pnpm package` | 产出 NSIS 安装包与免安装目录，落在 `apps\desktop\release\` |
+| 双击启动（免安装） | 双击根目录 `FF-pane.cmd` | 定位并启动打包产物；未打包时会提示先运行 `pnpm package` |
+| 直接运行 exe | `apps\desktop\release\win-unpacked\FF-pane.exe` | `FF-pane.cmd` 启动的就是它；打包产物不进 git，需先本机打包 |
+| 安装版 | 运行 `apps\desktop\release\FF-pane-Setup-<版本>.exe` | 向导式用户级安装（默认 `%LOCALAPPDATA%\Programs\FF-pane`），免管理员权限 |
+
+> 打包产物体积大（win-unpacked 约数百 MB），不进 git——所以根目录放的是轻量启动器 `FF-pane.cmd` 而非真 exe。
 
 ## 文档
 
