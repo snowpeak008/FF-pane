@@ -38,10 +38,17 @@ export class ProviderValidationError extends ProviderStoreError {
   override readonly code = "provider-validation" as const;
   /** 违规字段名（Provider 领域字段，camelCase）。 */
   readonly field: string;
+  /**
+   * 违规原因（不带「Provider 校验失败」前缀的裸原因，T9.2 ①）：IPC 信封按字段
+   * 序列化后，渲染层错误翻译层用 field + reason 拼用户可读文案，message 原文
+   * 收进「技术详情」折叠——原因若只活在 message 里，翻译层就只能整串直出。
+   */
+  readonly reason: string;
 
   constructor(field: string, reason: string) {
     super(`Provider 校验失败（字段 ${field}）：${reason}`);
     this.field = field;
+    this.reason = reason;
   }
 }
 

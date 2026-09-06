@@ -41,7 +41,7 @@ const CHAT_PROVIDER: Provider = {
   enabled: true,
 };
 
-/** 未配置 defaultModel 的 Provider（cli_login 允许 models 为空）。 */
+/** 未配置 defaultModel 的 cli_login Provider（models 允许为空；T9.2 ④ 模型可选）。 */
 const NO_DEFAULT_PROVIDER: Provider = {
   id: "provider-9b8c7d6e5f4a" as ProviderId,
   name: "Claude 订阅登录",
@@ -50,10 +50,23 @@ const NO_DEFAULT_PROVIDER: Provider = {
   enabled: true,
 };
 
+/** 未配置 defaultModel 的 openai_compatible Provider（模型必填规则的靶子）。 */
+const NO_DEFAULT_HTTP_PROVIDER: Provider = {
+  id: "provider-1a2b3c4d5e6f" as ProviderId,
+  name: "无默认模型的兼容端点",
+  type: "openai_compatible",
+  baseUrl: "https://api.example.com/v1",
+  apiKeyRef: "keyref-example-001" as ApiKeyRef,
+  models: [{ id: "some-chat", displayName: "Some Chat", kind: "chat" }],
+  enabled: true,
+};
+
 /** 同步 getProvider：与 W1.5a 约定一致，不存在返回 undefined 不抛错。 */
 const DEPS = {
   getProvider: (id: ProviderId): Provider | undefined =>
-    [CHAT_PROVIDER, NO_DEFAULT_PROVIDER].find((provider) => provider.id === id),
+    [CHAT_PROVIDER, NO_DEFAULT_PROVIDER, NO_DEFAULT_HTTP_PROVIDER].find(
+      (provider) => provider.id === id,
+    ),
 };
 
 const WORKER_PRESET: PermissionEnvelope = {
@@ -180,9 +193,25 @@ describe("Provider 与模型（§4.4：Provider + 模型）", () => {
     }
   });
 
-  it("model 缺省但 Provider 未配置 defaultModel：model 违规", async () => {
+  it("model 缺省但 Provider 未配置 defaultModel：model 违规（非 cli_login 维持必填）", async () => {
+    const { model: _model, ...withoutModel } = workerDraft();
+    const draft: ProfileDraft = { ...withoutModel, providerId: NO_DEFAULT_HTTP_PROVIDER.id };
+    expectViolationFields(await validateProfileDraft(draft, DEPS), ["model"]);
+  });
+});
+
+describe("cli_login 模型可选化（T9.2 ④：缺省 = CLI 默认模型，派发不传 -m 类参数）", () => {
+  it("model 缺省 + cli_login Provider 无 defaultModel 无 models：通过", async () => {
     const { model: _model, ...withoutModel } = workerDraft();
     const draft: ProfileDraft = { ...withoutModel, providerId: NO_DEFAULT_PROVIDER.id };
+    expect(await validateProfileDraft(draft, DEPS)).toEqual({ ok: true });
+  });
+
+  it("显式指定的 model 仍要求存在于 models（放宽只对「缺省」，不对「乱填」）", async () => {
+    const draft = workerDraft({
+      providerId: NO_DEFAULT_PROVIDER.id,
+      model: "nonexistent-model",
+    });
     expectViolationFields(await validateProfileDraft(draft, DEPS), ["model"]);
   });
 });

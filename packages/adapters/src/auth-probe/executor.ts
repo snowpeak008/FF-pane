@@ -20,7 +20,7 @@ import path from "node:path";
 import process from "node:process";
 import type { ExecutionOutcome, ProcessExecutor } from "./types.js";
 
-/** 单流输出上限（状态查询输出极小，防御性封顶）。 */
+/** 单流输出上限缺省值（登录态查询输出极小，防御性封顶）。 */
 const MAX_STREAM_BYTES = 64 * 1024;
 
 /**
@@ -136,67 +136,78 @@ function killProcessTree(pid: number | undefined, child: { kill: (s: "SIGKILL") 
 }
 
 /**
+ * 构造执行器（T9.2 抽出工厂）：maxStreamBytes 可调——登录态探测输出极小（缺省
+ * 64 KB 足够），而 `codex debug models` 的目录 JSON 真机实测约 400 KB（每个条目
+ * 内嵌完整 instructions 模板），本地模型枚举须放宽上限（local-models/probe.ts）。
+ */
+export function createChildProcessExecutor(
+  maxStreamBytes: number = MAX_STREAM_BYTES,
+): ProcessExecutor {
+  return (cmd, args, timeoutMs) => {
+    return new Promise<ExecutionOutcome>((resolve) => {
+      const resolved = resolveCommand(cmd, args);
+      if (resolved === undefined) {
+        resolve({ kind: "cli_missing" });
+        return;
+      }
+
+      const child = spawn(resolved.file, [...resolved.args], {
+        shell: false,
+        windowsHide: true,
+        windowsVerbatimArguments: resolved.windowsVerbatimArguments,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: buildProbeEnv(),
+      });
+
+      let stdout = "";
+      let stderr = "";
+      let settled = false;
+
+      const settle = (outcome: ExecutionOutcome) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve(outcome);
+        }
+      };
+
+      const timer = setTimeout(() => {
+        killProcessTree(child.pid, child);
+        settle({ kind: "timeout" });
+      }, timeoutMs);
+
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+      child.stdout.on("data", (chunk: string) => {
+        if (stdout.length < maxStreamBytes) {
+          stdout += chunk;
+        }
+      });
+      child.stderr.on("data", (chunk: string) => {
+        if (stderr.length < maxStreamBytes) {
+          stderr += chunk;
+        }
+      });
+
+      child.on("error", (error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") {
+          settle({ kind: "cli_missing" });
+          return;
+        }
+        // 其余 spawn 层错误（权限、EINVAL 等）：以 -1 退出码回报，
+        // 上层规则统一落为 unknown。
+        settle({ kind: "completed", exitCode: -1, stdout, stderr: String(error) });
+      });
+
+      child.on("close", (code) => {
+        settle({ kind: "completed", exitCode: code ?? -1, stdout, stderr });
+      });
+    });
+  };
+}
+
+/**
  * 生产执行器：spawn（shell: false）+ 超时终止 + 三态结果。
  * stdin 置 ignore（Codex 等 CLI 会等 stdin，见 docs/adapters/codex.md §1.1）。
  */
-export const executeWithChildProcess: ProcessExecutor = (cmd, args, timeoutMs) => {
-  return new Promise<ExecutionOutcome>((resolve) => {
-    const resolved = resolveCommand(cmd, args);
-    if (resolved === undefined) {
-      resolve({ kind: "cli_missing" });
-      return;
-    }
-
-    const child = spawn(resolved.file, [...resolved.args], {
-      shell: false,
-      windowsHide: true,
-      windowsVerbatimArguments: resolved.windowsVerbatimArguments,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: buildProbeEnv(),
-    });
-
-    let stdout = "";
-    let stderr = "";
-    let settled = false;
-
-    const settle = (outcome: ExecutionOutcome) => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timer);
-        resolve(outcome);
-      }
-    };
-
-    const timer = setTimeout(() => {
-      killProcessTree(child.pid, child);
-      settle({ kind: "timeout" });
-    }, timeoutMs);
-
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
-      if (stdout.length < MAX_STREAM_BYTES) {
-        stdout += chunk;
-      }
-    });
-    child.stderr.on("data", (chunk: string) => {
-      if (stderr.length < MAX_STREAM_BYTES) {
-        stderr += chunk;
-      }
-    });
-
-    child.on("error", (error: NodeJS.ErrnoException) => {
-      if (error.code === "ENOENT") {
-        settle({ kind: "cli_missing" });
-        return;
-      }
-      // 其余 spawn 层错误（权限、EINVAL 等）：以 -1 退出码回报，
-      // 上层规则统一落为 unknown。
-      settle({ kind: "completed", exitCode: -1, stdout, stderr: String(error) });
-    });
-
-    child.on("close", (code) => {
-      settle({ kind: "completed", exitCode: code ?? -1, stdout, stderr });
-    });
-  });
-};
+export const executeWithChildProcess: ProcessExecutor = createChildProcessExecutor();

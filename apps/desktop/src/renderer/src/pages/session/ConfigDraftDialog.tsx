@@ -1,3 +1,4 @@
+import { AlertTriangle } from "lucide-react";
 import type { ReactElement } from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -11,6 +12,7 @@ import {
   DialogHeader,
 } from "../../components/ui/Dialog";
 import { Input } from "../../components/ui/Input";
+import { draftContainsSecretShape } from "../../lib/secret-shape";
 import { respondConfigDraft } from "../../lib/session-run";
 import type { PendingConfigDraft } from "../../stores/session";
 import { pendingConfigDraftsOf, useSessionStore } from "../../stores/session";
@@ -158,6 +160,18 @@ function DraftDialog({ pending }: { readonly pending: PendingConfigDraft }): Rea
             {pending.summary}
           </span>
           <DraftFields pending={pending} />
+          {/* 密钥形状警示（T9.2 ⑤，T9.1 验收裁定）：仅提示不拦截，用户仍可自行决定 */}
+          {draftContainsSecretShape(pending.payload.draft) ? (
+            <div
+              className="flex items-start gap-2 rounded-md border border-warning-border bg-warning-surface p-2"
+              data-testid="config-draft-secret-warning"
+            >
+              <AlertTriangle aria-hidden className="mt-0.5 shrink-0 text-warning-text" size={14} />
+              <span className="text-xs text-warning-text">
+                {t("session.configDraft.secretShapeWarning")}
+              </span>
+            </div>
+          ) : null}
           {pending.needsApiKey ? (
             <div className="flex flex-col gap-1 border-t border-border pt-2">
               <label className="text-xs font-medium text-fg" htmlFor="config-draft-api-key">

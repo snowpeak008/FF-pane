@@ -18,6 +18,12 @@
  * code 与 path 用 font-mono 元信息呈现；禁止只显示"出错了"。
  */
 
+/** 结构化违规条目（信封 violations 的渲染层形态，与 SerializedIpcViolation 同构）。 */
+export interface IpcErrorViolation {
+  readonly field: string;
+  readonly reason: string;
+}
+
 /** 渲染层统一错误形态：跨 IPC 只靠字段传递，不依赖原型。 */
 export interface IpcErrorInfo {
   /** 机器可读错误码（用于分支处理与埋点）。 */
@@ -28,6 +34,12 @@ export interface IpcErrorInfo {
   readonly path?: string;
   /** 出错的 IPC 通道名。 */
   readonly channel?: string;
+  /** 违规字段名（T9.2 ① 信封结构化扩展；旧错误缺席）。 */
+  readonly field?: string;
+  /** 违规裸原因（不带模板前缀；旧错误缺席）。 */
+  readonly reason?: string;
+  /** 结构化违规列表（ProfileValidationError 一类；旧错误缺席）。 */
+  readonly violations?: readonly IpcErrorViolation[];
 }
 
 /** 取不到任何错误码时的兜底码。 */
@@ -67,6 +79,26 @@ function stringifyThrown(thrown: unknown): string {
  * @param thrown 捕获到的任意值（Error、结构化克隆后的普通对象、字符串、undefined…）
  * @param channel 调用方已知的通道名（抛出物自带 channel 时以自带的为准）
  */
+/** 从抛出物上提取结构化违规列表（形状不符的条目丢弃，与信封侧同款宽容读取）。 */
+function readViolations(source: Record<string, unknown>): readonly IpcErrorViolation[] | undefined {
+  const value = source["violations"];
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const violations: IpcErrorViolation[] = [];
+  for (const item of value) {
+    const fields = asRecord(item);
+    if (
+      fields !== undefined &&
+      typeof fields["field"] === "string" &&
+      typeof fields["reason"] === "string"
+    ) {
+      violations.push({ field: fields["field"], reason: fields["reason"] });
+    }
+  }
+  return violations.length > 0 ? violations : undefined;
+}
+
 export function toIpcErrorInfo(thrown: unknown, channel?: string): IpcErrorInfo {
   const fields = asRecord(thrown);
   const code =
@@ -77,6 +109,9 @@ export function toIpcErrorInfo(thrown: unknown, channel?: string): IpcErrorInfo 
         readNonEmptyString(fields, "name"));
   const message = fields === undefined ? undefined : readNonEmptyString(fields, "message");
   const path = fields === undefined ? undefined : readNonEmptyString(fields, "path");
+  const field = fields === undefined ? undefined : readNonEmptyString(fields, "field");
+  const reason = fields === undefined ? undefined : readNonEmptyString(fields, "reason");
+  const violations = fields === undefined ? undefined : readViolations(fields);
   const resolvedChannel =
     (fields === undefined ? undefined : readNonEmptyString(fields, "channel")) ??
     (channel !== undefined && channel.trim().length > 0 ? channel : undefined);
@@ -86,6 +121,9 @@ export function toIpcErrorInfo(thrown: unknown, channel?: string): IpcErrorInfo 
     message: message ?? stringifyThrown(thrown),
     ...(path !== undefined ? { path } : {}),
     ...(resolvedChannel !== undefined ? { channel: resolvedChannel } : {}),
+    ...(field !== undefined ? { field } : {}),
+    ...(reason !== undefined ? { reason } : {}),
+    ...(violations !== undefined ? { violations } : {}),
   };
 }
 

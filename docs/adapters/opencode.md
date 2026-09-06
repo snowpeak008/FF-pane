@@ -374,6 +374,26 @@ OpenCode 内置 75+ Provider 目录（DeepSeek、Moonshot/Kimi、Z.AI/GLM、阿�
 
 ---
 
+## 9. 本地模型枚举（T9.2 调研，2026-09-06，OpenCode 1.18.25 真机）
+
+**结论：支持。途径 `opencode models`（list all available models）。**
+
+- 输出：stdout 每行一个 `<providerID>/<modelID>`（本机 0 凭证形态实测 7 行，全部为
+  `opencode/*` 免费目录条目，如 `opencode/big-pickle`）。退出码 0。可选位置参数
+  `[provider]` 过滤单个 Provider。
+- **凭证联动**：清单随已配凭证扩张——`opencode auth list` 为 0 credentials 时只出
+  内置免费层；用户 `auth login` 过的 Provider（deepseek 等）会连同其模型进清单。
+  这正是 cli_login 语义想要的「CLI 自己视角的可用模型」。
+- 形态注意：① 输出可能混 ANSI 码 / 空行（同 auth-probe 的 stripAnsi 处理）；
+  ② `providerID/modelID` 是 OpenCode 的模型引用格式，适配器 `parseOpenCodeModel`
+  已按该格式消费（含 `/` 直接用作 `-m` 值）——枚举结果原样入 Provider.models 即可；
+  ③ 首跑可能联网拉 models.dev 目录（§4.3），离线时以缓存 `~/.cache/opencode/models.json`
+  出结果，探测超时要给缓冲（本机暖机实测约 3~9 s）。
+- Server 路径另有 `GET /config/providers`（§4.4 提过），但枚举走 CLI 子命令更轻
+  （不必为一次配置期查询拉起常驻 server）。
+
+---
+
 ## 附：fixture 清单
 
 真实录制（OpenCode 1.18.25 + 本地 mock OpenAI 端点，Windows 11），详见 `packages/adapters/fixtures/opencode/README.md`：

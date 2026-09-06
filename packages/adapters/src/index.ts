@@ -23,6 +23,8 @@ export * from "./grok-build/index.js";
 export * from "./guard/index.js";
 /** iFlow 适配器（T8.6b）：ACP 单通道 + 受管 HOME 隔离 + 审批拒绝自记账。 */
 export * from "./iflow/index.js";
+/** cli_login 本地模型枚举（T9.2）：codex/opencode/grok 命令解析，claude/gemini 如实 no。 */
+export * from "./local-models/index.js";
 /** OpenCode 适配器（W2.6）：`opencode serve` + HTTP/SSE 接入路径。 */
 export * from "./opencode/index.js";
 /** Agent CLI 子进程管理层（W2.1a）：spawn 封装、环境变量清洗、进程树终止。 */

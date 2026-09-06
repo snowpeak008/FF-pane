@@ -8,6 +8,7 @@ import {
 } from "@ff-pane/shared";
 import { type ReactElement, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { InlineIpcError } from "../../../components/states/InlineIpcError";
 import { Button } from "../../../components/ui/Button";
 import {
   Dialog,
@@ -18,6 +19,7 @@ import {
 } from "../../../components/ui/Dialog";
 import { Field, Input, Textarea } from "../../../components/ui/Input";
 import { inputVariants } from "../../../components/ui/input.variants";
+import type { IpcErrorInfo } from "../../../ipc/errors";
 import { invokeQuery, queryData } from "../../../ipc/query";
 import { useInvokeQuery } from "../../../ipc/useInvokeQuery";
 import { cn } from "../../../lib/cn";
@@ -70,7 +72,8 @@ export function ProfileEditorDialog({
 
   const [form, setForm] = useState(() => emptyProfileForm(DEFAULT_PERMISSION_PRESET));
   const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | undefined>(undefined);
+  // 保存失败留结构化形态（T9.2 ①）：InlineIpcError 按 code 翻译，无 code 回退原文直出
+  const [saveError, setSaveError] = useState<IpcErrorInfo | undefined>(undefined);
 
   const isEdit = profile !== undefined;
 
@@ -106,7 +109,7 @@ export function ProfileEditorDialog({
         : await invokeQuery("profiles:create", { draft });
     setSaving(false);
     if (settled.status === "error") {
-      setSaveError(settled.error.message);
+      setSaveError(settled.error);
       return;
     }
     onSaved(settled.data);
@@ -174,7 +177,14 @@ export function ProfileEditorDialog({
                 ))}
               </select>
             </Field>
-            <Field htmlFor="profile-model" label={t("settings.profiles.field.model")}>
+            <Field
+              htmlFor="profile-model"
+              label={t("settings.profiles.field.model")}
+              // cli_login 模型可选化（T9.2 ④）：缺省 = CLI 默认模型（派发不传 -m 类参数）
+              {...(selectedProvider?.type === "cli_login"
+                ? { hint: t("settings.profiles.field.modelCliDefaultHint") }
+                : {})}
+            >
               <select
                 id="profile-model"
                 className={selectClass}
@@ -182,7 +192,11 @@ export function ProfileEditorDialog({
                 disabled={selectedProvider === undefined}
                 onChange={(e) => patch({ model: e.target.value })}
               >
-                <option value="">{t("settings.profiles.field.modelDefault")}</option>
+                <option value="">
+                  {selectedProvider?.type === "cli_login"
+                    ? t("settings.profiles.field.modelCliDefault")
+                    : t("settings.profiles.field.modelDefault")}
+                </option>
                 {chatModels.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.displayName.length > 0 ? m.displayName : m.id}
@@ -294,11 +308,7 @@ export function ProfileEditorDialog({
             />
           </div>
 
-          {saveError !== undefined ? (
-            <p className="font-mono text-xs text-danger-text select-text" role="alert">
-              {saveError}
-            </p>
-          ) : null}
+          {saveError !== undefined ? <InlineIpcError error={saveError} /> : null}
         </DialogBody>
         <DialogFooter>
           <Button variant="secondary" size="lg" onClick={() => onOpenChange(false)}>

@@ -104,6 +104,44 @@ describe("IPC 客户端/服务端端到端（假线路）", () => {
     });
   });
 
+  it("invokeEnvelope 返回未解包信封：结构化字段以值形态过桥（T9.2 ①）", async () => {
+    const { ipcMain, ipcRenderer } = createFakeWire();
+    registerInvokeHandlers(ipcMain, {
+      "providers:create": () => {
+        const error = new Error("Provider 校验失败（字段 baseUrl）：必须是 http/https 形式的 URL");
+        error.name = "ProviderValidationError";
+        Object.assign(error, {
+          code: "provider-validation",
+          field: "baseUrl",
+          reason: "必须是 http/https 形式的 URL",
+        });
+        throw error;
+      },
+    });
+
+    const client = createIpcClient(ipcRenderer);
+    const raw = await client.invokeEnvelope?.("providers:create", {
+      draft: { name: "x", type: "openai_compatible", models: [], enabled: true },
+    });
+    // 信封是纯数据（contextBridge 结构化克隆无损），错误的结构化字段全在
+    expect(raw).toMatchObject({
+      ok: false,
+      error: {
+        channel: "providers:create",
+        code: "provider-validation",
+        field: "baseUrl",
+        reason: "必须是 http/https 形式的 URL",
+      },
+    });
+    // 对照：invoke 路径解包抛出（Error 过 contextBridge 会丢结构化字段，
+    // 这正是 invokeEnvelope 存在的理由——假线路上字段还在，真桥上会丢）
+    await expect(
+      client.invoke("providers:create", {
+        draft: { name: "x", type: "openai_compatible", models: [], enabled: true },
+      }),
+    ).rejects.toBeInstanceOf(IpcInvokeError);
+  });
+
   it("契约之外的 invoke 通道被客户端直接拦截（不触达传输层）", async () => {
     const { ipcRenderer } = createFakeWire();
     const client = createIpcClient(ipcRenderer);

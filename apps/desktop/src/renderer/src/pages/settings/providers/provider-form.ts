@@ -46,6 +46,15 @@ export function supportsProbe(type: ProviderType): boolean {
   return type === "openai_compatible" || type === "anthropic";
 }
 
+/**
+ * 该类型的模型清单是否只能来自 CLI 本地枚举（T9.2 ③：cli_login 禁手填）。
+ * 手填模型名对 cli_login 既易错（CLI 认不出就整轮失败）又无必要（CLI 有默认模型、
+ * 支持枚举的家能拉真实清单），故手填入口对该类型隐藏。
+ */
+export function usesCliEnumeratedModels(type: ProviderType): boolean {
+  return type === "cli_login";
+}
+
 /** 编辑表单里的单个模型行（均为字符串态，提交时裁剪）。 */
 export interface ModelRow {
   readonly id: string;

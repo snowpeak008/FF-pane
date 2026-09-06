@@ -335,6 +335,84 @@ export interface FetchProviderModelsRequest {
   readonly proxy?: string;
 }
 
+/**
+ * cli_login 登录态探测（T9.2 ②）与本地模型枚举（T9.2 ③）的线上形状。
+ *
+ * 字面量镜像自 @ff-pane/adapters（CLI_LOGIN_RUNTIMES / CLI_LOGIN_STATUSES /
+ * LOCAL_MODEL_ERRORS）：契约由 renderer 与 main 共享，而 adapters 包不是渲染层
+ * 依赖（同 renderer 侧 RUNTIME_OPTIONS / CAPABILITY_LEVELS 的既有镜像惯例），
+ * 一致性由 session-registry.test.ts 的对照断言钉住。
+ */
+export const CLI_LOGIN_RUNTIME_WIRES = [
+  "codex",
+  "claude-code",
+  "gemini-cli",
+  "opencode",
+  "grok-build",
+] as const;
+
+/** 支持登录态探测的 Runtime（线上形状）。 */
+export type CliLoginRuntimeWire = (typeof CLI_LOGIN_RUNTIME_WIRES)[number];
+
+/** CliLoginRuntimeWire 运行时守卫（编辑器按 Runtime 决定是否展示登录态区）。 */
+export function isCliLoginRuntimeWire(value: unknown): value is CliLoginRuntimeWire {
+  return (
+    typeof value === "string" && (CLI_LOGIN_RUNTIME_WIRES as readonly string[]).includes(value)
+  );
+}
+
+/**
+ * 支持本地模型枚举的 Runtime（T9.2 ③ 真机调研结论：codex `debug models` /
+ * opencode `models` / grok `models`；claude-code 与 gemini-cli 无枚举途径）。
+ * 镜像自 adapters LOCAL_MODEL_RUNTIMES，一致性由 session-registry.test.ts 钉住。
+ * UI 据此决定「读取本地模型」按钮显隐——不支持的 Runtime 不给按钮（点了必失败
+ * 的按钮不该存在），文案说明留空走 CLI 默认。
+ */
+export const LOCAL_MODEL_RUNTIME_WIRES = ["codex", "opencode", "grok-build"] as const;
+
+/** 该 Runtime 是否支持本地模型枚举。 */
+export function supportsLocalModelsWire(runtime: CliLoginRuntimeWire): boolean {
+  return (LOCAL_MODEL_RUNTIME_WIRES as readonly string[]).includes(runtime);
+}
+
+/** providers:probe-cli-login 请求。 */
+export interface ProbeCliLoginRequest {
+  readonly runtime: CliLoginRuntimeWire;
+}
+
+/** providers:probe-cli-login 应答（同 adapters CliLoginProbeResult 的可序列化形状）。 */
+export interface CliLoginProbeView {
+  /** 探测结论（logged_in / logged_out / cli_missing / unknown）。 */
+  readonly status: "logged_in" | "logged_out" | "cli_missing" | "unknown";
+  /** 人类可读的判定依据（已脱敏截断，可直接展示）。 */
+  readonly detail: string;
+  /** 实际执行的探测命令行。 */
+  readonly probedWith: string;
+}
+
+/** providers:list-local-models 请求。 */
+export interface ListLocalModelsRequest {
+  readonly runtime: CliLoginRuntimeWire;
+}
+
+/** 本地模型条目（同 adapters LocalModelEntry 的可序列化形状）。 */
+export interface LocalModelEntryWire {
+  /** 模型 ID（该 CLI 的 -m 类参数可直接消费的形态）。 */
+  readonly id: string;
+  readonly displayName: string;
+  /** 该 CLI 的默认模型标记（仅 grok 清单携带）。 */
+  readonly isDefault: boolean;
+}
+
+/** providers:list-local-models 应答（判别联合；失败分类供 UI 给可理解提示）。 */
+export type ListLocalModelsResponse =
+  | { readonly ok: true; readonly models: readonly LocalModelEntryWire[]; readonly detail: string }
+  | {
+      readonly ok: false;
+      readonly error: "unsupported" | "cli_missing" | "timeout" | "parse_error" | "cli_error";
+      readonly detail: string;
+    };
+
 /** secrets:masked-tail 请求。 */
 export interface MaskedTailRequest {
   readonly ref: ApiKeyRef;
@@ -1078,6 +1156,20 @@ export interface IpcInvokeContracts {
   };
   /** 拉取模型列表（失败上层回退手动输入）。 */
   "providers:fetch-models": { request: FetchProviderModelsRequest; response: FetchModelsResult };
+  /**
+   * cli_login 登录态探测（T9.2 ②，接线既有 adapters probeCliLogin）。
+   * 只跑非交互状态查询命令，绝不触发登录；超时/异常落 unknown 不挂界面。
+   */
+  "providers:probe-cli-login": { request: ProbeCliLoginRequest; response: CliLoginProbeView };
+  /**
+   * cli_login 本地模型枚举（T9.2 ③，接线 adapters listLocalModels）。
+   * 支持面按真机调研：codex / opencode / grok-build；claude-code / gemini-cli
+   * 如实回 unsupported（无枚举途径，试探未知子命令会起真轮次）。
+   */
+  "providers:list-local-models": {
+    request: ListLocalModelsRequest;
+    response: ListLocalModelsResponse;
+  };
   /** 取密钥明文尾 4 位（§4.3 规则 3，UI 展示用；不足 4 位返回空串）。 */
   "secrets:masked-tail": { request: MaskedTailRequest; response: { readonly tail: string } };
   /** 读取全局设置（缺字段补出厂默认，§10.1）。 */
@@ -1264,6 +1356,8 @@ export const INVOKE_CHANNELS = [
   "providers:remove",
   "providers:test-connection",
   "providers:fetch-models",
+  "providers:probe-cli-login",
+  "providers:list-local-models",
   "secrets:masked-tail",
   "config:get",
   "config:update",

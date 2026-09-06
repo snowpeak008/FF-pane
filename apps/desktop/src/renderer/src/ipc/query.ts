@@ -23,6 +23,7 @@
  * 本文件不依赖 DOM / React，可直接单测。
  */
 import type { InvokeChannel, InvokeRequest, InvokeResponse } from "../../../shared-ipc/contracts";
+import { unwrapIpcResult } from "../../../shared-ipc/envelope";
 import { getIpcApi } from "./api";
 import { type IpcErrorInfo, toIpcErrorInfo } from "./errors";
 
@@ -111,13 +112,23 @@ export type InvokeQueryArgs<K extends InvokeChannel> =
 /**
  * 一次性查询：调用契约内的 invoke 通道，**永不 reject**，
  * 成功/失败统一落成 SettledQueryState 供三态组件消费。
+ *
+ * 传输路径优先走 invokeEnvelope（T9.2 ①）：信封以纯数据过 contextBridge、在
+ * 渲染层世界解包——preload 世界抛出的 Error 过桥只剩 message，code / field /
+ * violations 全丢，报错人话化依赖这些字段。假 window.ffpane（单测）只实现
+ * invoke 时回退旧路径，行为不变。
  */
 export async function invokeQuery<K extends InvokeChannel>(
   channel: K,
   ...args: InvokeQueryArgs<K>
 ): Promise<SettledQueryState<InvokeResponse<K>>> {
   try {
-    const data = await getIpcApi().invoke(channel, ...args);
+    const api = getIpcApi();
+    if (api.invokeEnvelope !== undefined) {
+      const raw = await api.invokeEnvelope(channel, ...args);
+      return successQueryState(unwrapIpcResult<InvokeResponse<K>>(raw, channel));
+    }
+    const data = await api.invoke(channel, ...args);
     return successQueryState(data);
   } catch (thrown) {
     return errorQueryState(toIpcErrorInfo(thrown, channel));

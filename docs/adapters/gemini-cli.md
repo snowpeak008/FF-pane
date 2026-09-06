@@ -277,3 +277,18 @@ Worker 必须 `yolo` 才能干活，等于 CLI 侧完全放权，FF-pane 的 5 �
    命令输出可能含 GBK 转码问题，管道读取按 UTF-8 处理并容错。
 10. **首次运行副作用**：`~/.gemini/`（installation_id、projects.json、tmp/）自动创建；
     无需预初始化，但清理用户数据时注意该目录归 CLI 所有。
+
+## 9. 本地模型枚举（T9.2 调研，2026-09-06，Gemini CLI 0.57.0 真机）
+
+**结论：不支持。无本地模型枚举命令。**
+
+- 0.57.0 全量 help 逐项核对：子命令仅 mcp / extensions / skills / hooks / gemma，
+  **无 models 类命令**。`gemini gemma` 是本地 Gemma 路由管理（setup/start/stop/status/logs，
+  管理 LiteRT-LM 本地服务器），不是 Gemini 模型目录枚举。
+- `gemini models` 实测：被当作 query 位置参数进入启动流程，本机未登录形态下 exit 41 +
+  「Please set an Auth method…」——**不是**「未知子命令」错误，且已登录环境下会真跑一轮
+  （消费端不能试探）。
+- `-m` 的取值是别名（`auto`/`pro`/`flash`/`flash-lite`）或具体模型名（§2 参数表），
+  清单在服务端；`~/.gemini/settings.json` 不含模型目录。
+- 对 FF-pane 的含义：cli_login + gemini-cli 无从枚举，模型留空走 CLI 默认（`auto` 路由）；
+  listLocalModels 能力声明 no。

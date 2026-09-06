@@ -208,3 +208,22 @@ codex exec resume [OPTIONS] [SESSION_ID] [PROMPT]
 - `codex login status` 作 cli_login 探测命令（退出码判定）。
 - CODEX_HOME 勿指向临时目录（会告警拒建 helper）；用用户默认 `~/.codex` 即可。
 - 版本漂移（R3）：0.147.0 的事件词汇已与官方 Rust 源码核对一致；`--json` 输出仍标注实验性质，升级 CLI 后先跑 fixture 回放测试再放行。
+
+## 8. 本地模型枚举（T9.2 调研，2026-09-06，codex-cli 0.151.0 真机）
+
+**结论：支持。途径 `codex debug models`（Render the raw model catalog as JSON）。**
+
+- 顶层无 `models` 子命令（0.151.0 全量 help 逐项核对）；枚举藏在 `codex debug models`
+  （`codex debug --help` 三个子命令之一：models / app-server / prompt-input）。
+- 输出：stdout 单个 JSON 对象 `{"models":[…]}`。条目关键字段：`slug`（模型 ID，`-m` 可直接
+  消费）、`display_name`、`visibility`（实测取值 `"list"` / `"hide"`——hide 为内部条目如
+  `gpt-reserve` / `codex-auto-review`，选择器不应展示）、`supported_in_api`、
+  `context_window` 等。**体量注意**：每个条目内嵌完整 instructions 模板，整包实测约
+  300~400 KB——消费端读流上限不能沿用 auth-probe 的 64 KB 封顶。
+- 登录态影响：**已登录与未登录都能出目录**（未登录以空 `CODEX_HOME` 实测：exit 0、
+  10 个 slug——目录是 CLI 内置的，非账号拉取；两种形态下条目集合可不同，以实际输出为准）。
+  退出码恒 0。
+- 无默认模型标记：目录里没有「当前默认」字段（默认模型由 `~/.codex/config.toml` 的
+  `model` 决定），枚举结果不带 defaultModel。
+- 判定建议：exit 0 + stdout 可 JSON.parse 且 `models` 为数组 → 取 `visibility === "list"`
+  条目；解析失败 → parse_error（不猜）。

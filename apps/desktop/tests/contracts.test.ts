@@ -68,4 +68,9 @@ describe("IPC 通道契约", () => {
   it("T9.1 配置草案裁决通道已登记到运行时清单（preload 据此放行）", () => {
     expect(INVOKE_CHANNELS).toContain("session:respond-config-draft");
   });
+
+  it("T9.2 cli_login 登录态探测与本地模型枚举通道已登记到运行时清单", () => {
+    expect(INVOKE_CHANNELS).toContain("providers:probe-cli-login");
+    expect(INVOKE_CHANNELS).toContain("providers:list-local-models");
+  });
 });

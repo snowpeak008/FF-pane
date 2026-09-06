@@ -366,3 +366,19 @@ headless fixtures）。**CLI 侧行为全部真机实测**（握手 / 审批往�
 authenticate 对 `grok.com` OAuth 的实际流程、`stopReason` 的 refusal/max_tokens 取值。
 续验命令：`node packages/adapters/scripts/live-grok-acp.mjs`（默认假模型；
 `LIVE_REAL_MODEL=1` 走真实后端，会产生费用）。
+
+## 8. 本地模型枚举（T9.2 调研，2026-09-06，grok 1.0.13 真机·未登录形态）
+
+**结论：支持。途径 `grok models`（List available models and exit）。**
+
+- 未登录实测（本机形态）：exit 0，stdout 为
+  `You are not authenticated.` + 空行 + `Default model: grok-4.6` + `Available models:` +
+  逐行 `  * grok-4.6 (default)` / `  - grok-4.5`。**未登录也出内置清单**（与 §5 登录态
+  探测借用同一命令的观察一致：退出码恒 0，登录态只能看文本标记）。
+- 输出为纯文本无 JSON 选项（`grok models --help` 仅 --debug/--debug-file/--leader-socket；
+  `--json` 实测 exit 2 unexpected argument）。解析形态：`* <id> (default)` 行是默认模型、
+  `- <id>` 行是普通条目；`Default model: <id>` 行可交叉验证。
+- 已登录形态的清单是否更长**未实测**（本机未登录）——解析器按行前缀取模型 ID，
+  不假设条目数；`not authenticated` 标记行照 §5 口径可顺带回报登录态。
+- 判定建议：exit 0 + 解析出 ≥1 个条目 → ok（未登录时也如实给内置清单，UI 可同时显示
+  登录态提醒）；exit ≠ 0 或解析 0 条 → 枚举失败给可理解提示。

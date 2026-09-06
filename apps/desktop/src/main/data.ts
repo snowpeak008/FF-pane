@@ -13,6 +13,7 @@
 import { randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
+import { isCliLoginRuntime, listLocalModels, probeCliLogin } from "@ff-pane/adapters";
 import {
   acceptTask,
   approvePlan,
@@ -94,6 +95,8 @@ type DataChannel =
   | "providers:remove"
   | "providers:test-connection"
   | "providers:fetch-models"
+  | "providers:probe-cli-login"
+  | "providers:list-local-models"
   | "secrets:masked-tail"
   | "config:get"
   | "config:update"
@@ -379,6 +382,32 @@ export async function createDataHandlers(
       } finally {
         await outlet.dispose?.();
       }
+    },
+
+    // cli_login 登录态探测（T9.2 ②）：接线既有 adapters probeCliLogin。
+    // 探测层自身吞异常落 unknown（probe.ts），此处只挡契约外的 runtime 值。
+    "providers:probe-cli-login": async (request) => {
+      if (!isCliLoginRuntime(request.runtime)) {
+        return {
+          status: "unknown",
+          detail: `不支持登录态探测的 Runtime：${String(request.runtime)}`,
+          probedWith: "",
+        };
+      }
+      return probeCliLogin(request.runtime);
+    },
+
+    // cli_login 本地模型枚举（T9.2 ③）：接线 adapters listLocalModels。
+    // 不支持的 Runtime（claude-code / gemini-cli）由枚举层如实回 unsupported。
+    "providers:list-local-models": async (request) => {
+      if (!isCliLoginRuntime(request.runtime)) {
+        return {
+          ok: false,
+          error: "unsupported",
+          detail: `非 cli_login Runtime：${String(request.runtime)}`,
+        };
+      }
+      return listLocalModels(request.runtime);
     },
 
     "secrets:masked-tail": async (request) => ({ tail: await secrets.maskedTail(request.ref) }),

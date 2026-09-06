@@ -1,8 +1,16 @@
 import type { ConnectionTestResult, ProbeProviderInput } from "@ff-pane/core";
 import type { ApiKeyRef, ModelKind, Provider, ProviderType } from "@ff-pane/shared";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, RefreshCw, Trash2 } from "lucide-react";
 import { type ReactElement, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import {
+  CLI_LOGIN_RUNTIME_WIRES,
+  type CliLoginProbeView,
+  type CliLoginRuntimeWire,
+  supportsLocalModelsWire,
+} from "../../../../../shared-ipc/contracts";
+import { InlineIpcError } from "../../../components/states/InlineIpcError";
+import { Badge } from "../../../components/ui/Badge";
 import { Button } from "../../../components/ui/Button";
 import {
   Dialog,
@@ -13,8 +21,10 @@ import {
 } from "../../../components/ui/Dialog";
 import { Field, Input } from "../../../components/ui/Input";
 import { inputVariants } from "../../../components/ui/input.variants";
+import type { IpcErrorInfo } from "../../../ipc/errors";
 import { invokeQuery } from "../../../ipc/query";
 import { cn } from "../../../lib/cn";
+import { createCliLoginProbeCache } from "./cli-login-probe";
 import {
   buildProviderDraft,
   emptyProviderForm,
@@ -25,11 +35,172 @@ import {
   supportsProbe,
   usesApiKey,
   usesBaseUrl,
+  usesCliEnumeratedModels,
   usesProxy,
   usesRequestTemplate,
 } from "./provider-form";
 
 const MODEL_KINDS: readonly ModelKind[] = ["chat", "embedding"];
+
+/** 登录态徽章色调（unknown/探测失败给中性——不确定的事不用警示色吓人）。 */
+const LOGIN_STATUS_TONE = {
+  logged_in: "success",
+  logged_out: "warning",
+  cli_missing: "danger",
+  unknown: "neutral",
+} as const;
+
+/**
+ * 登录态探测缓存：模块级单例（TTL 30s + 在飞去重，cli-login-probe.ts）——
+ * 编辑器重开 / 类型切换不重复 spawn CLI；探测层对超时/异常自落 unknown 不挂界面。
+ */
+const loginProbeCache = createCliLoginProbeCache(async (runtime) => {
+  const settled = await invokeQuery("providers:probe-cli-login", { runtime });
+  return settled.status === "success"
+    ? settled.data
+    : { status: "unknown", detail: settled.error.message, probedWith: "" };
+});
+
+/**
+ * cli_login 的登录态 + 本地模型区（T9.2 ②③）。
+ *
+ * Provider 领域无 runtime 字段（Runtime 归 Profile），这里的 CLI 选择是**编辑器
+ * 本地状态**：只用来决定探测哪家登录态、向哪家枚举模型，不落盘。模型清单本身
+ * 落进 Provider.models（枚举结果替换 chat 模型行），与其他类型同一存储形状。
+ */
+function CliLoginSection({
+  onModels,
+}: {
+  /** 枚举成功后回填模型行（chat kind；grok 的 default 标记回填 defaultModel）。 */
+  readonly onModels: (models: readonly ModelRow[], defaultModel: string | undefined) => void;
+}): ReactElement {
+  const { t } = useTranslation();
+  const [runtime, setRuntime] = useState<CliLoginRuntimeWire>("codex");
+  const [probing, setProbing] = useState(false);
+  const [probe, setProbe] = useState<CliLoginProbeView | undefined>(undefined);
+  // 探测触发器：runtime 变化走缓存路径；点「刷新」置 force 强制重探
+  const [probeTick, setProbeTick] = useState({ force: false });
+  const [listing, setListing] = useState(false);
+  const [listError, setListError] = useState<string | undefined>(undefined);
+
+  // 选中 CLI 变化 / 手动刷新即探测（缓存新鲜时立即返回，不重复 spawn CLI）。
+  // cancelled 旗防竞态：切 runtime 后旧探测的迟到结果不得落到新选择上。
+  useEffect(() => {
+    let cancelled = false;
+    setProbing(true);
+    setProbe(undefined);
+    void loginProbeCache.probe(runtime, probeTick.force).then((result) => {
+      if (!cancelled) {
+        setProbe(result);
+        setProbing(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [runtime, probeTick]);
+
+  const listModels = useCallback(async () => {
+    setListing(true);
+    setListError(undefined);
+    const settled = await invokeQuery("providers:list-local-models", { runtime });
+    setListing(false);
+    if (settled.status === "error") {
+      setListError(settled.error.message);
+      return;
+    }
+    if (!settled.data.ok) {
+      setListError(
+        `${t(`settings.providers.cliLogin.listError.${settled.data.error}`)} — ${settled.data.detail}`,
+      );
+      return;
+    }
+    const rows: ModelRow[] = settled.data.models.map((m) => ({
+      id: m.id,
+      displayName: m.displayName,
+      kind: "chat" as const,
+    }));
+    const defaultId = settled.data.models.find((m) => m.isDefault)?.id;
+    onModels(rows, defaultId);
+  }, [runtime, onModels, t]);
+
+  const selectClass = cn(inputVariants({}), "cursor-pointer");
+  const canList = supportsLocalModelsWire(runtime);
+
+  return (
+    <div
+      className="flex flex-col gap-2 rounded-md border border-border bg-surface-sunken p-3"
+      data-testid="cli-login-section"
+    >
+      <div className="flex items-end gap-2">
+        <Field htmlFor="provider-cli-runtime" label={t("settings.providers.cliLogin.runtime")}>
+          <select
+            id="provider-cli-runtime"
+            className={cn(selectClass, "w-40")}
+            value={runtime}
+            onChange={(e) => {
+              setRuntime(e.target.value as CliLoginRuntimeWire);
+              // 切 CLI 回到缓存路径（上一次「刷新」的 force 不该跟到新选择上）
+              setProbeTick({ force: false });
+            }}
+          >
+            {CLI_LOGIN_RUNTIME_WIRES.map((rt) => (
+              <option key={rt} value={rt}>
+                {rt}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <div className="flex items-center gap-1.5 pb-1.5" data-testid="cli-login-status">
+          {probing ? (
+            <Badge tone="neutral">{t("settings.providers.cliLogin.probing")}</Badge>
+          ) : probe !== undefined ? (
+            <Badge tone={LOGIN_STATUS_TONE[probe.status]}>
+              {t(`settings.providers.cliLogin.status.${probe.status}`)}
+            </Badge>
+          ) : null}
+          <Button
+            variant="ghost"
+            size="sm"
+            iconOnly
+            disabled={probing}
+            aria-label={t("settings.providers.cliLogin.refresh")}
+            title={t("settings.providers.cliLogin.refresh")}
+            onClick={() => setProbeTick({ force: true })}
+          >
+            <RefreshCw aria-hidden size={14} />
+          </Button>
+        </div>
+      </div>
+      {probe !== undefined && !probing ? (
+        <span className="font-mono text-2xs text-fg-muted select-text">{probe.detail}</span>
+      ) : null}
+      <div className="flex items-center gap-2">
+        {canList ? (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => void listModels()}
+            loading={listing}
+            data-testid="cli-login-list-models"
+          >
+            {t("settings.providers.cliLogin.listModels")}
+          </Button>
+        ) : (
+          <span className="text-xs text-fg-subtle">
+            {t("settings.providers.cliLogin.noEnumeration")}
+          </span>
+        )}
+      </div>
+      {listError !== undefined ? (
+        <p className="text-xs text-danger-text select-text" data-testid="cli-login-list-error">
+          {listError}
+        </p>
+      ) : null}
+      <span className="text-2xs text-fg-subtle">{t("settings.providers.cliLogin.modelHint")}</span>
+    </div>
+  );
+}
 
 function buildProbeInput(form: ProviderFormState): ProbeProviderInput {
   const baseUrl = form.baseUrl.trim();
@@ -71,7 +242,8 @@ export function ProviderEditorDialog({
   const [apiKey, setApiKey] = useState("");
   const [maskedTail, setMaskedTail] = useState<string>("");
   const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | undefined>(undefined);
+  // 保存失败留结构化形态（T9.2 ①）：InlineIpcError 按 code 翻译，无 code 回退原文直出
+  const [saveError, setSaveError] = useState<IpcErrorInfo | undefined>(undefined);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<ConnectionTestResult | undefined>(undefined);
   const [fetchingModels, setFetchingModels] = useState(false);
@@ -171,7 +343,10 @@ export function ProviderEditorDialog({
       return;
     }
     if (!settled.data.ok) {
-      setModelsError(settled.data.rawError);
+      // T9.2 ①：补 stage 分类文案（与 test-connection 分支同款口径），原文跟在后面
+      setModelsError(
+        `${t(`settings.providers.probeStage.${settled.data.stage}`)} — ${settled.data.rawError}`,
+      );
       return;
     }
     patch({
@@ -181,7 +356,19 @@ export function ProviderEditorDialog({
         kind: m.kind,
       })),
     });
-  }, [form, patch, resolveKeyArgs, resolveProxyArg]);
+  }, [form, patch, resolveKeyArgs, resolveProxyArg, t]);
+
+  /** cli_login 枚举回填（T9.2 ③）：整表替换 chat 模型行 + 采纳 CLI 的默认模型标记。 */
+  const applyEnumeratedModels = useCallback(
+    (models: readonly ModelRow[], defaultModel: string | undefined) => {
+      setForm((prev) => ({
+        ...prev,
+        models: [...models],
+        ...(defaultModel !== undefined ? { defaultModel } : {}),
+      }));
+    },
+    [],
+  );
 
   const save = useCallback(async () => {
     setSaving(true);
@@ -203,7 +390,7 @@ export function ProviderEditorDialog({
           });
     setSaving(false);
     if (settled.status === "error") {
-      setSaveError(settled.error.message);
+      setSaveError(settled.error);
       return;
     }
     onSaved(settled.data);
@@ -322,6 +509,11 @@ export function ProviderEditorDialog({
             </Field>
           ) : null}
 
+          {/* cli_login：登录态 + 本地模型枚举（T9.2 ②③）。手填模型入口对该类型隐藏。 */}
+          {usesCliEnumeratedModels(form.type) ? (
+            <CliLoginSection onModels={applyEnumeratedModels} />
+          ) : null}
+
           {/* 模型列表 */}
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
@@ -337,14 +529,42 @@ export function ProviderEditorDialog({
                     {t("settings.providers.fetchModels")}
                   </Button>
                 ) : null}
-                <Button variant="ghost" size="sm" onClick={addModel}>
-                  <Plus aria-hidden size={14} />
-                  {t("settings.providers.addModel")}
-                </Button>
+                {!usesCliEnumeratedModels(form.type) ? (
+                  <Button variant="ghost" size="sm" onClick={addModel}>
+                    <Plus aria-hidden size={14} />
+                    {t("settings.providers.addModel")}
+                  </Button>
+                ) : null}
               </div>
             </div>
             {form.models.length === 0 ? (
-              <p className="text-xs text-fg-subtle">{t("settings.providers.field.modelsEmpty")}</p>
+              <p className="text-xs text-fg-subtle">
+                {usesCliEnumeratedModels(form.type)
+                  ? t("settings.providers.cliLogin.modelsEmpty")
+                  : t("settings.providers.field.modelsEmpty")}
+              </p>
+            ) : usesCliEnumeratedModels(form.type) ? (
+              // cli_login 的模型行只读呈现（来自枚举），只留移除；ID 不可手改
+              <div className="flex flex-col gap-1.5">
+                {form.models.map((row, index) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: 模型行无稳定 id（用户编辑中），索引即身份
+                  <div key={index} className="flex items-center gap-1.5">
+                    <span className="flex-1 truncate font-mono text-xs text-fg select-text">
+                      {row.id}
+                    </span>
+                    <span className="flex-1 truncate text-xs text-fg-muted">{row.displayName}</span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      iconOnly
+                      aria-label={t("settings.providers.removeModel")}
+                      onClick={() => removeModel(index)}
+                    >
+                      <Trash2 aria-hidden size={14} />
+                    </Button>
+                  </div>
+                ))}
+              </div>
             ) : (
               <div className="flex flex-col gap-1.5">
                 {form.models.map((row, index) => (
@@ -488,11 +708,7 @@ export function ProviderEditorDialog({
             </div>
           ) : null}
 
-          {saveError !== undefined ? (
-            <p className="font-mono text-xs text-danger-text select-text" role="alert">
-              {saveError}
-            </p>
-          ) : null}
+          {saveError !== undefined ? <InlineIpcError error={saveError} /> : null}
         </DialogBody>
         <DialogFooter>
           <Button variant="secondary" size="lg" onClick={() => onOpenChange(false)}>

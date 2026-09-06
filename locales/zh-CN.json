@@ -160,6 +160,42 @@
       "hint": "名称必须完全一致，否则确认按钮不可用。"
     }
   },
+  "errors": {
+    "technicalDetail": "技术详情",
+    "fieldNote": "{{field}}：{{reason}}",
+    "fieldOnly": "{{field}}",
+    "codes": {
+      "provider-validation": "Provider 配置未通过校验，请检查下列字段：",
+      "provider-not-found": "该 Provider 已不存在（可能刚被删除），请刷新列表。",
+      "provider-in-use": "该 Provider 正被某个 Profile 引用，先解除引用才能删除。",
+      "profile-not-found": "该 Profile 已不存在（可能刚被删除），请刷新列表。",
+      "ProfileValidationError": "Profile 配置未通过校验，请检查下列字段：",
+      "CustomRoleValidationError": "自定义角色未通过校验，请检查下列字段：",
+      "role-not-found": "该角色已不存在（可能刚被删除），请刷新列表。",
+      "role-in-use": "该角色正被某个 Profile 引用，先解除引用才能删除。"
+    },
+    "fields": {
+      "name": "名称",
+      "type": "类型",
+      "baseUrl": "API 地址",
+      "apiKeyRef": "API 密钥",
+      "models": "模型列表",
+      "defaultModel": "默认对话模型",
+      "embeddingModel": "默认嵌入模型",
+      "proxy": "代理",
+      "timeoutS": "超时（秒）",
+      "requestTemplate": "请求模板",
+      "providerId": "Provider",
+      "model": "模型",
+      "defaultRole": "默认角色",
+      "permissionPreset": "权限预设",
+      "outputLanguage": "输出语言",
+      "genericExec.command": "命令",
+      "genericExec.args": "参数模板",
+      "genericExec.taskDelivery": "任务投递方式",
+      "prompt": "提示词"
+    }
+  },
   "nav": {
     "primary": "主导航",
     "collapse": "收起侧栏",
@@ -322,6 +358,28 @@
         "http": "HTTP 错误",
         "invalid-response": "响应无法解析"
       },
+      "cliLogin": {
+        "runtime": "CLI",
+        "probing": "探测中…",
+        "refresh": "刷新登录状态",
+        "status": {
+          "logged_in": "已登录",
+          "logged_out": "未登录",
+          "cli_missing": "未安装",
+          "unknown": "未知"
+        },
+        "listModels": "读取本地模型",
+        "noEnumeration": "该 CLI 无本地模型枚举途径；模型留空即使用 CLI 默认模型。",
+        "modelsEmpty": "模型清单来自 CLI 枚举（不支持手填）。留空即使用 CLI 默认模型。",
+        "modelHint": "cli_login 类型的模型由 CLI 自管：清单只能经「读取本地模型」枚举，Profile 侧留空即用 CLI 默认模型。",
+        "listError": {
+          "unsupported": "该 CLI 不支持本地模型枚举",
+          "cli_missing": "PATH 中找不到该 CLI，请确认已安装",
+          "timeout": "枚举超时（CLI 无响应）",
+          "parse_error": "无法解析 CLI 的输出",
+          "cli_error": "CLI 执行失败"
+        }
+      },
       "edit": {
         "title": "编辑 Provider",
         "description": "修改来源配置；密钥留空表示不改动。"
@@ -397,6 +455,8 @@
         "selectProvider": "选择 Provider",
         "model": "模型",
         "modelDefault": "（用 Provider 默认）",
+        "modelCliDefault": "（用 CLI 默认模型）",
+        "modelCliDefaultHint": "留空使用 CLI 默认模型（派发时不传模型参数）。",
         "defaultRole": "默认角色",
         "outputLanguage": "输出语言",
         "outputFollowGlobal": "跟随全局",
@@ -627,6 +687,7 @@
       "apiKeyLabel": "API 密钥（由你亲手输入，模型看不到）",
       "apiKeyHint": "该 Provider 类型需要 API 密钥。请在此亲手输入——Agent 无法读取此输入框，密钥将加密存储。",
       "apiKeyPlaceholder": "输入 API 密钥",
+      "secretShapeWarning": "该草案的值疑似包含密钥，密钥不应经 AI 填写。请确认这不是真实密钥，或拒绝草案后在设置页亲手填写。",
       "field": {
         "name": "名称",
         "type": "类型",

@@ -316,3 +316,16 @@ supportsCommandEvents:     true   (退出码从 is_error/文本推断)
 supportsPermissionForward: true   (stdio control 协议)
 supportsCancel:            true   (interrupt 控制请求,硬杀兜底)
 ```
+
+## 10. 本地模型枚举(T9.2 调研,2026-09-06,Claude Code 2.1.220 真机)
+
+**结论:不支持。无任何本地模型枚举命令或稳定的本地目录文件。**
+
+- 2.1.220 全量 help 逐项核对:子命令仅 agents / auth / auto-mode / doctor / gateway /
+  install / mcp / plugin / project / setup-token / ultrareview / update,**无 models 类命令**。
+- `claude models` 实测:被当作 prompt 进入交互会话(挂起,须强杀)——不是错误退出,
+  消费端绝不能拿未知子命令去试探。
+- `--model` 帮助文本只给别名示例(`fable` / `opus` / `sonnet`)与全名格式
+  (`claude-fable-5`),模型清单在服务端,CLI 不落地本地目录文件。
+- 对 FF-pane 的含义:cli_login + claude-code 的 Provider 无从枚举,模型留空走 CLI
+  默认(订阅默认模型)是唯一稳妥形态;listLocalModels 能力声明 no。

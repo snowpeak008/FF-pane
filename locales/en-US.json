@@ -160,6 +160,42 @@
       "hint": "The name must match exactly, otherwise the confirm button stays disabled."
     }
   },
+  "errors": {
+    "technicalDetail": "Technical details",
+    "fieldNote": "{{field}}: {{reason}}",
+    "fieldOnly": "{{field}}",
+    "codes": {
+      "provider-validation": "The provider configuration failed validation. Please check the following fields:",
+      "provider-not-found": "This provider no longer exists (it may have just been deleted). Please refresh the list.",
+      "provider-in-use": "This provider is referenced by a profile. Remove the reference before deleting.",
+      "profile-not-found": "This profile no longer exists (it may have just been deleted). Please refresh the list.",
+      "ProfileValidationError": "The profile configuration failed validation. Please check the following fields:",
+      "CustomRoleValidationError": "The custom role failed validation. Please check the following fields:",
+      "role-not-found": "This role no longer exists (it may have just been deleted). Please refresh the list.",
+      "role-in-use": "This role is referenced by a profile. Remove the reference before deleting."
+    },
+    "fields": {
+      "name": "Name",
+      "type": "Type",
+      "baseUrl": "Base URL",
+      "apiKeyRef": "API key",
+      "models": "Models",
+      "defaultModel": "Default chat model",
+      "embeddingModel": "Default embedding model",
+      "proxy": "Proxy",
+      "timeoutS": "Timeout (s)",
+      "requestTemplate": "Request template",
+      "providerId": "Provider",
+      "model": "Model",
+      "defaultRole": "Default role",
+      "permissionPreset": "Permission preset",
+      "outputLanguage": "Output language",
+      "genericExec.command": "Command",
+      "genericExec.args": "Argument template",
+      "genericExec.taskDelivery": "Task delivery",
+      "prompt": "Prompt"
+    }
+  },
   "nav": {
     "primary": "Primary navigation",
     "collapse": "Collapse sidebar",
@@ -322,6 +358,28 @@
         "http": "HTTP error",
         "invalid-response": "Could not parse the response"
       },
+      "cliLogin": {
+        "runtime": "CLI",
+        "probing": "Probing…",
+        "refresh": "Refresh login status",
+        "status": {
+          "logged_in": "Logged in",
+          "logged_out": "Not logged in",
+          "cli_missing": "Not installed",
+          "unknown": "Unknown"
+        },
+        "listModels": "Read local models",
+        "noEnumeration": "This CLI has no local model enumeration. Leave the model empty to use the CLI default.",
+        "modelsEmpty": "The model list comes from CLI enumeration (manual entry is disabled). Leave empty to use the CLI default model.",
+        "modelHint": "cli_login models are managed by the CLI: the list can only be read via \"Read local models\", and leaving the profile model empty uses the CLI default.",
+        "listError": {
+          "unsupported": "This CLI does not support local model enumeration",
+          "cli_missing": "The CLI was not found on PATH. Please make sure it is installed",
+          "timeout": "Enumeration timed out (the CLI did not respond)",
+          "parse_error": "Could not parse the CLI output",
+          "cli_error": "The CLI command failed"
+        }
+      },
       "edit": {
         "title": "Edit provider",
         "description": "Update the source configuration; leave the key blank to keep it."
@@ -397,6 +455,8 @@
         "selectProvider": "Select a provider",
         "model": "Model",
         "modelDefault": "(use provider default)",
+        "modelCliDefault": "(use CLI default model)",
+        "modelCliDefaultHint": "Leave empty to use the CLI default model (no model argument is passed on dispatch).",
         "defaultRole": "Default role",
         "outputLanguage": "Output language",
         "outputFollowGlobal": "Follow global",
@@ -627,6 +687,7 @@
       "apiKeyLabel": "API key (entered by you, never seen by the model)",
       "apiKeyHint": "This provider type needs an API key. Type it here yourself — the agent cannot read this field, and the key is stored encrypted.",
       "apiKeyPlaceholder": "Enter the API key",
+      "secretShapeWarning": "A value in this draft looks like a secret key. Secrets should never be filled in by AI. Confirm only if it is not a real key, or reject the draft and enter the key yourself in Settings.",
       "field": {
         "name": "Name",
         "type": "Type",

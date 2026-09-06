@@ -187,8 +187,10 @@ export async function validateProfileDraft(
   if (provider === undefined) {
     violations.push({ field: "providerId", reason: `Provider 不存在：${draft.providerId}` });
   } else if (draft.model === undefined) {
-    // §4.4：Model 缺省 = 用 Provider 的 defaultModel，此时该默认必须已配置
-    if (provider.defaultModel === undefined) {
+    // §4.4：Model 缺省 = 用 Provider 的 defaultModel，此时该默认必须已配置。
+    // T9.2 ④ 例外：cli_login 类型缺省 = CLI 自身的默认模型（编排器不给 ctx.model、
+    // 适配器不传 -m 类参数，各家实测均支持无模型参数运行）——不要求 defaultModel。
+    if (provider.type !== "cli_login" && provider.defaultModel === undefined) {
       violations.push({
         field: "model",
         reason: `model 缺省表示使用 Provider 默认模型，但 Provider「${provider.name}」未配置 defaultModel`,
