@@ -87,6 +87,32 @@ export async function respondSessionPermission(params: {
   await invokeQuery("session:respond-permission", params);
 }
 
+/**
+ * 回执一份配置草案的裁决（T9.1）。**确认成功才清本地待裁决**：落盘可能失败
+ * （如密钥格式不被 Provider 校验接受），失败时对话框须留在原地给用户改，
+ * 拒绝则立即清（拒绝没有失败路径——写响应失败也不该让对话框复活）。
+ * 返回 ack 供对话框呈现失败原因。
+ */
+export async function respondConfigDraft(params: {
+  readonly turnId: string;
+  readonly draftId: string;
+  readonly decision: "confirm" | "reject";
+  readonly apiKey?: string;
+  readonly reason?: string;
+}): Promise<{ readonly ok: boolean; readonly message?: string }> {
+  const settled = await invokeQuery("session:respond-config-draft", params);
+  if (settled.status === "error") {
+    if (params.decision === "reject") {
+      useSessionStore.getState().clearPendingConfigDraft(params.turnId, params.draftId);
+    }
+    return { ok: false, message: settled.error.message };
+  }
+  if (settled.data.ok || params.decision === "reject") {
+    useSessionStore.getState().clearPendingConfigDraft(params.turnId, params.draftId);
+  }
+  return settled.data;
+}
+
 /** 取消在飞的一轮。 */
 export async function cancelSessionTurn(turnId: string): Promise<void> {
   await invokeQuery("session:cancel", { turnId });

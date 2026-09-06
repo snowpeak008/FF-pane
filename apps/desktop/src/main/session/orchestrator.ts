@@ -88,6 +88,7 @@ import type {
   AiOutputLanguageSettings,
   ApiKeyRef,
   CommandRecord,
+  ConfigToolCallRecord,
   CustomRole,
   CustomRoleId,
   FileChange,
@@ -118,6 +119,8 @@ import { isCustomRoleId } from "@ff-pane/shared";
 import type { ProjectLayout } from "@ff-pane/storage";
 import type {
   CancelSessionRequest,
+  ConfigDraftAck,
+  RespondConfigDraftRequest,
   RespondPermissionRequest,
   SessionActionAck,
   SessionStreamEvent,
@@ -170,6 +173,8 @@ export interface SessionOrchestrator {
   start(request: StartSessionRequest): Promise<StartSessionAck>;
   /** 回执一条上浮的权限请求。 */
   respondPermission(request: RespondPermissionRequest): Promise<SessionActionAck>;
+  /** 回执一份配置草案的用户裁决（T9.1；按 turnId 路由到该轮的草案中枢）。 */
+  respondConfigDraft(request: RespondConfigDraftRequest): Promise<ConfigDraftAck>;
   /** 取消在飞的一轮。 */
   cancel(request: CancelSessionRequest): Promise<SessionActionAck>;
   /** 在飞轮次数（诊断 / 测试）。 */
@@ -299,6 +304,15 @@ export interface SessionOrchestratorDeps {
   readonly prepareKnowledgeTool?: (
     layout: ProjectLayout,
   ) => Promise<KnowledgeToolBinding | undefined>;
+  /**
+   * 装配本轮的工作台自配置工具（T9.1，Phase 9）。缺省（未注入）或返回 undefined =
+   * 本轮不挂该工具（项目开关默认关闭时的路径，与 prepareKnowledgeTool 同款）。
+   * turnId 传入是因为草案确认事件要按轮路由（对话框回执经 respondConfigDraft 回到该轮）。
+   */
+  readonly prepareConfigTool?: (
+    layout: ProjectLayout,
+    turnId: string,
+  ) => Promise<ConfigToolBinding | undefined>;
 }
 
 /** 本轮知识库工具的绑定：注入用的服务端规格 + 收尾用的审计回读。 */
@@ -311,6 +325,24 @@ export interface KnowledgeToolBinding {
   readonly inheritUserMcpServers?: boolean;
   /** 读回本轮全部调用记录（一次没调用返回空数组）。 */
   readAudit(): Promise<readonly KnowledgeQueryRecord[]>;
+}
+
+/**
+ * 本轮自配置工具的绑定（T9.1）：服务端规格 + 草案裁决回执 + 收尾职责。
+ * 与 KnowledgeToolBinding 的差异是多了 respond / dispose——这是个**双向**工具
+ * （草案要等用户裁决），而知识库工具是单向只读。
+ */
+export interface ConfigToolBinding {
+  /** MCP 服务器注册名。 */
+  readonly serverName: string;
+  /** 服务端规格（交给适配器按 Runtime 注入）。 */
+  readonly spec: McpStdioServerSpec;
+  /** 渲染层回执一份草案的裁决（confirm 才落盘，铁律 2）。 */
+  respond(request: RespondConfigDraftRequest): Promise<ConfigDraftAck>;
+  /** 读回本轮全部调用记录（list + 草案，按时间升序；一次没调用返回空数组）。 */
+  readAudit(): Promise<readonly ConfigToolCallRecord[]>;
+  /** 轮次收尾：未决草案自动拒绝、停轮询、清理信箱目录。幂等、不抛。 */
+  dispose(): Promise<void>;
 }
 
 /**
@@ -376,6 +408,9 @@ interface WorkerContext {
 /** 本轮挂上的知识库工具（未挂时为 undefined）；收尾时据它回读审计。 */
 type KnowledgeContext = KnowledgeToolBinding;
 
+/** 本轮挂上的自配置工具（T9.1；未挂时为 undefined）；收尾时回读审计并 dispose。 */
+type ConfigToolContext = ConfigToolBinding;
+
 /** 计划生成轮（planner-plan）落库所需的上下文（普通 Planner 讨论轮为 undefined）。 */
 interface PlanTurnContext {
   readonly layout: ProjectLayout;
@@ -401,6 +436,7 @@ interface TurnContexts {
   readonly reviewCtx?: ReviewTurnContext;
   readonly sessionCtx: SessionContext;
   readonly knowledgeCtx?: KnowledgeContext;
+  readonly configToolCtx?: ConfigToolContext;
 }
 
 /**
@@ -606,6 +642,8 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
     }
     // 本轮是否已写入并行事实表（受理失败时 catch 里据此回滚，不误删他轮登记）。
     let parallelRegistered = false;
+    // 已装配的自配置工具中枢（受理失败时 catch 里 dispose，不留轮询孤儿）。
+    let configToolToCleanup: ConfigToolContext | undefined;
     try {
       const profile = await deps.loadProfile(request.profileId);
       if (profile === undefined) {
@@ -891,6 +929,21 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         console.warn(`[session] knowledge tool unavailable this turn: ${String(thrown)}`);
       }
 
+      // 工作台自配置工具（T9.1，Phase 9）：项目开关开启时才装配（同款默认关闭纪律）。
+      // 装配失败同样不拖垮整轮——工具是增强而非前提。
+      let configToolCtx: ConfigToolContext | undefined;
+      try {
+        configToolCtx = await deps.prepareConfigTool?.(layout, request.turnId);
+      } catch (thrown) {
+        console.warn(`[session] config tool unavailable this turn: ${String(thrown)}`);
+      }
+      configToolToCleanup = configToolCtx;
+
+      // 两个内置工具各按注册名合并进同一张 MCP 服务端表（注册名带产品前缀，不互撞）
+      const mcpServers: Record<string, McpStdioServerSpec> = {
+        ...(knowledgeCtx !== undefined ? { [knowledgeCtx.serverName]: knowledgeCtx.spec } : {}),
+        ...(configToolCtx !== undefined ? { [configToolCtx.serverName]: configToolCtx.spec } : {}),
+      };
       const turnCtx: AdapterTurnContext = {
         cwd: request.projectRoot,
         prompt,
@@ -898,10 +951,10 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         ...(Object.keys(configOverrides).length > 0 ? { configOverrides } : {}),
         ...(model !== undefined ? { model } : {}),
         ...(resumeBinding !== undefined ? { resume: resumeBinding } : {}),
-        ...(knowledgeCtx !== undefined
+        ...(Object.keys(mcpServers).length > 0
           ? {
-              mcpServers: { [knowledgeCtx.serverName]: knowledgeCtx.spec },
-              ...(knowledgeCtx.inheritUserMcpServers === true
+              mcpServers,
+              ...(knowledgeCtx?.inheritUserMcpServers === true
                 ? { inheritUserMcpServers: true }
                 : {}),
             }
@@ -954,6 +1007,7 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         ...(reviewCtx !== undefined ? { reviewCtx } : {}),
         sessionCtx,
         ...(knowledgeCtx !== undefined ? { knowledgeCtx } : {}),
+        ...(configToolCtx !== undefined ? { configToolCtx } : {}),
       };
       const turn: ActiveTurn = {
         guarded,
@@ -991,6 +1045,10 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
       if (parallelRegistered) {
         parallelTable = unregisterActiveTurn(parallelTable, request.turnId);
         turnProjects.delete(request.turnId);
+      }
+      // 已装配的草案中枢不留轮询孤儿（该轮从未起飞，dispose 幂等且不抛）
+      if (configToolToCleanup !== undefined) {
+        void configToolToCleanup.dispose().catch(() => undefined);
       }
       const message = thrown instanceof Error ? thrown.message : String(thrown);
       return { accepted: false, reason: message };
@@ -1229,7 +1287,7 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
       readonly verifyResult?: VerifyResult;
     },
   ): Promise<TurnEndSummary> {
-    const { workerCtx, planCtx, reviewCtx, knowledgeCtx } = ctx;
+    const { workerCtx, planCtx, reviewCtx, knowledgeCtx, configToolCtx } = ctx;
     // 知识库工具审计（T6.6）：轮末一次性回读 sidecar 写下的调用记录。
     // 未挂工具 = undefined（与"挂了但一次没调用"的空数组是两件事，见 Run.knowledgeQueries）。
     // 读取失败不该拖垮收尾：readKnowledgeAudit 自身已把失败归一为空数组，这里再兜一层。
@@ -1239,6 +1297,17 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
       if (knowledgeQueries.length > 0) {
         // 两个角色都推：Planner 轮没有 Run，这是它唯一的可见途径
         deps.publish({ turnId, kind: "knowledge-query", queries: knowledgeQueries });
+      }
+    }
+
+    // 自配置工具收尾（T9.1）：**先 dispose 再回读**——dispose 会把未决草案自动拒绝并
+    // 写下它们的审计行，先读后收会漏掉这批"轮次结束自动拒绝"的记录。缺省语义同上。
+    let configToolCalls: readonly ConfigToolCallRecord[] | undefined;
+    if (configToolCtx !== undefined) {
+      await configToolCtx.dispose().catch(() => undefined);
+      configToolCalls = await configToolCtx.readAudit().catch(() => []);
+      if (configToolCalls.length > 0) {
+        deps.publish({ turnId, kind: "config-tool-calls", calls: configToolCalls });
       }
     }
 
@@ -1308,6 +1377,7 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         ...(outcome.verifyResult !== undefined ? { verifyResult: outcome.verifyResult } : {}),
         ...(report.length > 0 ? { report } : {}),
         ...(knowledgeQueries !== undefined ? { knowledgeQueries } : {}),
+        ...(configToolCalls !== undefined ? { configToolCalls } : {}),
       });
       const changesDiff = evidence.fileChanges
         .map((change) => change.diff)
@@ -1357,7 +1427,12 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
   async function settleInterrupted(turnId: string, turn: ActiveTurn): Promise<void> {
     // 与 finalize 同点释放并行事实：本轮已被退出钩子接手，不再占可写范围
     releaseParallelFacts(turnId);
-    const { workerCtx, reviewCtx } = turn.ctx;
+    const { workerCtx, reviewCtx, configToolCtx } = turn.ctx;
+    // 自配置工具的未决草案在退出前也要收场（自动拒绝并写审计）——sidecar 进程
+    // 即将随子进程树消亡，不收场就是永久悬而未决。失败只记日志，不阻塞退出。
+    if (configToolCtx !== undefined) {
+      await configToolCtx.dispose().catch(() => undefined);
+    }
     let summary: TurnEndSummary = { endReason: "interrupted" };
     if (reviewCtx !== undefined) {
       summary = {
@@ -1464,6 +1539,16 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
     return { ok: true };
   }
 
+  /** 配置草案裁决回执（T9.1）：按 turnId 路由到该轮的草案中枢。 */
+  async function respondConfigDraft(request: RespondConfigDraftRequest): Promise<ConfigDraftAck> {
+    const turn = active.get(request.turnId);
+    const hub = turn?.ctx.configToolCtx;
+    if (hub === undefined) {
+      return { ok: false, message: "该轮次已结束或未挂配置工具" };
+    }
+    return hub.respond(request);
+  }
+
   async function cancel(request: CancelSessionRequest): Promise<SessionActionAck> {
     const turn = active.get(request.turnId);
     if (turn === undefined) {
@@ -1479,6 +1564,7 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
   return {
     start,
     respondPermission,
+    respondConfigDraft,
     cancel,
     activeCount: () => active.size,
     hasActiveTurn: (turnId) => active.has(turnId),

@@ -13,17 +13,28 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { detectHabitConflicts, observeCorrection } from "@ff-pane/core";
+import {
+  detectHabitConflicts,
+  observeCorrection,
+  ProfileValidationError,
+  validateProfileDraft,
+} from "@ff-pane/core";
 import type {
+  ApiKeyRef,
+  ConfigToolCallRecord,
   HabitEntry,
   HabitEntryId,
   LocalSessionId,
   Plan,
   PlanVersion,
+  ProfileId,
+  Provider,
   RunId,
 } from "@ff-pane/shared";
+import { DEFAULT_CONFIG_TOOL_SERVER_NAME } from "@ff-pane/shared";
 import {
   appendTranscriptEntry,
   createConfigStore,
@@ -53,15 +64,24 @@ import {
   savePlan,
   saveRun,
   saveTask,
+  validateProviderDraft,
   writeInflightMarker,
   writeInflightPartial,
   writeRunChangesDiff,
   writeRunRawLog,
 } from "@ff-pane/storage";
+import { PRESET_FROM_GLOBAL_DEFAULT } from "../../mcp/config-tool";
 import { DEFAULT_TRANSCRIPT_LIMIT } from "../../shared-ipc/contracts";
 import { type InvokeHandlers, publishEvent, type WebContentsLike } from "../../shared-ipc/server";
 import { resolveGlobalRoot } from "../data-root";
 import { createSafeStorageBackend, createSecretStore, resolveSecretsFile } from "../secrets";
+import { createConfigDraftHub, type PrepareDraftResult } from "./config-draft-hub";
+import {
+  CONFIG_MAILBOX_ROOT_NAME,
+  createConfigMailbox,
+  readConfigAudit,
+  resolveConfigMcpServer,
+} from "./config-tool";
 import {
   createKnowledgeAuditPath,
   readKnowledgeAudit,
@@ -71,6 +91,8 @@ import { createSessionOrchestrator, type SessionOrchestrator } from "./orchestra
 import { createDesktopAdapterRegistry, type DesktopAdapterRegistry } from "./registry";
 import { createProjectRepairer, type ProjectRepairer, type RepairDeps } from "./repair";
 
+export * from "./config-draft-hub";
+export * from "./config-tool";
 export * from "./env";
 export * from "./event-map";
 export * from "./interrupted";
@@ -87,6 +109,7 @@ const moduleDir = dirname(fileURLToPath(import.meta.url));
 type SessionChannel =
   | "session:start"
   | "session:respond-permission"
+  | "session:respond-config-draft"
   | "session:cancel"
   | "sessions:latest"
   | "sessions:transcript"
@@ -302,6 +325,171 @@ export async function createSessionLayer(getWindow: SessionWindowGetter): Promis
         await writeRunChangesDiff(projectLayout, run.id, changesDiff);
       }
     },
+    // 工作台自配置工具（T9.1，Phase 9）：项目开关默认关闭（照 T6.6 同款纪律），
+    // 关着连 MCP 配置都不生成。开着则装配 sidecar 规格 + 信箱 + 草案中枢。
+    prepareConfigTool: async (projectLayout, turnId) => {
+      const settings = await createProjectSettingsStore(projectLayout.projectFile).readSettings();
+      if (!settings.configToolEnabled) {
+        return undefined;
+      }
+      const mailbox = await createConfigMailbox(join(layout.rootDir, CONFIG_MAILBOX_ROOT_NAME));
+      const spec = resolveConfigMcpServer({
+        moduleDir,
+        mailbox,
+        providersFile: layout.providersFile,
+        profilesFile: layout.profilesFile,
+      });
+
+      /** 该 Provider 类型是否需要 API key（§4.2：openai_compatible / anthropic）。 */
+      const typeNeedsKey = (type: Provider["type"]): boolean =>
+        type === "openai_compatible" || type === "anthropic";
+
+      /**
+       * 校验用的密钥引用占位：草案物理无 key 字段（铁律 1），而 §4.2 的领域校验要求
+       * 这两类 Provider 必有 apiKeyRef。key 由用户在确认对话框的安全输入框亲手补填
+       * （apply 时经 storeSecret 换真引用），故校验阶段以哨兵放行「key 缺席」这一项、
+       * 其余领域规则照常执行。哨兵永不落盘——apply 从不消费它。
+       */
+      const PENDING_KEY_REF = "pending-user-input" as ApiKeyRef;
+
+      const hub = createConfigDraftHub({
+        turnId,
+        requestsDir: mailbox.requestsDir,
+        responsesDir: mailbox.responsesDir,
+        auditPath: mailbox.auditPath,
+        publish: (event) => {
+          const window = getWindow();
+          if (window !== null) {
+            publishEvent(window.webContents, "session:event", event);
+          }
+        },
+        prepare: async (parsed): Promise<PrepareDraftResult> => {
+          if (parsed.kind === "provider") {
+            const existing =
+              parsed.id !== undefined
+                ? await providers.getProvider(parsed.id as Provider["id"])
+                : undefined;
+            if (parsed.id !== undefined && existing === undefined) {
+              return { ok: false, error: `Provider not found: ${parsed.id}` };
+            }
+            const keyRef = existing?.apiKeyRef ?? PENDING_KEY_REF;
+            try {
+              // 复用既有领域校验（storage validateProviderDraft，不另写一套）
+              validateProviderDraft({
+                ...parsed.draft,
+                ...(typeNeedsKey(parsed.draft.type) ? { apiKeyRef: keyRef } : {}),
+              });
+            } catch (thrown) {
+              return {
+                ok: false,
+                error: thrown instanceof Error ? thrown.message : String(thrown),
+              };
+            }
+            return {
+              ok: true,
+              normalized: parsed,
+              // 已有密钥引用的更新不再要求补填（换 key 走设置页）
+              needsApiKey: typeNeedsKey(parsed.draft.type) && existing?.apiKeyRef === undefined,
+            };
+          }
+          // Profile 草案：预设哨兵（缺省）替换为全局默认，再走 core 校验
+          if (parsed.id !== undefined) {
+            const existing = await profiles.getProfile(parsed.id as ProfileId);
+            if (existing === undefined) {
+              return { ok: false, error: `Profile not found: ${parsed.id}` };
+            }
+          }
+          const globalConfig = await config.readConfig();
+          const draft =
+            parsed.draft.permissionPreset === PRESET_FROM_GLOBAL_DEFAULT
+              ? { ...parsed.draft, permissionPreset: globalConfig.defaultPermissionPreset }
+              : parsed.draft;
+          const result = await validateProfileDraft(draft, {
+            getProvider: (id) => providers.getProvider(id),
+            getCustomRole: (id) => roles.getRole(id),
+          });
+          if (!result.ok) {
+            return { ok: false, error: new ProfileValidationError(result.violations).message };
+          }
+          return {
+            ok: true,
+            normalized: {
+              kind: "profile",
+              ...(parsed.id !== undefined ? { id: parsed.id } : {}),
+              draft,
+            },
+            needsApiKey: false,
+          };
+        },
+        apply: async (parsed, apiKey) => {
+          if (parsed.kind === "provider") {
+            // 密钥经既有 safeStorage 通道（照 data.ts providers:create/update 款式）：
+            // 明文只在此一瞬存在，加密落库后草稿只带引用
+            if (parsed.id === undefined) {
+              const draft =
+                apiKey !== undefined && apiKey.length > 0
+                  ? { ...parsed.draft, apiKeyRef: await secrets.storeSecret(apiKey) }
+                  : parsed.draft;
+              const created = await providers.createProvider(draft);
+              return created.id;
+            }
+            const providerId = parsed.id as Provider["id"];
+            const existing = await providers.getProvider(providerId);
+            const oldRef = existing?.apiKeyRef;
+            const nextRef =
+              apiKey !== undefined && apiKey.length > 0
+                ? await secrets.storeSecret(apiKey)
+                : oldRef;
+            const updated = await providers.updateProvider(providerId, {
+              ...parsed.draft,
+              ...(nextRef !== undefined ? { apiKeyRef: nextRef } : {}),
+            });
+            if (oldRef !== undefined && oldRef !== nextRef) {
+              await secrets.deleteSecret(oldRef);
+            }
+            return updated.id;
+          }
+          const validate = async (draft: Parameters<typeof validateProfileDraft>[0]) => {
+            const result = await validateProfileDraft(draft, {
+              getProvider: (id) => providers.getProvider(id),
+              getCustomRole: (id) => roles.getRole(id),
+            });
+            if (!result.ok) {
+              throw new ProfileValidationError(result.violations);
+            }
+          };
+          if (parsed.id === undefined) {
+            const created = await profiles.createProfile(parsed.draft, validate);
+            return created.id;
+          }
+          const updated = await profiles.updateProfile(
+            parsed.id as ProfileId,
+            parsed.draft,
+            validate,
+          );
+          return updated.id;
+        },
+        now: () => Date.now(),
+        log: (message) => console.warn(`[session] ${message}`),
+      });
+      hub.start();
+
+      // dispose 会连信箱目录一起清，而编排器收尾的顺序是 dispose →readAudit
+      // （先收场未决草案，其审计行才齐全）——故 dispose 在删目录前把审计读进内存缓存。
+      let cachedAudit: readonly ConfigToolCallRecord[] | undefined;
+      return {
+        serverName: DEFAULT_CONFIG_TOOL_SERVER_NAME,
+        spec,
+        respond: (request) => hub.respond(request),
+        readAudit: async () => cachedAudit ?? readConfigAudit(mailbox.auditPath),
+        dispose: async () => {
+          await hub.dispose();
+          cachedAudit = await readConfigAudit(mailbox.auditPath).catch(() => []);
+          // 信箱是本轮的临时通道，审计已缓存，目录用完即清
+          await rm(mailbox.mailboxDir, { recursive: true, force: true }).catch(() => undefined);
+        },
+      };
+    },
     // Agent 只读知识库检索工具（T6.6，§8.3.5 路径二）：项目开关默认关闭，
     // 关着就返回 undefined —— 本轮连 MCP 配置都不生成，Agent 侧完全看不到这个工具。
     prepareKnowledgeTool: async (projectLayout) => {
@@ -357,6 +545,7 @@ export async function createSessionLayer(getWindow: SessionWindowGetter): Promis
       return orchestrator.start(request);
     },
     "session:respond-permission": (request) => orchestrator.respondPermission(request),
+    "session:respond-config-draft": (request) => orchestrator.respondConfigDraft(request),
     "session:cancel": (request) => orchestrator.cancel(request),
     "sessions:latest": async (request) => {
       const projectLayout = await touchProject(request.projectRoot);

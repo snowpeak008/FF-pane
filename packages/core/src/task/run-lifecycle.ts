@@ -13,6 +13,7 @@
 
 import type {
   CommandRecord,
+  ConfigToolCallRecord,
   EpochMillis,
   FileChange,
   KnowledgeQueryRecord,
@@ -88,6 +89,11 @@ export interface EndRunParams {
    * 缺省 = 本轮没挂这个工具；空数组 = 挂了但一次没调用（两者在界面上是两种文案）。
    */
   readonly knowledgeQueries?: readonly KnowledgeQueryRecord[];
+  /**
+   * 本轮 Agent 对工作台自配置工具的全部调用（T9.1，Phase 9）。
+   * 缺省 / 空数组语义同 knowledgeQueries。
+   */
+  readonly configToolCalls?: readonly ConfigToolCallRecord[];
 }
 
 /**
@@ -109,6 +115,7 @@ export function endRun(run: Run, params: EndRunParams): EndedRun {
     ...(params.verifyResult !== undefined ? { verifyResult: params.verifyResult } : {}),
     ...(params.report !== undefined ? { report: params.report } : {}),
     ...(params.knowledgeQueries !== undefined ? { knowledgeQueries: params.knowledgeQueries } : {}),
+    ...(params.configToolCalls !== undefined ? { configToolCalls: params.configToolCalls } : {}),
   };
 }
 

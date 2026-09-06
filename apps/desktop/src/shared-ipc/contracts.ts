@@ -22,6 +22,7 @@ import type {
 import type {
   AgentProfile,
   ApiKeyRef,
+  ConfigToolCallRecord,
   CustomRole,
   CustomRoleId,
   GlobalConfig,
@@ -70,6 +71,57 @@ export interface ProjectScopedRequest {
  * 避免契约（renderer + main 共享）依赖 node-only 的 @ff-pane/storage。
  */
 export type ProviderDraftWire = Omit<Provider, "id">;
+
+/**
+ * T9.1 —— Agent 起草的 Provider 草案（工作台自配置工具）：**类型层面就没有 apiKeyRef**。
+ * 与 mcp/config-tool.ts 的 ConfigProviderDraft 同构（结构化类型互通）；契约再派生一份
+ * 是因为渲染层（确认对话框）也要消费这个形状，而它不该 import sidecar 模块。
+ */
+export type ConfigProviderDraftWire = Omit<Provider, "id" | "apiKeyRef">;
+
+/** T9.1 —— Agent 起草的 Profile 草案（Profile 本就无密钥字段）。 */
+export type ConfigProfileDraftWire = Omit<AgentProfile, "id">;
+
+/**
+ * T9.1 —— 推给渲染层确认对话框的一份配置草案（已过领域校验；校验失败的草案
+ * 根本不会到达这里，而是原样回给 Agent）。**物理不含任何密钥字段**（铁律 1）。
+ */
+export type ConfigDraftPayload =
+  | {
+      readonly kind: "provider";
+      /** 更新目标（带 = 更新既有条目；缺省 = 新建）。 */
+      readonly targetId?: ProviderId;
+      readonly draft: ConfigProviderDraftWire;
+    }
+  | {
+      readonly kind: "profile";
+      readonly targetId?: ProfileId;
+      readonly draft: ConfigProfileDraftWire;
+    };
+
+/**
+ * session:respond-config-draft 请求：用户对一份配置草案的裁决（T9.1 铁律 2 的回程）。
+ *
+ * apiKey 是**用户亲手在安全输入框里敲的明文**（铁律 1 的补填通道）：与 providers:create
+ * 同款语义——只在此一瞬经 IPC 交主进程加密落库，模型从头到尾不知道它存在。
+ * 仅 Provider 草案且类型需要密钥时对话框才展示该输入框。
+ */
+export interface RespondConfigDraftRequest {
+  readonly turnId: string;
+  /** 草案 ID（config-draft 事件带来的那个）。 */
+  readonly draftId: string;
+  readonly decision: "confirm" | "reject";
+  /** 确认时随手补填的明文密钥（主进程 storeSecret 后把引用并进草稿）。 */
+  readonly apiKey?: string;
+  /** 拒绝原因（原样回给 Agent，供其调整草案）。 */
+  readonly reason?: string;
+}
+
+/** session:respond-config-draft 应答：ok=false 时给出人可读的失败原因（如落盘校验失败）。 */
+export interface ConfigDraftAck {
+  readonly ok: boolean;
+  readonly message?: string;
+}
 
 /** 应用元信息（app:get-info 响应）。 */
 export interface AppInfo {
@@ -144,6 +196,8 @@ export interface RestoreProjectRequest {
 export interface ProjectSettingsView {
   /** 设计文档 §8.3.5 —— Agent 只读知识库检索工具开关（缺省关闭）。 */
   readonly knowledgeToolEnabled: boolean;
+  /** T9.1 —— 工作台自配置工具开关（缺省关闭，照 T6.6 纪律）。 */
+  readonly configToolEnabled: boolean;
   /** 设计文档 §3.1 —— Reviewer 角色开关（T7.2，缺省关闭）。 */
   readonly reviewerEnabled: boolean;
   /** 设计文档 §3.1 —— Reviewer 绑定的 Profile（T7.2；未绑定时缺省）。 */
@@ -898,6 +952,44 @@ export type SessionStreamEvent =
     }
   | {
       /**
+       * Agent 提交了一份配置草案，等用户裁决（T9.1 铁律 2）。**实时推送**而非轮末：
+       * sidecar 正拿着这份草案阻塞等待，用户不裁决 Agent 就停在那里——与权限请求
+       * 同一交互时效。payload 已过领域校验（校验失败的草案不进用户视野）。
+       */
+      readonly turnId: string;
+      readonly kind: "config-draft";
+      /** 草案 ID（回执 session:respond-config-draft 时带回）。 */
+      readonly draftId: string;
+      /** 人可读摘要（对话框标题行，如 `create provider "DeepSeek"`）。 */
+      readonly summary: string;
+      readonly payload: ConfigDraftPayload;
+      /**
+       * 确认后是否需要引导补填密钥（Provider 草案且类型需要 key）。
+       * 由主进程按类型判定——渲染层不该自带一份「哪些类型要 key」的知识。
+       */
+      readonly needsApiKey: boolean;
+    }
+  | {
+      /**
+       * 一份配置草案已了结（T9.1）：用户裁决之外的收场（超时 / 轮次结束自动拒绝）
+       * 也要让对话框关掉，否则用户面对的是一个回执必然失败的僵尸对话框。
+       * 用户自己点了确认/拒绝时渲染层已就地清除，本事件幂等无害。
+       */
+      readonly turnId: string;
+      readonly kind: "config-draft-resolved";
+      readonly draftId: string;
+    }
+  | {
+      /**
+       * Agent 对工作台自配置工具的全部调用（T9.1，轮次收尾时一次性推出，
+       * 照 knowledge-query 款式）：Planner 轮没有 Run，本事件是其唯一可见途径。
+       */
+      readonly turnId: string;
+      readonly kind: "config-tool-calls";
+      readonly calls: readonly ConfigToolCallRecord[];
+    }
+  | {
+      /**
        * Agent 调用了只读知识库检索工具（T6.6，§8.3.5 路径二）。
        *
        * **在轮次收尾时一次性推出全部调用，而不是逐次实时推**：调用记录由 sidecar
@@ -1106,6 +1198,8 @@ export interface IpcInvokeContracts {
   "session:start": { request: StartSessionRequest; response: StartSessionAck };
   /** 回执一条上浮的权限请求（§7）。 */
   "session:respond-permission": { request: RespondPermissionRequest; response: SessionActionAck };
+  /** 回执一份配置草案的用户裁决（T9.1 铁律 2：确认才落盘；可随手补填密钥）。 */
+  "session:respond-config-draft": { request: RespondConfigDraftRequest; response: ConfigDraftAck };
   /** 取消在飞的一轮。 */
   "session:cancel": { request: CancelSessionRequest; response: SessionActionAck };
   /** 仅冒烟模式注册：请求主进程向本窗口推送一条 smoke:event。 */
@@ -1215,6 +1309,7 @@ export const INVOKE_CHANNELS = [
   "knowledge:export",
   "session:start",
   "session:respond-permission",
+  "session:respond-config-draft",
   "session:cancel",
   "smoke:emit-event",
   "smoke:report",

@@ -143,6 +143,8 @@
     "cancel": "取消",
     "confirm": "确认",
     "close": "关闭",
+    "yes": "是",
+    "no": "否",
     "retry": "重试",
     "copy": "复制",
     "copied": "已复制",
@@ -458,6 +460,16 @@
       "saved": "已保存",
       "error": "保存失败"
     },
+    "configTool": {
+      "title": "工作台自配置工具",
+      "subtitle": "允许 Agent 查看 Provider / Profile（脱敏视图）并提交配置草案。任何写入都必须经你确认才会保存。",
+      "safetyNote": "API 密钥永不经过模型：工具的输入里物理上没有密钥字段。确认一份需要密钥的草案后，由你亲手在安全输入框里补填。",
+      "label": "对当前项目启用",
+      "hint": "仅作用于项目「{{project}}」。默认关闭；关闭时该工具根本不会注册给 Agent。",
+      "enabledNote": "已启用：每次写入都要经过草案校验与你的确认对话框，全部调用会记入执行记录。",
+      "needProject": "请先选择一个项目——此开关按项目生效。",
+      "saveError": "开关保存失败"
+    },
     "roles": {
       "title": "自定义角色",
       "subtitle": "内置规划者/执行者/审查者之外的角色：名称 + 角色提示词 + 权限预设。",
@@ -551,6 +563,19 @@
       "duration": "{{ms}} ms",
       "failed": "调用失败：{{reason}}"
     },
+    "configTool": {
+      "title": "工作台自配置",
+      "enabledUnused": "本轮启用了自配置工具，但 Agent 一次也没有调用。",
+      "duration": "{{ms}} ms",
+      "outcome": {
+        "ok": "只读查询",
+        "confirmed": "已确认并保存",
+        "rejected": "被你拒绝",
+        "timeout": "超时未裁决",
+        "invalid": "校验未通过",
+        "error": "出错"
+      }
+    },
     "review": {
       "title": "审查结论",
       "by": "审查者 Profile：{{profile}}",
@@ -589,6 +614,38 @@
     "permissionTitle": "权限请求",
     "permissionAllow": "允许",
     "permissionDeny": "拒绝",
+    "configDraft": {
+      "titleCreate": "Agent 请求新建{{kind}}",
+      "titleUpdate": "Agent 请求更新{{kind}}",
+      "kindProvider": " Provider",
+      "kindProfile": " Profile",
+      "description": "未经你确认不会保存任何内容。拒绝会把草案连同你的理由退回给 Agent。",
+      "confirm": "确认并保存",
+      "reject": "拒绝",
+      "confirmed": "配置已保存",
+      "applyFailed": "草案保存失败",
+      "apiKeyLabel": "API 密钥（由你亲手输入，模型看不到）",
+      "apiKeyHint": "该 Provider 类型需要 API 密钥。请在此亲手输入——Agent 无法读取此输入框，密钥将加密存储。",
+      "apiKeyPlaceholder": "输入 API 密钥",
+      "field": {
+        "name": "名称",
+        "type": "类型",
+        "baseUrl": "API 地址",
+        "models": "模型列表",
+        "defaultModel": "默认模型",
+        "embeddingModel": "嵌入模型",
+        "proxy": "代理",
+        "timeoutS": "超时（秒）",
+        "enabled": "是否启用",
+        "runtime": "Runtime",
+        "providerId": "Provider",
+        "model": "模型",
+        "defaultRole": "默认角色",
+        "permissionPreset": "权限预设",
+        "outputLanguage": "输出语言",
+        "genericExec": "命令配置"
+      }
+    },
     "turnStatus": {
       "idle": "空闲",
       "running": "执行中",

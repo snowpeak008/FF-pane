@@ -9,6 +9,7 @@ import { useInvokeQuery } from "./ipc/useInvokeQuery";
 import { AppLayout } from "./layout/AppLayout";
 import { navItemById } from "./layout/nav";
 import { AppRoutes } from "./pages/AppRoutes";
+import { ConfigDraftDialog } from "./pages/session/ConfigDraftDialog";
 import { HabitSuggestionBridge } from "./pages/session/HabitSuggestionBridge";
 import { SessionEventBridge } from "./pages/session/SessionEventBridge";
 import { useUiStore } from "./stores/ui";
@@ -101,6 +102,8 @@ export function App(): ReactElement {
         <SessionEventBridge />
         {/* 系统观察建议全局桥（T5.4 来源三）：唯一订阅 habits:suggestion，提示 observed 候选。 */}
         <HabitSuggestionBridge />
+        {/* 配置草案确认对话框（T9.1 铁律 2）：全局模态，用户在任何页面都能裁决。 */}
+        <ConfigDraftDialog />
         <AppToaster />
       </TooltipProvider>
     </HashRouter>

@@ -64,4 +64,8 @@ describe("IPC 通道契约", () => {
   it("T8.7 记忆混合检索通道已登记到运行时清单（preload 据此放行）", () => {
     expect(INVOKE_CHANNELS).toContain("memory:search");
   });
+
+  it("T9.1 配置草案裁决通道已登记到运行时清单（preload 据此放行）", () => {
+    expect(INVOKE_CHANNELS).toContain("session:respond-config-draft");
+  });
 });

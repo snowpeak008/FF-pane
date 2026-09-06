@@ -34,7 +34,7 @@ import type {
   SessionResumeKind,
 } from "@ff-pane/shared";
 import { create } from "zustand";
-import type { SessionStreamEvent } from "../../../shared-ipc/contracts";
+import type { ConfigDraftPayload, SessionStreamEvent } from "../../../shared-ipc/contracts";
 
 /** 右侧可折叠栏的标签（§11.2：当前计划概要 + 进行中任务）。 */
 export type SessionSidePanelTab = "plan" | "tasks";
@@ -49,6 +49,16 @@ export interface PendingPermission {
   readonly summary: string;
   readonly detail?: string;
   readonly diff?: string;
+}
+
+/** 等待用户裁决的配置草案（T9.1 铁律 2），由确认对话框呈现。 */
+export interface PendingConfigDraft {
+  readonly turnId: string;
+  readonly draftId: string;
+  readonly summary: string;
+  readonly payload: ConfigDraftPayload;
+  /** 确认后是否引导补填密钥（主进程按 Provider 类型判定）。 */
+  readonly needsApiKey: boolean;
 }
 
 /**
@@ -67,6 +77,11 @@ export interface ActiveTurnView {
   readonly text: string;
   /** 该轮上浮且未回执的权限请求（null = 无；awaiting 态由此派生）。 */
   readonly pendingPermission: PendingPermission | null;
+  /**
+   * 该轮等待用户裁决的配置草案（T9.1；null = 无）。至多一份：sidecar 串行处理工具
+   * 调用，前一份未了结时 Agent 拿不到结果、发不出下一份。
+   */
+  readonly pendingConfigDraft: PendingConfigDraft | null;
 }
 
 /** 轮结束标记：供任务页等据此刷新（endedTurnSeq 单调递增触发 effect）。 */
@@ -165,6 +180,8 @@ export interface SessionUiActions {
   readonly ingestSessionEvent: (event: SessionStreamEvent) => void;
   /** 回执某轮的权限请求后清空其待批准（按 turnId 路由，T8.3b）。 */
   readonly clearPendingPermission: (turnId: string) => void;
+  /** 回执 / 了结某轮的配置草案后清空其待裁决（T9.1，幂等）。 */
+  readonly clearPendingConfigDraft: (turnId: string, draftId: string) => void;
   /** 切换会话时清空全部会话级 UI 状态。 */
   readonly resetSessionUi: () => void;
   /**
@@ -243,6 +260,22 @@ export function pendingPermissionsOf(
   for (const turn of turns.values()) {
     if (turn.pendingPermission !== null) {
       out.push(turn.pendingPermission);
+    }
+  }
+  return out;
+}
+
+/**
+ * 全部在飞轮的待裁决配置草案（T9.1，跨会话，开始序）：与权限请求同款口径——
+ * 并发的 Worker 轮在别的会话里提了草案时，用户当前正看着的页面是唯一裁决入口。
+ */
+export function pendingConfigDraftsOf(
+  turns: ReadonlyMap<string, ActiveTurnView>,
+): readonly PendingConfigDraft[] {
+  const out: PendingConfigDraft[] = [];
+  for (const turn of turns.values()) {
+    if (turn.pendingConfigDraft !== null) {
+      out.push(turn.pendingConfigDraft);
     }
   }
   return out;
@@ -361,6 +394,7 @@ export const useSessionStore = create<SessionStore>()((set) => ({
         resumeKind: null,
         text: "",
         pendingPermission: null,
+        pendingConfigDraft: null,
       }),
       lastActivity: null,
       ...(userText !== undefined && userText.length > 0
@@ -392,6 +426,7 @@ export const useSessionStore = create<SessionStore>()((set) => ({
             resumeKind: event.resumeKind ?? null,
             text: known?.text ?? "",
             pendingPermission: null,
+            pendingConfigDraft: null,
           }),
           activeSessionId: event.sessionId,
         };
@@ -429,6 +464,27 @@ export const useSessionStore = create<SessionStore>()((set) => ({
               },
             }),
           };
+        case "config-draft":
+          // T9.1：草案已过领域校验，等用户裁决（确认对话框据此渲染）
+          return {
+            activeTurns: withTurn(state.activeTurns, {
+              ...turn,
+              pendingConfigDraft: {
+                turnId: event.turnId,
+                draftId: event.draftId,
+                summary: event.summary,
+                payload: event.payload,
+                needsApiKey: event.needsApiKey,
+              },
+            }),
+          };
+        case "config-draft-resolved":
+          // 超时 / 轮次结束自动拒绝的收场：关掉对应对话框（用户已裁决时幂等）
+          return turn.pendingConfigDraft?.draftId === event.draftId
+            ? {
+                activeTurns: withTurn(state.activeTurns, { ...turn, pendingConfigDraft: null }),
+              }
+            : state;
         case "end":
           return {
             activeTurns: withoutTurn(state.activeTurns, event.turnId),
@@ -465,6 +521,15 @@ export const useSessionStore = create<SessionStore>()((set) => ({
         return state;
       }
       return { activeTurns: withTurn(state.activeTurns, { ...turn, pendingPermission: null }) };
+    });
+  },
+  clearPendingConfigDraft: (turnId, draftId) => {
+    set((state) => {
+      const turn = state.activeTurns.get(turnId);
+      if (turn === undefined || turn.pendingConfigDraft?.draftId !== draftId) {
+        return state;
+      }
+      return { activeTurns: withTurn(state.activeTurns, { ...turn, pendingConfigDraft: null }) };
     });
   },
   resetSessionUi: () => {

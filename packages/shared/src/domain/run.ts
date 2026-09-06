@@ -123,6 +123,48 @@ export interface KnowledgeQueryRecord {
   readonly error?: string;
 }
 
+/**
+ * T9.1（Phase 9）—— 工作台自配置工具一次调用的最终去向。
+ * 判别的是「这次调用发生了什么」：只读工具只会 ok / error；
+ * 草案工具经 invalid（校验失败回给 Agent）或用户裁决三态（confirmed / rejected / timeout）。
+ */
+export const CONFIG_TOOL_OUTCOMES = [
+  "ok",
+  "invalid",
+  "confirmed",
+  "rejected",
+  "timeout",
+  "error",
+] as const;
+
+/** T9.1 —— 自配置工具调用去向。 */
+export type ConfigToolOutcome = (typeof CONFIG_TOOL_OUTCOMES)[number];
+
+/** ConfigToolOutcome 运行时守卫。 */
+export const isConfigToolOutcome = createLiteralGuard(CONFIG_TOOL_OUTCOMES);
+
+/**
+ * T9.1 —— 工作台自配置工具一次调用的审计（照 KnowledgeQueryRecord 款式）。
+ *
+ * 「Agent 想改什么配置、用户放没放行」必须在执行记录里可查——这是写类工具，
+ * 审计的分量比只读检索更重。**本记录永不含密钥**：草案本身物理无 key 字段，
+ * summary/detail 由工具层从草案的非密钥字段折算。
+ */
+export interface ConfigToolCallRecord {
+  /** 调用发生时间（epoch 毫秒）。 */
+  readonly calledAt: EpochMillis;
+  /** 工具名（CONFIG_TOOL_NAMES 之一）。 */
+  readonly tool: string;
+  /** 人可读的调用摘要（如「新建 Provider "DeepSeek"」；列表工具为条数）。 */
+  readonly summary: string;
+  /** 调用去向。 */
+  readonly outcome: ConfigToolOutcome;
+  /** 补充说明（校验失败原文 / 拒绝原因 / 错误原文；成功时缺省）。 */
+  readonly detail?: string;
+  /** 调用耗时（毫秒，含等待用户裁决的时间）。 */
+  readonly durationMs: number;
+}
+
 /** 设计文档 §3.1 —— Reviewer 的审查结论（T7.2）。 */
 export const REVIEW_VERDICTS = ["pass", "fail", "inconclusive"] as const;
 
@@ -212,6 +254,11 @@ export interface Run {
    * 压成缺省就把它和「没开」混为一谈了。
    */
   readonly knowledgeQueries?: readonly KnowledgeQueryRecord[];
+  /**
+   * T9.1（Phase 9）—— 本轮 Agent 对工作台自配置工具的全部调用（按时间升序）。
+   * 缺省 = 本轮没开这个工具；空数组 = 开了但一次没调用（与 knowledgeQueries 同口径）。
+   */
+  readonly configToolCalls?: readonly ConfigToolCallRecord[];
   /**
    * 设计文档 §3.1 —— Reviewer 对本次尝试的审查结论（T7.2；未审查过时缺省）。
    *

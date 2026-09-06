@@ -16,6 +16,8 @@ export default defineConfig({
           // 但它**不由主进程 require**，而是由 CLI Agent 作为独立进程拉起
           // （启动方式见 main/session/knowledge-tool.ts）。
           "knowledge-mcp": resolve(__dirname, "src/mcp/server.ts"),
+          // T9.1 工作台自配置 MCP sidecar：同上进程模型（CLI 拉起、文件信箱与主进程通信）。
+          "config-mcp": resolve(__dirname, "src/mcp/config-server.ts"),
         },
       },
     },

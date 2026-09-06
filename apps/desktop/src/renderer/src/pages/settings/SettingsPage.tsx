@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Separator } from "../../components/ui/Separator";
 import { PageHeader } from "../../layout/PageHeader";
 import { AppearanceSection } from "./AppearanceSection";
+import { ConfigToolSection } from "./ConfigToolSection";
 import { DefaultPermissionSection } from "./DefaultPermissionSection";
 import { KnowledgeToolSection } from "./KnowledgeToolSection";
 import { LanguageSection } from "./LanguageSection";
@@ -36,6 +37,8 @@ export function SettingsPage(): ReactElement {
           <DefaultPermissionSection />
           <Separator />
           <KnowledgeToolSection />
+          <Separator />
+          <ConfigToolSection />
         </div>
       </div>
     </>

@@ -1,4 +1,11 @@
-import type { KnowledgeQueryRecord, ReviewVerdict, Run, RunEndReason } from "@ff-pane/shared";
+import type {
+  ConfigToolCallRecord,
+  ConfigToolOutcome,
+  KnowledgeQueryRecord,
+  ReviewVerdict,
+  Run,
+  RunEndReason,
+} from "@ff-pane/shared";
 import { type ReactElement, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { EmptyState } from "../../components/states/EmptyState";
@@ -131,6 +138,83 @@ function KnowledgeQueries({
         ))
       )}
     </section>
+  );
+}
+
+/** 自配置工具调用去向 → 徽章配色（confirmed 是成事，rejected/timeout 中性，错误类危险色）。 */
+const CONFIG_OUTCOME_CLASS: Readonly<Record<ConfigToolOutcome, string>> = {
+  ok: "bg-surface-sunken text-fg-muted",
+  confirmed: "bg-success-surface text-success-text",
+  rejected: "bg-surface-sunken text-fg-muted",
+  timeout: "bg-surface-sunken text-fg-muted",
+  invalid: "bg-danger-surface text-danger-text",
+  error: "bg-danger-surface text-danger-text",
+};
+
+/**
+ * 执行记录页的「工作台自配置」区（T9.1）。三态口径同 KnowledgeQueries：
+ * 缺省 = 本轮没开这个工具（整区不显示）；空数组 = 开了但一次没调用。
+ * 这是写类工具，「Agent 想改什么、用户放没放行」每条都要可查（合同的审计要求）。
+ */
+function ConfigToolCalls({
+  run,
+  locale,
+}: {
+  readonly run: Run;
+  readonly locale: string;
+}): ReactElement | null {
+  const { t } = useTranslation();
+  const calls = run.configToolCalls;
+  if (calls === undefined) {
+    return null;
+  }
+  return (
+    <section className="flex flex-col gap-2">
+      <h3 className="text-xs font-medium text-fg-muted">{t("runs.configTool.title")}</h3>
+      {calls.length === 0 ? (
+        <span className="text-xs text-fg-subtle">{t("runs.configTool.enabledUnused")}</span>
+      ) : (
+        calls.map((record, index) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: 已结束 Run 的只读列表，永不重排或插入（同 KnowledgeQueries）
+          <ConfigToolCallCard key={`${record.calledAt}-${index}`} record={record} locale={locale} />
+        ))
+      )}
+    </section>
+  );
+}
+
+/** 一次自配置工具调用：工具名 + 摘要 + 去向徽章 + 补充说明。 */
+function ConfigToolCallCard({
+  record,
+  locale,
+}: {
+  readonly record: ConfigToolCallRecord;
+  readonly locale: string;
+}): ReactElement {
+  const { t } = useTranslation();
+  return (
+    <div className="flex flex-col gap-1 rounded-sm bg-surface-sunken p-2">
+      <div className="flex items-baseline justify-between gap-3">
+        <div className="flex min-w-0 items-baseline gap-2">
+          <code className="shrink-0 font-mono text-2xs text-fg-subtle">{record.tool}</code>
+          <span className="min-w-0 truncate text-xs text-fg select-text">{record.summary}</span>
+        </div>
+        <span className="shrink-0 font-mono text-2xs text-fg-subtle">
+          {formatAbsoluteTime(record.calledAt, locale)}
+        </span>
+      </div>
+      <div className="flex items-center gap-2">
+        <Badge className={cn("shrink-0 border-transparent", CONFIG_OUTCOME_CLASS[record.outcome])}>
+          {t(`runs.configTool.outcome.${record.outcome}`)}
+        </Badge>
+        <span className="text-2xs text-fg-subtle">
+          {t("runs.configTool.duration", { ms: record.durationMs })}
+        </span>
+      </div>
+      {record.detail !== undefined ? (
+        <span className="text-2xs text-fg-muted select-text">{record.detail}</span>
+      ) : null}
+    </div>
   );
 }
 
@@ -271,6 +355,8 @@ function RunDetail({ run, locale }: { readonly run: Run; readonly locale: string
       <ReviewSection run={run} locale={locale} />
 
       <KnowledgeQueries run={run} locale={locale} />
+
+      <ConfigToolCalls run={run} locale={locale} />
 
       <section className="flex flex-col gap-2">
         <h3 className="text-xs font-medium text-fg-muted">{t("runs.fileChanges")}</h3>

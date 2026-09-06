@@ -35,6 +35,7 @@ import type { ProjectLayout } from "@ff-pane/storage";
 import { describe, expect, it, vi } from "vitest";
 import {
   CANCEL_UNREGISTER_GRACE_MS,
+  type ConfigToolBinding,
   createSessionOrchestrator,
   type KnowledgeToolBinding,
   type SessionOrchestratorDeps,
@@ -189,6 +190,11 @@ function makeHarness(
      *（等价于旧行为）；给 null = 注入了但返回 undefined（项目开关关闭那条路径）。
      */
     readonly knowledgeTool?: KnowledgeToolBinding | null;
+    /**
+     * T9.1：本轮的自配置工具绑定。语义同 knowledgeTool：缺省 = 不注入 prepareConfigTool；
+     * null = 注入了但返回 undefined（项目开关关闭那条路径）。
+     */
+    readonly configTool?: ConfigToolBinding | null;
     /** T8.2b：预置某会话的回放本（续接轮对话摘录测试用）。 */
     readonly existingTranscript?: readonly TranscriptEntry[];
     /** 自定义假适配器（如"永不结束的流"）；给出时忽略 events / runtime / nativeResume。 */
@@ -266,6 +272,11 @@ function makeHarness(
       ? {
           prepareKnowledgeTool: async () =>
             opts.knowledgeTool === null ? undefined : opts.knowledgeTool,
+        }
+      : {}),
+    ...(opts.configTool !== undefined
+      ? {
+          prepareConfigTool: async () => (opts.configTool === null ? undefined : opts.configTool),
         }
       : {}),
     appendTranscript: async (_l, sessionId, entry) => {
@@ -1117,6 +1128,212 @@ describe("T6.6 Agent 只读知识库检索工具", () => {
       ...h.deps,
       prepareKnowledgeTool: async () => {
         throw new Error("索引库打不开");
+      },
+    };
+    const orch = createSessionOrchestrator(deps);
+
+    const ack = await orch.start(workerRequest());
+    await flushUntilEnd(h.published);
+
+    expect(ack.accepted).toBe(true);
+    expect(h.captured[0]?.mcpServers).toBeUndefined();
+    expect(h.persistedRuns).toHaveLength(1);
+  });
+});
+
+describe("T9.1 工作台自配置工具（注入面 / 审计回流 / 收尾职责）", () => {
+  const CONFIG_SPEC: McpStdioServerSpec = {
+    command: "/app/electron",
+    args: ["/app/out/main/config-mcp.js"],
+    env: { FF_PANE_CONFIG_MAILBOX: "/root/config-mailbox/turn-1" },
+    allowedTools: [
+      "config_list_providers",
+      "config_list_profiles",
+      "config_draft_provider",
+      "config_draft_profile",
+    ],
+  };
+
+  const OK_EVENTS: AgentEvent[] = [
+    { kind: "session_start" },
+    { kind: "text", content: "done", final: true, channel: "answer" },
+    { kind: "end", reason: "completed" },
+  ];
+
+  function configBinding(
+    calls: readonly import("@ff-pane/shared").ConfigToolCallRecord[],
+    overrides: Partial<ConfigToolBinding> & { readonly disposed?: { count: number } } = {},
+  ): ConfigToolBinding {
+    const { disposed, ...rest } = overrides;
+    return {
+      serverName: "ffpane-config",
+      spec: CONFIG_SPEC,
+      respond: async () => ({ ok: false, message: "not in this test" }),
+      readAudit: async () => calls,
+      dispose: async () => {
+        if (disposed !== undefined) {
+          disposed.count += 1;
+        }
+      },
+      ...rest,
+    };
+  }
+
+  function callRecord(
+    summary: string,
+    outcome: import("@ff-pane/shared").ConfigToolCallRecord["outcome"],
+  ): import("@ff-pane/shared").ConfigToolCallRecord {
+    return { calledAt: 900, tool: "config_draft_provider", summary, outcome, durationMs: 5 };
+  }
+
+  it("项目开关关闭（返回 undefined）→ 完全不注入，Run 的 configToolCalls 缺省", async () => {
+    const h = makeHarness(OK_EVENTS, { configTool: null });
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start(workerRequest());
+    await flushUntilEnd(h.published);
+
+    expect(h.captured[0]?.mcpServers).toBeUndefined();
+    expect(h.persistedRuns[0]?.configToolCalls).toBeUndefined();
+  });
+
+  it("开关开启 → 按注册名注入 MCP 服务端规格", async () => {
+    const h = makeHarness(OK_EVENTS, { configTool: configBinding([]) });
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start(workerRequest());
+    await flushUntilEnd(h.published);
+
+    expect(h.captured[0]?.mcpServers).toEqual({ "ffpane-config": CONFIG_SPEC });
+  });
+
+  it("与知识库工具同轮共存：两个服务端按各自注册名并入同一张表", async () => {
+    const kbSpec: McpStdioServerSpec = { command: "/app/electron", args: ["kb.js"] };
+    const h = makeHarness(OK_EVENTS, {
+      knowledgeTool: { serverName: "ffpane-knowledge", spec: kbSpec, readAudit: async () => [] },
+      configTool: configBinding([]),
+    });
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start(workerRequest());
+    await flushUntilEnd(h.published);
+
+    expect(h.captured[0]?.mcpServers).toEqual({
+      "ffpane-knowledge": kbSpec,
+      "ffpane-config": CONFIG_SPEC,
+    });
+  });
+
+  it("Worker 轮收尾：审计落进 Run.configToolCalls，并推 config-tool-calls 事件", async () => {
+    const calls = [callRecord('create provider "X"', "confirmed")];
+    const h = makeHarness(OK_EVENTS, { configTool: configBinding(calls) });
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start(workerRequest());
+    await flushUntilEnd(h.published);
+
+    expect(h.persistedRuns[0]?.configToolCalls).toEqual(calls);
+    expect(h.published.find((e) => e.kind === "config-tool-calls")).toMatchObject({ calls });
+  });
+
+  it("挂了但一次没调用 → Run.configToolCalls 为空数组（与缺省区分），不推事件", async () => {
+    const h = makeHarness(OK_EVENTS, { configTool: configBinding([]) });
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start(workerRequest());
+    await flushUntilEnd(h.published);
+
+    expect(h.persistedRuns[0]?.configToolCalls).toEqual([]);
+    expect(h.published.some((e) => e.kind === "config-tool-calls")).toBe(false);
+  });
+
+  it("Planner 轮没有 Run：审计仍经 config-tool-calls 事件可见", async () => {
+    const calls = [callRecord("list providers (2)", "ok")];
+    const h = makeHarness(OK_EVENTS, { configTool: configBinding(calls) });
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start(plannerRequest());
+    await flushUntilEnd(h.published);
+
+    expect(h.persistedRuns).toHaveLength(0);
+    expect(h.published.find((e) => e.kind === "config-tool-calls")).toMatchObject({ calls });
+  });
+
+  it("收尾必调 dispose（未决草案自动拒绝的触发点），且先于审计回读", async () => {
+    const disposed = { count: 0 };
+    let disposedBeforeRead = false;
+    const h = makeHarness(OK_EVENTS, {
+      configTool: configBinding([], {
+        disposed,
+        readAudit: async () => {
+          disposedBeforeRead = disposed.count > 0;
+          return [];
+        },
+      }),
+    });
+    const orch = createSessionOrchestrator(h.deps);
+
+    await orch.start(workerRequest());
+    await flushUntilEnd(h.published);
+
+    expect(disposed.count).toBe(1);
+    expect(disposedBeforeRead).toBe(true);
+  });
+
+  it("respondConfigDraft 按 turnId 路由到该轮中枢；未知轮 / 未挂工具 → ok=false", async () => {
+    const respondCalls: string[] = [];
+    const h = makeHarness(OK_EVENTS, {
+      configTool: configBinding([], {
+        respond: async (request) => {
+          respondCalls.push(request.draftId);
+          return { ok: true };
+        },
+      }),
+      adapter: {
+        runtime: "fake",
+        displayName: "hang",
+        capabilities: () => ({
+          nativeResume: "no",
+          streaming: "yes",
+          fileChangeEvents: "yes",
+          commandEvents: "yes",
+          permissionForwarding: "no",
+          gracefulCancel: "yes",
+        }),
+        // 挂住的流：让轮保持在飞，respond 有处可路由
+        startTurn: () => ({
+          events: (async function* () {
+            await new Promise(() => {});
+          })() as AsyncIterable<AgentEvent>,
+          cancel: async () => {},
+        }),
+      },
+    });
+    const orch = createSessionOrchestrator(h.deps);
+    await orch.start(workerRequest());
+
+    const ok = await orch.respondConfigDraft({
+      turnId: "t2",
+      draftId: "d1",
+      decision: "confirm",
+    });
+    expect(ok.ok).toBe(true);
+    expect(respondCalls).toEqual(["d1"]);
+
+    const missing = await orch.respondConfigDraft({
+      turnId: "ghost",
+      draftId: "d1",
+      decision: "confirm",
+    });
+    expect(missing.ok).toBe(false);
+  });
+
+  it("装配抛错不拖垮整轮（工具是增强而非前提）", async () => {
+    const h = makeHarness(OK_EVENTS, { configTool: null });
+    const deps: SessionOrchestratorDeps = {
+      ...h.deps,
+      prepareConfigTool: async () => {
+        throw new Error("信箱目录建不出来");
       },
     };
     const orch = createSessionOrchestrator(deps);

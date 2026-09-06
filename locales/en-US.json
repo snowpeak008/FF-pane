@@ -143,6 +143,8 @@
     "cancel": "Cancel",
     "confirm": "Confirm",
     "close": "Close",
+    "yes": "Yes",
+    "no": "No",
     "retry": "Retry",
     "copy": "Copy",
     "copied": "Copied",
@@ -458,6 +460,16 @@
       "saved": "Saved",
       "error": "Could not save"
     },
+    "configTool": {
+      "title": "Workbench self-configuration tool",
+      "subtitle": "Lets the agent list providers/profiles (sanitized) and submit configuration drafts. Nothing is saved without your confirmation.",
+      "safetyNote": "API keys never pass through the model: the tool physically has no key field. After you confirm a draft that needs a key, you enter it yourself in a secure input.",
+      "label": "Enable for the current project",
+      "hint": "Applies to project \"{{project}}\" only. Off by default; when off, the tool is not even registered with the agent.",
+      "enabledNote": "Enabled: every write goes through draft validation and your confirmation dialog. All calls are audited in Runs.",
+      "needProject": "Select a project first — this switch is per-project.",
+      "saveError": "Could not save the switch"
+    },
     "roles": {
       "title": "Custom roles",
       "subtitle": "Roles beyond the built-in Planner/Worker/Reviewer: name + role prompt + permission preset.",
@@ -551,6 +563,19 @@
       "duration": "{{ms}} ms",
       "failed": "Call failed: {{reason}}"
     },
+    "configTool": {
+      "title": "Workbench self-configuration",
+      "enabledUnused": "The self-configuration tool was enabled this run, but the agent never called it.",
+      "duration": "{{ms}} ms",
+      "outcome": {
+        "ok": "Read",
+        "confirmed": "Confirmed and saved",
+        "rejected": "Rejected by you",
+        "timeout": "Timed out (no decision)",
+        "invalid": "Failed validation",
+        "error": "Error"
+      }
+    },
     "review": {
       "title": "Review verdict",
       "by": "Reviewer profile: {{profile}}",
@@ -589,6 +614,38 @@
     "permissionTitle": "Permission requested",
     "permissionAllow": "Allow",
     "permissionDeny": "Deny",
+    "configDraft": {
+      "titleCreate": "Agent proposes to create a {{kind}}",
+      "titleUpdate": "Agent proposes to update a {{kind}}",
+      "kindProvider": "provider",
+      "kindProfile": "profile",
+      "description": "Nothing is saved until you confirm. Rejecting sends the draft back to the agent with your reason.",
+      "confirm": "Confirm and save",
+      "reject": "Reject",
+      "confirmed": "Configuration saved",
+      "applyFailed": "Could not save the draft",
+      "apiKeyLabel": "API key (entered by you, never seen by the model)",
+      "apiKeyHint": "This provider type needs an API key. Type it here yourself — the agent cannot read this field, and the key is stored encrypted.",
+      "apiKeyPlaceholder": "Enter the API key",
+      "field": {
+        "name": "Name",
+        "type": "Type",
+        "baseUrl": "Base URL",
+        "models": "Models",
+        "defaultModel": "Default model",
+        "embeddingModel": "Embedding model",
+        "proxy": "Proxy",
+        "timeoutS": "Timeout (s)",
+        "enabled": "Enabled",
+        "runtime": "Runtime",
+        "providerId": "Provider",
+        "model": "Model",
+        "defaultRole": "Default role",
+        "permissionPreset": "Permission preset",
+        "outputLanguage": "Output language",
+        "genericExec": "Command config"
+      }
+    },
     "turnStatus": {
       "idle": "Idle",
       "running": "Running",

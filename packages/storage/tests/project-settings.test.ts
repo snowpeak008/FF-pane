@@ -40,11 +40,25 @@ describe("ProjectSettingsStore", () => {
     await expect(readFile(projectFile, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it("T9.1 自配置工具开关缺省关闭（合同验收：默认关，关着连 MCP 配置都不生成）", async () => {
+    expect(DEFAULT_PROJECT_SETTINGS.configToolEnabled).toBe(false);
+    expect((await store.readSettings()).configToolEnabled).toBe(false);
+  });
+
+  it("T9.1 自配置工具开关独立读写，与其他开关互不影响", async () => {
+    const merged = await store.updateSettings({ configToolEnabled: true });
+    expect(merged.configToolEnabled).toBe(true);
+    expect(merged.knowledgeToolEnabled).toBe(false);
+    const after = await store.updateSettings({ knowledgeToolEnabled: true });
+    expect(after.configToolEnabled).toBe(true);
+  });
+
   it("update：首次写入即建档，读回合并结果", async () => {
     const merged = await store.updateSettings({ knowledgeToolEnabled: true });
     expect(merged.knowledgeToolEnabled).toBe(true);
     expect(await store.readSettings()).toEqual({
       knowledgeToolEnabled: true,
+      configToolEnabled: false,
       reviewerEnabled: false,
     });
   });
@@ -79,6 +93,7 @@ describe("ProjectSettingsStore", () => {
       roleBindings: { planner: "p1", worker: "p2" },
       outputLanguage: "en-US",
       knowledgeToolEnabled: true,
+      configToolEnabled: false,
       reviewerEnabled: false,
     });
   });
@@ -106,6 +121,7 @@ describe("ProjectSettingsStore", () => {
     });
     expect(await store.readSettings()).toEqual({
       knowledgeToolEnabled: false,
+      configToolEnabled: false,
       reviewerEnabled: false,
     });
   });
@@ -120,6 +136,7 @@ describe("ProjectSettingsStore", () => {
     await store.updateSettings({ reviewerEnabled: true });
     expect(await store.readSettings()).toEqual({
       knowledgeToolEnabled: false,
+      configToolEnabled: false,
       reviewerEnabled: true,
       reviewerProfileId: "prof-r",
     });

@@ -64,6 +64,37 @@ export const DEFAULT_KNOWLEDGE_TOOL_SERVER_NAME = "ffpane-knowledge";
 export const KNOWLEDGE_TOOL_NAME = "knowledge_search";
 
 /**
+ * 工作台自配置工具（T9.1，Phase 9）的 MCP 服务器默认注册名。
+ * 带产品前缀的理由同 DEFAULT_KNOWLEDGE_TOOL_SERVER_NAME：注册名是隔离单位，
+ * 通用词会与用户已配的服务器静默互相覆盖。
+ */
+export const DEFAULT_CONFIG_TOOL_SERVER_NAME = "ffpane-config";
+
+/** T9.1 —— 只读：列出 Provider 的脱敏视图（绝不含 key，apiKeyRef 折算为布尔）。 */
+export const CONFIG_TOOL_LIST_PROVIDERS = "config_list_providers";
+
+/** T9.1 —— 只读：列出 Agent Profile。 */
+export const CONFIG_TOOL_LIST_PROFILES = "config_list_profiles";
+
+/** T9.1 —— 写草案：Provider 创建 / 更新（带 id 即更新）。落盘必经用户确认。 */
+export const CONFIG_TOOL_DRAFT_PROVIDER = "config_draft_provider";
+
+/** T9.1 —— 写草案：Profile 创建 / 更新（带 id 即更新）。落盘必经用户确认。 */
+export const CONFIG_TOOL_DRAFT_PROFILE = "config_draft_profile";
+
+/**
+ * T9.1 工作台自配置工具的全部工具名。**没有 delete、没有直接写**：
+ * 写路径只有「草案 → 用户确认」一条，静默写在服务端物理不存在（两条铁律之二）；
+ * 密钥字段在任何工具的输入 schema 里物理不存在（两条铁律之一）。
+ */
+export const CONFIG_TOOL_NAMES = [
+  CONFIG_TOOL_LIST_PROVIDERS,
+  CONFIG_TOOL_LIST_PROFILES,
+  CONFIG_TOOL_DRAFT_PROVIDER,
+  CONFIG_TOOL_DRAFT_PROFILE,
+] as const;
+
+/**
  * 默认权限预设（出厂）：保守起点——项目内可读、不可写、禁 Shell、禁网络、
  * 危险操作恒需逐次确认。用户在设置页 / Profile 里按需放宽。
  */

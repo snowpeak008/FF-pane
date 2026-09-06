@@ -32,6 +32,11 @@ export interface ProjectSettings {
    */
   readonly knowledgeToolEnabled: boolean;
   /**
+   * T9.1（Phase 9）—— 工作台自配置工具的项目级开关。
+   * **缺省 false（默认关闭）**：照 T6.6 知识库工具的同款纪律——关着连 MCP 配置都不生成。
+   */
+  readonly configToolEnabled: boolean;
+  /**
    * 设计文档 §3.1 —— Reviewer 角色的项目级开关（T7.2）。
    * **缺省 false（默认关闭）**：§3.1 角色表里 Reviewer 一栏写的就是"可选，默认关闭"。
    */
@@ -51,9 +56,10 @@ export interface ProjectSettings {
   readonly reviewerProfileId?: ProfileId;
 }
 
-/** 出厂缺省：两个工具/角色开关均默认关闭，Reviewer 未绑定。 */
+/** 出厂缺省：三个工具/角色开关均默认关闭，Reviewer 未绑定。 */
 export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
   knowledgeToolEnabled: false,
+  configToolEnabled: false,
   reviewerEnabled: false,
 };
 
@@ -110,6 +116,11 @@ function pickSettings(raw: Record<string, unknown>): ProjectSettings {
       raw,
       "knowledgeToolEnabled",
       DEFAULT_PROJECT_SETTINGS.knowledgeToolEnabled,
+    ),
+    configToolEnabled: pickBoolean(
+      raw,
+      "configToolEnabled",
+      DEFAULT_PROJECT_SETTINGS.configToolEnabled,
     ),
     reviewerEnabled: pickBoolean(raw, "reviewerEnabled", DEFAULT_PROJECT_SETTINGS.reviewerEnabled),
     ...(typeof reviewerProfileId === "string" && reviewerProfileId.length > 0
