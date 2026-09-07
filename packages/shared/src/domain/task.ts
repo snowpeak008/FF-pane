@@ -45,6 +45,23 @@ export type TaskTerminalStatus = (typeof TASK_TERMINAL_STATUSES)[number];
 export const isTaskTerminalStatus = createLiteralGuard(TASK_TERMINAL_STATUSES);
 
 /**
+ * 任务落定状态（T9.7 B 栏落定高亮 / T9.10 结算摘要）：done / failed / blocked 三态。
+ * 是 TaskStatus 的子集而不是全集：accepted / cancelled 是用户亲手操作的结果（他知道），
+ * pending / running 不是落定——需要「被看见 / 被汇报」的只有这三个 Agent 侧产生的收场。
+ *
+ * 落点从 shared-ipc/contracts.ts 移到此处（T9.10）：结算摘要队列（storage）与摘要拼装
+ * （core）都要消费这组字面量，而 packages 不依赖 apps 的契约层；contracts.ts 原样
+ * 再导出，两端消费方不变、事实源只此一份。
+ */
+export const TASK_SETTLED_STATUSES = ["done", "failed", "blocked"] as const;
+
+/** 任务落定状态（TaskStatus 的三态子集）。 */
+export type TaskSettledStatus = (typeof TASK_SETTLED_STATUSES)[number];
+
+/** TaskSettledStatus 运行时守卫。 */
+export const isTaskSettledStatus = createLiteralGuard(TASK_SETTLED_STATUSES);
+
+/**
  * 设计文档 §6.2 —— 任务合同（Worker 收到的不是聊天记录，是任务合同）。
  * 即 §6.2 的 Task 结构去掉 status：计划内的任务列表（§6.1 tasks）与
  * 派发给 Worker 的输入都是纯合同，运行状态由 Task 记录承载。

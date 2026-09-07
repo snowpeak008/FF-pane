@@ -57,6 +57,7 @@ import type {
   SessionResumeKind,
   Task,
   TaskId,
+  TaskSettledStatus,
   TranscriptEntry,
 } from "@ff-pane/shared";
 
@@ -1315,17 +1316,13 @@ export interface IpcInvokeContracts {
 
 /**
  * 任务落定状态（T9.7 B 栏落定高亮）：done / failed / blocked 三态。
- * 是 TaskStatus 的子集而不是全集：accepted / cancelled 是用户亲手操作的结果（他知道），
- * pending / running 不是落定——需要"被看见"的只有这三个 Agent 侧产生的收场。
+ * 事实源自 T9.10 起移到 @ff-pane/shared（storage 队列与 core 摘要拼装也要消费，
+ * 而 packages 不依赖 apps 的契约层）。此处**只做类型再导出**：本文件在 preload 的
+ * 依赖图上（preload → client.ts → contracts.ts），运行时再导出会给 sandbox preload
+ * 产物引入 require("@ff-pane/shared")（externalizeDepsPlugin 外置后沙箱解析不了，
+ * window.ffpane 桥整个失效）——运行时消费方（守卫 / 常量）直接 import @ff-pane/shared。
  */
-export const TASK_SETTLED_STATUSES = ["done", "failed", "blocked"] as const;
-
-export type TaskSettledStatus = (typeof TASK_SETTLED_STATUSES)[number];
-
-/** TaskSettledStatus 运行时守卫。 */
-export function isTaskSettledStatus(value: unknown): value is TaskSettledStatus {
-  return typeof value === "string" && (TASK_SETTLED_STATUSES as readonly string[]).includes(value);
-}
+export type { TaskSettledStatus } from "@ff-pane/shared";
 
 /**
  * tasks:settled 事件载荷（T9.7）：某项目内一个任务进入落定状态。

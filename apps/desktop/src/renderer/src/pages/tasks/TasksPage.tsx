@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { EmptyState } from "../../components/states/EmptyState";
 import { ErrorState } from "../../components/states/ErrorState";
 import { LoadingState } from "../../components/states/LoadingState";
+import { Button } from "../../components/ui/Button";
 import { useActiveProject } from "../../hooks/useActiveProject";
 import { useRoleProfile } from "../../hooks/useRoleProfile";
 import { invokeQuery, queryData } from "../../ipc/query";
@@ -37,6 +38,53 @@ import { deriveTaskReview } from "./task-review";
  *   改了/取消了怎么办"、自动派发还会在用户不在场时启动要花钱的 Agent 轮——复杂度
  *   与「用户自己点一下重试」的成本完全不成比例，弃。
  */
+/**
+ * 「让 Planner 复盘」（T9.10 ③）：一键发起携带结算摘要的 Planner 轮。
+ *
+ * 管线选择（合同落档取舍）：**复用 ② 的注入管线**而非显式把摘要拼进输入——任一
+ * Planner 轮开始时编排器都会自动注入「任务看板增量（含待汇报队列）」，本按钮只需
+ * 发起一轮普通 planner-message（输入是一句复盘指令），摘要天然随注入到场且消费后
+ * 出队。显式拼进输入被否掉：要新开 IPC 通道把队列搬到渲染层再塞回主进程，同一份
+ * 战况走两条通路，消费语义（何时出队）也会裂成两处。
+ *
+ * 红线合规：这是**用户显式点击**发起的轮（与派发 / 审查按钮同款），不是自动触发。
+ * 不传 sessionId = 开新 Planner 会话——汇报对象是「当前 / 下一个 Planner 会话」
+ * （T9.10 动因），新会话经注入天然继承战况，无需绑住某个旧会话。
+ */
+function PlannerReviewButton({ projectRoot }: { readonly projectRoot: string }): ReactElement {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const { profile: plannerProfile } = useRoleProfile("planner");
+  const [starting, setStarting] = useState(false);
+
+  const startReview = useCallback(async () => {
+    if (plannerProfile === null) {
+      toast.error(t("tasks.plannerReview.noProfile"));
+      return;
+    }
+    setStarting(true);
+    const { ack } = await startSessionTurn({
+      projectRoot,
+      profileId: plannerProfile.id,
+      input: { kind: "planner-message", text: t("tasks.plannerReview.message") },
+    });
+    setStarting(false);
+    if (ack === null || !ack.accepted) {
+      toast.error(t("tasks.plannerReview.startError"), {
+        ...(ack !== null && !ack.accepted ? { description: ack.reason } : {}),
+      });
+      return;
+    }
+    navigate("/session");
+  }, [projectRoot, plannerProfile, navigate, t]);
+
+  return (
+    <Button variant="secondary" size="sm" loading={starting} onClick={() => void startReview()}>
+      {t("tasks.plannerReview.button")}
+    </Button>
+  );
+}
+
 function TaskBoard({ projectRoot }: { readonly projectRoot: string }): ReactElement {
   const { t } = useTranslation();
   const { state, refetch } = useInvokeQuery("tasks:list", { projectRoot });
@@ -254,6 +302,8 @@ function TaskBoard({ projectRoot }: { readonly projectRoot: string }): ReactElem
 /**
  * 任务页（W3.6 / §11.4「现在做到哪了」）：六状态看板 + 任务卡片。
  * 以当前项目为作用域；任务由 Planner 批准计划后生成（Phase 4），此前显示空态。
+ * 头部动作区放「让 Planner 复盘」（T9.10 ③）：复盘的对象是整个看板的战况，
+ * 不属于任何一张卡片，页面级动作落页面级位置。
  */
 export function TasksPage(): ReactElement {
   const { t } = useTranslation();
@@ -261,7 +311,13 @@ export function TasksPage(): ReactElement {
 
   return (
     <>
-      <PageHeader title={t("nav.tasks.label")} description={t("nav.tasks.question")} />
+      <PageHeader
+        title={t("nav.tasks.label")}
+        description={t("nav.tasks.question")}
+        {...(entry !== null
+          ? { actions: <PlannerReviewButton projectRoot={entry.rootPath} /> }
+          : {})}
+      />
       {loading ? (
         <LoadingState variant="list" />
       ) : entry === null ? (

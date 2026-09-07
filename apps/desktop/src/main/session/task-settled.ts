@@ -10,8 +10,8 @@
  * 纯函数：无 IO，可直接单测。发布侧（窗口取值 + publishEvent）留在装配层。
  */
 
-import type { Task } from "@ff-pane/shared";
-import { isTaskSettledStatus, type TaskSettledEvent } from "../../shared-ipc/contracts";
+import { isTaskSettledStatus, type Task } from "@ff-pane/shared";
+import type { TaskSettledEvent } from "../../shared-ipc/contracts";
 
 /**
  * 从一次任务落盘派生落定事件；非落定状态（pending / running / accepted / cancelled）

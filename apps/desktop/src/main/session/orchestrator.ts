@@ -51,10 +51,12 @@ import {
 import {
   type ActiveTurnRecord,
   type ActiveTurnTable,
+  assembleBoardDelta,
   assemblePrompt,
   assembleRebuildContext,
   assembleReviewMaterial,
   assembleRunEnvelope,
+  boardSnapshotOf,
   checkTurnParallelism,
   compileHabitProfile,
   createInitialDraft,
@@ -101,6 +103,8 @@ import type {
   ModelId,
   NativeSessionBinding,
   Plan,
+  PlannerBoardBaseline,
+  PlannerReportState,
   PlanVersion,
   Provider,
   ReviewRecord,
@@ -313,6 +317,19 @@ export interface SessionOrchestratorDeps {
     layout: ProjectLayout,
     turnId: string,
   ) => Promise<ConfigToolBinding | undefined>;
+  /**
+   * 读取 Planner 待汇报状态（T9.10 ②：结算摘要队列 + 上次 Planner 轮看板基准）。
+   * 缺省 = 宿主未接跟进回路（不注入、不消费——测试替身与旧装配天然兼容）。
+   */
+  readonly readPlannerReport?: (layout: ProjectLayout) => Promise<PlannerReportState>;
+  /**
+   * 消费待汇报状态（清队列 + 换基准，一次写盘）。只在 Planner 轮**受理成功**
+   * （裁决通过、prompt 已定形、即将 spawn）后调用——受理失败摘要不丢，下轮再报。
+   */
+  readonly consumePlannerReport?: (
+    layout: ProjectLayout,
+    baseline: PlannerBoardBaseline,
+  ) => Promise<void>;
 }
 
 /** 本轮知识库工具的绑定：注入用的服务端规格 + 收尾用的审计回读。 */
@@ -752,6 +769,9 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
       let workerCtx: WorkerContext | undefined;
       let planCtx: PlanTurnContext | undefined;
       let reviewCtx: ReviewTurnContext | undefined;
+      // T9.10 ②：Planner 轮的看板增量注入文本 + 消费时要落的新基准快照（非 Planner 轮恒缺席）
+      let boardDeltaText: string | undefined;
+      let boardSnapshot: Readonly<Record<string, Task["status"]>> | undefined;
       // Worker 轮待派发的任务合同（T8.3b：dispatchTask 推迟到互斥裁决通过后）。
       let workerTaskToDispatch: Task | undefined;
       // 进回放本的用户输入（T8.2b）：只记用户可见的原始输入，见 TranscriptUserMessage 注释
@@ -829,6 +849,30 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         };
       } else {
         const stateSnapshot = await deps.loadStateSnapshot(layout);
+
+        // Planner 跟进回路（T9.10 ②）：任一 Planner 轮开始时注入「自上次 Planner 轮
+        // 以来的任务看板增量」（待汇报结算摘要队列 + 基准 diff）。范围 = 全部讨论轮
+        // （planner-message / planner-plan，含绑定自定义角色的讨论 Profile）——合同
+        // 语义是「续接 / 轻装新开 / 换 Profile 的 Planner 都天然继承战况」，判轮不判人；
+        // Worker / 审查轮不注入（战况正是它们产生的）。读取失败只降级不挡轮：
+        // 汇报是增强不是前提（与知识库工具装配同款容错）。消费（出队 + 换基准）推迟
+        // 到受理成功之后——评估轮启动失败时摘要不该丢（合同「出队语义」落档取舍）。
+        if (deps.readPlannerReport !== undefined) {
+          try {
+            const reportState = await deps.readPlannerReport(layout);
+            const boardTasks = await deps.listTasks(layout);
+            boardSnapshot = boardSnapshotOf(boardTasks);
+            boardDeltaText = assembleBoardDelta({
+              queue: reportState.queue,
+              tasks: boardTasks,
+              ...(reportState.baseline !== undefined ? { baseline: reportState.baseline } : {}),
+            });
+          } catch (thrown) {
+            console.warn(`[session] planner report unavailable this turn: ${String(thrown)}`);
+            boardSnapshot = undefined;
+          }
+        }
+
         // planner-plan（计划生成轮）：text 可选，缺省给一句默认指令；否则用讨论消息原文
         const messageText =
           request.input.kind === "planner-plan"
@@ -908,6 +952,12 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         workerCtx = { layout, runningTask, profileId: profile.id, startedAt };
       }
 
+      // 任务看板增量（T9.10 ②）：前置到 Planner 提示词。先于 resumeContext 拼接 →
+      // 最终顺序（自上而下）交接包 → 重建上下文 → 看板增量 → 本轮正文：增量是
+      // 最新战况，紧挨当前输入（与 rebuild「对话摘录放最末」同一排布理由）。
+      if (boardDeltaText !== undefined) {
+        prompt = `${boardDeltaText}\n\n${prompt}`;
+      }
       // 上下文重建：把重建文本前置到提示词（native 恢复走原生会话，不注入）
       if (resumeContext !== undefined) {
         prompt = `${resumeContext}\n\n${prompt}`;
@@ -1001,6 +1051,19 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
       );
 
       const guarded = guardTurn(adapter.startTurn(turnCtx), guardCtx);
+
+      // 待汇报消费（T9.10 出队语义）：子进程已 spawn（startTurn 同步抛错会跳过此处
+      // 进 catch），本轮**成功开始**，注入的战况已在提示词里——此刻清队列 + 换基准。
+      // 消费失败只记日志不挡轮：最坏情形是下一轮重复汇报同一批摘要，比丢报好。
+      const consumePlannerReport = deps.consumePlannerReport;
+      if (boardSnapshot !== undefined && consumePlannerReport !== undefined) {
+        const baseline: PlannerBoardBaseline = {
+          plannerTurnAt: startedAt,
+          taskStatuses: boardSnapshot,
+        };
+        await recordSafely("planner report consume", () => consumePlannerReport(layout, baseline));
+      }
+
       const ctx: TurnContexts = {
         ...(workerCtx !== undefined ? { workerCtx } : {}),
         ...(planCtx !== undefined ? { planCtx } : {}),

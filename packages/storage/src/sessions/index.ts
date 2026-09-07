@@ -6,5 +6,6 @@
 
 export * from "./errors.js";
 export * from "./inflight.js";
+export * from "./planner-report.js";
 export * from "./store.js";
 export * from "./transcript.js";

@@ -38,6 +38,7 @@ import type {
 import { DEFAULT_CONFIG_TOOL_SERVER_NAME } from "@ff-pane/shared";
 import {
   appendTranscriptEntry,
+  consumePlannerReport,
   createConfigStore,
   createObservationStore,
   createProfileStore,
@@ -47,6 +48,7 @@ import {
   createRoleStore,
   createSessionStore,
   deleteInflightMarker,
+  enqueueSettlementReport,
   initGlobalLayout,
   listEntries,
   listHabits,
@@ -59,6 +61,7 @@ import {
   loadTask,
   type ProjectLayout,
   readInflightPartial,
+  readPlannerReport,
   readTranscript,
   resolveProjectLayout,
   saveHabit,
@@ -91,6 +94,7 @@ import {
 import { createSessionOrchestrator, type SessionOrchestrator } from "./orchestrator";
 import { createDesktopAdapterRegistry, type DesktopAdapterRegistry } from "./registry";
 import { createProjectRepairer, type ProjectRepairer, type RepairDeps } from "./repair";
+import { enqueueSettlementIfSettled, type SettlementEnqueueDeps } from "./settlement";
 import { taskSettledEventOf } from "./task-settled";
 
 export * from "./config-draft-hub";
@@ -103,6 +107,7 @@ export * from "./orchestrator";
 export * from "./quit";
 export * from "./registry";
 export * from "./repair";
+export * from "./settlement";
 export * from "./task-settled";
 
 /** 主进程模块目录：内置 MCP sidecar 与 main/index.js 同目录（见 electron.vite.config.ts）。 */
@@ -136,7 +141,7 @@ export interface SessionLayer {
 /** 启动修正的真实存取绑定（与编排器 deps 同一套 storage 函数，只是形状不同）。 */
 function createRepairDeps(
   isTurnActive: (turnId: string) => boolean,
-  onTaskSaved: (projectLayout: ProjectLayout, task: Task) => void,
+  onTaskSaved: (projectLayout: ProjectLayout, task: Task) => Promise<void>,
 ): RepairDeps {
   return {
     listInflightMarkers,
@@ -149,7 +154,7 @@ function createRepairDeps(
     },
     saveTask: async (projectLayout, task) => {
       await saveTask(projectLayout, task);
-      onTaskSaved(projectLayout, task);
+      await onTaskSaved(projectLayout, task);
     },
     listRuns: async (projectLayout) => {
       const result = await listRuns(projectLayout);
@@ -208,6 +213,27 @@ export async function createSessionLayer(getWindow: SessionWindowGetter): Promis
     if (window !== null) {
       publishEvent(window.webContents, "tasks:settled", event);
     }
+  }
+
+  /** T9.10 ①：结算摘要入队的存取绑定（enqueueSettlementIfSettled 自带落定判定与容错）。 */
+  const settlementDeps: SettlementEnqueueDeps = {
+    listRuns: async (projectLayout) => {
+      const result = await listRuns(projectLayout);
+      return result.ok ? result.value : [];
+    },
+    enqueue: enqueueSettlementReport,
+    now: () => Date.now(),
+    log: (message) => console.warn(message),
+  };
+
+  /**
+   * 任务落盘后的统一收尾（T9.7 事件 + T9.10 结算入队）：与 taskSettledEventOf 同一
+   * 判定口径（三态落定），同点接入即同点覆盖四条落定路径。入队先于事件推送——
+   * 渲染层若因事件立刻发起「让 Planner 复盘」，队列里已有这条摘要。
+   */
+  async function onTaskSaved(projectLayout: ProjectLayout, task: Task): Promise<void> {
+    await enqueueSettlementIfSettled(settlementDeps, projectLayout, task);
+    publishTaskSettled(projectLayout, task);
   }
 
   // 最新计划版本：v1..vN 连续，逐版加载到 not-found 为止，返回末版（与 data.ts plans:list 同构）
@@ -316,7 +342,7 @@ export async function createSessionLayer(getWindow: SessionWindowGetter): Promis
     },
     saveTask: async (projectLayout, task) => {
       await saveTask(projectLayout, task);
-      publishTaskSettled(projectLayout, task);
+      await onTaskSaved(projectLayout, task);
     },
     listRuns: async (projectLayout) => {
       const result = await listRuns(projectLayout);
@@ -548,16 +574,21 @@ export async function createSessionLayer(getWindow: SessionWindowGetter): Promis
       await deleteInflightMarker(projectLayout, turnId);
     },
     writeInflightPartial,
+    // Planner 跟进回路（T9.10 ②）：待汇报队列 + 看板基准的读与消费（storage 绑定）。
+    // 结构损坏归一为空状态并留痕（readPlannerReport 的容错语义，不挡轮）。
+    readPlannerReport: (projectLayout) =>
+      readPlannerReport(projectLayout, (reason) =>
+        console.warn(`[session] planner-report.json invalid, reset to empty: ${reason}`),
+      ),
+    consumePlannerReport: (projectLayout, baseline) =>
+      consumePlannerReport(projectLayout, baseline),
     now: () => Date.now(),
     newRunId: () => randomUUID() as RunId,
     newLocalSessionId: () => randomUUID() as LocalSessionId,
   });
 
   const repairer = createProjectRepairer(
-    createRepairDeps(
-      (turnId) => orchestrator.hasActiveTurn(turnId),
-      (projectLayout, task) => publishTaskSettled(projectLayout, task),
-    ),
+    createRepairDeps((turnId) => orchestrator.hasActiveTurn(turnId), onTaskSaved),
   );
 
   /** 首次为某项目服务前先修正残留（幂等；修正失败只记日志，不挡正常请求）。 */

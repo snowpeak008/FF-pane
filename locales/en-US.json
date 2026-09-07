@@ -874,6 +874,12 @@
         "inconclusive": "The reviewer gave no parseable verdict. See the runs page for the raw answer."
       }
     },
+    "plannerReview": {
+      "button": "Planner debrief",
+      "message": "Please debrief the latest task situation: using the injected task board delta and settlement summaries, assess how each task ended and point out anything that needs re-dispatch, rework, or plan adjustment.",
+      "noProfile": "No planner profile yet — create one in settings first.",
+      "startError": "Failed to start debrief"
+    },
     "reviewer": {
       "label": "Enable reviewer",
       "bindingLabel": "Reviewer profile",

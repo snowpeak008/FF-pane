@@ -874,6 +874,12 @@
         "inconclusive": "Reviewer 没有给出可解析的结论。到执行记录页看原文。"
       }
     },
+    "plannerReview": {
+      "button": "让 Planner 复盘",
+      "message": "请复盘最新任务战况：结合注入的任务看板增量与结算摘要，评估各任务收场，指出需要重派、返工或调整计划的地方。",
+      "noProfile": "还没有 Planner Profile，请先到设置页新建。",
+      "startError": "发起复盘失败"
+    },
     "reviewer": {
       "label": "启用 Reviewer 审查",
       "bindingLabel": "审查者 Profile",

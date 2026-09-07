@@ -35,6 +35,9 @@ export * from "./prompt/index.js";
 /** Provider 连接探测（W1.5c）：连接测试 + /models 拉取，纯网络逻辑、零密钥存取。 */
 export * from "./provider-probe/index.js";
 
+/** Planner 跟进回路第一档（T9.10）：落定结算摘要 + 看板增量组装（§13 红线：不做自主回路）。 */
+export * from "./report/index.js";
+
 /** 会话恢复（T4.3）：恢复方式判定 + 上下文重建文本组装（设计文档 §10.3）。 */
 export * from "./resume/index.js";
 

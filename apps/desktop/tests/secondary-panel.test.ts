@@ -5,7 +5,7 @@
  * 覆盖面：
  * 1. 落定事件派生（主进程 task-settled.ts）：done/failed/blocked 三态推送、
  *    非落定态不推送；
- * 2. 落定守卫（contracts.ts isTaskSettledStatus）与三态清单；
+ * 2. 落定守卫（@ff-pane/shared isTaskSettledStatus，T9.10 起事实源在 shared）与三态清单；
  * 3. project-alerts store：置位 / 幂等 / 已读消除 / 已读后再落定重新高亮 /
  *    持久化形状（重启不复活由「持久化的是未读集合」这一形状保证，此处钉形状）；
  * 4. 即时已读判定（isInstantRead）与已读路由判定（isReadClearingPath）；
@@ -14,7 +14,13 @@
  * 6. A/B 独立收展（store action 层面：toggle 互不影响）。
  */
 
-import type { Task, TaskId } from "@ff-pane/shared";
+import {
+  isTaskSettledStatus,
+  TASK_SETTLED_STATUSES,
+  type Task,
+  type TaskId,
+  type TaskSettledStatus,
+} from "@ff-pane/shared";
 import { beforeEach, describe, expect, it } from "vitest";
 import { taskSettledEventOf } from "../src/main/session/task-settled";
 import {
@@ -32,11 +38,6 @@ import {
   UI_STORE_VERSION,
   useUiStore,
 } from "../src/renderer/src/stores/ui";
-import {
-  isTaskSettledStatus,
-  TASK_SETTLED_STATUSES,
-  type TaskSettledStatus,
-} from "../src/shared-ipc/contracts";
 
 const ROOT_A = "D:\\proj\\alpha";
 const ROOT_B = "D:\\proj\\beta";

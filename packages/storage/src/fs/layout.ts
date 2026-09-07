@@ -74,6 +74,12 @@ export interface ProjectLayout {
   /** sessions.json —— 会话登记表（Local↔Native Session ID 映射，供原生恢复，§10.2 规则 3）。 */
   readonly sessionsFile: string;
   /**
+   * planner-report.json —— Planner 待汇报状态（T9.10）：Worker 落定结算摘要队列 +
+   * 上次 Planner 轮的看板基准。整文件原子读写（照 sessions.json 款式），
+   * 不在 initProjectLayout 预建——没落定过任务的项目不该多出空文件。
+   */
+  readonly plannerReportFile: string;
+  /**
    * sessions/ —— 对话回放本根目录（T8.2b，§10.2 规则 3 修订版）：
    * `<localSessionId>/transcript.jsonl` + `inflight/`。目录按需创建（首次写入时），
    * 与 sessions.json 一样不在 initProjectLayout 里预建——没聊过的项目不该多出空目录。
@@ -141,6 +147,7 @@ export function resolveProjectLayout(projectRootDir: string): ProjectLayout {
     workbenchDir,
     projectFile: join(workbenchDir, "project.json"),
     sessionsFile: join(workbenchDir, "sessions.json"),
+    plannerReportFile: join(workbenchDir, "planner-report.json"),
     sessionsDir,
     sessionsInflightDir: join(sessionsDir, "inflight"),
     plansDir: join(workbenchDir, "plans"),
