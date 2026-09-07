@@ -2,7 +2,7 @@
  * 命令表（W3.1c）—— 命令面板里可执行的条目，分三组：导航 / 操作 / 设置。
  *
  * 与快捷键表的关系：
- * - 快捷键表（shortcuts.ts）是"键位 → 命令"的映射，19 条，含只在键盘上有意义的
+ * - 快捷键表（shortcuts.ts）是"键位 → 命令"的映射，21 条，含只在键盘上有意义的
  *   条目（Esc、↑/↓、Enter、Ctrl+1~7）；
  * - 命令表是"面板里可以点的事"，把 Ctrl+1~7 摊成七个具名导航命令，
  *   并把纯键盘操作（Esc / 列表移动）排除在外——它们仍然能在面板的
@@ -63,6 +63,9 @@ export const COMMAND_TABLE: readonly CommandDescriptor[] = [
   },
   // 面板自身的模式切换（项目模式，§7 的 Ctrl+P）
   { id: "palette-projects", group: "navigation", requiresHandler: false },
+  // 布局收展（T9.7）：handler 由 App.tsx 装配层注入（toggle 落 ui store）
+  { id: "nav-toggle-sidebar", group: "navigation", requiresHandler: true },
+  { id: "nav-toggle-secondary-panel", group: "navigation", requiresHandler: true },
 
   // 操作组：全部由对应页面工单注入 handler
   { id: "page-focus-search", group: "action", requiresHandler: true },

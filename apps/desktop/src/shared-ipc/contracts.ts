@@ -1300,6 +1300,34 @@ export interface IpcInvokeContracts {
   "smoke:report": { request: SmokeReport; response: { readonly acknowledged: true } };
 }
 
+/**
+ * 任务落定状态（T9.7 B 栏落定高亮）：done / failed / blocked 三态。
+ * 是 TaskStatus 的子集而不是全集：accepted / cancelled 是用户亲手操作的结果（他知道），
+ * pending / running 不是落定——需要"被看见"的只有这三个 Agent 侧产生的收场。
+ */
+export const TASK_SETTLED_STATUSES = ["done", "failed", "blocked"] as const;
+
+export type TaskSettledStatus = (typeof TASK_SETTLED_STATUSES)[number];
+
+/** TaskSettledStatus 运行时守卫。 */
+export function isTaskSettledStatus(value: unknown): value is TaskSettledStatus {
+  return typeof value === "string" && (TASK_SETTLED_STATUSES as readonly string[]).includes(value);
+}
+
+/**
+ * tasks:settled 事件载荷（T9.7）：某项目内一个任务进入落定状态。
+ *
+ * 携带 projectRoot 而非 projectId：事实源是主进程 saveTask 落盘点，那里只有
+ * ProjectLayout（按 projectRoot 解析而来）；而渲染层发起项目级请求时传的正是
+ * 注册表条目的 rootPath——两端字符串同源，渲染层无需再查一次注册表做映射。
+ */
+export interface TaskSettledEvent {
+  /** 项目根路径（与 ProjectRegistryEntry.rootPath 同源同串）。 */
+  readonly projectRoot: string;
+  readonly taskId: TaskId;
+  readonly status: TaskSettledStatus;
+}
+
 /** habits:suggestion 事件载荷（来源三，§8.2.4）：系统据反复纠正生成的 observed 候选。 */
 export interface HabitSuggestionEvent {
   /** 已落库的 observed 候选 ID（供渲染层跳转/高亮）。 */
@@ -1320,6 +1348,8 @@ export interface IpcEventContracts {
   "habits:suggestion": { payload: HabitSuggestionEvent };
   /** 知识库导入 / 重建进度（§8.3.2「导入进度」）。 */
   "knowledge:import-progress": { payload: KnowledgeImportProgressEvent };
+  /** 任务落定通知（T9.7 B 栏落定高亮）：done / failed / blocked 时推送。 */
+  "tasks:settled": { payload: TaskSettledEvent };
 }
 
 export type InvokeChannel = keyof IpcInvokeContracts;
@@ -1415,6 +1445,7 @@ export const EVENT_CHANNELS = [
   "session:event",
   "habits:suggestion",
   "knowledge:import-progress",
+  "tasks:settled",
 ] as const satisfies readonly EventChannel[];
 
 type AssertNever<T extends never> = T;

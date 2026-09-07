@@ -136,6 +136,14 @@
       "memory-reject": {
         "title": "记忆候选：拒绝",
         "keywords": "reject memory candidate 拒绝 记忆 候选"
+      },
+      "nav-toggle-sidebar": {
+        "title": "收起/展开导航侧栏",
+        "keywords": "sidebar collapse expand 侧栏 导航 收起 展开"
+      },
+      "nav-toggle-secondary-panel": {
+        "title": "收起/展开次级侧栏",
+        "keywords": "panel secondary collapse expand 次级 侧栏 项目 切换"
       }
     }
   },
@@ -794,7 +802,9 @@
       "tasks-dispatch": "任务：派发焦点任务",
       "tasks-accept": "任务：接受（通过）",
       "memory-approve": "记忆候选：通过",
-      "memory-reject": "记忆候选：拒绝"
+      "memory-reject": "记忆候选：拒绝",
+      "nav-toggle-sidebar": "收起/展开导航侧栏（A 栏）",
+      "nav-toggle-secondary-panel": "收起/展开次级侧栏（B 栏）"
     }
   },
   "tasks": {
@@ -1053,5 +1063,17 @@
       "tags": "标签",
       "tagsHint": "用逗号或空格分隔，供检索时按标签过滤。"
     }
+  },
+  "secondaryPanel": {
+    "label": "次级侧栏",
+    "projects": "项目切换",
+    "collapse": "收起次级侧栏",
+    "expand": "展开次级侧栏",
+    "settled": {
+      "done": "有任务已完成（未读）",
+      "failed": "有任务已失败（未读）",
+      "blocked": "有任务被阻塞（未读）"
+    },
+    "switchTo": "切换到项目：{{name}}"
   }
 }

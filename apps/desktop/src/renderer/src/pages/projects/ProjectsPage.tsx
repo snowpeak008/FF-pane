@@ -33,6 +33,8 @@ export function ProjectsPage(): ReactElement {
   const [removingIds, setRemovingIds] = useState<ReadonlySet<string>>(new Set());
   const activeProjectId = useUiStore((s) => s.activeProjectId);
   const setActiveProjectId = useUiStore((s) => s.setActiveProjectId);
+  // B 栏常驻项目列表与本页无共享缓存（T9.7）：增删/恢复成功后 bump 信号让它重取
+  const bumpProjectsRefresh = useUiStore((s) => s.bumpProjectsRefresh);
 
   const openCreate = useCallback(() => setCreateOpen(true), []);
 
@@ -51,9 +53,10 @@ export function ProjectsPage(): ReactElement {
   const handleCreated = useCallback(
     (entry: ProjectRegistryEntry) => {
       refetch();
+      bumpProjectsRefresh();
       toast.success(t("projects.create.toast", { name: entry.name }));
     },
-    [refetch, t],
+    [refetch, bumpProjectsRefresh, t],
   );
 
   const restore = useCallback(
@@ -64,9 +67,10 @@ export function ProjectsPage(): ReactElement {
         return;
       }
       refetch();
+      bumpProjectsRefresh();
       toast.success(t("projects.remove.restored", { name: entry.name }));
     },
-    [refetch, t],
+    [refetch, bumpProjectsRefresh, t],
   );
 
   const handleRemove = useCallback(
@@ -83,6 +87,7 @@ export function ProjectsPage(): ReactElement {
         return;
       }
       refetch();
+      bumpProjectsRefresh();
       toast.success(t("projects.remove.toast", { name: entry.name }), {
         action: {
           label: t("common.undo"),
@@ -90,7 +95,7 @@ export function ProjectsPage(): ReactElement {
         },
       });
     },
-    [refetch, restore, t],
+    [refetch, bumpProjectsRefresh, restore, t],
   );
 
   const newButton = (

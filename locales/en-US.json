@@ -136,6 +136,14 @@
       "memory-reject": {
         "title": "Memory candidate: reject",
         "keywords": "reject memory candidate 拒绝 记忆 候选"
+      },
+      "nav-toggle-sidebar": {
+        "title": "Toggle navigation sidebar",
+        "keywords": "sidebar collapse expand 侧栏 导航 收起 展开"
+      },
+      "nav-toggle-secondary-panel": {
+        "title": "Toggle secondary panel",
+        "keywords": "panel secondary collapse expand 次级 侧栏 项目 切换"
       }
     }
   },
@@ -794,7 +802,9 @@
       "tasks-dispatch": "Tasks: dispatch focused task",
       "tasks-accept": "Tasks: accept (approve)",
       "memory-approve": "Memory candidate: approve",
-      "memory-reject": "Memory candidate: reject"
+      "memory-reject": "Memory candidate: reject",
+      "nav-toggle-sidebar": "Toggle navigation sidebar (rail A)",
+      "nav-toggle-secondary-panel": "Toggle secondary panel (rail B)"
     }
   },
   "tasks": {
@@ -1053,5 +1063,17 @@
       "tags": "Tags",
       "tagsHint": "Separate with commas or spaces; used for tag filters in search."
     }
+  },
+  "secondaryPanel": {
+    "label": "Secondary panel",
+    "projects": "Project switcher",
+    "collapse": "Collapse secondary panel",
+    "expand": "Expand secondary panel",
+    "settled": {
+      "done": "A task is done (unread)",
+      "failed": "A task failed (unread)",
+      "blocked": "A task is blocked (unread)"
+    },
+    "switchTo": "Switch to project: {{name}}"
   }
 }

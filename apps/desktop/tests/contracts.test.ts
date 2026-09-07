@@ -73,4 +73,8 @@ describe("IPC 通道契约", () => {
     expect(INVOKE_CHANNELS).toContain("providers:probe-cli-login");
     expect(INVOKE_CHANNELS).toContain("providers:list-local-models");
   });
+
+  it("T9.7 任务落定事件通道已登记到运行时清单（preload 据此放行订阅）", () => {
+    expect(EVENT_CHANNELS).toContain("tasks:settled");
+  });
 });

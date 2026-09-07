@@ -1,64 +1,38 @@
-import { type ReactElement, type ReactNode, useCallback, useState } from "react";
+import type { ReactElement, ReactNode } from "react";
+import { useUiStore } from "../stores/ui";
+import { SecondaryPanel } from "./SecondaryPanel";
 import { Sidebar } from "./Sidebar";
 
 /**
- * 侧栏折叠状态的持久化 key。
- * 与主题（ffpane.ui-theme）、语言（ffpane.ui-language）同一先例：Phase 3 暂存 localStorage，
- * 后续接入全局 config.json 时唯一改动点是这两个读写函数。
- */
-const SIDEBAR_STORAGE_KEY = "ffpane.ui-sidebar-collapsed";
-
-function readCollapsed(): boolean {
-  try {
-    return window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === "1";
-  } catch {
-    // 隐私模式等读不到 localStorage 的场景一律按展开处理，不影响可用性
-    return false;
-  }
-}
-
-function persistCollapsed(collapsed: boolean): void {
-  try {
-    window.localStorage.setItem(SIDEBAR_STORAGE_KEY, collapsed ? "1" : "0");
-  } catch (thrown) {
-    console.error("[renderer] persisting sidebar state failed:", thrown);
-  }
-}
-
-export interface AppLayoutProps {
-  readonly children: ReactNode;
-}
-
-/**
- * 应用布局骨架：左侧导航 + 右侧内容列。
+ * 应用布局骨架（T9.7 起三列）：A 栏（导航侧栏）+ B 栏（次级侧栏，项目切换器）+ 内容列。
+ * B 栏是 flex 行内第二个 shrink-0 子项，位置天然跟随 A 栏右缘；A/B 独立收展。
+ *
+ * 折叠状态（T9.7 收敛）：此前本组件自持 localStorage["ffpane.ui-sidebar-collapsed"]，
+ * 与 ui store 的 navCollapsed 双套并存。现收敛进 ui store（persist 迁移见 stores/ui.ts
+ * 文件头），本组件只读 store——快捷键（Ctrl+B / Ctrl+Shift+B，§7）经命令面板 handler
+ * 走同一套 action，不会再出现两套状态各自为政。
  *
  * 内容列顶部**不由本组件占用**：会话页的常驻状态条、各页面的筛选条属于页面自有头部，
  * 由各页面用 layout/PageHeader 自行渲染（结构上它就是内容列的第一个 flex 子项）。
  *
- * 键盘：**本组件不监听键盘**。Ctrl+1~7 的页面切换归 command/ 的全局注册表
- * （`nav-page-by-index`，全局作用域），§7 定的就是「全局键位优先级最高，页面不得覆盖」。
- *
- * 此前这里另挂了一条 window keydown 做同一件事。T8.1 删除它的理由不是"会跳两次"
- * ——实测并不会：注册表那条挂在**捕获阶段**且命中即 stopPropagation，本处的冒泡监听
- * 根本收不到 Ctrl+N。也就是说它早已是事实上的死代码，而它的"无害"完全依赖于
- * 远处另一个文件恰好用了捕获阶段：那边哪天改走冒泡，这里就会立刻变成跳两次。
- * 同一组键位留两个实现本身就是隐患，与它今天有没有生效无关。
+ * 键盘：**本组件不监听键盘**。全局键位归 command/ 的注册表（§7 全局键位优先级最高），
+ * 收展命令的 handler 由 App.tsx 装配层注入。
  */
-export function AppLayout({ children }: AppLayoutProps): ReactElement {
-  const [collapsed, setCollapsed] = useState<boolean>(readCollapsed);
+export interface AppLayoutProps {
+  readonly children: ReactNode;
+}
 
-  const toggleSidebar = useCallback(() => {
-    setCollapsed((previous) => {
-      const next = !previous;
-      persistCollapsed(next);
-      return next;
-    });
-  }, []);
+export function AppLayout({ children }: AppLayoutProps): ReactElement {
+  const collapsed = useUiStore((s) => s.navCollapsed);
+  const toggleNav = useUiStore((s) => s.toggleNavCollapsed);
 
   return (
     <div className="flex h-dvh w-full overflow-hidden bg-canvas text-fg">
-      <Sidebar collapsed={collapsed} onToggle={toggleSidebar} />
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">{children}</div>
+      <Sidebar collapsed={collapsed} onToggle={toggleNav} />
+      <SecondaryPanel />
+      {/* main 地标：nav（A 栏）/ aside（B 栏）/ main（内容列）三分——语义化之外，
+          也让测试能把「页面内容」与「B 栏同名项目条目」区分开 */}
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden">{children}</main>
     </div>
   );
 }

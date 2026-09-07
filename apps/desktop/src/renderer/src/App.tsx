@@ -2,12 +2,19 @@ import type { ProjectRegistryEntry } from "@ff-pane/shared";
 import { type ReactElement, useCallback, useMemo } from "react";
 import { HashRouter, useNavigate } from "react-router-dom";
 import { Toaster } from "sonner";
-import { CommandPaletteProvider, type NavigationTarget, type PaletteProjectItem } from "./command";
+import {
+  type CommandHandlerMap,
+  CommandPaletteProvider,
+  type NavigationTarget,
+  type PaletteProjectItem,
+} from "./command";
 import { TooltipProvider } from "./components/ui/Tooltip";
 import { queryData } from "./ipc/query";
 import { useInvokeQuery } from "./ipc/useInvokeQuery";
 import { AppLayout } from "./layout/AppLayout";
 import { navItemById } from "./layout/nav";
+import { ProjectAlertsBridge } from "./layout/ProjectAlertsBridge";
+import { SecondaryPanelProvider } from "./layout/secondary-panel";
 import { AppRoutes } from "./pages/AppRoutes";
 import { ConfigDraftDialog } from "./pages/session/ConfigDraftDialog";
 import { HabitSuggestionBridge } from "./pages/session/HabitSuggestionBridge";
@@ -47,6 +54,8 @@ const EMPTY_ENTRIES: readonly ProjectRegistryEntry[] = [];
 function AppCommandPalette({ children }: { readonly children: ReactElement }): ReactElement {
   const navigate = useNavigate();
   const setActiveProjectId = useUiStore((s) => s.setActiveProjectId);
+  const toggleNavCollapsed = useUiStore((s) => s.toggleNavCollapsed);
+  const toggleSecondaryPanelCollapsed = useUiStore((s) => s.toggleSecondaryPanelCollapsed);
   const { state } = useInvokeQuery("projects:list");
   const entries = useMemo(() => queryData(state) ?? EMPTY_ENTRIES, [state]);
 
@@ -66,6 +75,16 @@ function AppCommandPalette({ children }: { readonly children: ReactElement }): R
     [navigate],
   );
 
+  // 布局收展（T9.7，§7 Ctrl+B / Ctrl+Shift+B）：挂载方注入——收展是布局骨架的事，
+  // 不属于任何页面；toggle action 引用在 store 生命周期内稳定，handlers 恒定不重建。
+  const layoutHandlers = useMemo<CommandHandlerMap>(
+    () => ({
+      "nav-toggle-sidebar": toggleNavCollapsed,
+      "nav-toggle-secondary-panel": toggleSecondaryPanelCollapsed,
+    }),
+    [toggleNavCollapsed, toggleSecondaryPanelCollapsed],
+  );
+
   // 面板给回的是裸字符串 id；回注册表里取那一条，用它自带的品牌化 ProjectId，
   // 免得在这里凭空 as 一次（品牌 ID 只在 JSON 边界收窄，见开发进度 §5 工程约定）。
   const handleSelectProject = useCallback(
@@ -81,6 +100,7 @@ function AppCommandPalette({ children }: { readonly children: ReactElement }): R
   return (
     <CommandPaletteProvider
       navigate={handleNavigate}
+      handlers={layoutHandlers}
       projects={projects}
       onSelectProject={handleSelectProject}
     >
@@ -94,12 +114,16 @@ export function App(): ReactElement {
     <HashRouter>
       <TooltipProvider>
         <AppCommandPalette>
-          <AppLayout>
-            <AppRoutes />
-          </AppLayout>
+          <SecondaryPanelProvider>
+            <AppLayout>
+              <AppRoutes />
+            </AppLayout>
+          </SecondaryPanelProvider>
         </AppCommandPalette>
         {/* 会话流式事件全局订阅桥（T4.2）：唯一订阅 session:event，归并进 store。 */}
         <SessionEventBridge />
+        {/* 项目落定高亮桥（T9.7）：唯一订阅 tasks:settled，维护 B 栏未读状态。 */}
+        <ProjectAlertsBridge />
         {/* 系统观察建议全局桥（T5.4 来源三）：唯一订阅 habits:suggestion，提示 observed 候选。 */}
         <HabitSuggestionBridge />
         {/* 配置草案确认对话框（T9.1 铁律 2）：全局模态，用户在任何页面都能裁决。 */}

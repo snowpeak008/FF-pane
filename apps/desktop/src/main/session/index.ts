@@ -33,6 +33,7 @@ import type {
   ProfileId,
   Provider,
   RunId,
+  Task,
 } from "@ff-pane/shared";
 import { DEFAULT_CONFIG_TOOL_SERVER_NAME } from "@ff-pane/shared";
 import {
@@ -90,6 +91,7 @@ import {
 import { createSessionOrchestrator, type SessionOrchestrator } from "./orchestrator";
 import { createDesktopAdapterRegistry, type DesktopAdapterRegistry } from "./registry";
 import { createProjectRepairer, type ProjectRepairer, type RepairDeps } from "./repair";
+import { taskSettledEventOf } from "./task-settled";
 
 export * from "./config-draft-hub";
 export * from "./config-tool";
@@ -101,6 +103,7 @@ export * from "./orchestrator";
 export * from "./quit";
 export * from "./registry";
 export * from "./repair";
+export * from "./task-settled";
 
 /** 主进程模块目录：内置 MCP sidecar 与 main/index.js 同目录（见 electron.vite.config.ts）。 */
 const moduleDir = dirname(fileURLToPath(import.meta.url));
@@ -131,7 +134,10 @@ export interface SessionLayer {
 }
 
 /** 启动修正的真实存取绑定（与编排器 deps 同一套 storage 函数，只是形状不同）。 */
-function createRepairDeps(isTurnActive: (turnId: string) => boolean): RepairDeps {
+function createRepairDeps(
+  isTurnActive: (turnId: string) => boolean,
+  onTaskSaved: (projectLayout: ProjectLayout, task: Task) => void,
+): RepairDeps {
   return {
     listInflightMarkers,
     readInflightPartial,
@@ -143,6 +149,7 @@ function createRepairDeps(isTurnActive: (turnId: string) => boolean): RepairDeps
     },
     saveTask: async (projectLayout, task) => {
       await saveTask(projectLayout, task);
+      onTaskSaved(projectLayout, task);
     },
     listRuns: async (projectLayout) => {
       const result = await listRuns(projectLayout);
@@ -185,6 +192,23 @@ export async function createSessionLayer(getWindow: SessionWindowGetter): Promis
     // 替换，用户真实 ~/.iflow 零触碰）；目录由适配器 startTurn 按需建出。
     iflowHomeDir: join(layout.rootDir, "iflow-home"),
   });
+
+  /**
+   * 任务落定通知（T9.7）：saveTask 落盘后按状态派生 tasks:settled 推给渲染层
+   * （B 栏落定高亮）。挂在 saveTask 绑定处（最小面）：编排器正常收尾 / 兜底 /
+   * 退出钩子 / 启动修正全部经此，事件源一处覆盖。窗口不存在时静默丢弃（与
+   * session:event 同款）；派生是纯函数，不影响落盘本身。
+   */
+  function publishTaskSettled(projectLayout: ProjectLayout, task: Task): void {
+    const event = taskSettledEventOf(projectLayout.projectRootDir, task);
+    if (event === null) {
+      return;
+    }
+    const window = getWindow();
+    if (window !== null) {
+      publishEvent(window.webContents, "tasks:settled", event);
+    }
+  }
 
   // 最新计划版本：v1..vN 连续，逐版加载到 not-found 为止，返回末版（与 data.ts plans:list 同构）
   async function loadLatestPlan(projectLayout: ProjectLayout): Promise<Plan | undefined> {
@@ -292,6 +316,7 @@ export async function createSessionLayer(getWindow: SessionWindowGetter): Promis
     },
     saveTask: async (projectLayout, task) => {
       await saveTask(projectLayout, task);
+      publishTaskSettled(projectLayout, task);
     },
     listRuns: async (projectLayout) => {
       const result = await listRuns(projectLayout);
@@ -529,7 +554,10 @@ export async function createSessionLayer(getWindow: SessionWindowGetter): Promis
   });
 
   const repairer = createProjectRepairer(
-    createRepairDeps((turnId) => orchestrator.hasActiveTurn(turnId)),
+    createRepairDeps(
+      (turnId) => orchestrator.hasActiveTurn(turnId),
+      (projectLayout, task) => publishTaskSettled(projectLayout, task),
+    ),
   );
 
   /** 首次为某项目服务前先修正残留（幂等；修正失败只记日志，不挡正常请求）。 */

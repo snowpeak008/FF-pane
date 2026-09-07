@@ -22,6 +22,9 @@ export const COMMAND_IDS = [
   "nav-back",
   "nav-forward",
   "nav-page-by-index",
+  // 布局收展（T9.7：A 栏 / B 栏独立收展，§7 Ctrl+B / Ctrl+Shift+B）
+  "nav-toggle-sidebar",
+  "nav-toggle-secondary-panel",
   "nav-projects",
   "nav-session",
   "nav-plan",

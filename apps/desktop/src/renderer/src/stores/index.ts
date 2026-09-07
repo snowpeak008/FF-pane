@@ -55,6 +55,19 @@ export {
   shortcutIndexOfPage,
 } from "./pages";
 export {
+  isInstantRead,
+  isReadClearingPath,
+  PROJECT_ALERTS_STORAGE_KEY,
+  type ProjectAlertMap,
+  type ProjectAlertsActions,
+  type ProjectAlertsState,
+  type ProjectAlertsStore,
+  READ_CLEARING_PATHS,
+  useProjectAlertsStore,
+  withoutProject,
+  withSettled,
+} from "./project-alerts";
+export {
   type ActiveTurnView,
   currentSessionTurns,
   type EndedTurnMarker,
@@ -79,9 +92,13 @@ export {
   type TasksUiState,
 } from "./tasks";
 export {
+  LEGACY_SIDEBAR_COLLAPSED_KEY,
   type ListDensity,
+  migrateUiState,
   UI_STORE_STORAGE_KEY,
+  UI_STORE_VERSION,
   type UiActions,
+  type UiRuntimeState,
   type UiState,
   type UiStore,
   useUiStore,

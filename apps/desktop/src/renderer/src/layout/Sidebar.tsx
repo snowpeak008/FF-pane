@@ -48,7 +48,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps): ReactElement {
         {collapsed ? null : (
           <span className="truncate px-1 text-sm font-semibold text-fg">{BRAND}</span>
         )}
-        <Tooltip content={toggleLabel} side="right">
+        <Tooltip content={toggleLabel} side="right" shortcut="Ctrl+B">
           <Button variant="ghost" size="sm" iconOnly aria-label={toggleLabel} onClick={onToggle}>
             <ToggleIcon aria-hidden size={14} />
           </Button>

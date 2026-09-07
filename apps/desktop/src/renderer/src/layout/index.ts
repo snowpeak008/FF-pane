@@ -13,5 +13,12 @@ export {
 } from "./nav";
 export { NAV_ICONS } from "./nav-icons";
 export { PageHeader, type PageHeaderProps } from "./PageHeader";
+export { ProjectSwitcher } from "./ProjectSwitcher";
+export { SecondaryPanel } from "./SecondaryPanel";
 export { Sidebar, type SidebarProps } from "./Sidebar";
+export {
+  type SecondaryPanelContextValue,
+  SecondaryPanelProvider,
+  useSecondaryPanel,
+} from "./secondary-panel";
 export { shortcutHint } from "./shortcuts";

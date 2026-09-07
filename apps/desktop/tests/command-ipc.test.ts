@@ -77,12 +77,14 @@ const APP_INFO: AppInfo = {
 // 快捷键注册表（设计系统 §7）
 // ════════════════════════════════════════════════════════════════════════════
 
-/** §7 表格里出现的全部键位（展示形式），25 个绑定去重后 23 个。 */
+/** §7 表格里出现的全部键位（展示形式），27 个绑定去重后 25 个。 */
 const EXPECTED_KEY_DISPLAYS: readonly string[] = [
   "Ctrl+K",
   "Ctrl+P",
   "Ctrl+,",
   "Ctrl+/",
+  "Ctrl+B",
+  "Ctrl+Shift+B",
   "Esc",
   `Alt+\u2190`,
   `Alt+\u2192`,
@@ -117,13 +119,13 @@ function keyEvent(
   };
 }
 
-describe("快捷键表：§7 的 19 条预登记齐全", () => {
+describe("快捷键表：§7 的 21 条预登记齐全", () => {
   const registry = createShortcutRegistry(SHORTCUT_TABLE);
 
-  it("条目数正好 19（一个「命令 × 作用域」一条）", () => {
+  it("条目数正好 21（一个「命令 × 作用域」一条）", () => {
     expect(SHORTCUT_TABLE).toHaveLength(SHORTCUT_TABLE_SIZE);
-    expect(SHORTCUT_TABLE_SIZE).toBe(19);
-    expect(registry.entries()).toHaveLength(19);
+    expect(SHORTCUT_TABLE_SIZE).toBe(21);
+    expect(registry.entries()).toHaveLength(21);
   });
 
   it("命令 ID 全部合法且互不重复", () => {
@@ -141,9 +143,9 @@ describe("快捷键表：§7 的 19 条预登记齐全", () => {
     }
   });
 
-  it("键位覆盖 §7 全表：25 个绑定、23 个去重键位", () => {
+  it("键位覆盖 §7 全表：27 个绑定、25 个去重键位", () => {
     const bindings = registry.bindings();
-    expect(bindings).toHaveLength(25);
+    expect(bindings).toHaveLength(27);
     const displays = [...new Set(bindings.map((binding) => binding.display))].sort();
     expect(displays).toEqual([...EXPECTED_KEY_DISPLAYS].sort());
   });
@@ -896,7 +898,7 @@ describe("语言包：命令与快捷键文案两语言齐全", () => {
     }
   });
 
-  it("19 条快捷键都有作用描述，7 个作用域都有名称", () => {
+  it("21 条快捷键都有作用描述，7 个作用域都有名称", () => {
     for (const tag of tags) {
       const pack = loadLocale(tag);
       for (const entry of SHORTCUT_TABLE) {

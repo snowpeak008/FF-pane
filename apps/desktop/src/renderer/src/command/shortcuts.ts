@@ -2,14 +2,15 @@
  * 全局快捷键注册表（W3.1c）——设计系统 §7 的可执行副本。
  *
  * ════════════════════════════════════════════════════════════════════════════
- * 一、19 条从哪来（拆分规则，别当魔数）
+ * 一、21 条从哪来（拆分规则，别当魔数）
  * ════════════════════════════════════════════════════════════════════════════
- * §7 表格 16 行，本注册表按 **一个「命令 × 作用域」一条** 展开：
+ * §7 表格 18 行（T9.7 增 Ctrl+B / Ctrl+Shift+B 两行），本注册表按
+ * **一个「命令 × 作用域」一条** 展开：
  *   - `Alt+←` / `Alt+→`        → 后退、前进 2 条（两个命令）
  *   - `↑` / `↓`                → 上移、下移 2 条（两个命令）
  *   - `Ctrl+Shift+A`           → 任务接受、记忆候选通过 2 条（同键位、两个作用域）
  *   - `Ctrl+1` ~ `Ctrl+7`      → 1 条（同一个"按序号切页"命令，7 个键位）
- * 16 + 1 + 1 + 1 = **19**。`Ctrl+Enter` 在 §7 本来就分两行（会话发送 / 任务派发），
+ * 18 + 1 + 1 + 1 = **21**。`Ctrl+Enter` 在 §7 本来就分两行（会话发送 / 任务派发），
  * 同键位不同作用域不算冲突——这是本表的既有先例。
  *
  * ════════════════════════════════════════════════════════════════════════════
@@ -284,7 +285,7 @@ export function isTextInputTarget(target: TextInputTargetLike | null | undefined
 }
 
 /**
- * 设计系统 §7 快捷键表（19 条）。
+ * 设计系统 §7 快捷键表（21 条）。
  * 未实现的动作在这里只登记 commandId：命令面板会把它显示为「待接入」，
  * 页面工单挂上 handler 之后立即生效，无需回来改本表。
  */
@@ -343,6 +344,20 @@ export const SHORTCUT_TABLE: readonly ShortcutRegistration[] = [
   {
     commandId: "nav-page-by-index",
     keys: ["Ctrl+1", "Ctrl+2", "Ctrl+3", "Ctrl+4", "Ctrl+5", "Ctrl+6", "Ctrl+7"],
+    scopes: ["global"],
+    disabledInTextInput: false,
+    preventDefault: true,
+  },
+  {
+    commandId: "nav-toggle-sidebar",
+    keys: ["Ctrl+B"],
+    scopes: ["global"],
+    disabledInTextInput: false,
+    preventDefault: true,
+  },
+  {
+    commandId: "nav-toggle-secondary-panel",
+    keys: ["Ctrl+Shift+B"],
     scopes: ["global"],
     disabledInTextInput: false,
     preventDefault: true,
@@ -427,7 +442,7 @@ export const SHORTCUT_TABLE: readonly ShortcutRegistration[] = [
 ];
 
 /** §7 表格行数（= 本注册表条目数），拆分规则见文件头注。 */
-export const SHORTCUT_TABLE_SIZE = 19;
+export const SHORTCUT_TABLE_SIZE = 21;
 
 export interface ShortcutRegistry {
   /** 注册一条；键位冲突抛 ShortcutConflictError。 */
