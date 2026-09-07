@@ -2,6 +2,7 @@ import type { AgentProfile, PermissionEnvelope } from "@ff-pane/shared";
 import { describe, expect, it } from "vitest";
 import {
   buildProfileDraft,
+  defaultRoleForNewProfile,
   emptyProfileForm,
   formFromProfile,
   type ProfileFormState,
@@ -22,6 +23,21 @@ describe("emptyProfileForm", () => {
     expect(form.defaultRole).toBe("worker");
     expect(form.permission).toEqual(PRESET);
     expect(form.model).toBe("");
+  });
+
+  it("显式传入默认角色即采用（T9.6 ⑤ 编辑器按 hasAnyProfile 注入）", () => {
+    expect(emptyProfileForm(PRESET, "planner").defaultRole).toBe("planner");
+    expect(emptyProfileForm(PRESET, "worker").defaultRole).toBe("worker");
+  });
+});
+
+describe("defaultRoleForNewProfile（T9.6 ⑤：首个 Profile 默认规划者）", () => {
+  it("尚无任何 Profile → planner（首个 Profile 必须能承载会话页讨论）", () => {
+    expect(defaultRoleForNewProfile(false)).toBe("planner");
+  });
+
+  it("已有 Profile → 维持 worker 缺省（后续通常在补执行者）", () => {
+    expect(defaultRoleForNewProfile(true)).toBe("worker");
   });
 });
 

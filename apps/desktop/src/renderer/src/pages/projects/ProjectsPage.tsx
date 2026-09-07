@@ -2,6 +2,7 @@ import type { ProjectRegistryEntry } from "@ff-pane/shared";
 import { FolderPlus } from "lucide-react";
 import { type ReactElement, useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { EmptyState } from "../../components/states/EmptyState";
 import { ErrorState } from "../../components/states/ErrorState";
@@ -24,6 +25,7 @@ import { ProjectCard } from "./ProjectCard";
  */
 export function ProjectsPage(): ReactElement {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   // projects:summary 而非 projects:list：本页要的是注册表 + 派生信息（T7.4，§11.1）
   const { state, refetch } = useInvokeQuery("projects:summary");
   const [createOpen, setCreateOpen] = useState(false);
@@ -37,9 +39,13 @@ export function ProjectsPage(): ReactElement {
   const handleOpen = useCallback(
     (entry: ProjectRegistryEntry) => {
       setActiveProjectId(entry.id);
-      toast.success(t("projects.opened", { name: entry.name }));
+      // 选中项目的下一步是去会话页开聊（T9.6 ③）：toast 补动作按钮把用户领过去，
+      // 不再让「选完项目然后呢」断在这里（planGenerated toast 的同款 action 位）。
+      toast.success(t("projects.opened", { name: entry.name }), {
+        action: { label: t("projects.goToSession"), onClick: () => void navigate("/session") },
+      });
     },
-    [setActiveProjectId, t],
+    [navigate, setActiveProjectId, t],
   );
 
   const handleCreated = useCallback(

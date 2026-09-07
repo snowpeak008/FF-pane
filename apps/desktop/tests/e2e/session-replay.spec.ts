@@ -156,14 +156,16 @@ test("点「新建会话」：消息区清空、横幅消失、且不被自动�
 
   await page.getByRole("button", { name: "New session" }).click();
 
-  // 横幅与回放消息全部消失，回到全新会话空态
+  // 横幅与回放消息全部消失，回到空态。本 spec 未建任何 Profile，故空态是 T9.6 ②
+  // 的「缺讨论 Profile」引导（有 Profile 时才是常规 session.empty 文案，
+  // 那一面由 first-use-guidance.spec.ts 覆盖）
   await expect(page.getByText("Resumed last session · Context rebuild")).toBeHidden();
   await expect(page.getByText("please summarize the project")).toBeHidden();
-  await expect(page.getByText(/No conversation in progress/)).toBeVisible();
+  await expect(page.getByText(/No profile can host a discussion/)).toBeVisible();
 
   // 离开再回来：autoResumeDoneRoot 已记，本项目不再被自动拉回旧会话
   await gotoRoute(page, "/projects");
   await gotoRoute(page, "/session");
-  await expect(page.getByText(/No conversation in progress/)).toBeVisible();
+  await expect(page.getByText(/No profile can host a discussion/)).toBeVisible();
   await expect(page.getByText("Resumed last session · Context rebuild")).toBeHidden();
 });

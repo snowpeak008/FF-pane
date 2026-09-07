@@ -216,6 +216,12 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
+  // 收尾预算放宽（T9.6 顺手项）：cleanup 的 app.close() 要走 prepareForQuit →
+  // 树杀挂起的假 codex（ping 86400s）→ 轮次 interrupted 落盘，整套 E2E 负载下
+  // 可超默认 60s 钩子预算——T9.6 回归实测一次失败形态即「afterAll hook timeout
+  // of 60000ms exceeded」（测试本体 5.8s 已过），失败被归因到全链路条 :317，
+  // 与 §4.5 已四见的登记形态一致。真挂死仍会在 120s 兜住。
+  test.setTimeout(120_000);
   await launched.cleanup();
   rmSync(projectDir, { recursive: true, force: true });
   rmSync(fakeBinDir, { recursive: true, force: true });
@@ -315,6 +321,14 @@ test("config MCP sidecar：拉起 → 四工具 schema 无密钥字段 → list 
 });
 
 test("全链路：设置页开开关 → 派发在飞轮 → 草案 → 确认对话框 → 确认后配置真落盘", async () => {
+  // 负载性 flake 加固（T9.6 顺手项，§4.5 已四见）：本条在整套 E2E 负载下偶发超时、
+  // 单跑与全量复跑均绿——链路上两段真实异步（session:start 后编排器装配信箱 +
+  // spawn 假 codex；草案投递后 hub 250ms 轮询 → 校验 → 事件 → 对话框渲染）在负载
+  // 挤压下可撞 15s 局部预算或 60s 全局预算。处置与 opencode env 指纹 / grok
+  // respondPermission 的 45s 时序钉子同款方向：本条显式放宽整条预算至 120s，
+  // 两段关键等待放宽至 45s（真失败仍会以可诊断的断言超时呈现，不是无限等）。
+  // 不动 hub 轮询节奏（250ms 是生产参数，问题在测试机负载不在轮询密度）。
+  test.setTimeout(120_000);
   const { page, dataRoot } = launched;
 
   // 1. 经真实设置页 UI 打开项目级开关（默认关——先断言再开）。
@@ -363,7 +377,8 @@ test("全链路：设置页开开关 → 派发在飞轮 → 草案 → 确认�
           return false;
         }
       },
-      { timeout: 15_000 },
+      // 45s（原 15s）：负载下编排器装配（spawn 假 codex + 建信箱目录）被挤压的钉子
+      { timeout: 45_000 },
     )
     .toBe(true);
   const mailboxDir = join(mailboxRoot, turnDir as string);
@@ -383,9 +398,10 @@ test("全链路：设置页开开关 → 派发在飞轮 → 草案 → 确认�
     "utf8",
   );
 
-  // 4. 确认对话框出现（真实校验已通过；cli_login 无密钥需求 → 无补填输入框）
+  // 4. 确认对话框出现（真实校验已通过；cli_login 无密钥需求 → 无补填输入框）。
+  //    45s（原 15s）：负载下 hub 轮询捡草案 → 校验 → 事件 → 渲染整段被挤压的钉子
   const dialog = page.getByTestId("config-draft-dialog");
-  await expect(dialog).toBeVisible({ timeout: 15_000 });
+  await expect(dialog).toBeVisible({ timeout: 45_000 });
   await expect(page.getByTestId("config-draft-summary")).toHaveText(
     'create provider "E2E Drafted"',
   );

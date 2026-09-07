@@ -1,11 +1,16 @@
 import { type ReactElement, useEffect, useRef } from "react";
-import { EmptyState } from "../../components/states/EmptyState";
+import { EmptyState, type EmptyStateAction } from "../../components/states/EmptyState";
 import { ChatMessage, type ChatMessageView } from "./ChatMessage";
 
 export interface MessageStreamProps {
   readonly messages: readonly ChatMessageView[];
   /** 无消息时的空态一句话（§6.2）。 */
   readonly emptyMessage: string;
+  /**
+   * 空态主操作（T9.6 ②）：缺 Planner Profile 时给「去设置」——关键引导不能只藏在
+   * Composer 禁用 tooltip 里。复用 EmptyState 既有 action 位（NoActiveProject 同款）。
+   */
+  readonly emptyAction?: EmptyStateAction;
 }
 
 /**
@@ -14,7 +19,11 @@ export interface MessageStreamProps {
  * 长会话虚拟化（§1.1）留待有真实历史数据规模时接入——工作台不持久化消息历史
  * （§10.2 规则 3），单次会话的可见消息量有限，先用原生滚动 + 贴底策略。
  */
-export function MessageStream({ messages, emptyMessage }: MessageStreamProps): ReactElement {
+export function MessageStream({
+  messages,
+  emptyMessage,
+  emptyAction,
+}: MessageStreamProps): ReactElement {
   const bottomRef = useRef<HTMLDivElement>(null);
   // 消息数或最后一条内容变化即滚到底（流式追加时跟随）
   const lastText = messages.length > 0 ? messages[messages.length - 1]?.text : undefined;
@@ -24,7 +33,13 @@ export function MessageStream({ messages, emptyMessage }: MessageStreamProps): R
   }, [messages.length, lastText]);
 
   if (messages.length === 0) {
-    return <EmptyState className="min-h-0 flex-1" message={emptyMessage} />;
+    return (
+      <EmptyState
+        className="min-h-0 flex-1"
+        message={emptyMessage}
+        {...(emptyAction !== undefined ? { action: emptyAction } : {})}
+      />
+    );
   }
 
   return (

@@ -163,6 +163,8 @@ export function ProfilesSection(): ReactElement {
         onOpenChange={setEditorOpen}
         profile={editing}
         onSaved={handleSaved}
+        // 首个 Profile 默认角色取 planner（T9.6 ⑤）：以列表区已拉到的清单为准
+        hasAnyProfile={state.status === "success" && state.data.length > 0}
       />
     </section>
   );

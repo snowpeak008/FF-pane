@@ -10,6 +10,7 @@ import type {
   ModelId,
   PermissionEnvelope,
   ProviderId,
+  Role,
   RoleRef,
   RuntimeId,
 } from "@ff-pane/shared";
@@ -35,14 +36,27 @@ export interface ProfileFormState {
   readonly gxDelivery: GenericExecDelivery;
 }
 
-/** 空表单（新建默认：worker 角色、注入的默认权限预设）。 */
-export function emptyProfileForm(defaultPermission: PermissionEnvelope): ProfileFormState {
+/**
+ * 新建 Profile 的默认角色（T9.6 ⑤）：首个 Profile 默认「规划者」——会话页讨论轮
+ * 只认 planner（或自定义角色）Profile，首个建成 worker 会落进「建完仍无法开聊」
+ * 的暗坑（noPlannerProfile 只在 Composer 禁用提示里出现，可发现性差）。
+ * 已有 Profile 后维持 worker 缺省（此时通常在补执行者，planner 多半已就位）。
+ */
+export function defaultRoleForNewProfile(hasAnyProfile: boolean): Role {
+  return hasAnyProfile ? "worker" : "planner";
+}
+
+/** 空表单（新建默认：角色按 {@link defaultRoleForNewProfile}、注入的默认权限预设）。 */
+export function emptyProfileForm(
+  defaultPermission: PermissionEnvelope,
+  defaultRole: Role = "worker",
+): ProfileFormState {
   return {
     name: "",
     runtime: "",
     providerId: "",
     model: "",
-    defaultRole: "worker",
+    defaultRole,
     outputLanguage: "",
     permission: defaultPermission,
     gxCommand: "",

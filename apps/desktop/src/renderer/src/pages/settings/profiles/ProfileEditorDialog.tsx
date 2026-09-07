@@ -24,7 +24,12 @@ import { invokeQuery, queryData } from "../../../ipc/query";
 import { useInvokeQuery } from "../../../ipc/useInvokeQuery";
 import { cn } from "../../../lib/cn";
 import { PermissionEnvelopeEditor } from "../PermissionEnvelopeEditor";
-import { buildProfileDraft, emptyProfileForm, formFromProfile } from "./profile-form";
+import {
+  buildProfileDraft,
+  defaultRoleForNewProfile,
+  emptyProfileForm,
+  formFromProfile,
+} from "./profile-form";
 
 /**
  * 已知 Runtime 下拉项（权威闭合清单在 @ff-pane/adapters KNOWN_RUNTIMES；
@@ -47,6 +52,8 @@ export interface ProfileEditorDialogProps {
   readonly onOpenChange: (open: boolean) => void;
   readonly profile?: AgentProfile | undefined;
   readonly onSaved: (profile: AgentProfile) => void;
+  /** 工作台是否已有任一 Profile（T9.6 ⑤）：无 → 新建默认角色取 planner。 */
+  readonly hasAnyProfile: boolean;
 }
 
 /**
@@ -59,6 +66,7 @@ export function ProfileEditorDialog({
   onOpenChange,
   profile,
   onSaved,
+  hasAnyProfile,
 }: ProfileEditorDialogProps): ReactElement {
   const { t } = useTranslation();
   const { state: providersState, refetch: refetchProviders } = useInvokeQuery("providers:list");
@@ -81,10 +89,14 @@ export function ProfileEditorDialog({
     if (!open) {
       return;
     }
-    setForm(profile !== undefined ? formFromProfile(profile) : emptyProfileForm(defaultPreset));
+    setForm(
+      profile !== undefined
+        ? formFromProfile(profile)
+        : emptyProfileForm(defaultPreset, defaultRoleForNewProfile(hasAnyProfile)),
+    );
     setSaveError(undefined);
     // defaultPreset 仅在新建且 config 已到时作为初值，故依赖它
-  }, [open, profile, defaultPreset]);
+  }, [open, profile, defaultPreset, hasAnyProfile]);
 
   /**
    * 列表新鲜度（T9.3 ①）：对话框常驻挂载、open 只是显隐 prop，useInvokeQuery

@@ -250,6 +250,11 @@ export function SessionPage(): ReactElement {
         ? t("session.turnInProgress")
         : undefined;
 
+  // 缺讨论 Profile 的显式引导（T9.6 ②）：项目已选中但无 planner / 自定义角色 Profile 时，
+  // 消息流空态换成「去设置」引导（NoActiveProject 同款空态 + 主操作）——此前该状态下
+  // 唯一的提示藏在 Composer 禁用 tooltip 里，不可发现。加载中不闪引导（以拉到的清单为准）。
+  const missingDiscussionProfile = activeProfile === null && !profileLoading;
+
   return (
     <>
       <PageHeader title={t("nav.session.label")} description={t("nav.session.question")} />
@@ -313,7 +318,20 @@ export function SessionPage(): ReactElement {
             />
           ) : null}
           <SessionReplayBanner />
-          <MessageStream messages={messages} emptyMessage={t("session.empty")} />
+          <MessageStream
+            messages={messages}
+            emptyMessage={
+              missingDiscussionProfile ? t("session.noPlannerProfile") : t("session.empty")
+            }
+            {...(missingDiscussionProfile
+              ? {
+                  emptyAction: {
+                    label: t("session.goToSettings"),
+                    onClick: () => void navigate("/settings"),
+                  },
+                }
+              : {})}
+          />
           {/* 坏行如实标注（§1.4 红线 3）：读得出来的都在上面，读不出来的不假装不存在 */}
           {replay !== null && replay.sessionId === activeSessionId && replay.skippedLines > 0 ? (
             <p className="shrink-0 px-4 py-1 text-center text-[11px] text-fg-subtle">
