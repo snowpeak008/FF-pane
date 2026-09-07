@@ -18,25 +18,42 @@ import { useInvokeQuery } from "../../ipc/useInvokeQuery";
 import { cn } from "../../lib/cn";
 import { startSessionTurn } from "../../lib/session-run";
 import { useSessionStore } from "../../stores/session";
-import { defaultHandoffTargetId, deriveHandoffTargets } from "./handoff-view";
+import {
+  defaultHandoffTargetId,
+  defaultInheritTargetId,
+  deriveHandoffTargets,
+} from "./handoff-view";
+
+/**
+ * 对话框意图（T9.8 ①）：同一条交接包管线的两个入口。
+ * - handoff：换 Agent（T7.1 原语义，缺省选换了 Runtime 的候选）；
+ * - inherit：开新会话并继承（轻装新开，缺省选当前 Profile 自己）。
+ * 两者走完全相同的确认链路（handoff:generate → 可编辑预览 → session:start 带
+ * handoffText），差别只有缺省选中与文案。
+ */
+export type HandoffIntent = "handoff" | "inherit";
 
 export interface HandoffDialogProps {
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
   readonly projectRoot: string;
-  /** 当前承载会话的 Profile（用于把自己排除出迁移目标）。 */
+  /** 当前承载会话的 Profile（缺省选中与「当前」标注据此判定）。 */
   readonly currentProfile: AgentProfile | null;
+  /** 入口意图（缺省 handoff，与 T7.1 行为一致）。 */
+  readonly intent?: HandoffIntent;
 }
 
 /**
- * 跨 Agent 迁移（T7.1，设计文档 §10.4）：预览交接包 → 可编辑 → 确认后注入新 Agent 会话。
+ * 跨 Agent 迁移 /「开新会话并继承」（T7.1 → T9.8 ①，设计文档 §10.4）：
+ * 预览交接包 → 可编辑 → 确认后注入新会话。
  *
  * **预览框里的文本就是要注入的文本**——不是"参考"、不是"摘要"。§10.4 写的是"生成后展示给
  * 用户预览（可编辑），确认后注入"，若确认时再从结构体渲染一遍，用户改的每个字都白改了。
  * 故这里把编辑后的字符串原样交给 `session:start` 的 handoffText。
  *
- * 迁移**开的是新会话**而不是续接：新 Agent 没有旧 Agent 的会话文件，续接在物理上不成立。
- * 主进程据 handoffText 强制开新会话并把会话类型标成 handoff，状态条会如实显示"跨 Agent 迁移"
+ * 迁移**开的是新会话**而不是续接：换 Agent 时新 Agent 没有旧 Agent 的会话文件，续接在
+ * 物理上不成立；选自己（轻装新开）时"甩掉膨胀上下文"正是目的，续接与目的相悖。
+ * 主进程据 handoffText 强制开新会话并把会话类型标成 handoff，状态条会如实显示
  * （§2「不伪装成会话恢复」）。
  */
 export function HandoffDialog({
@@ -44,6 +61,7 @@ export function HandoffDialog({
   onOpenChange,
   projectRoot,
   currentProfile,
+  intent = "handoff",
 }: HandoffDialogProps): ReactElement {
   const { t } = useTranslation();
   const setActiveSessionId = useSessionStore((state) => state.setActiveSessionId);
@@ -88,12 +106,14 @@ export function HandoffDialog({
     };
   }, [open, projectRoot]);
 
-  // 目标 Profile 的缺省选中在候选列表就绪后落定；用户改过就不再覆盖。
+  // 目标 Profile 的缺省选中在候选列表就绪后按意图落定；用户改过就不再覆盖。
   useEffect(() => {
     if (open && targetId === "") {
-      setTargetId(defaultHandoffTargetId(targets) ?? "");
+      const fallback =
+        intent === "inherit" ? defaultInheritTargetId(targets) : defaultHandoffTargetId(targets);
+      setTargetId(fallback ?? "");
     }
-  }, [open, targets, targetId]);
+  }, [open, targets, targetId, intent]);
 
   const confirm = async (): Promise<void> => {
     if (targetId === "") {
@@ -115,7 +135,7 @@ export function HandoffDialog({
     // 迁移后的当前会话换成新会话——否则下一次发言会带着旧会话 ID 去续接旧 Agent
     setActiveSessionId(ack.sessionId);
     onOpenChange(false);
-    toast.success(t("session.handoff.migrated"));
+    toast.success(t(intent === "inherit" ? "session.inherit.done" : "session.handoff.migrated"));
   };
 
   const selectClass = cn(inputVariants({}), "cursor-pointer");
@@ -134,12 +154,32 @@ export function HandoffDialog({
           issues: preview.openIssueCount,
         });
 
+  const optionLabel = (target: (typeof targets)[number]): string => {
+    if (target.isCurrent) {
+      return t("session.handoff.targetOptionCurrent", {
+        name: target.profile.name,
+        runtime: target.profile.runtime,
+      });
+    }
+    return target.runtimeChanged
+      ? t("session.handoff.targetOptionSwitch", {
+          name: target.profile.name,
+          runtime: target.profile.runtime,
+        })
+      : t("session.handoff.targetOptionSame", {
+          name: target.profile.name,
+          runtime: target.profile.runtime,
+        });
+  };
+
+  const inherit = intent === "inherit";
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent size="diff" className="flex h-[85vh] flex-col gap-3">
         <DialogHeader
-          title={t("session.handoff.title")}
-          description={t("session.handoff.description")}
+          title={t(inherit ? "session.inherit.title" : "session.handoff.title")}
+          description={t(inherit ? "session.inherit.description" : "session.handoff.description")}
         />
         {/* 主体不自己滚：唯一该滚的是交接包正文框（它随对话框高度伸缩）。
             否则正文框与主体各出一根滚动条，用户拖哪根都只滚一半。 */}
@@ -148,7 +188,7 @@ export function HandoffDialog({
             htmlFor="handoff-target"
             label={t("session.handoff.target")}
             required
-            hint={t("session.handoff.targetHint")}
+            hint={t(inherit ? "session.inherit.targetHint" : "session.handoff.targetHint")}
           >
             <select
               id="handoff-target"
@@ -157,17 +197,9 @@ export function HandoffDialog({
               onChange={(e) => setTargetId(e.target.value as ProfileId)}
             >
               <option value="">{t("session.handoff.targetPlaceholder")}</option>
-              {targets.map(({ profile, runtimeChanged }) => (
-                <option key={profile.id} value={profile.id}>
-                  {runtimeChanged
-                    ? t("session.handoff.targetOptionSwitch", {
-                        name: profile.name,
-                        runtime: profile.runtime,
-                      })
-                    : t("session.handoff.targetOptionSame", {
-                        name: profile.name,
-                        runtime: profile.runtime,
-                      })}
+              {targets.map((target) => (
+                <option key={target.profile.id} value={target.profile.id}>
+                  {optionLabel(target)}
                 </option>
               ))}
             </select>
@@ -206,7 +238,7 @@ export function HandoffDialog({
             disabled={loading || sending || targetId === "" || text.trim().length === 0}
             loading={sending}
           >
-            {t("session.handoff.confirm")}
+            {t(inherit ? "session.inherit.confirm" : "session.handoff.confirm")}
           </Button>
         </DialogFooter>
       </DialogContent>

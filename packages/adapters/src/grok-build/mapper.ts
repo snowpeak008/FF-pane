@@ -142,7 +142,14 @@ function excerpt(text: string): string {
     : `${single.slice(0, COMMAND_EXCERPT_LENGTH)}…`;
 }
 
-/** usage 映射（§2 的 end 载荷；逐条 usage 行不映射，理由见 §7.1）。 */
+/**
+ * usage 映射（§2 的 end 载荷；逐条 usage 行不映射，理由见 §7.1）。
+ *
+ * contextTokens（T9.8 ②）：grok 是 OpenAI 口径——fixture 实证 total_tokens =
+ * input + output（2436 + 135 = 2571），cache_read 是 input 的子集不是加项，
+ * 故本轮上下文占用 = input + output（与 qwen 的 Claude 风格相反，
+ * 折算口径见 events/types.ts TokenUsage.contextTokens 注释）。
+ */
 function mapUsage(value: unknown): TokenUsage | undefined {
   if (!isJsonObject(value)) {
     return undefined;
@@ -152,12 +159,24 @@ function mapUsage(value: unknown): TokenUsage | undefined {
   const cachedInputTokens = asNumber(value["cache_read_input_tokens"]);
   const reasoningTokens = asNumber(value["reasoning_tokens"]);
   const totalTokens = asNumber(value["total_tokens"]);
+  // ACP usage_update（T9.8 ②，acp-turn 合成 end 记录时注入的两个键）：Agent 自报的
+  // 上下文占用/窗口大小是最权威的分子分母，命中时优先于 input+output 折算。
+  // headless 流没有这两个键，恒走折算路径。
+  const usedFromAgent = asNumber(value["context_used_tokens"]);
+  const windowFromAgent = asNumber(value["context_window_tokens"]);
+  const contextTokens =
+    usedFromAgent ??
+    (inputTokens === undefined && outputTokens === undefined
+      ? undefined
+      : (inputTokens ?? 0) + (outputTokens ?? 0));
   const usage: TokenUsage = {
     ...(inputTokens === undefined ? {} : { inputTokens }),
     ...(outputTokens === undefined ? {} : { outputTokens }),
     ...(cachedInputTokens === undefined ? {} : { cachedInputTokens }),
     ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
     ...(totalTokens === undefined ? {} : { totalTokens }),
+    ...(contextTokens === undefined ? {} : { contextTokens }),
+    ...(windowFromAgent === undefined ? {} : { contextWindowTokens: windowFromAgent }),
   };
   return Object.keys(usage).length === 0 ? undefined : usage;
 }

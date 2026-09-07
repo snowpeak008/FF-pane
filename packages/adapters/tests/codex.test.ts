@@ -210,7 +210,7 @@ describe("fixture 回放：exec-basic.jsonl（成功全流程）", () => {
     expect(commands[3]?.exitCode).toBe(0);
   });
 
-  it("end：completed + usage 四项（cache_write 无落点故不映射）", async () => {
+  it("end：completed + usage 四项（cache_write 无落点故不映射）+ contextTokens 折算", async () => {
     const end = endOf(await replay("exec-basic.jsonl"));
     expect(end.reason).toBe("completed");
     expect(end.usage).toStrictEqual({
@@ -218,6 +218,9 @@ describe("fixture 回放：exec-basic.jsonl（成功全流程）", () => {
       outputTokens: 450,
       cachedInputTokens: 40192,
       reasoningTokens: 131,
+      // T9.8 ②：OpenAI 口径 cached ⊆ input（fixture 实证 46130 里 40192 命中缓存），
+      // 上下文占用 = input + output，不再加 cached
+      contextTokens: 46_580,
     });
     expect(end.exitCode).toBe(0);
   });

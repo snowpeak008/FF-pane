@@ -1,5 +1,5 @@
 import type { SessionRecord } from "@ff-pane/shared";
-import { ArrowLeftRight } from "lucide-react";
+import { ArrowLeftRight, MessageSquarePlus, RotateCcw } from "lucide-react";
 import { type ReactElement, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
@@ -15,7 +15,8 @@ import { currentSessionTurns, sessionStatusView, useSessionStore } from "../../s
 import { NoActiveProject } from "../NoActiveProject";
 import type { ChatMessageView } from "./ChatMessage";
 import { Composer } from "./Composer";
-import { HandoffDialog } from "./HandoffDialog";
+import { ContextUsageBanner } from "./ContextUsageBanner";
+import { HandoffDialog, type HandoffIntent } from "./HandoffDialog";
 import { MessageStream } from "./MessageStream";
 import { PermissionBanner } from "./PermissionBanner";
 import { predictResumeKind } from "./resume-view";
@@ -94,9 +95,12 @@ export function SessionPage(): ReactElement {
   const autoResumeDoneRoot = useSessionStore((s) => s.autoResumeDoneRoot);
   const lastEndedView = useSessionStore((s) => s.lastEndedView);
   const [cancelling, setCancelling] = useState(false);
-  // 跨 Agent 迁移（T7.1，§10.4）：对话框只在打开时挂载——交接包是"此刻的项目现状"快照，
-  // 常驻会让它在项目推进后悄悄过期。
-  const [handoffOpen, setHandoffOpen] = useState(false);
+  // 跨 Agent 迁移 /「开新会话并继承」（T7.1 → T9.8 ①）：对话框只在打开时挂载——
+  // 交接包是"此刻的项目现状"快照，常驻会让它在项目推进后悄悄过期。
+  // null = 关闭；否则记录打开意图（handoff 换 Agent / inherit 轻装新开），
+  // 两个入口共用同一个对话框（同一条交接包管线），只差缺省选中与文案。
+  const [handoffIntent, setHandoffIntent] = useState<HandoffIntent | null>(null);
+  const startNewSession = useSessionStore((s) => s.startNewSession);
 
   // 自动续接（T8.2b-b）：进入会话页且该项目尚未处理过时，取最近会话并回放其对话。
   // 无历史会话时只记「已处理」保持空态。in-flight 守卫（loadReplay 内亦有）：用户已在
@@ -289,11 +293,26 @@ export function SessionPage(): ReactElement {
                     ))}
                   </select>
                 ) : null}
+                {/* 「开新会话并继承」与「新建会话（清零）」并列（T9.8 ①）：应对上下文
+                    膨胀的两条出路摆在一起——带交接包轻装重开，或彻底清零重来 */}
                 <Button
                   variant="ghost"
                   size="sm"
                   disabled={busy}
-                  onClick={() => setHandoffOpen(true)}
+                  onClick={() => setHandoffIntent("inherit")}
+                >
+                  <MessageSquarePlus aria-hidden size={14} />
+                  {t("session.inherit.action")}
+                </Button>
+                <Button variant="ghost" size="sm" disabled={busy} onClick={startNewSession}>
+                  <RotateCcw aria-hidden size={14} />
+                  {t("session.newSessionReset")}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => setHandoffIntent("handoff")}
                 >
                   <ArrowLeftRight aria-hidden size={14} />
                   {t("session.handoff.action")}
@@ -301,12 +320,17 @@ export function SessionPage(): ReactElement {
               </div>
             }
           />
-          {handoffOpen ? (
+          {handoffIntent !== null ? (
             <HandoffDialog
               open
-              onOpenChange={setHandoffOpen}
+              onOpenChange={(open) => {
+                if (!open) {
+                  setHandoffIntent(null);
+                }
+              }}
               projectRoot={entry.rootPath}
               currentProfile={activeProfile}
+              intent={handoffIntent}
             />
           ) : null}
           {!busy ? (
@@ -318,6 +342,13 @@ export function SessionPage(): ReactElement {
             />
           ) : null}
           <SessionReplayBanner />
+          <ContextUsageBanner
+            // 模型：本轮 started 事件的权威值优先（statusView 同源），空窗期退回
+            // Profile 配置（model 缺省即 cli_login 缺省模型场景，横幅按 Runtime 估算）
+            model={statusView.model ?? activeProfile?.model ?? null}
+            runtime={activeProfile?.runtime ?? null}
+            onInherit={() => setHandoffIntent("inherit")}
+          />
           <MessageStream
             messages={messages}
             emptyMessage={

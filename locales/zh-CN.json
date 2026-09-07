@@ -438,6 +438,14 @@
       "loadError": "读取失败",
       "error": "保存 AI 输出语言失败"
     },
+    "contextWarn": {
+      "title": "上下文阈值提醒",
+      "label": "提醒阈值",
+      "hint": "会话上下文用量达到模型窗口的该比例时，会话页横幅建议轻装重开。",
+      "optionPercent": "{{percent}}%",
+      "loadError": "读取失败",
+      "error": "保存上下文阈值失败"
+    },
     "profiles": {
       "title": "Agent Profile",
       "subtitle": "把 Runtime + Provider + 模型 + 角色 + 权限组合成可复用的运行配置。",
@@ -762,6 +770,7 @@
       "targetPlaceholder": "请选择",
       "targetOptionSwitch": "{{name}}（{{runtime}}，换 Runtime）",
       "targetOptionSame": "{{name}}（{{runtime}}）",
+      "targetOptionCurrent": "{{name}}（{{runtime}}，当前 Profile）",
       "previewLabel": "交接包正文",
       "previewHint": "可直接编辑；确认后注入的就是你改完的这一份。",
       "summary": "{{plan}} · 任务 {{tasks}} · 决定 {{decisions}} · 规则 {{rules}} · 经验 {{lessons}} · 未决 {{issues}}",
@@ -770,6 +779,19 @@
       "confirm": "确认并迁移",
       "kickoff": "请阅读以上交接包，先复述你对当前进度与约束的理解，再说明你打算接下来做什么。不要直接动手。",
       "migrated": "已迁移到新 Agent，交接包已注入新会话。"
+    },
+    "inherit": {
+      "action": "开新会话并继承",
+      "title": "开新会话并继承",
+      "description": "把当前项目的计划、任务与项目记忆打包成交接包，开一个新会话注入——甩掉膨胀的旧上下文，工作现场不丢。密钥与原始执行日志不会进入。",
+      "targetHint": "默认还是当前 Profile（轻装新开）；也可以换一个 Profile 接手。",
+      "confirm": "确认并开新会话",
+      "done": "已开新会话，交接包已注入。"
+    },
+    "newSessionReset": "新建会话（清零）",
+    "contextWarn": {
+      "banner": "上下文已用约 {{percent}}%（{{used}} / {{window}} token），建议轻装重开。",
+      "estimated": "（估算）"
     },
     "discussionProfile": "讨论 Profile"
   },

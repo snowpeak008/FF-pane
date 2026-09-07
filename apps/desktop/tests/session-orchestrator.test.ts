@@ -397,6 +397,50 @@ describe("createSessionOrchestrator", () => {
     expect(orch.activeCount()).toBe(0);
   });
 
+  it("上下文用量透出（T9.8 ②）：end.usage 带 contextTokens 时先推 context-usage 再推 end", async () => {
+    const events: AgentEvent[] = [
+      { kind: "session_start" },
+      { kind: "text", content: "ok", final: true, channel: "answer" },
+      {
+        kind: "end",
+        reason: "completed",
+        usage: {
+          inputTokens: 812,
+          outputTokens: 45,
+          contextTokens: 857,
+          contextWindowTokens: 500_000,
+        },
+      },
+    ];
+    const h = makeHarness(events, { profile: profile({ defaultRole: "planner" }) });
+    await createSessionOrchestrator(h.deps).start(plannerRequest());
+    await flushUntilEnd(h.published);
+
+    const usageIndex = h.published.findIndex((e) => e.kind === "context-usage");
+    const endIndex = h.published.findIndex((e) => e.kind === "end");
+    expect(usageIndex).toBeGreaterThan(-1);
+    expect(usageIndex).toBeLessThan(endIndex);
+    expect(h.published[usageIndex]).toEqual({
+      turnId: "t1",
+      kind: "context-usage",
+      usedTokens: 857,
+      windowTokens: 500_000,
+    });
+  });
+
+  it("上下文用量透出：usage 缺席 / 无 contextTokens 时不推 context-usage（消费方退回字符估算）", async () => {
+    const events: AgentEvent[] = [
+      { kind: "session_start" },
+      // usage 有其他字段但无 contextTokens（该 Runtime 未折算）——同样不推
+      { kind: "end", reason: "completed", usage: { totalTokens: 1234 } },
+    ];
+    const h = makeHarness(events, { profile: profile({ defaultRole: "planner" }) });
+    await createSessionOrchestrator(h.deps).start(plannerRequest());
+    await flushUntilEnd(h.published);
+
+    expect(h.published.some((e) => e.kind === "context-usage")).toBe(false);
+  });
+
   it("习惯档案：active+enabled 习惯编入 Prompt 第 2 层，停用/候选被排除（T5.2）", async () => {
     const events: AgentEvent[] = [
       { kind: "session_start" },

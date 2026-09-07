@@ -438,6 +438,14 @@
       "loadError": "Failed to load",
       "error": "Failed to save AI output language"
     },
+    "contextWarn": {
+      "title": "Context threshold reminder",
+      "label": "Warn threshold",
+      "hint": "When a session's context usage reaches this share of the model window, the session page suggests a fresh restart.",
+      "optionPercent": "{{percent}}%",
+      "loadError": "Failed to load",
+      "error": "Failed to save context threshold"
+    },
     "profiles": {
       "title": "Agent profiles",
       "subtitle": "Combine runtime + provider + model + role + permissions into reusable configs.",
@@ -762,6 +770,7 @@
       "targetPlaceholder": "Select a profile",
       "targetOptionSwitch": "{{name}} ({{runtime}}, different runtime)",
       "targetOptionSame": "{{name}} ({{runtime}})",
+      "targetOptionCurrent": "{{name}} ({{runtime}}, current profile)",
       "previewLabel": "Handoff package",
       "previewHint": "Edit freely — what you leave here is exactly what gets injected.",
       "summary": "{{plan}} · {{tasks}} tasks · {{decisions}} decisions · {{rules}} rules · {{lessons}} lessons · {{issues}} open",
@@ -770,6 +779,19 @@
       "confirm": "Confirm and hand off",
       "kickoff": "Read the handoff package above. First restate your understanding of the current progress and constraints, then say what you intend to do next. Do not start working yet.",
       "migrated": "Handed off. The package was injected into a new session."
+    },
+    "inherit": {
+      "action": "Continue in fresh session",
+      "title": "Continue in fresh session",
+      "description": "Packs this project's plan, tasks and project memory into a handoff package and injects it into a fresh session — the bloated old context is left behind, the working state is not. API keys and raw execution logs never enter it.",
+      "targetHint": "Defaults to the current profile (fresh restart); you can also pick another profile to take over.",
+      "confirm": "Confirm and continue",
+      "done": "Fresh session started with the handoff package injected."
+    },
+    "newSessionReset": "Start over (reset)",
+    "contextWarn": {
+      "banner": "Context is about {{percent}}% full ({{used}} / {{window}} tokens). Consider a fresh restart.",
+      "estimated": "(estimated)"
     },
     "discussionProfile": "Discussion profile"
   },

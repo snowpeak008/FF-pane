@@ -102,6 +102,22 @@ export interface TokenUsage {
   readonly totalTokens?: number;
   /** 本次花费（美元）。仅 claude 与 opencode 直接给出。 */
   readonly costUsd?: number;
+  /**
+   * 本轮结束后模型上下文的占用 token 数（T9.8 ②，上下文阈值提醒的分子）。
+   *
+   * **必须由各映射器按自家 usage 口径折算**，不能由消费方通用推导——cached 的归属
+   * 各家相反：codex / grok（OpenAI 口径）的 cached ⊆ input_tokens，直接 input + output；
+   * qwen（Claude 风格信封）的 cache_read 独立于 input，须 input + cached + output。
+   * 消费方拿到的这个数是"最后一次请求的上下文规模"，缺席 = 该 Runtime 未折算
+   * （消费方退回字符估算并标注）。
+   */
+  readonly contextTokens?: number;
+  /**
+   * Agent 自报的上下文窗口大小（T9.8 ②，阈值提醒的分母）。
+   * 目前仅 grok 的 ACP `usage_update`（载荷 used/size）给出；缺席时消费方按
+   * 模型注册表（公开规格常量）取值。
+   */
+  readonly contextWindowTokens?: number;
 }
 
 /**

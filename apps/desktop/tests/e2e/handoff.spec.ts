@@ -134,4 +134,25 @@ test("会话页「换 Agent」入口打开预览对话框，正文预填且可�
 
   // 本机没有任何 Profile，故没有迁移目标，确认按钮应保持禁用而不是让用户点了才报错
   await expect(page.getByRole("button", { name: "Confirm and hand off" })).toBeDisabled();
+  // 收尾关闭对话框，让下一条用例从干净状态开始
+  await page.keyboard.press("Escape");
+});
+
+test("T9.8 ①：「开新会话并继承」与「新建会话（清零）」并列呈现，继承入口走同一条交接包管线", async () => {
+  const { page } = launched;
+
+  // 两个入口并列在状态条（合同：显式入口并列呈现）
+  const inherit = page.getByRole("button", { name: "Continue in fresh session" });
+  const reset = page.getByRole("button", { name: "Start over (reset)" });
+  await expect(inherit).toBeVisible();
+  await expect(reset).toBeVisible();
+
+  // 继承入口打开的是同一个 HandoffDialog（交接包管线复用），标题与文案换 inherit 意图
+  await inherit.click();
+  await expect(page.getByRole("heading", { name: "Continue in fresh session" })).toBeVisible();
+  const preview = page.locator("#handoff-text");
+  await expect(preview).toHaveValue(/跨 Agent 交接包/);
+  // 无 Profile：确认按钮禁用（与换 Agent 同款守卫）
+  await expect(page.getByRole("button", { name: "Confirm and continue" })).toBeDisabled();
+  await page.keyboard.press("Escape");
 });

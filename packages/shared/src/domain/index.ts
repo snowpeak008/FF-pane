@@ -8,6 +8,7 @@
 
 export * from "./common.js";
 export * from "./config.js";
+export * from "./context-window.js";
 export * from "./handoff.js";
 export * from "./knowledge.js";
 export * from "./language.js";

@@ -387,13 +387,68 @@ describe("grok-build ACP 模式：全链路回放", () => {
     expect(end).toHaveLength(1);
     expect(events.at(-1)?.kind).toBe("end");
     expect(end[0]).toMatchObject({ reason: "completed" });
-    expect(end[0]?.usage).toEqual({ inputTokens: 812, outputTokens: 45, totalTokens: 857 });
+    expect(end[0]?.usage).toEqual({
+      inputTokens: 812,
+      outputTokens: 45,
+      totalTokens: 857,
+      // T9.8 ②：无 usage_update 时按 OpenAI 口径折算 input + output
+      contextTokens: 857,
+    });
     // 协议层已给终局：进程是被主动收掉的，退出码不混进 end
     expect(end[0]?.exitCode).toBeUndefined();
     // 权限拦截前提：ACP 路径不带 --always-approve，且 stdin 是管道
     expect(rig.specs[0]?.args).not.toContain("--always-approve");
     expect(rig.specs[0]?.stdin).toBe("pipe");
     expect(fake.killed()).toBe(true);
+  });
+
+  it("usage_update 消费（T9.8 ②）：末条 used/size 进 end 的 contextTokens / contextWindowTokens", async () => {
+    const fake = createFakeAcpProcess({
+      onPrompt: async (agent) => {
+        agent.update({
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "干活中" },
+        });
+        // 一轮多条 usage_update：以末条为准（52k 才是收尾时的上下文规模）
+        agent.update({ sessionUpdate: "usage_update", used: 30_000, size: 500_000 });
+        agent.update({ sessionUpdate: "usage_update", used: 52_000, size: 500_000 });
+        return {
+          stopReason: "end_turn",
+          _meta: { usage: { inputTokens: 812, outputTokens: 45, totalTokens: 857 } },
+        };
+      },
+    });
+    const rig = createSpawnRig([fake]);
+    const adapter = createGrokBuildAdapter({ spawn: rig.spawn });
+    const turn = adapter.startTurn({ cwd: CWD, prompt: "做事" });
+    const events = await collect(turn.events);
+
+    const end = only(events, "end");
+    expect(end).toHaveLength(1);
+    // Agent 自报优先于 input+output 折算（857 是折算值，52k 才是自报的上下文占用）
+    expect(end[0]?.usage?.contextTokens).toBe(52_000);
+    expect(end[0]?.usage?.contextWindowTokens).toBe(500_000);
+    // usage_update 本身照旧走 raw 留档（不额外产出事件，留档纪律不变）
+    const raws = only(events, "raw");
+    expect(raws.some((r) => r.nativeType === "usage_update")).toBe(true);
+  });
+
+  it("usage_update 载荷残缺（缺 used/size）不投毒：忽略之，end 退回折算路径", async () => {
+    const fake = createFakeAcpProcess({
+      onPrompt: async (agent) => {
+        agent.update({ sessionUpdate: "usage_update", tokens: 5 });
+        return {
+          stopReason: "end_turn",
+          _meta: { usage: { inputTokens: 812, outputTokens: 45, totalTokens: 857 } },
+        };
+      },
+    });
+    const rig = createSpawnRig([fake]);
+    const adapter = createGrokBuildAdapter({ spawn: rig.spawn });
+    const events = await collect(adapter.startTurn({ cwd: CWD, prompt: "x" }).events);
+    const end = only(events, "end");
+    expect(end[0]?.usage?.contextTokens).toBe(857);
+    expect(end[0]?.usage?.contextWindowTokens).toBeUndefined();
   });
 
   it("initialize 发 clientInfo；-m 与 --reasoning-effort 落在 agent 层参数", async () => {

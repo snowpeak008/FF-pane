@@ -113,6 +113,16 @@ function toUsage(result: QwenResultRow | undefined): TokenUsage | undefined {
   if (usage === undefined) {
     return undefined;
   }
+  // contextTokens（T9.8 ②）：qwen 是 Claude 风格信封，cache_read_input_tokens 独立于
+  // input_tokens（缓存命中不计入 input），本轮上下文占用 = input + cached + output
+  // ——与 codex/grok 的 OpenAI 口径（cached ⊆ input，input + output）相反，
+  // 折算口径见 events/types.ts TokenUsage.contextTokens 注释。
+  const contextTokens =
+    usage.inputTokens === undefined &&
+    usage.cachedInputTokens === undefined &&
+    usage.outputTokens === undefined
+      ? undefined
+      : (usage.inputTokens ?? 0) + (usage.cachedInputTokens ?? 0) + (usage.outputTokens ?? 0);
   const narrowed: TokenUsage = {
     ...(usage.inputTokens === undefined ? {} : { inputTokens: usage.inputTokens }),
     ...(usage.outputTokens === undefined ? {} : { outputTokens: usage.outputTokens }),
@@ -120,6 +130,7 @@ function toUsage(result: QwenResultRow | undefined): TokenUsage | undefined {
       ? {}
       : { cachedInputTokens: usage.cachedInputTokens }),
     ...(usage.totalTokens === undefined ? {} : { totalTokens: usage.totalTokens }),
+    ...(contextTokens === undefined ? {} : { contextTokens }),
   };
   return Object.keys(narrowed).length === 0 ? undefined : narrowed;
 }

@@ -110,6 +110,10 @@ function excerpt(text: string): string {
  * usage 映射（codex.md §2 的 turn.completed 载荷）。
  * `cache_write_input_tokens` 在 TokenUsage 里没有落点（W2.1b 的字段集以四家
  * 交集为准），Codex 独有此项，故不映射——统计口径以其余四项为准。
+ *
+ * contextTokens（T9.8 ②）：OpenAI 口径的 `cached_input_tokens` ⊆ `input_tokens`
+ * （fixture 实证：46130 输入中 40192 命中缓存，缓存是输入的子集不是加项），
+ * 故本轮上下文占用 = input + output，不再加 cached。
  */
 function mapUsage(value: unknown): TokenUsage | undefined {
   if (!isJsonObject(value)) {
@@ -119,11 +123,16 @@ function mapUsage(value: unknown): TokenUsage | undefined {
   const outputTokens = asNumber(value["output_tokens"]);
   const cachedInputTokens = asNumber(value["cached_input_tokens"]);
   const reasoningTokens = asNumber(value["reasoning_output_tokens"]);
+  const contextTokens =
+    inputTokens === undefined && outputTokens === undefined
+      ? undefined
+      : (inputTokens ?? 0) + (outputTokens ?? 0);
   const usage: TokenUsage = {
     ...(inputTokens === undefined ? {} : { inputTokens }),
     ...(outputTokens === undefined ? {} : { outputTokens }),
     ...(cachedInputTokens === undefined ? {} : { cachedInputTokens }),
     ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
+    ...(contextTokens === undefined ? {} : { contextTokens }),
   };
   return Object.keys(usage).length === 0 ? undefined : usage;
 }

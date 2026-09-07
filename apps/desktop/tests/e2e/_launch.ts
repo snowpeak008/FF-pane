@@ -26,6 +26,13 @@ const desktopDir = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 /** i18n 语言持久化键（与 renderer/src/i18n/index.ts 的 STORAGE_KEY 保持一致）。 */
 const UI_LANGUAGE_KEY = "ffpane.ui-language";
 
+/**
+ * cleanup 里 app.close() 的等待预算（T9.8 顺手项）。正常收尾含 prepareForQuit
+ * （3 s 总预算）+ runtime 关停（1 s）+ Electron 进程退出，负载下实测量级 ≤ 10 s；
+ * 30 s ≈ 3 倍裕量。超时即判定挂死，走强杀兜底（见 cleanup 注释）。
+ */
+const CLEANUP_CLOSE_BUDGET_MS = 30_000;
+
 export interface LaunchedApp {
   readonly app: ElectronApplication;
   readonly page: Page;
@@ -101,9 +108,34 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
   await expect(page.locator("html")).toHaveAttribute("lang", "en-US");
 
   const cleanup = async (): Promise<void> => {
-    await app.close();
-    rmSync(dataRoot, { recursive: true, force: true });
-    rmSync(userDataDir, { recursive: true, force: true });
+    // 有界关闭 + 强杀兜底（T9.8 顺手项，config-tool flake 第二轮处置）：
+    // T9.6 的 120 s afterAll 预算加固后仍复发（第七见），且本套 E2E 本就 workers:1
+    // 全串行——失败形态是 app.close() 真挂住（正常收尾 3~5 s，120 s 都等不到），
+    // 而非负载性变慢。已知成因形态：spec 的挂起假 CLI（ping 86400）树杀在负载下
+    // 失手时，孤儿子进程持有 Electron 的 stdio 管道，Playwright 等不到进程 close
+    // 事件。兜底：预算内等优雅关闭（3 倍裕量），超时强杀 Electron 进程——其
+    // 后代由 Job Object（KILL_ON_JOB_CLOSE）+ libuv 全局 Job 在进程消亡时收走
+    // （T8.2 关应用即清场语义），临时目录照常清理。只动测试基建，不动生产参数。
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const outcome = await Promise.race([
+      app.close().then(() => "closed" as const),
+      new Promise<"timeout">((resolve) => {
+        timer = setTimeout(() => resolve("timeout"), CLEANUP_CLOSE_BUDGET_MS);
+      }),
+    ]);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+    if (outcome === "timeout") {
+      console.warn(
+        `[e2e] app.close() exceeded ${CLEANUP_CLOSE_BUDGET_MS} ms; force-killing electron process`,
+      );
+      app.process().kill();
+      // 给内核一点时间收走进程树，随后的目录删除才不撞句柄
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+    }
+    rmSync(dataRoot, { recursive: true, force: true, maxRetries: 3 });
+    rmSync(userDataDir, { recursive: true, force: true, maxRetries: 3 });
   };
 
   return { app, page, dataRoot, cleanup };

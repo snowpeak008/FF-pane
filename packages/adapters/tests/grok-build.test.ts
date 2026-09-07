@@ -211,13 +211,18 @@ describe("grok-build fixture 回放：成功流", () => {
     });
   });
 
-  it("end 恰好一条、reason=completed、带 usage", async () => {
+  it("end 恰好一条、reason=completed、带 usage 与 contextTokens", async () => {
     const events = await replay("real-streaming-json-success.jsonl");
     const ends = only(events, "end");
     expect(ends).toHaveLength(1);
     expect(events[events.length - 1]?.kind).toBe("end");
     expect(ends[0]).toMatchObject({ reason: "completed", exitCode: 0 });
     expect(ends[0]?.usage?.totalTokens).toBe(2571);
+    // T9.8 ②：OpenAI 口径 input + output（fixture 实证 total = 2436 + 135，
+    // cache_read 是 input 的子集不是加项）
+    expect(ends[0]?.usage?.contextTokens).toBe(2571);
+    // headless 流无 usage_update，Agent 自报窗口恒缺席
+    expect(ends[0]?.usage?.contextWindowTokens).toBeUndefined();
   });
 
   it("available_commands 重复出现不影响映射，只落 raw", async () => {

@@ -203,13 +203,38 @@ describe("qwen-code fixture 回放：成功流", () => {
     expect(texts[texts.length - 1]?.final).toBe(true);
   });
 
-  it("end 恰好一条、reason=completed、带 usage 汇总", async () => {
+  it("end 恰好一条、reason=completed、带 usage 汇总与 contextTokens", async () => {
     const events = await replay("real-stream-json-success.jsonl");
     const ends = only(events, "end");
     expect(ends).toHaveLength(1);
     expect(events[events.length - 1]?.kind).toBe("end");
     expect(ends[0]?.reason).toBe("completed");
     expect(ends[0]?.usage?.totalTokens).toBe(2571);
+    // T9.8 ②：Claude 风格口径 input + cached + output（fixture cache_read=0，
+    // 故 2436 + 0 + 135；cached 独立成分见下一条合成用例）
+    expect(ends[0]?.usage?.contextTokens).toBe(2571);
+  });
+
+  it("contextTokens 折算：cache_read 独立于 input，须三项相加（T9.8 ②，Claude 风格口径）", async () => {
+    const mapper = createQwenEventMapper({ cwd: FIXTURE_CWD });
+    const line = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: "ok",
+      usage: { input_tokens: 1000, output_tokens: 200, cache_read_input_tokens: 5000 },
+      permission_denials: [],
+    });
+    for await (const record of readJsonlStream(singleChunk(line))) {
+      mapper.map(record);
+    }
+    const events = mapper.finish(NORMAL_EXIT);
+    const end = events.find((e) => e.kind === "end");
+    if (end?.kind !== "end") {
+      throw new Error("应有 end 事件");
+    }
+    // 若照 OpenAI 口径只加 input + output（1200），5000 的缓存命中会被漏掉
+    expect(end.usage?.contextTokens).toBe(6200);
   });
 
   it("goal_state 等非骨架 stream_event 落 raw 留档不丢证据", async () => {

@@ -116,6 +116,17 @@ export interface SessionHistoryMessage {
   readonly interrupted?: true;
 }
 
+/**
+ * 会话的真实上下文用量（T9.8 ②）：`context-usage` 事件（适配器折算的 CLI 真实 usage）
+ * 按会话记账，横幅优先用它做分子；没有条目的会话退回转录字符估算（UI 标注估算）。
+ */
+export interface SessionContextUsage {
+  /** 最近一轮结束时的上下文占用 token 数（适配器按各家口径折算）。 */
+  readonly usedTokens: number;
+  /** Agent 自报的上下文窗口（仅 grok ACP usage_update 给出；缺席按模型注册表取）。 */
+  readonly windowTokens?: number;
+}
+
 /** 续接横幅的上下文（T8.2b-b）：自动选中最近会话并回放后登记。 */
 export interface ReplayContext {
   /** 被回放的会话（横幅只在它仍是当前会话时显示）。 */
@@ -154,6 +165,12 @@ export interface SessionUiState {
    * 选中最近会话；「新建会话」把当前项目记在这里，防止 effect 把用户拉回旧会话。
    */
   readonly autoResumeDoneRoot: string | null;
+  /**
+   * 各会话最近一轮的真实上下文用量（T9.8 ②：sessionId → 用量）。跨会话记账
+   * （与 activeTurns 同款口径）：并发 Worker 轮的用量也要能在切过去时立即可见。
+   * 不持久化——重启后回退字符估算，下一轮结束即恢复真实值。
+   */
+  readonly contextUsage: ReadonlyMap<LocalSessionId, SessionContextUsage>;
 }
 
 export interface SessionUiActions {
@@ -209,6 +226,9 @@ export type SessionStore = SessionUiState & SessionUiActions;
 /** 空在飞表（初始态与重置共用同一引用，选择器比较不抖动）。 */
 const EMPTY_TURNS: ReadonlyMap<string, ActiveTurnView> = new Map();
 
+/** 空用量表（同上）。 */
+const EMPTY_CONTEXT_USAGE: ReadonlyMap<LocalSessionId, SessionContextUsage> = new Map();
+
 /** 初始状态：页面工单直接展开使用，保证形态与本文件一致。 */
 export const INITIAL_SESSION_UI_STATE: SessionUiState = {
   activeSessionId: null,
@@ -223,6 +243,7 @@ export const INITIAL_SESSION_UI_STATE: SessionUiState = {
   historyMessages: [],
   replay: null,
   autoResumeDoneRoot: null,
+  contextUsage: EMPTY_CONTEXT_USAGE,
 };
 
 /**
@@ -485,6 +506,20 @@ export const useSessionStore = create<SessionStore>()((set) => ({
                 activeTurns: withTurn(state.activeTurns, { ...turn, pendingConfigDraft: null }),
               }
             : state;
+        case "context-usage": {
+          // T9.8 ②：按会话记账（事件先于 end 到达，该轮仍在飞、sessionId 可查）。
+          // 尚未被 started 认领的轮（sessionId null）没有会话可挂，弃之——
+          // 真实 usage 只随 end 到达，届时 started 早已发生，该分支实际不可达。
+          if (turn.sessionId === null) {
+            return state;
+          }
+          const nextUsage = new Map(state.contextUsage);
+          nextUsage.set(turn.sessionId, {
+            usedTokens: event.usedTokens,
+            ...(event.windowTokens !== undefined ? { windowTokens: event.windowTokens } : {}),
+          });
+          return { contextUsage: nextUsage };
+        }
         case "end":
           return {
             activeTurns: withoutTurn(state.activeTurns, event.turnId),

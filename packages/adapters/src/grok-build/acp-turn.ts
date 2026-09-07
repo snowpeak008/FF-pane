@@ -304,6 +304,20 @@ function usageRecordOf(
   return Object.keys(mapped).length === 0 ? undefined : mapped;
 }
 
+/**
+ * ACP `usage_update` 通知的载荷视图（T9.8 ②，官方 schema UsageUpdate：
+ * `used`/`size` 必填 token 数，cost 可选不消费）。协议层对该判别值走 opaque 透传
+ * （parse.ts 后 5 种），本层在 opaque 里认出它——Agent 自报的上下文占用/窗口
+ * 是阈值提醒最权威的分子分母。
+ */
+export function readAcpUsageUpdate(
+  raw: Readonly<Record<string, unknown>>,
+): { readonly used: number; readonly size: number } | undefined {
+  const used = asNumber(raw["used"]);
+  const size = asNumber(raw["size"]);
+  return used === undefined || size === undefined ? undefined : { used, size };
+}
+
 /** 权限请求事件的 toolName（`_meta["x.ai/tool"].name` 优先，rawInput.variant 兜底）。 */
 function toolNameOf(toolCall: AcpToolCallView): string | undefined {
   const tool = xaiToolMeta(toolCall.raw);
@@ -351,6 +365,8 @@ export function startGrokAcpAttempt(
   let permissionSeq = 0;
   let sessionId: string | undefined;
   let cancelRequested = false;
+  /** 最近一条 usage_update 的载荷（T9.8 ②；一轮多条，末条即本轮收尾时的上下文规模）。 */
+  let latestUsageUpdate: { readonly used: number; readonly size: number } | undefined;
 
   const mapper = createGrokEventMapper({
     cwd: ctx.cwd,
@@ -407,6 +423,14 @@ export function startGrokAcpAttempt(
         toRawEvent(GROK_BUILD_RUNTIME, notification.raw, "非本轮会话的 session/update，仅留档"),
       ]);
       return;
+    }
+    // usage_update（T9.8 ②）：只登记末条载荷供 end 合成时注入，事件本身仍按 opaque
+    // → raw 留档走同一条流（不额外产出事件，留档纪律不变）。
+    if (
+      notification.update.kind === "opaque" &&
+      notification.update.sessionUpdate === "usage_update"
+    ) {
+      latestUsageUpdate = readAcpUsageUpdate(notification.update.raw) ?? latestUsageUpdate;
     }
     sink.push(mapNative(acpUpdateToNativeRecord(notification.update)));
   }
@@ -540,11 +564,21 @@ export function startGrokAcpAttempt(
       const usage = usageRecordOf(prompt.raw);
       // 合成 headless 形态的 end 记录喂给 mapper：stopReason 语义（cancelled 不是
       // 成功、非 end_turn 报失败、end_turn 但有阻断也报失败）全部复用（约定 1）。
-      // 刻意不带 sessionId——session_start 已在上面发过，带了会重复发
+      // 刻意不带 sessionId——session_start 已在上面发过，带了会重复发。
+      // usage_update 末条（T9.8 ②）以 context_used/window 两键并入 usage 记录：
+      // mapper 的 mapUsage 优先取它们作 contextTokens / contextWindowTokens。
+      const usageWithContext =
+        latestUsageUpdate === undefined
+          ? usage
+          : {
+              ...(usage ?? {}),
+              context_used_tokens: latestUsageUpdate.used,
+              context_window_tokens: latestUsageUpdate.size,
+            };
       mapNative({
         type: "end",
         stopReason: prompt.stopReason,
-        ...(usage === undefined ? {} : { usage }),
+        ...(usageWithContext === undefined ? {} : { usage: usageWithContext }),
       });
     } catch (thrown) {
       if (!(thrown instanceof AcpConnectionClosedError)) {

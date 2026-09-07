@@ -1088,6 +1088,20 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
     try {
       for await (const event of guarded.events) {
         if (event.kind === "end") {
+          // 上下文用量透出（T9.8 ②）：适配器折算出 contextTokens 才推——先于 end
+          // 发布，渲染层归并时该轮仍在飞、能查到所属会话。end 本身的契约不动
+          //（usage 其余字段无消费方，不为将来假想需求扩事件面）。
+          const contextTokens = event.usage?.contextTokens;
+          if (contextTokens !== undefined) {
+            deps.publish({
+              turnId,
+              kind: "context-usage",
+              usedTokens: contextTokens,
+              ...(event.usage?.contextWindowTokens !== undefined
+                ? { windowTokens: event.usage.contextWindowTokens }
+                : {}),
+            });
+          }
           await finalize(turnId, turn, {
             reason: event.reason,
             ...(event.message !== undefined ? { message: event.message } : {}),

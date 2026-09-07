@@ -5,6 +5,7 @@
  * 默认权限预设（新建 Profile 的起点，§7）。
  */
 
+import { DEFAULT_CONTEXT_WARN_PERCENT } from "./context-window.js";
 import type { AiOutputLanguage } from "./language.js";
 import type { PermissionEnvelope } from "./permission.js";
 
@@ -45,6 +46,11 @@ export interface GlobalConfig {
   readonly defaultPermissionPreset: PermissionEnvelope;
   /** 设计文档 §8.3.5 —— 只读检索工具的 MCP 接入设置；缺省 = 全用内置默认。 */
   readonly knowledgeTool?: KnowledgeToolSettings;
+  /**
+   * T9.8 ② —— 上下文阈值提醒的触发百分比（用量达窗口的该比例时会话页横幅提示
+   * 轻装重开）。出厂默认 DEFAULT_CONTEXT_WARN_PERCENT（70）。
+   */
+  readonly contextWarnPercent: number;
 }
 
 /** AI 输出语言的出厂默认（产品中文优先）。 */
@@ -111,4 +117,5 @@ export const DEFAULT_PERMISSION_PRESET: PermissionEnvelope = {
 export const DEFAULT_GLOBAL_CONFIG: GlobalConfig = {
   aiOutputLanguage: DEFAULT_AI_OUTPUT_LANGUAGE,
   defaultPermissionPreset: DEFAULT_PERMISSION_PRESET,
+  contextWarnPercent: DEFAULT_CONTEXT_WARN_PERCENT,
 };

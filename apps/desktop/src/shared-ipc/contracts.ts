@@ -1084,6 +1084,19 @@ export type SessionStreamEvent =
       readonly queries: readonly KnowledgeQueryRecord[];
     }
   | {
+      /**
+       * 本轮结束时的上下文用量（T9.8 ②，阈值提醒的分子/分母数据源）。
+       * 只在适配器折算出 contextTokens 时推送（codex / qwen 的 result usage、
+       * grok 的 end usage 与 ACP usage_update），紧挨在 end 事件之前——渲染层
+       * 归并时该轮仍在飞、可查到所属会话。windowTokens 仅 grok ACP 自报
+       * （usage_update 的 size），缺席时渲染层按模型注册表取窗口。
+       */
+      readonly turnId: string;
+      readonly kind: "context-usage";
+      readonly usedTokens: number;
+      readonly windowTokens?: number;
+    }
+  | {
       readonly turnId: string;
       readonly kind: "end";
       readonly reason: RunEndReason;
