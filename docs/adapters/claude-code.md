@@ -329,3 +329,28 @@ supportsCancel:            true   (interrupt 控制请求,硬杀兜底)
   (`claude-fable-5`),模型清单在服务端,CLI 不落地本地目录文件。
 - 对 FF-pane 的含义:cli_login + claude-code 的 Provider 无从枚举,模型留空走 CLI
   默认(订阅默认模型)是唯一稳妥形态;listLocalModels 能力声明 no。
+
+## 11. 模型行为参数（T9.4a，2026-09-15，Claude Code 2.1.220 真机·已登录）
+
+**结论：支持 effort。隐藏 `--max-thinking-tokens` 存在但不应作第一期硬依赖。**
+
+| 项 | 内容 |
+|---|---|
+| 规范化名 | `reasoningEffort`（主）；`maxThinkingTokens`（隐藏，第一期建议不进 UI） |
+| CLI 入口 | 公开：`--effort <level>`（`claude --help` / `claude -p --help` 均列）。隐藏：`--max-thinking-tokens <tokens>`（help 不列；传参不带值报 `argument missing`） |
+| 取值域 | `--effort`：**`low` / `medium` / `high` / `xhigh` / `max`**（help 原文 + 非法值警告原文）。`--max-thinking-tokens`：正整数 token 预算（CLI 只声明 `<tokens>`；本单未再起会话探上下界） |
+| 缺省 | 不传 `--effort` = CLI 默认。非法值**不拒跑**：stderr 警告后忽略并走默认 |
+| 与模型关系 | help 未写按模型裁剪。本机非法值探测用了默认订阅模型（`claude-opus-5`），警告只谈 effort 枚举、未说「该模型不支持」。是否某模型无视 effort：**本单未逐模型复测** |
+| 适配器现状 | **无第一类字段；仅 extraArgs 逃生门。** `ClaudeCodeCliOptions` / `buildClaudeCodeArgs` 不认识 `--effort`；单测用 `extraArgs: ["--effort", "low"]` 证明参数能落到 argv，但 `createClaudeCodeAdapter()` 零参注册、Profile / 编排器不传 extraArgs。thinking **输出**已映射为 `text(channel: reasoning)`（含 `thinking` 块与 `thinking_delta`）——展示面，不是下发 |
+| 建议 UI | **显示** effort 五档下拉。`--max-thinking-tokens` **隐藏**（隐藏参数，R3 漂移；与 `--permission-prompt-tool` 同类） |
+
+**本机证据：**
+
+- `claude --version` → `2.1.220`；`claude auth status` → `loggedIn:true, authMethod:oauth_token`
+- `claude --help` 摘录：`--effort <level>  Effort level for the current session (low, medium, high, xhigh, max)`
+- `claude --effort` → `error: option '--effort <level>' argument missing`
+- `claude --max-thinking-tokens` → `error: option '--max-thinking-tokens <tokens>' argument missing`（help 无此行，与 §1.2 隐藏参数探法一致）
+- 非法值（`claude -p --effort not-a-level --output-format json "x"`，本机已登录，**会起真轮**）：stderr `Warning: Unknown --effort value 'not-a-level' — ignoring it and using the default effort. Valid values: low, medium, high, xhigh, max.`——**不是 clap 拒绝**，实现单校验必须在 FF-pane 侧做
+- 与既有文档：§1.2 写 `--effort low..max`，未点名 `xhigh`；本机 help 已含 `xhigh`。隐藏 `--max-thinking-tokens` 与 §1.2 一致
+
+**不做：** 把 `--max-thinking-tokens` 当稳定 API；无校验地把任意字符串塞进 `--effort`（CLI 会静默回退默认，用户以为生效了）。

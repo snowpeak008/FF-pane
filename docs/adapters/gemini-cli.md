@@ -292,3 +292,34 @@ Worker 必须 `yolo` 才能干活，等于 CLI 侧完全放权，FF-pane 的 5 �
   清单在服务端；`~/.gemini/settings.json` 不含模型目录。
 - 对 FF-pane 的含义：cli_login + gemini-cli 无从枚举，模型留空走 CLI 默认（`auto` 路由）；
   listLocalModels 能力声明 no。
+
+## 10. 模型行为参数（T9.4a，2026-09-15，Gemini CLI 0.57.0 真机）
+
+**结论：不支持。无任何 CLI / 逐轮入口可下发 effort 或 thinking。**
+
+| 项 | 内容 |
+|---|---|
+| 规范化名 | （无） |
+| CLI / 逐轮入口 | **无。** `gemini --help` 选项表无 thinking / effort / reasoning。下列旗标均被 yargs 拒绝：`--thinking`、`--effort`、`--reasoning-effort`、`--thinking-budget`、`--thinking-level`、`--thinking-config` |
+| 取值域 | 不适用（CLI 面） |
+| 缺省 | 不适用 |
+| 与模型关系 | 安装包文档 `bundle/docs/reference/configuration.md` 的 `modelConfigs.modelDefinitions[].features.thinking` 是**模型能力位**（true/false），不是用户可配档位。部分预置 alias（如 `chat-base-3`）在 settings 的 `generateContentConfig.thinkingConfig` 里写了 `thinkingLevel: "HIGH"` 或 `thinkingBudget`——那是 **`settings.json` 的 modelConfigs 系统**，不是 headless 旗标 |
+| 适配器现状 | **无缝。** `buildGeminiCommand` 只有 model / approval / session / policy / extraArgs；`createGeminiCliAdapter()` 零参。事件面：stream-json 无独立 thinking 块映射（本适配器不产 `channel: reasoning`） |
+| 建议 UI | **隐藏。** 第一期不要为 gemini-cli 画 effort/thinking 控件，也不要发明「写用户 `~/.gemini/settings.json`」的下发路径（与「不改用户全局配置」纪律冲突，且无逐轮隔离） |
+
+settings 文档里的 thinking（**只登记，不作本单下发面**）：
+
+- `thinkingConfig.thinkingBudget`：整数 token 预算（文档样例 0 / 512 / 4096 / 8192）
+- `thinkingConfig.thinkingLevel`：安装包源码枚举 `THINKING_LEVEL_UNSPECIFIED` / `LOW` / `HIGH`（`bundle/chunk-*.js`）
+- `thinkingConfig.includeThoughts`：是否把思考纳入输出（`chat-base` 默认 `true`）
+- `ui.inlineThinkingMode`：UI 展示（off / full），不是模型行为
+
+**本机证据：**
+
+- `gemini --version` → `0.57.0`；本机无 `~/.gemini/settings.json`（未登录形态与 T2.0 一致）
+- `gemini --help` 全量选项名核对：无 thinking / effort / reasoning
+- `gemini --thinking` → `Unknown argument: thinking`（随后打印 Usage，**未进入交互会话**）
+- 同款拒绝：`--effort`、`--reasoning-effort`（yargs 同时报 `reasoning-effort, reasoningEffort`）、`--thinking-budget`、`--thinking-level`、`--thinking-config`
+- 与既有文档：§2 参数表与 §9 均无 effort/thinking 字样——**一致**。本小节把「无」写成硬结论
+
+**不做：** 无调研支撑的参数透传；把行为参数塞进 extraArgs 碰运气；改写用户 settings.json 冒充逐轮下发。

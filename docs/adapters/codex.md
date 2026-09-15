@@ -227,3 +227,36 @@ codex exec resume [OPTIONS] [SESSION_ID] [PROMPT]
   `model` 决定），枚举结果不带 defaultModel。
 - 判定建议：exit 0 + stdout 可 JSON.parse 且 `models` 为数组 → 取 `visibility === "list"`
   条目；解析失败 → parse_error（不猜）。
+
+## 9. 模型行为参数（T9.4a，2026-09-15，codex-cli 0.153.4 真机·已登录）
+
+**结论：支持 reasoning effort。无独立 thinking 开关。**
+
+| 项 | 内容 |
+|---|---|
+| 规范化名 | `reasoningEffort` |
+| CLI 入口 | `codex exec -c model_reasoning_effort="<level>"`（`-c/--config` 覆盖 `~/.codex/config.toml`；resume 同样可带 `-c`） |
+| 取值域 | **按模型绑定**。本机 `codex debug models`（visibility=`list`）目录：`low` / `medium` / `high` / `xhigh` / `max` / `ultra`。并非每条模型都收全档——见下表。help 的 `-c` 本身不枚举合法值（任意 `key=value`，值按 TOML 解析） |
+| 缺省 | 目录字段 `default_reasoning_level`（本机可见模型多为 `medium`；`gpt-5.6-sol` 为 `low`）。用户 `~/.codex/config.toml` 也可写 `model_reasoning_effort`（本机已有 `= "low"`，那是用户全局配置，不是 FF-pane 下发） |
+| 与模型关系 | **强绑定**。目录每条有 `supported_reasoning_levels[]`（`effort` + 说明）。某档不在该模型清单里则不应下发 |
+| 适配器现状 | **已有下发缝、Profile 未接线。** `buildCodexArgs` / `CodexArgsInput.configOverrides` 已能拼 `-c key=value`（单测钉 `model_reasoning_effort="low"`）；编排器 `resolveRuntimeConfigOverrides` 只把 openai_compatible 的 `model_provider` 路由写进该通道，**不写 effort**。`createCodexAdapter()` 零参注册。另：reasoning **输出**已映射为 `text(channel: reasoning)`——那是展示面，不是用户可配参数 |
+| 建议 UI | **显示**（该 Runtime 的 effort 下拉）。选项应按所选模型的 `supported_reasoning_levels` 收窄；模型缺省或目录未命中时只给交集保守档 `low/medium/high/xhigh`，不要默认露出 `ultra` |
+
+本机可见模型（`visibility === "list"`，2026-09-15）：
+
+| slug | default_reasoning_level | supported_reasoning_levels |
+|---|---|---|
+| gpt-6-astra | medium | low, medium, high, xhigh, max, ultra |
+| gpt-5.6-sol | low | low, medium, high, xhigh, max, ultra |
+| gpt-5.6-terra | medium | low, medium, high, xhigh, max, ultra |
+| gpt-5.6-luna | medium | low, medium, high, xhigh, max |
+| gpt-5.5 | medium | low, medium, high, xhigh |
+
+**本机证据：**
+
+- `codex --version` → `codex-cli 0.153.4`；`codex login status` → `Logged in using ChatGPT`
+- `codex exec --help`：`-c, --config <key=value>`「Override a configuration value… parsed as TOML」——无 `reasoning`/`effort`/`think` 独立旗标
+- `codex debug models`：首条 `gpt-6-astra` 含 `default_reasoning_level:"medium"` 与 `supported_reasoning_levels` 六档（含 `ultra`：「Maximum reasoning with automatic task delegation」）
+- 既有文档 §1.2 / §7.4「`-c model_reasoning_effort="low"` 实测有效」与本机目录字段一致；版本已从调研时 0.147.0 / T9.2 的 0.151.0 漂到 0.153.4，**档位比旧文档多了 `xhigh`/`max`/`ultra`**，实现单须按目录而非写死四档
+
+**不做：** 没有调研支撑的任意 `-c` 透传；把 `ultra` 塞给不支持的模型。

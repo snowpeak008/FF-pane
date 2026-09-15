@@ -382,3 +382,27 @@ authenticate 对 `grok.com` OAuth 的实际流程、`stopReason` 的 refusal/max
   不假设条目数；`not authenticated` 标记行照 §5 口径可顺带回报登录态。
 - 判定建议：exit 0 + 解析出 ≥1 个条目 → ok（未登录时也如实给内置清单，UI 可同时显示
   登录态提醒）；exit ≠ 0 或解析 0 条 → 枚举失败给可理解提示。
+
+## 9. 模型行为参数（T9.4a，2026-09-15，grok 1.0.13 真机·未登录）
+
+**结论：支持 reasoning effort。适配器两模式已接下发，Profile / 注册表未接线。**
+
+| 项 | 内容 |
+|---|---|
+| 规范化名 | `reasoningEffort` |
+| CLI 入口 | headless：`--reasoning-effort <EFFORT>`（别名 `--effort`），与 `-p` / `--prompt-file` 同层。ACP：`grok agent --reasoning-effort <e> --no-leader stdio`（**必须在 `stdio` 之前**，放后面报 `unexpected argument`——§7.5.2 已踩过） |
+| 取值域 | 随装官方文档（`~/.grok/docs/user-guide/14-headless-mode.md` / README）规范档：`none` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max`；并接受该模型 menu 的 option id（如 `deep` → 映射到 wire 值）。**`grok --help` 不列枚举**（只写 `Reasoning effort for reasoning models`） |
+| 缺省 | 不传 = 配置 `models.default_reasoning_effort` 或模型自身默认。本机未登录，未测「非法档被拒还是被忽略」——`grok -p … --reasoning-effort not-a-level` 在 clap 收下后卡在认证（`Not signed in`），**到不了模型校验** |
+| 与模型关系 | **强绑定。** 文档原文：「a model only accepts the levels its menu advertises」。配置参考 `model.<id>.reasoning_efforts`（允许档）/ 已弃用的 `supports_reasoning_effort`。`grok models` 未登录只出 `grok-4.6` / `grok-4.5`，**未带每模型 effort 菜单** |
+| 适配器现状 | **已下发、Profile 未接线。** `GrokArgsInput.reasoningEffort` / `GrokAcpArgsInput.reasoningEffort` / `createGrokBuildAdapter({ reasoningEffort })` 两模式都拼 `--reasoning-effort`；单测钉 agent 层参数位置。`registry.ts` 调用 `createGrokBuildAdapter()` **不传该选项**。`thought` → `channel: reasoning` 是展示面 |
+| 建议 UI | **显示。** 第一期用文档规范七档；有模型菜单后再收窄。不要把 `deep` 这类 raw menu id 默认暴露给用户（未决，见调研记录） |
+
+**本机证据：**
+
+- `grok --version` → `grok 1.0.13 (5e9a58528b76)`；`grok models` → `You are not authenticated.` + 内置两模型（与 §8 一致）
+- `grok --help` / `grok agent --help` 均列 `--reasoning-effort <EFFORT>` `[aliases: --effort]`
+- `grok --reasoning-effort` → `error: a value is required for '--reasoning-effort <EFFORT>' but none was supplied`
+- 随装文档 14-headless-mode.md：「Canonical levels: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`」
+- 与既有文档：§1.2 / §7.5.2 已登记该参数与 ACP 位置——**一致**。本小节补取值域（文档）与「Profile 未接线」的装配事实
+
+**不做：** 未登录形态下编造「非法档被 CLI 拒绝」；把 effort 塞进 `stdio` 子命令参数表。

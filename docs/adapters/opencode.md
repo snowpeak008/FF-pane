@@ -392,9 +392,29 @@ OpenCode 内置 75+ Provider 目录（DeepSeek、Moonshot/Kimi、Z.AI/GLM、阿�
 - Server 路径另有 `GET /config/providers`（§4.4 提过），但枚举走 CLI 子命令更轻
   （不必为一次配置期查询拉起常驻 server）。
 
----
+## 10. 模型行为参数（T9.4a，2026-09-15，OpenCode 1.18.25 真机）
 
-## 附：fixture 清单
+**结论：部分支持。CLI `run` 有 `--variant`（effort）与 `--thinking`（展示开关）；适配器主路径是 Server，HTTP 体目前不下发这两项。**
+
+| 项 | 内容 |
+|---|---|
+| 规范化名 | `reasoningEffort` ← `--variant`；`thinkingVisible` ← `--thinking`（展示，不是思考预算） |
+| CLI 入口 | `opencode run --variant <档>`：help 原文「model variant (provider-specific reasoning effort, e.g., high, max, minimal)」。`opencode run --thinking`：boolean，「show thinking blocks」；JSON 模式对应 `reasoning` 事件（§3.1） |
+| Server 入口 | `GET /doc`（本机 `opencode serve` 1.18.25，478 KB OpenAPI）：模型对象 schema 含可选 `variant` 字符串（与 `id` / `providerID` 并列）。**适配器 `PromptInput.model` 只有 `{providerID, modelID}`，`promptAsync` 不传 variant** |
+| 取值域 | **按 Provider/模型绑定，不是闭合枚举。** help 只给例子。本机 `~/.cache/opencode/models.json` 的 `reasoning_options` 形态极多：`effort` 值集从 `{low,medium,high}` 到含 `none`/`minimal`/`xhigh`/`max` 的超集；另有 `toggle`、`budget_tokens`（带 min/max）。非法 `--variant not-a-variant` **CLI 不拒**（本机 `run --format json` 仍起轮，exit 0） |
+| 缺省 | 不传 = Provider/模型默认。`--thinking` 默认 false（help `[boolean]`，不加不出 reasoning 块——§3.1） |
+| 与模型关系 | **强绑定。** 无 `reasoning_options` 的模型（目录里大量 `[]`）传 variant 无稳定语义。Server 路径若要做条件 UI，须读 models.dev / `GET /config/providers` 的能力位，不能写死五档 |
+| 适配器现状 | **无下发缝。** `createOpenCodeAdapter()` / `promptAsync` 只发 parts + agent + model。`OpenCodeServerOptions.extraArgs` 是 `serve` 的附加参数，不是 `run --variant`。reasoning **输出**已映射（SSE `part.type=="reasoning"` → `channel: reasoning`）——展示面 |
+| 建议 UI | **显示 effort（variant），条件显示。** 第一期：有 `reasoning_options.type=="effort"` 才出下拉，选项用该模型 values；读不到能力位则隐藏，不要自由文本。`--thinking`：**隐藏或不当 Profile 项**——Server 路径已解析 reasoning 块，展示开关属 UI 偏好不是派发参数 |
+
+**本机证据：**
+
+- `opencode --version` → `1.18.25`
+- `opencode run --help` 摘录：`--variant  model variant (provider-specific reasoning effort, e.g., high, max, minimal)`；`--thinking  show thinking blocks  [boolean]`
+- `opencode serve --port 47471` + `GET /global/health` → `{"healthy":true,"version":"1.18.25"}`；`GET /doc` 模型 schema 含 `"variant":{"type":"string"}`（required 仅 `id`+`providerID`）
+- 与既有文档：§2.1 已登记 `--variant` / `--thinking`——**一致**。本小节补的是「Server 主路径未接线」与「取值按模型、非法值不拒」
+
+**不做：** 把 `--variant` 当全局闭合枚举透传；第一期为 Server 路径发明 `--thinking` 等价物（没有对应 HTTP 字段的证据）。
 
 真实录制（OpenCode 1.18.25 + 本地 mock OpenAI 端点，Windows 11），详见 `packages/adapters/fixtures/opencode/README.md`：
 
