@@ -248,14 +248,24 @@ export function createOpenCodeAdapter(options: OpenCodeAdapterOptions = {}): Ope
           handshake.cancel();
         }
 
-        const model = parseOpenCodeModel(ctx.model, options.providerId);
-        if (ctx.model !== undefined && model === undefined) {
+        const parsed = parseOpenCodeModel(ctx.model, options.providerId);
+        if (ctx.model !== undefined && parsed === undefined) {
           yield toRawEvent(
             OPENCODE_RUNTIME,
             { model: ctx.model },
             "模型名不含 providerID 且适配器未配置 providerId，本轮改用 OpenCode 默认模型",
           );
         }
+        const variant =
+          ctx.reasoningEffort !== undefined && ctx.reasoningEffort !== ""
+            ? ctx.reasoningEffort
+            : undefined;
+        const model =
+          parsed === undefined
+            ? undefined
+            : variant === undefined
+              ? parsed
+              : { ...parsed, variant };
         await activeClient.promptAsync({
           sessionId: resolved,
           text: ctx.prompt,

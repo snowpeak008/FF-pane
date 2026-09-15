@@ -76,6 +76,26 @@ describe("buildProfileDraft", () => {
     expect("outputLanguage" in draft).toBe(false);
   });
 
+  it("T9.4b：白名单 + 非空才序列化 reasoningEffort；换 Runtime 不带字段", () => {
+    const withEffort = buildProfileDraft(
+      form({
+        name: "P",
+        runtime: "claude-code",
+        providerId: "provider-x",
+        reasoningEffort: "high",
+      }),
+    );
+    expect(withEffort.reasoningEffort).toBe("high");
+    const empty = buildProfileDraft(
+      form({ name: "P", runtime: "claude-code", providerId: "provider-x", reasoningEffort: "" }),
+    );
+    expect("reasoningEffort" in empty).toBe(false);
+    const gemini = buildProfileDraft(
+      form({ name: "P", runtime: "gemini-cli", providerId: "provider-x", reasoningEffort: "high" }),
+    );
+    expect("reasoningEffort" in gemini).toBe(false);
+  });
+
   it("非 generic-exec：genericExec 不进草稿（即使表单留有残值）", () => {
     const draft = buildProfileDraft(
       form({ name: "P", runtime: "codex", providerId: "provider-x", gxCommand: "leftover" }),
@@ -137,6 +157,21 @@ describe("formFromProfile round-trip", () => {
       permissionPreset: PRESET,
       genericExec: { command: "node", args: ["-e", "{task}"], taskDelivery: "argv" },
     } as unknown as AgentProfile;
+    const draft = buildProfileDraft(formFromProfile(profile));
+    const { id: _id, ...rest } = profile;
+    expect(draft).toEqual(rest);
+  });
+
+  it("T9.4b reasoningEffort round-trip（白名单 Runtime）", () => {
+    const profile = {
+      id: "profile-4",
+      name: "P",
+      runtime: "claude-code",
+      providerId: "provider-1",
+      defaultRole: "worker",
+      permissionPreset: PRESET,
+      reasoningEffort: "high",
+    } as AgentProfile;
     const draft = buildProfileDraft(formFromProfile(profile));
     const { id: _id, ...rest } = profile;
     expect(draft).toEqual(rest);

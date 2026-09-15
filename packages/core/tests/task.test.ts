@@ -364,9 +364,21 @@ describe("Run 生命周期", () => {
       fileChanges: [],
       commands: [],
       rawLogPath: "runs/run-new/raw.log",
+      reasoningEffort: "unset",
     });
     expect(isRunInFlight(run)).toBe(true);
     expect(isRunEnded(run)).toBe(false);
+  });
+
+  it("显式 reasoningEffort 落档；缺省记 unset", () => {
+    const withEffort = startRun(makeTask("running"), {
+      ...startParams,
+      existingRuns: [],
+      reasoningEffort: "high",
+    });
+    expect(withEffort.reasoningEffort).toBe("high");
+    const unset = startRun(makeTask("running"), { ...startParams, existingRuns: [] });
+    expect(unset.reasoningEffort).toBe("unset");
   });
 
   it("attempt 按该任务历史最大值 +1 递增，跳号不回填", () => {

@@ -269,4 +269,10 @@ export interface Run {
   readonly review?: ReviewRecord;
   /** 设计文档 §6.4 —— raw_log_path 原始日志文件路径（保留但不进主界面）。 */
   readonly rawLogPath: string;
+  /**
+   * T9.4b —— 本轮实际下发的推理强度档。
+   * 未传记哨兵 `unset`（界面译为「未设置」），不要事后猜 CLI 默认。
+   * 旧记录缺字段 = 本单之前的 Run，界面按未设置展示。
+   */
+  readonly reasoningEffort?: string;
 }

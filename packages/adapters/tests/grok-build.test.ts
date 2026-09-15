@@ -15,6 +15,7 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import type { AgentEvent, GrokStreamOutcome } from "../src/index.js";
 import {
+  buildGrokAcpArgs,
   buildGrokArgs,
   createGrokBuildAdapter,
   createGrokEventMapper,
@@ -118,6 +119,15 @@ describe("grok-build 命令行组装", () => {
 
   it("noSubagents: false 时不下发该标志（用户明确要子 Agent 时的逃生门）", () => {
     expect(buildGrokArgs({ ...base, noSubagents: false })).not.toContain("--no-subagents");
+  });
+
+  it("T9.4b --reasoning-effort 显式下发；空不传", () => {
+    const args = buildGrokArgs({ ...base, reasoningEffort: "high" });
+    expect(args).toContain("--reasoning-effort");
+    expect(args[args.indexOf("--reasoning-effort") + 1]).toBe("high");
+    expect(buildGrokArgs(base)).not.toContain("--reasoning-effort");
+    const acp = buildGrokAcpArgs({ reasoningEffort: "low" });
+    expect(acp).toEqual(["agent", "--reasoning-effort", "low", "--no-leader", "stdio"]);
   });
 });
 
@@ -383,6 +393,22 @@ describe("grok-build 适配器本体", () => {
       events.push(event);
     }
     expect(events[0]).toMatchObject({ kind: "end", reason: "failed" });
+  });
+
+  it("ctx.reasoningEffort 优先于构造项写入 --reasoning-effort", () => {
+    const adapter = createGrokBuildAdapter({
+      transport: "streaming-json",
+      reasoningEffort: "low",
+    });
+    const turn = adapter.startTurn({
+      cwd: process.cwd(),
+      prompt: "x",
+      timeoutMs: 1,
+      reasoningEffort: "high",
+    });
+    expect(turn.commandLine).toContain("--reasoning-effort");
+    expect(turn.commandLine[turn.commandLine.indexOf("--reasoning-effort") + 1]).toBe("high");
+    void turn.cancel();
   });
 
   it("registry 键与展示名", () => {

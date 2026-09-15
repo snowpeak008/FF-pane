@@ -75,7 +75,14 @@ export interface PromptInput {
   readonly text: string;
   readonly directory?: string | undefined;
   readonly agent?: string | undefined;
-  readonly model?: { readonly providerID: string; readonly modelID: string } | undefined;
+  readonly model?:
+    | {
+        readonly providerID: string;
+        readonly modelID: string;
+        /** T9.4b —— 该模型 effort variant。缺席 = 不传。 */
+        readonly variant?: string;
+      }
+    | undefined;
 }
 
 /** 客户端构造参数。 */

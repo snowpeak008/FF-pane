@@ -4,7 +4,11 @@ import {
   DEFAULT_PERMISSION_PRESET,
   GENERIC_EXEC_DELIVERIES,
   type GenericExecDelivery,
+  isReasoningEffortLevel,
+  isReasoningEffortRuntime,
   ROLES,
+  resolveContextWindow,
+  resolveReasoningEffortOptions,
 } from "@ff-pane/shared";
 import { type ReactElement, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -126,6 +130,39 @@ export function ProfileEditorDialog({
     () => (selectedProvider?.models ?? []).filter((m) => m.kind === "chat"),
     [selectedProvider],
   );
+  const effortModel = form.model.trim() || selectedProvider?.defaultModel || "";
+  const { state: effortState } = useInvokeQuery("runtimes:reasoning-effort-levels", {
+    runtime: form.runtime,
+    ...(effortModel.length > 0 ? { model: effortModel } : {}),
+  });
+  const effortCatalog = queryData(effortState);
+  const effortOptions = useMemo(() => {
+    if (effortCatalog !== undefined) {
+      return effortCatalog.levels.filter(isReasoningEffortLevel);
+    }
+    return [...resolveReasoningEffortOptions(form.runtime)];
+  }, [effortCatalog, form.runtime]);
+  const showEffort = effortOptions.length > 0;
+  const contextWindow = useMemo(
+    () =>
+      resolveContextWindow(
+        form.model.trim() || selectedProvider?.defaultModel,
+        form.runtime.length > 0 ? form.runtime : undefined,
+      ),
+    [form.model, form.runtime, selectedProvider?.defaultModel],
+  );
+
+  useEffect(() => {
+    if (form.reasoningEffort === "") {
+      return;
+    }
+    if (form.runtime === "opencode" && effortCatalog === undefined) {
+      return;
+    }
+    if (!showEffort || !(effortOptions as readonly string[]).includes(form.reasoningEffort)) {
+      patch({ reasoningEffort: "" });
+    }
+  }, [effortCatalog, effortOptions, form.reasoningEffort, form.runtime, patch, showEffort]);
 
   const save = useCallback(async () => {
     setSaving(true);
@@ -173,7 +210,13 @@ export function ProfileEditorDialog({
                 id="profile-runtime"
                 className={selectClass}
                 value={form.runtime}
-                onChange={(e) => patch({ runtime: e.target.value })}
+                onChange={(e) => {
+                  const runtime = e.target.value;
+                  patch({
+                    runtime,
+                    ...(!isReasoningEffortRuntime(runtime) ? { reasoningEffort: "" } : {}),
+                  });
+                }}
               >
                 <option value="">{t("settings.profiles.field.selectRuntime")}</option>
                 {RUNTIME_OPTIONS.map((rt) => (
@@ -213,24 +256,34 @@ export function ProfileEditorDialog({
                 ? { hint: t("settings.profiles.field.modelCliDefaultHint") }
                 : {})}
             >
-              <select
-                id="profile-model"
-                className={selectClass}
-                value={form.model}
-                disabled={selectedProvider === undefined}
-                onChange={(e) => patch({ model: e.target.value })}
-              >
-                <option value="">
-                  {selectedProvider?.type === "cli_login"
-                    ? t("settings.profiles.field.modelCliDefault")
-                    : t("settings.profiles.field.modelDefault")}
-                </option>
-                {chatModels.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.displayName.length > 0 ? m.displayName : m.id}
+              <div className="flex flex-col gap-1">
+                <select
+                  id="profile-model"
+                  className={selectClass}
+                  value={form.model}
+                  disabled={selectedProvider === undefined}
+                  onChange={(e) => patch({ model: e.target.value })}
+                >
+                  <option value="">
+                    {selectedProvider?.type === "cli_login"
+                      ? t("settings.profiles.field.modelCliDefault")
+                      : t("settings.profiles.field.modelDefault")}
                   </option>
-                ))}
-              </select>
+                  {chatModels.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.displayName.length > 0 ? m.displayName : m.id}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-2xs text-fg-subtle" data-testid="profile-context-window">
+                  {t("settings.profiles.field.contextWindow", {
+                    tokens: contextWindow.tokens.toLocaleString(),
+                    source: t(
+                      `settings.profiles.field.contextWindowSource.${contextWindow.source}`,
+                    ),
+                  })}
+                </span>
+              </div>
             </Field>
           </div>
 
@@ -274,6 +327,28 @@ export function ProfileEditorDialog({
               </select>
             </Field>
           </div>
+
+          {showEffort ? (
+            <Field
+              htmlFor="profile-reasoning-effort"
+              label={t("settings.profiles.field.reasoningEffort")}
+              hint={t("settings.profiles.field.reasoningEffortHint")}
+            >
+              <select
+                id="profile-reasoning-effort"
+                className={selectClass}
+                value={form.reasoningEffort}
+                onChange={(e) => patch({ reasoningEffort: e.target.value })}
+              >
+                <option value="">{t("settings.profiles.field.reasoningEffortUnset")}</option>
+                {effortOptions.map((level) => (
+                  <option key={level} value={level}>
+                    {t(`settings.profiles.field.reasoningEffortLevel.${level}`)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          ) : null}
 
           {isGenericExec ? (
             <div className="flex flex-col gap-3 rounded border border-border p-3">

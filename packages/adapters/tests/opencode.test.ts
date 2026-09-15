@@ -669,6 +669,20 @@ describe("HTTP 客户端请求组装（node:http 假服务）", () => {
       model: { providerID: "deepseek", modelID: "deepseek-chat" },
     });
 
+    await client.promptAsync({
+      sessionId: "ses_fake0001",
+      text: "再干",
+      directory: "C:\\proj",
+      model: { providerID: "deepseek", modelID: "deepseek-chat", variant: "high" },
+    });
+    const withVariant = fake.requests
+      .filter((request) => request.url.includes("prompt_async"))
+      .at(-1);
+    expect(JSON.parse(withVariant?.body ?? "")).toStrictEqual({
+      parts: [{ type: "text", text: "再干" }],
+      model: { providerID: "deepseek", modelID: "deepseek-chat", variant: "high" },
+    });
+
     expect(await client.abort("ses_fake0001", "C:\\proj")).toBe(true);
     expect(fake.requests.some((request) => request.url.includes("/abort"))).toBe(true);
   });

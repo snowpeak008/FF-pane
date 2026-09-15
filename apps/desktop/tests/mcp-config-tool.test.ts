@@ -220,6 +220,19 @@ describe("parseProfileDraftArgs", () => {
     expect(parseProfileDraftArgs({ ...VALID, token: "x" }).ok).toBe(false);
   });
 
+  it("T9.4b reasoningEffort 非空进草稿，空串省略", () => {
+    const withEffort = parseProfileDraftArgs({ ...VALID, reasoningEffort: "high" });
+    expect(withEffort.ok).toBe(true);
+    if (withEffort.ok && withEffort.parsed.kind === "profile") {
+      expect(withEffort.parsed.draft.reasoningEffort).toBe("high");
+    }
+    const empty = parseProfileDraftArgs({ ...VALID, reasoningEffort: "  " });
+    expect(empty.ok).toBe(true);
+    if (empty.ok && empty.parsed.kind === "profile") {
+      expect("reasoningEffort" in empty.parsed.draft).toBe(false);
+    }
+  });
+
   it("genericExec 子对象结构校验", () => {
     const bad = parseProfileDraftArgs({ ...VALID, genericExec: { command: "" } });
     expect(bad.ok).toBe(false);

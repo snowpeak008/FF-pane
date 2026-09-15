@@ -48,6 +48,8 @@ interface CapturedTurn {
   readonly prompt: string;
   readonly resume?: { readonly nativeSessionId: string; readonly cwd: string };
   readonly configOverrides?: Readonly<Record<string, string>>;
+  /** T9.4b：本轮下发的推理强度档。 */
+  readonly reasoningEffort?: string;
   /** T6.6：本轮注入的 MCP 服务端（未挂知识库工具时缺席）。 */
   readonly mcpServers?: Readonly<Record<string, McpStdioServerSpec>>;
   readonly inheritUserMcpServers?: boolean;
@@ -74,6 +76,7 @@ function fakeAdapter(
         prompt: ctx.prompt,
         ...(ctx.resume !== undefined ? { resume: ctx.resume } : {}),
         ...(ctx.configOverrides !== undefined ? { configOverrides: ctx.configOverrides } : {}),
+        ...(ctx.reasoningEffort !== undefined ? { reasoningEffort: ctx.reasoningEffort } : {}),
         ...(ctx.mcpServers !== undefined ? { mcpServers: ctx.mcpServers } : {}),
         ...(ctx.inheritUserMcpServers !== undefined
           ? { inheritUserMcpServers: ctx.inheritUserMcpServers }
@@ -766,10 +769,51 @@ describe("createSessionOrchestrator", () => {
     expect(h.persistedRuns).toHaveLength(1);
     expect(h.persistedRuns[0]?.fileChanges).toHaveLength(1);
     expect(h.persistedRuns[0]?.endReason).toBe("completed");
+    expect(h.persistedRuns[0]?.reasoningEffort).toBe("unset");
     expect(h.published.find((e) => e.kind === "end")).toMatchObject({
       reason: "completed",
       runId: "run-1",
     });
+  });
+
+  it("T9.4b：claude-code 显式 effort 写入 ctx；Run 落档 high", async () => {
+    const events: AgentEvent[] = [
+      { kind: "text", content: "done", final: true, channel: "answer" },
+      { kind: "end", reason: "completed" },
+    ];
+    const h = makeHarness(events, {
+      runtime: "claude-code",
+      profile: profile({ runtime: "claude-code", reasoningEffort: "high" }),
+    });
+    await createSessionOrchestrator(h.deps).start(workerRequest());
+    await flushUntilEnd(h.published);
+    expect(h.captured[0]?.reasoningEffort).toBe("high");
+    expect(h.persistedRuns[0]?.reasoningEffort).toBe("high");
+  });
+
+  it("T9.4b：codex effort 并入 configOverrides；gemini 不下发", async () => {
+    const events: AgentEvent[] = [
+      { kind: "text", content: "done", final: true, channel: "answer" },
+      { kind: "end", reason: "completed" },
+    ];
+    const codex = makeHarness(events, {
+      runtime: "codex",
+      profile: profile({ runtime: "codex", reasoningEffort: "high" }),
+    });
+    await createSessionOrchestrator(codex.deps).start(workerRequest());
+    await flushUntilEnd(codex.published);
+    expect(codex.captured[0]?.configOverrides).toEqual({ model_reasoning_effort: '"high"' });
+    expect(codex.captured[0]?.reasoningEffort).toBe("high");
+
+    const gemini = makeHarness(events, {
+      runtime: "gemini-cli",
+      profile: profile({ runtime: "gemini-cli", reasoningEffort: "high" }),
+    });
+    await createSessionOrchestrator(gemini.deps).start(workerRequest());
+    await flushUntilEnd(gemini.published);
+    expect(gemini.captured[0]?.reasoningEffort).toBeUndefined();
+    expect(gemini.captured[0]?.configOverrides).toBeUndefined();
+    expect(gemini.persistedRuns[0]?.reasoningEffort).toBe("unset");
   });
 
   it("失败结束的 Worker 轮：任务转 failed，不 done", async () => {

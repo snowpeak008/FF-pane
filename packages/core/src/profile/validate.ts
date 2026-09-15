@@ -33,8 +33,12 @@ import {
   isAiOutputLanguage,
   isCustomRoleId,
   isGenericExecDelivery,
+  isReasoningEffortLevel,
+  isReasoningEffortRuntime,
   isRole,
   isShellPolicy,
+  REASONING_EFFORT_LEVELS,
+  REASONING_EFFORT_RUNTIMES,
   ROLES,
 } from "@ff-pane/shared";
 import { intersectEnvelopes, ROLE_DEFAULT_ENVELOPES } from "../permission/index.js";
@@ -57,6 +61,14 @@ export interface ProfileValidationDeps {
   readonly getCustomRole?: (
     id: CustomRoleId,
   ) => CustomRole | undefined | Promise<CustomRole | undefined>;
+  /**
+   * T9.4b：若能读到该 Runtime + 模型的 effort 目录，返回规范档子集。
+   * 缺省 / 返回 undefined = 只校验规范档，不按模型收窄。
+   */
+  readonly getSupportedReasoningEfforts?: (
+    runtime: string,
+    model: string | undefined,
+  ) => readonly string[] | undefined | Promise<readonly string[] | undefined>;
 }
 
 /** 单条校验违规：field 指向 Profile 领域字段（camelCase，嵌套字段用点号路径）。 */
@@ -250,6 +262,34 @@ export async function validateProfileDraft(
       field: "genericExec",
       reason: `命令配置仅对 generic-exec 有效（当前 runtime：${draft.runtime}）`,
     });
+  }
+
+  // T9.4b：reasoningEffort 空 / 缺省 = 未设置（不传）。非空则必须是白名单 Runtime + 规范档；
+  // 不在白名单却带了字段 → 拒存。能读到模型目录再收窄。
+  const effortRaw = draft.reasoningEffort;
+  if (effortRaw !== undefined) {
+    const effort = effortRaw.trim();
+    if (effort.length > 0) {
+      if (!isReasoningEffortRuntime(draft.runtime)) {
+        violations.push({
+          field: "reasoningEffort",
+          reason: `推理强度仅对 ${REASONING_EFFORT_RUNTIMES.join(" / ")} 有效（当前 runtime：${draft.runtime}）`,
+        });
+      } else if (!isReasoningEffortLevel(effort)) {
+        violations.push({
+          field: "reasoningEffort",
+          reason: `未知推理强度：${effort}（应为 ${REASONING_EFFORT_LEVELS.join(" / ")}，缺省 = 不传）`,
+        });
+      } else if (deps.getSupportedReasoningEfforts !== undefined) {
+        const catalog = await deps.getSupportedReasoningEfforts(draft.runtime, draft.model);
+        if (catalog !== undefined && !catalog.includes(effort)) {
+          violations.push({
+            field: "reasoningEffort",
+            reason: `推理强度 ${effort} 不在该模型目录中（目录：${catalog.join(" / ") || "空"}）`,
+          });
+        }
+      }
+    }
   }
 
   if (draft.outputLanguage !== undefined && !isAiOutputLanguage(draft.outputLanguage)) {

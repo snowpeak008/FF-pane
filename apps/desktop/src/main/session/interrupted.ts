@@ -36,6 +36,8 @@ export interface InterruptedRunInput {
   /** 退出钩子路径可给出的已累积证据；启动修正路径拿不到，缺省即空。 */
   readonly fileChanges?: readonly FileChange[];
   readonly commands?: readonly CommandRecord[];
+  /** T9.4b —— 本轮已下发档；缺席记未设置。 */
+  readonly reasoningEffort?: string;
 }
 
 /** buildInterruptedRun 的产出：可直接落盘的 Run 与推进后的任务。 */
@@ -57,6 +59,7 @@ export function buildInterruptedRun(input: InterruptedRunInput): InterruptedRunO
     startedAt: input.startedAt,
     rawLogPath: "raw.log",
     existingRuns: input.existingRuns,
+    ...(input.reasoningEffort !== undefined ? { reasoningEffort: input.reasoningEffort } : {}),
   });
   const report = input.partialReport.trim();
   const run = endRun(started, {

@@ -414,6 +414,17 @@ export type ListLocalModelsResponse =
       readonly detail: string;
     };
 
+/** T9.4b —— 按 Runtime + 模型解析可见的推理强度档。 */
+export interface ReasoningEffortLevelsRequest {
+  readonly runtime: string;
+  readonly model?: string;
+}
+
+/** T9.4b —— `levels` 为空数组 = UI 隐藏下拉。 */
+export interface ReasoningEffortLevelsResponse {
+  readonly levels: readonly string[];
+}
+
 /** secrets:masked-tail 请求。 */
 export interface MaskedTailRequest {
   readonly ref: ApiKeyRef;
@@ -1184,6 +1195,13 @@ export interface IpcInvokeContracts {
     request: ListLocalModelsRequest;
     response: ListLocalModelsResponse;
   };
+  /**
+   * T9.4b —— 推理强度可见档。非白名单返回空；opencode 读不到该模型 effort values 也返回空。
+   */
+  "runtimes:reasoning-effort-levels": {
+    request: ReasoningEffortLevelsRequest;
+    response: ReasoningEffortLevelsResponse;
+  };
   /** 取密钥明文尾 4 位（§4.3 规则 3，UI 展示用；不足 4 位返回空串）。 */
   "secrets:masked-tail": { request: MaskedTailRequest; response: { readonly tail: string } };
   /** 读取全局设置（缺字段补出厂默认，§10.1）。 */
@@ -1398,6 +1416,7 @@ export const INVOKE_CHANNELS = [
   "providers:fetch-models",
   "providers:probe-cli-login",
   "providers:list-local-models",
+  "runtimes:reasoning-effort-levels",
   "secrets:masked-tail",
   "config:get",
   "config:update",

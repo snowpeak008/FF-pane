@@ -479,7 +479,25 @@
         "defaultRole": "Default role",
         "outputLanguage": "Output language",
         "outputFollowGlobal": "Follow global",
-        "permission": "Permission preset"
+        "permission": "Permission preset",
+        "reasoningEffort": "Reasoning effort",
+        "reasoningEffortHint": "Empty = do not pass; follow the CLI or local config. Only an explicit choice is sent.",
+        "reasoningEffortUnset": "(not set, follow CLI)",
+        "reasoningEffortLevel": {
+          "none": "none",
+          "minimal": "minimal",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "xhigh",
+          "max": "max"
+        },
+        "contextWindow": "Context window ≈ {{tokens}} tokens (source: {{source}})",
+        "contextWindowSource": {
+          "model": "model spec",
+          "runtime": "runtime default (estimate)",
+          "fallback": "conservative default (estimate)"
+        }
       },
       "genericExec": {
         "title": "Generic command config",
@@ -617,6 +635,8 @@
     "empty": "No run records yet. Every AI change shows up here after a task is dispatched.",
     "loadError": "Failed to load run records",
     "attempt": "Attempt {{n}}",
+    "reasoningEffort": "Reasoning effort: {{level}}",
+    "reasoningEffortUnset": "Reasoning effort: not set (follow CLI)",
     "commands": "Commands",
     "verify": "Verify",
     "verifyPassed": "Verify passed",

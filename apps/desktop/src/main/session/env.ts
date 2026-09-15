@@ -7,7 +7,7 @@
  * 本模块不接触密钥库、不记录明文。
  */
 
-import type { Provider, RuntimeId } from "@ff-pane/shared";
+import { type Provider, type RuntimeId, resolveDispatchedReasoningEffort } from "@ff-pane/shared";
 
 /** 各 Runtime 读取 API 密钥的环境变量名（CLI 自管登录态的 Runtime 返回 undefined）。 */
 export function runtimeApiKeyEnvVar(runtime: RuntimeId): string | undefined {
@@ -79,30 +79,39 @@ const CODEX_PROVIDER_SLUG = "ffpane";
  *
  * 值按 codex `-c` 的 TOML 语义：model_provider 用裸 slug；name/base_url/env_key 为
  * 基本字符串，用 JSON.stringify 产出合法带引号串（含转义）。cli_login / 非 codex / 非
- * openai_compatible / 无 baseUrl → 返回空表（无覆盖）。
+ * openai_compatible / 无 baseUrl → 不装配路由（可仍带 T9.4b 的 model_reasoning_effort）。
  */
 export function resolveRuntimeConfigOverrides(input: {
   readonly runtime: RuntimeId;
   readonly provider: Provider;
+  /** T9.4b —— 显式选中的推理强度档；缺席 / 空 = 不传（跟随用户本机 toml）。 */
+  readonly reasoningEffort?: string;
 }): Record<string, string> {
   const { runtime, provider } = input;
+  const overrides: Record<string, string> = {};
   if (
-    runtime !== "codex" ||
-    provider.type !== "openai_compatible" ||
-    provider.baseUrl === undefined ||
-    provider.baseUrl.length === 0
+    runtime === "codex" &&
+    provider.type === "openai_compatible" &&
+    provider.baseUrl !== undefined &&
+    provider.baseUrl.length > 0
   ) {
-    return {};
-  }
-  const slug = CODEX_PROVIDER_SLUG;
-  const name = provider.name.length > 0 ? provider.name : slug;
-  return {
-    model_provider: slug,
-    [`model_providers.${slug}.name`]: JSON.stringify(name),
-    [`model_providers.${slug}.base_url`]: JSON.stringify(provider.baseUrl),
+    const slug = CODEX_PROVIDER_SLUG;
+    const name = provider.name.length > 0 ? provider.name : slug;
+    overrides["model_provider"] = slug;
+    overrides[`model_providers.${slug}.name`] = JSON.stringify(name);
+    overrides[`model_providers.${slug}.base_url`] = JSON.stringify(provider.baseUrl);
     // env_key 指向 resolveRuntimeEnv 为 codex 注入的密钥变量（下方常量），二者必须一致。
-    [`model_providers.${slug}.env_key`]: JSON.stringify("OPENAI_API_KEY"),
-  };
+    overrides[`model_providers.${slug}.env_key`] = JSON.stringify("OPENAI_API_KEY");
+  }
+  // T9.4b：即使 cli_login / 无 openai_compatible 路由，显式档位仍要下发。
+  const effort = resolveDispatchedReasoningEffort({
+    runtime,
+    reasoningEffort: input.reasoningEffort,
+  });
+  if (effort !== undefined && runtime === "codex") {
+    overrides["model_reasoning_effort"] = JSON.stringify(effort);
+  }
+  return overrides;
 }
 
 /**

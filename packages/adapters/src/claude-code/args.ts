@@ -110,6 +110,10 @@ export interface ClaudeCodeTurnArgs {
   /** 原生会话 ID（cwd 一致性由适配器在启动前校验）。 */
   readonly resumeSessionId?: string | undefined;
   /**
+   * T9.4b —— 第一类 `--effort`（非法值由工作台先拦）。缺席 = 不传。
+   */
+  readonly effort?: string | undefined;
+  /**
    * 本轮 MCP 配置文件路径（T6.6，由 mcp-file.ts 逐轮落盘）。
    * 缺席 = 本轮不注入任何 MCP 服务端，连 `--mcp-config` 都不传。
    */
@@ -140,6 +144,9 @@ export function buildClaudeCodeArgs(
   }
   if (turn.model !== undefined) {
     args.push("--model", turn.model);
+  }
+  if (turn.effort !== undefined && turn.effort !== "") {
+    args.push("--effort", turn.effort);
   }
   if (turn.resumeSessionId !== undefined) {
     args.push("--resume", turn.resumeSessionId);

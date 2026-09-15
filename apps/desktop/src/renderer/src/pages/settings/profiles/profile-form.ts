@@ -3,16 +3,17 @@
  * 校验权威在 core validateProfileDraft（主进程落盘前执行），本层只构造草稿。
  */
 
-import type {
-  AgentProfile,
-  AiOutputLanguage,
-  GenericExecDelivery,
-  ModelId,
-  PermissionEnvelope,
-  ProviderId,
-  Role,
-  RoleRef,
-  RuntimeId,
+import {
+  type AgentProfile,
+  type AiOutputLanguage,
+  type GenericExecDelivery,
+  isReasoningEffortRuntime,
+  type ModelId,
+  type PermissionEnvelope,
+  type ProviderId,
+  type Role,
+  type RoleRef,
+  type RuntimeId,
 } from "@ff-pane/shared";
 import type { ProfileDraftWire } from "../../../../../shared-ipc/contracts";
 
@@ -34,6 +35,8 @@ export interface ProfileFormState {
   readonly gxArgs: string;
   /** generic-exec：任务投递方式（select 受控值，argv / stdin）。 */
   readonly gxDelivery: GenericExecDelivery;
+  /** T9.4b：空串 = 未设置（不传）。 */
+  readonly reasoningEffort: string;
 }
 
 /**
@@ -64,6 +67,7 @@ export function emptyProfileForm(
     // 空模板保存必被拒，预填让"最短路径"（echo 一类）开箱即过。
     gxArgs: "{task}",
     gxDelivery: "argv",
+    reasoningEffort: "",
   };
 }
 
@@ -80,6 +84,7 @@ export function formFromProfile(profile: AgentProfile): ProfileFormState {
     gxCommand: profile.genericExec?.command ?? "",
     gxArgs: profile.genericExec?.args.join("\n") ?? "{task}",
     gxDelivery: profile.genericExec?.taskDelivery ?? "argv",
+    reasoningEffort: profile.reasoningEffort ?? "",
   };
 }
 
@@ -101,6 +106,7 @@ export function buildProfileDraft(form: ProfileFormState): ProfileDraftWire {
   const model = form.model.trim();
   const outputLanguage = form.outputLanguage.trim();
   const runtime = form.runtime.trim();
+  const reasoningEffort = form.reasoningEffort.trim();
   return {
     name: form.name.trim(),
     runtime: runtime as RuntimeId,
@@ -118,5 +124,6 @@ export function buildProfileDraft(form: ProfileFormState): ProfileDraftWire {
           },
         }
       : {}),
+    ...(isReasoningEffortRuntime(runtime) && reasoningEffort.length > 0 ? { reasoningEffort } : {}),
   };
 }

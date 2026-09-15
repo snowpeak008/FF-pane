@@ -78,6 +78,7 @@ export const CONFIG_PROFILE_DRAFT_FIELDS = [
   "permissionPreset",
   "outputLanguage",
   "genericExec",
+  "reasoningEffort",
 ] as const;
 
 /** Provider 草案（AI 可填的全部字段）：**类型层面就没有 apiKeyRef**。 */
@@ -239,6 +240,12 @@ export const CONFIG_DRAFT_PROFILE_TOOL: McpToolDefinition = {
         required: ["command", "args", "taskDelivery"],
         additionalProperties: false,
         description: "Command config (generic-exec runtime only).",
+      },
+      reasoningEffort: {
+        type: "string",
+        description:
+          "Canonical reasoning effort (none/minimal/low/medium/high/xhigh/max). " +
+          "Omit to follow the CLI / local config. Only valid for codex, claude-code, grok-build, opencode.",
       },
     },
     required: ["name", "runtime", "providerId", "defaultRole"],
@@ -468,6 +475,7 @@ export function parseProfileDraftArgs(
   }
   const model = nonEmptyString(args["model"]);
   const outputLanguage = nonEmptyString(args["outputLanguage"]);
+  const reasoningEffort = nonEmptyString(args["reasoningEffort"]);
   const id = nonEmptyString(args["id"]);
 
   // preset 缺省在此以占位表达：主进程收到后用全局 defaultPermissionPreset 补齐再校验。
@@ -482,6 +490,7 @@ export function parseProfileDraftArgs(
     ...(model !== undefined ? { model: model as ModelId } : {}),
     ...(outputLanguage !== undefined ? { outputLanguage: outputLanguage as AiOutputLanguage } : {}),
     ...(genericExec !== undefined ? { genericExec } : {}),
+    ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
   };
   return { ok: true, parsed: { kind: "profile", ...(id !== undefined ? { id } : {}), draft } };
 }

@@ -11,18 +11,19 @@
  * - attempt 从 1 起、按该任务历史最大值 +1 递增（§6.4 序号），历史有跳号也不回填。
  */
 
-import type {
-  CommandRecord,
-  ConfigToolCallRecord,
-  EpochMillis,
-  FileChange,
-  KnowledgeQueryRecord,
-  ProfileId,
-  Run,
-  RunEndReason,
-  RunId,
-  Task,
-  VerifyResult,
+import {
+  type CommandRecord,
+  type ConfigToolCallRecord,
+  type EpochMillis,
+  type FileChange,
+  type KnowledgeQueryRecord,
+  type ProfileId,
+  REASONING_EFFORT_UNSET,
+  type Run,
+  type RunEndReason,
+  type RunId,
+  type Task,
+  type VerifyResult,
 } from "@ff-pane/shared";
 import { RunLifecycleError } from "./errors.js";
 import type { EndedRun } from "./model.js";
@@ -41,6 +42,10 @@ export interface StartRunParams {
   readonly rawLogPath: string;
   /** 该任务已有的全部 Run 记录（并发检查与 attempt 递增依据；其他任务的记录被忽略）。 */
   readonly existingRuns: readonly Run[];
+  /**
+   * T9.4b —— 本轮实际下发的推理强度档。缺省记 {@link REASONING_EFFORT_UNSET}（未设置）。
+   */
+  readonly reasoningEffort?: string;
 }
 
 /**
@@ -67,6 +72,7 @@ export function startRun(task: Task, params: StartRunParams): Run {
     fileChanges: [],
     commands: [],
     rawLogPath: params.rawLogPath,
+    reasoningEffort: params.reasoningEffort ?? REASONING_EFFORT_UNSET,
   };
 }
 

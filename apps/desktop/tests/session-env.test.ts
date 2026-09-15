@@ -157,4 +157,30 @@ describe("resolveRuntimeConfigOverrides", () => {
       }),
     ).toEqual({});
   });
+
+  it("T9.4b：codex 显式 effort 并入 model_reasoning_effort（TOML 字符串）", () => {
+    const withRoute = resolveRuntimeConfigOverrides({
+      runtime: "codex",
+      provider: provider({ type: "openai_compatible", baseUrl: "https://x.test" }),
+      reasoningEffort: "high",
+    });
+    expect(withRoute["model_reasoning_effort"]).toBe('"high"');
+    expect(withRoute["model_provider"]).toBe("ffpane");
+    const cliLogin = resolveRuntimeConfigOverrides({
+      runtime: "codex",
+      provider: provider({ type: "cli_login" }),
+      reasoningEffort: "high",
+    });
+    expect(cliLogin).toEqual({ model_reasoning_effort: '"high"' });
+  });
+
+  it("T9.4b：gemini-cli 即使传入 effort 也不进 overrides", () => {
+    expect(
+      resolveRuntimeConfigOverrides({
+        runtime: "gemini-cli",
+        provider: provider({ type: "openai_compatible", baseUrl: "https://x.test" }),
+        reasoningEffort: "high",
+      }),
+    ).toEqual({});
+  });
 });

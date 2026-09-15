@@ -98,6 +98,13 @@ export interface AdapterTurnContext {
   /** 指定模型；缺席 = 用 Runtime/Profile 默认。 */
   readonly model?: ModelId;
   /**
+   * T9.4b —— 本轮推理强度档（规范档）。缺席 = 不传，跟随 CLI / 用户本机配置。
+   * 语义由具体 Runtime 解释：claude-code → `--effort`；grok-build → `--reasoning-effort`；
+   * opencode Server → model.variant；codex 走 configOverrides 的 `model_reasoning_effort`。
+   * 非白名单 Runtime 忽略本字段。
+   */
+  readonly reasoningEffort?: string;
+  /**
    * 本轮运行时配置覆盖（键值）。语义由具体 Runtime 定义、其余 Runtime 忽略——
    * 与 env 同款"通用通道、按 Runtime 解释"的模式（宿主在 desktop 侧按 runtime+provider 解析）。
    * codex：映射为 `-c key=value`（值按 TOML 解析，字符串需自带引号），用于把

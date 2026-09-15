@@ -207,7 +207,7 @@ function startGrokTurn(options: GrokBuildAdapterOptions, ctx: AdapterTurnContext
     tools: options.tools,
     disallowedTools: options.disallowedTools,
     maxTurns: options.maxTurns,
-    reasoningEffort: options.reasoningEffort,
+    reasoningEffort: ctx.reasoningEffort ?? options.reasoningEffort,
     extraArgs: options.extraArgs,
   });
   const commandLine = [command, ...args];
@@ -298,7 +298,10 @@ function startAcpFirstTurn(
   onDetected: (mode: "acp" | "streaming-json") => void,
 ): GrokBuildTurn {
   const command = resolveGrokCommand(options.command ?? DEFAULT_GROK_COMMAND);
-  const args = buildGrokAcpArgs({ model: ctx.model, reasoningEffort: options.reasoningEffort });
+  const args = buildGrokAcpArgs({
+    model: ctx.model,
+    reasoningEffort: ctx.reasoningEffort ?? options.reasoningEffort,
+  });
   const commandLine = [command, ...args];
 
   if (ctx.resume !== undefined) {

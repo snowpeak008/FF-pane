@@ -155,4 +155,120 @@ export interface AgentProfile {
    * （此前该 runtime 派发必收「Runtime 未注册」，无可用存量），零迁移。
    */
   readonly genericExec?: GenericExecProfileConfig;
+  /**
+   * T9.4b —— 模型推理强度档。缺省 / 空 = 不传，跟随 CLI 或用户本机配置。
+   * 只对白名单 Runtime（{@link REASONING_EFFORT_RUNTIMES}）有意义；
+   * 取值须为规范档 {@link REASONING_EFFORT_LEVELS}。旧档缺字段 = 未设置。
+   */
+  readonly reasoningEffort?: string;
+}
+
+/**
+ * T9.4b —— 规范档（grok 文档 ∪ claude help ∪ codex 目录主体）。
+ * UI 只暴露这些；能读到模型目录再与之求交收窄。`ultra` / grok menu id 第一期不进下拉。
+ */
+export const REASONING_EFFORT_LEVELS = [
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
+
+/** 规范档字面量。 */
+export type ReasoningEffortLevel = (typeof REASONING_EFFORT_LEVELS)[number];
+
+/** ReasoningEffortLevel 运行时守卫。 */
+export const isReasoningEffortLevel = createLiteralGuard(REASONING_EFFORT_LEVELS);
+
+/**
+ * T9.4b —— 允许非空 `reasoningEffort` 的 Runtime 白名单。
+ * 不在名单的 Runtime 带了该字段 → 校验拒存；下发层也不会把它塞进 argv / HTTP。
+ */
+export const REASONING_EFFORT_RUNTIMES = [
+  "codex",
+  "claude-code",
+  "grok-build",
+  "opencode",
+] as const;
+
+/** 白名单 Runtime。 */
+export type ReasoningEffortRuntime = (typeof REASONING_EFFORT_RUNTIMES)[number];
+
+/** ReasoningEffortRuntime 运行时守卫。 */
+export const isReasoningEffortRuntime = createLiteralGuard(REASONING_EFFORT_RUNTIMES);
+
+/**
+ * opencode 读不到该模型 effort values 时 UI 隐藏且不下发。
+ * 其余白名单 Runtime 无目录时仍显示完整规范档。
+ */
+export const REASONING_EFFORT_CATALOG_REQUIRED_RUNTIMES = ["opencode"] as const;
+
+/** Run 落档：本轮未下发 effort 时的哨兵（可追溯，不要事后猜）。 */
+export const REASONING_EFFORT_UNSET = "unset";
+
+/** 去掉空白；空串与缺省一律视为未设置。 */
+export function normalizeReasoningEffort(
+  value: string | undefined,
+): ReasoningEffortLevel | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return isReasoningEffortLevel(trimmed) ? trimmed : undefined;
+}
+
+/**
+ * 规范档 ∩ 模型目录（若有）。目录里的非规范值（如 codex `ultra`）第一期丢弃。
+ * `catalogLevels === undefined` 表示没读到目录，返回完整规范档。
+ */
+export function narrowReasoningEffortLevels(
+  catalogLevels?: readonly string[],
+): readonly ReasoningEffortLevel[] {
+  if (catalogLevels === undefined) {
+    return REASONING_EFFORT_LEVELS;
+  }
+  const allowed = new Set(catalogLevels);
+  return REASONING_EFFORT_LEVELS.filter((level) => allowed.has(level));
+}
+
+/**
+ * Profile 编辑器 / 下发共用的可见档位。
+ * - 非白名单：不显示（返回空数组）
+ * - opencode：必须读到该模型 effort values，否则空（隐藏）
+ * - 其余白名单：无目录用完整规范档，有目录则求交
+ */
+export function resolveReasoningEffortOptions(
+  runtime: string,
+  catalogLevels?: readonly string[],
+): readonly ReasoningEffortLevel[] {
+  if (!isReasoningEffortRuntime(runtime)) {
+    return [];
+  }
+  if (
+    (REASONING_EFFORT_CATALOG_REQUIRED_RUNTIMES as readonly string[]).includes(runtime) &&
+    catalogLevels === undefined
+  ) {
+    return [];
+  }
+  return narrowReasoningEffortLevels(catalogLevels);
+}
+
+/**
+ * 本轮实际下发的档位：白名单 + 非空规范档（再按模型目录收窄）才返回值。
+ * opencode 读不到目录 → 不下发。脏数据（非白名单却带了字段）在此被吞掉。
+ */
+export function resolveDispatchedReasoningEffort(input: {
+  readonly runtime: string;
+  readonly reasoningEffort?: string | undefined;
+  readonly catalogLevels?: readonly string[];
+}): ReasoningEffortLevel | undefined {
+  const normalized = normalizeReasoningEffort(input.reasoningEffort);
+  if (normalized === undefined) {
+    return undefined;
+  }
+  const options = resolveReasoningEffortOptions(input.runtime, input.catalogLevels);
+  return options.includes(normalized) ? normalized : undefined;
 }

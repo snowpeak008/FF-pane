@@ -6,6 +6,7 @@ import type {
   Run,
   RunEndReason,
 } from "@ff-pane/shared";
+import { REASONING_EFFORT_UNSET } from "@ff-pane/shared";
 import { type ReactElement, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { EmptyState } from "../../components/states/EmptyState";
@@ -301,6 +302,13 @@ function RunDetail({ run, locale }: { readonly run: Run; readonly locale: string
         </div>
         <span className="font-mono text-xs text-fg-subtle">
           {formatAbsoluteTime(run.startedAt, locale)}
+        </span>
+        <span className="text-xs text-fg-subtle">
+          {run.reasoningEffort !== undefined &&
+          run.reasoningEffort !== "" &&
+          run.reasoningEffort !== REASONING_EFFORT_UNSET
+            ? t("runs.reasoningEffort", { level: run.reasoningEffort })
+            : t("runs.reasoningEffortUnset")}
         </span>
       </div>
 

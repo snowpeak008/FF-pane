@@ -218,6 +218,9 @@ function startClaudeCodeTurn(ctx: AdapterTurnContext, resolved: ResolvedOptions)
   const args = buildClaudeCodeArgs(resolved.cli, {
     model: ctx.model,
     resumeSessionId: ctx.resume?.nativeSessionId,
+    ...(ctx.reasoningEffort !== undefined && ctx.reasoningEffort !== ""
+      ? { effort: ctx.reasoningEffort }
+      : {}),
     ...(mcpFile !== undefined ? { mcpConfigPath: mcpFile.path } : {}),
     ...(mcpAllowedTools.length > 0 ? { mcpAllowedTools } : {}),
     // 只在本轮确有注入时才谈"忽略用户 MCP 配置"：没注入还传 strict，

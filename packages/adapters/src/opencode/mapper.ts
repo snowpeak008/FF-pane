@@ -527,6 +527,8 @@ function describeError(error: Record<string, unknown>): string {
 export interface OpenCodeModelRef {
   readonly providerID: string;
   readonly modelID: string;
+  /** T9.4b —— Server `variant`（该模型 effort values 之一）。缺席 = 不传。 */
+  readonly variant?: string;
 }
 
 /**

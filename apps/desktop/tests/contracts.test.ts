@@ -74,6 +74,10 @@ describe("IPC 通道契约", () => {
     expect(INVOKE_CHANNELS).toContain("providers:list-local-models");
   });
 
+  it("T9.4b 推理强度档通道已登记到运行时清单", () => {
+    expect(INVOKE_CHANNELS).toContain("runtimes:reasoning-effort-levels");
+  });
+
   it("T9.7 任务落定事件通道已登记到运行时清单（preload 据此放行订阅）", () => {
     expect(EVENT_CHANNELS).toContain("tasks:settled");
   });

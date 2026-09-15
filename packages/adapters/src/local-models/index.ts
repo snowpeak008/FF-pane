@@ -1,6 +1,11 @@
 /** cli_login 本地模型枚举（T9.2 ③）barrel。 */
 
 export {
+  defaultOpenCodeModelsPath,
+  parseOpenCodeEffortValues,
+  readOpenCodeEffortValues,
+} from "./effort-catalog.js";
+export {
   DEFAULT_LIST_MODELS_TIMEOUT_MS,
   LIST_MODELS_MAX_STREAM_BYTES,
   type ListLocalModelsOptions,

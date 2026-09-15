@@ -479,6 +479,52 @@ describe("generic-exec 命令配置（T8.4b 多实例装配）", () => {
   });
 });
 
+describe("reasoningEffort（T9.4b）", () => {
+  it("白名单 Runtime + 规范档通过；空串 / 缺省视为未设置", async () => {
+    expect(await validateProfileDraft(workerDraft({ reasoningEffort: "high" }), DEPS)).toEqual({
+      ok: true,
+    });
+    expect(await validateProfileDraft(workerDraft({ reasoningEffort: "" }), DEPS)).toEqual({
+      ok: true,
+    });
+    expect(await validateProfileDraft(workerDraft({ reasoningEffort: "  " }), DEPS)).toEqual({
+      ok: true,
+    });
+    expect(await validateProfileDraft(workerDraft(), DEPS)).toEqual({ ok: true });
+  });
+
+  it("非法档位拒存", async () => {
+    expectViolationFields(
+      await validateProfileDraft(workerDraft({ reasoningEffort: "ultra" }), DEPS),
+      ["reasoningEffort"],
+    );
+  });
+
+  it("非白名单 Runtime 带了字段 → 拒存（gemini-cli）", async () => {
+    expectViolationFields(
+      await validateProfileDraft(
+        workerDraft({ runtime: "gemini-cli", reasoningEffort: "high" }),
+        DEPS,
+      ),
+      ["reasoningEffort"],
+    );
+  });
+
+  it("能读到模型目录则按目录收窄", async () => {
+    const deps = {
+      ...DEPS,
+      getSupportedReasoningEfforts: () => ["low", "medium"],
+    };
+    expect(await validateProfileDraft(workerDraft({ reasoningEffort: "low" }), deps)).toEqual({
+      ok: true,
+    });
+    expectViolationFields(
+      await validateProfileDraft(workerDraft({ reasoningEffort: "high" }), deps),
+      ["reasoningEffort"],
+    );
+  });
+});
+
 describe("ProfileValidationError（抛错通道封装，供 storage 校验回调接线）", () => {
   it("携带全部违规，message 含字段名", async () => {
     const draft = plannerDraft({

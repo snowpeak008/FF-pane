@@ -13,7 +13,12 @@
 import { randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
-import { isCliLoginRuntime, listLocalModels, probeCliLogin } from "@ff-pane/adapters";
+import {
+  isCliLoginRuntime,
+  listLocalModels,
+  probeCliLogin,
+  readOpenCodeEffortValues,
+} from "@ff-pane/adapters";
 import {
   acceptTask,
   approvePlan,
@@ -29,13 +34,14 @@ import {
   validateCustomRoleDraft,
   validateProfileDraft,
 } from "@ff-pane/core";
-import type {
-  ApiKeyRef,
-  HabitEntry,
-  HabitEntryId,
-  MemoryEntryId,
-  Plan,
-  PlanVersion,
+import {
+  type ApiKeyRef,
+  type HabitEntry,
+  type HabitEntryId,
+  type MemoryEntryId,
+  type Plan,
+  type PlanVersion,
+  resolveReasoningEffortOptions,
 } from "@ff-pane/shared";
 import {
   createConfigStore,
@@ -97,6 +103,7 @@ type DataChannel =
   | "providers:fetch-models"
   | "providers:probe-cli-login"
   | "providers:list-local-models"
+  | "runtimes:reasoning-effort-levels"
   | "secrets:masked-tail"
   | "config:get"
   | "config:update"
@@ -154,6 +161,12 @@ export async function createDataHandlers(
     const result = await validateProfileDraft(draft, {
       getProvider: (id) => providers.getProvider(id),
       getCustomRole: (id) => roles.getRole(id),
+      getSupportedReasoningEfforts: async (runtime, model) => {
+        if (runtime !== "opencode") {
+          return undefined;
+        }
+        return readOpenCodeEffortValues(model);
+      },
     });
     if (!result.ok) {
       throw new ProfileValidationError(result.violations);
@@ -408,6 +421,12 @@ export async function createDataHandlers(
         };
       }
       return listLocalModels(request.runtime);
+    },
+
+    "runtimes:reasoning-effort-levels": async (request) => {
+      const catalog =
+        request.runtime === "opencode" ? await readOpenCodeEffortValues(request.model) : undefined;
+      return { levels: [...resolveReasoningEffortOptions(request.runtime, catalog)] };
     },
 
     "secrets:masked-tail": async (request) => ({ tail: await secrets.maskedTail(request.ref) }),

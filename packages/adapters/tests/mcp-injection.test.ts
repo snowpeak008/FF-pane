@@ -167,4 +167,16 @@ describe("claude：参数装配", () => {
     const args = buildClaudeCodeArgs({ strictMcpConfig: true }, {});
     expect(args).toContain("--strict-mcp-config");
   });
+
+  it("T9.4b 第一类 --effort 在 extraArgs 之前，缺席不传", () => {
+    const withEffort = buildClaudeCodeArgs({}, { effort: "high" });
+    expect(withEffort).toContain("--effort");
+    expect(withEffort[withEffort.indexOf("--effort") + 1]).toBe("high");
+    expect(withEffort.indexOf("--effort")).toBeLessThan(withEffort.length);
+    const extras = buildClaudeCodeArgs({ extraArgs: ["--effort", "low"] }, { effort: "high" });
+    expect(extras.indexOf("--effort")).toBeLessThan(extras.lastIndexOf("--effort"));
+    expect(extras[extras.indexOf("--effort") + 1]).toBe("high");
+    expect(extras[extras.lastIndexOf("--effort") + 1]).toBe("low");
+    expect(buildClaudeCodeArgs({}, {})).not.toContain("--effort");
+  });
 });

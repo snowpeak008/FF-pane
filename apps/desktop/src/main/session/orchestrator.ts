@@ -46,6 +46,7 @@ import {
   type GuardTurnContext,
   guardTurn,
   type McpStdioServerSpec,
+  readOpenCodeEffortValues,
   toStoredRunEvidence,
 } from "@ff-pane/adapters";
 import {
@@ -119,7 +120,11 @@ import type {
   TranscriptEntry,
   VerifyResult,
 } from "@ff-pane/shared";
-import { isCustomRoleId } from "@ff-pane/shared";
+import {
+  isCustomRoleId,
+  REASONING_EFFORT_UNSET,
+  resolveDispatchedReasoningEffort,
+} from "@ff-pane/shared";
 import type { ProjectLayout } from "@ff-pane/storage";
 import type {
   CancelSessionRequest,
@@ -420,6 +425,8 @@ interface WorkerContext {
   readonly runningTask: Task;
   readonly profileId: AgentProfile["id"];
   readonly startedAt: number;
+  /** T9.4b —— 本轮实际下发档或哨兵 `unset`。 */
+  readonly reasoningEffort: string;
 }
 
 /** 本轮挂上的知识库工具（未挂时为 undefined）；收尾时据它回读审计。 */
@@ -759,9 +766,21 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         provider,
         ...(apiKeyPlaintext !== undefined ? { apiKeyPlaintext } : {}),
       });
-      // 运行时配置覆盖（如 openai_compatible → codex model_provider 路由，§T4.5 方案 A）
-      const configOverrides = resolveRuntimeConfigOverrides({ runtime: profile.runtime, provider });
       const model: ModelId | undefined = profile.model ?? provider.defaultModel;
+      // T9.4b：白名单 + 显式档才下发；opencode 读不到该模型 effort values 则不下发。
+      const effortCatalog =
+        profile.runtime === "opencode" ? await readOpenCodeEffortValues(model) : undefined;
+      const reasoningEffort = resolveDispatchedReasoningEffort({
+        runtime: profile.runtime,
+        reasoningEffort: profile.reasoningEffort,
+        ...(effortCatalog !== undefined ? { catalogLevels: effortCatalog } : {}),
+      });
+      // 运行时配置覆盖（如 openai_compatible → codex model_provider 路由，§T4.5 方案 A）
+      const configOverrides = resolveRuntimeConfigOverrides({
+        runtime: profile.runtime,
+        provider,
+        ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+      });
 
       // 组装 Prompt + 权限信封（Worker 从任务合同派生，Planner 用只读角色默认）
       let prompt: string;
@@ -949,7 +968,13 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
       if (workerTaskToDispatch !== undefined) {
         const runningTask = dispatchTask(workerTaskToDispatch);
         await deps.saveTask(layout, runningTask);
-        workerCtx = { layout, runningTask, profileId: profile.id, startedAt };
+        workerCtx = {
+          layout,
+          runningTask,
+          profileId: profile.id,
+          startedAt,
+          reasoningEffort: reasoningEffort ?? REASONING_EFFORT_UNSET,
+        };
       }
 
       // 任务看板增量（T9.10 ②）：前置到 Planner 提示词。先于 resumeContext 拼接 →
@@ -1000,6 +1025,7 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         ...(Object.keys(env).length > 0 ? { env } : {}),
         ...(Object.keys(configOverrides).length > 0 ? { configOverrides } : {}),
         ...(model !== undefined ? { model } : {}),
+        ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
         ...(resumeBinding !== undefined ? { resume: resumeBinding } : {}),
         ...(Object.keys(mcpServers).length > 0
           ? {
@@ -1444,6 +1470,7 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         startedAt,
         rawLogPath: "raw.log",
         existingRuns,
+        reasoningEffort: workerCtx.reasoningEffort,
       });
       const report = outcome.report.trim();
       const ended = endRun(started, {
@@ -1535,6 +1562,7 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
           partialReport: turn.answerText,
           fileChanges: evidence.fileChanges as readonly FileChange[],
           commands: evidence.commands as readonly CommandRecord[],
+          reasoningEffort: workerCtx.reasoningEffort,
         });
         const changesDiff = evidence.fileChanges
           .map((change) => change.diff)

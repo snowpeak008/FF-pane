@@ -479,7 +479,25 @@
         "defaultRole": "默认角色",
         "outputLanguage": "输出语言",
         "outputFollowGlobal": "跟随全局",
-        "permission": "权限预设"
+        "permission": "权限预设",
+        "reasoningEffort": "推理强度",
+        "reasoningEffortHint": "空 = 不传，跟随 CLI 或本机配置。只有显式选择才会下发。",
+        "reasoningEffortUnset": "（未设置，跟随 CLI）",
+        "reasoningEffortLevel": {
+          "none": "none",
+          "minimal": "minimal",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "xhigh",
+          "max": "max"
+        },
+        "contextWindow": "上下文窗口约 {{tokens}} token（来路：{{source}}）",
+        "contextWindowSource": {
+          "model": "模型公开规格",
+          "runtime": "Runtime 默认（估算）",
+          "fallback": "保守默认（估算）"
+        }
       },
       "genericExec": {
         "title": "通用命令配置",
@@ -617,6 +635,8 @@
     "empty": "还没有执行记录。派发任务后这里会出现 AI 的每次改动。",
     "loadError": "读取执行记录失败",
     "attempt": "第 {{n}} 次尝试",
+    "reasoningEffort": "推理强度：{{level}}",
+    "reasoningEffortUnset": "推理强度：未设置（跟随 CLI）",
     "commands": "命令",
     "verify": "验证",
     "verifyPassed": "验证通过",
