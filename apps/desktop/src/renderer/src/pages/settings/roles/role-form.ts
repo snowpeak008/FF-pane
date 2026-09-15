@@ -39,3 +39,23 @@ export function buildRoleDraft(form: RoleFormState): CustomRoleDraftWire {
     permissionPreset: form.permission,
   };
 }
+
+/**
+ * 新建路径：选中模板即覆盖 name / systemPrompt / permission；
+ * 回到空白起点则回到 emptyRoleForm(blankPermission)。
+ * displayName 由调用方从 locales 取模板显示名（提示词正文不进 locales）。
+ */
+export function applyRoleTemplate(
+  template: { readonly systemPrompt: string; readonly permissionPreset: PermissionEnvelope } | null,
+  displayName: string,
+  blankPermission: PermissionEnvelope,
+): RoleFormState {
+  if (template === null) {
+    return emptyRoleForm(blankPermission);
+  }
+  return {
+    name: displayName,
+    systemPrompt: template.systemPrompt,
+    permission: template.permissionPreset,
+  };
+}

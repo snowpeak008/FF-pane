@@ -6,4 +6,5 @@
 export * from "./assemble.js";
 export * from "./inject.js";
 export * from "./language.js";
+export * from "./role-templates.js";
 export * from "./roles.js";

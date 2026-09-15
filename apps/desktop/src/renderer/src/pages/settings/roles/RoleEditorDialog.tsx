@@ -1,3 +1,4 @@
+import { getRoleTemplate, isRoleTemplateId, ROLE_TEMPLATE_IDS } from "@ff-pane/core";
 import { type CustomRole, DEFAULT_PERMISSION_PRESET } from "@ff-pane/shared";
 import { type ReactElement, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -10,9 +11,11 @@ import {
   DialogHeader,
 } from "../../../components/ui/Dialog";
 import { Field, Input, Textarea } from "../../../components/ui/Input";
+import { inputVariants } from "../../../components/ui/input.variants";
 import { invokeQuery } from "../../../ipc/query";
+import { cn } from "../../../lib/cn";
 import { PermissionEnvelopeEditor } from "../PermissionEnvelopeEditor";
-import { buildRoleDraft, emptyRoleForm, formFromRole } from "./role-form";
+import { applyRoleTemplate, buildRoleDraft, emptyRoleForm, formFromRole } from "./role-form";
 
 export interface RoleEditorDialogProps {
   readonly open: boolean;
@@ -37,18 +40,40 @@ export function RoleEditorDialog({
 }: RoleEditorDialogProps): ReactElement {
   const { t } = useTranslation();
   const [form, setForm] = useState(() => emptyRoleForm(DEFAULT_PERMISSION_PRESET));
+  const [templateId, setTemplateId] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | undefined>(undefined);
 
   const isEdit = role !== undefined;
+  const selectClass = cn(inputVariants({}), "cursor-pointer");
 
   useEffect(() => {
     if (!open) {
       return;
     }
     setForm(role !== undefined ? formFromRole(role) : emptyRoleForm(DEFAULT_PERMISSION_PRESET));
+    setTemplateId("");
     setSaveError(undefined);
   }, [open, role]);
+
+  const onTemplateChange = useCallback(
+    (nextId: string) => {
+      setTemplateId(nextId);
+      if (nextId === "" || !isRoleTemplateId(nextId)) {
+        setForm(applyRoleTemplate(null, "", DEFAULT_PERMISSION_PRESET));
+        return;
+      }
+      const template = getRoleTemplate(nextId);
+      setForm(
+        applyRoleTemplate(
+          template,
+          t(`settings.roles.template.${nextId}`),
+          DEFAULT_PERMISSION_PRESET,
+        ),
+      );
+    },
+    [t],
+  );
 
   const patch = useCallback((next: Partial<typeof form>) => {
     setForm((prev) => ({ ...prev, ...next }));
@@ -81,6 +106,28 @@ export function RoleEditorDialog({
           description={t("settings.roles.edit.description")}
         />
         <DialogBody className="flex max-h-[70vh] flex-col gap-3 py-3">
+          {!isEdit ? (
+            <Field
+              htmlFor="role-template"
+              label={t("settings.roles.template.label")}
+              hint={t("settings.roles.template.hint")}
+            >
+              <select
+                id="role-template"
+                className={selectClass}
+                value={templateId}
+                onChange={(e) => onTemplateChange(e.target.value)}
+              >
+                <option value="">{t("settings.roles.template.blank")}</option>
+                {ROLE_TEMPLATE_IDS.map((id) => (
+                  <option key={id} value={id}>
+                    {t(`settings.roles.template.${id}`)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          ) : null}
+
           <Field htmlFor="role-name" label={t("settings.roles.field.name")} required>
             <Input
               id="role-name"

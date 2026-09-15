@@ -588,6 +588,16 @@
         "systemPrompt": "角色提示词",
         "systemPromptHint": "发给 Agent 的角色定义原文（进 Prompt 第 1 层，不随界面语言变化）。",
         "permission": "权限预设"
+      },
+      "template": {
+        "label": "从模板预填",
+        "blank": "空白起点",
+        "hint": "选一套即填入名称、提示词与权限，仍可改。回到空白起点会清空表单。",
+        "planner": "规划者",
+        "worker": "执行者",
+        "reviewer": "审查者",
+        "docs-writer": "文档写手",
+        "test-engineer": "测试工程师"
       }
     }
   },

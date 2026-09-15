@@ -588,6 +588,16 @@
         "systemPrompt": "Role prompt",
         "systemPromptHint": "The role definition sent to the agent verbatim (prompt layer 1; not affected by UI language).",
         "permission": "Permission preset"
+      },
+      "template": {
+        "label": "Start from a template",
+        "blank": "Blank start",
+        "hint": "Choosing a template fills name, prompt, and permissions. You can still edit. Switching back to blank clears the form.",
+        "planner": "Planner",
+        "worker": "Worker",
+        "reviewer": "Reviewer",
+        "docs-writer": "Docs writer",
+        "test-engineer": "Test engineer"
       }
     }
   },

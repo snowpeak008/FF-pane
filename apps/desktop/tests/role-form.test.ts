@@ -1,10 +1,17 @@
 /**
  * T8.4 自定义角色表单纯逻辑单测：表单态 ↔ 线上草稿（校验权威在 core，本层只构形）。
+ * T9.5：applyRoleTemplate 选模板覆盖 / 回空白清空。
  */
 
-import type { CustomRole, CustomRoleId, PermissionEnvelope } from "@ff-pane/shared";
+import {
+  type CustomRole,
+  type CustomRoleId,
+  DEFAULT_PERMISSION_PRESET,
+  type PermissionEnvelope,
+} from "@ff-pane/shared";
 import { describe, expect, it } from "vitest";
 import {
+  applyRoleTemplate,
   buildRoleDraft,
   emptyRoleForm,
   formFromRole,
@@ -39,6 +46,28 @@ describe("buildRoleDraft", () => {
       systemPrompt: "你是文档撰写者。",
       permissionPreset: PRESET,
     });
+  });
+});
+
+describe("applyRoleTemplate", () => {
+  const template = {
+    systemPrompt: "你是规划者。只读澄清，把想法收敛成可核对的计划。",
+    permissionPreset: PRESET,
+  };
+
+  it("选模板覆盖 name / systemPrompt / permission", () => {
+    const form = applyRoleTemplate(template, "规划者", DEFAULT_PERMISSION_PRESET);
+    expect(form.name).toBe("规划者");
+    expect(form.systemPrompt).toBe(template.systemPrompt);
+    expect(form.permission).toBe(template.permissionPreset);
+  });
+
+  it("回空白清空为 emptyRoleForm(DEFAULT_PERMISSION_PRESET)", () => {
+    const filled = applyRoleTemplate(template, "规划者", DEFAULT_PERMISSION_PRESET);
+    expect(filled.systemPrompt.length).toBeGreaterThan(0);
+    expect(applyRoleTemplate(null, "规划者", DEFAULT_PERMISSION_PRESET)).toEqual(
+      emptyRoleForm(DEFAULT_PERMISSION_PRESET),
+    );
   });
 });
 
