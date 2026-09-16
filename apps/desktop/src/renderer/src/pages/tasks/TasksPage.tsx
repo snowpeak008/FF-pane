@@ -1,5 +1,6 @@
 import type { Task } from "@ff-pane/shared";
-import { type ReactElement, useCallback, useEffect, useState } from "react";
+import { isReasoningEffortLevel, resolveReasoningEffortOptions } from "@ff-pane/shared";
+import { type ReactElement, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -102,6 +103,37 @@ function TaskBoard({ projectRoot }: { readonly projectRoot: string }): ReactElem
   const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(new Set());
   const [dispatchConflict, setDispatchConflict] = useState<DispatchConflictState | null>(null);
   const { profile: workerProfile } = useRoleProfile("worker");
+  const workerEffortModel = workerProfile?.model ?? "";
+  const { state: workerEffortState } = useInvokeQuery("runtimes:reasoning-effort-levels", {
+    runtime: workerProfile?.runtime ?? "",
+    ...(workerEffortModel.length > 0 ? { model: workerEffortModel } : {}),
+  });
+  const workerEffortCatalog = queryData(workerEffortState);
+  const workerEffortOptions = useMemo(() => {
+    if (workerProfile === null) {
+      return [];
+    }
+    if (workerEffortCatalog !== undefined) {
+      return workerEffortCatalog.levels.filter(isReasoningEffortLevel);
+    }
+    return [...resolveReasoningEffortOptions(workerProfile.runtime)];
+  }, [workerProfile, workerEffortCatalog]);
+
+  const setTaskEffort = useCallback(
+    async (task: Task, level: string) => {
+      const settled = await invokeQuery("tasks:set-reasoning-effort", {
+        projectRoot,
+        id: task.id,
+        ...(level.length > 0 ? { reasoningEffort: level } : {}),
+      });
+      if (settled.status === "error") {
+        toast.error(t("tasks.reasoningEffort.error"), { description: settled.error.message });
+        return;
+      }
+      refetch();
+    },
+    [projectRoot, refetch, t],
+  );
   const navigate = useNavigate();
   // 任一会话轮结束（含 Worker 执行完、审查轮出结论）→ 刷新看板、执行记录与在飞区。
   const endedTurnSeq = useSessionStore((s) => s.endedTurnSeq);
@@ -261,6 +293,13 @@ function TaskBoard({ projectRoot }: { readonly projectRoot: string }): ReactElem
                     onDispatch={(x) => void dispatch(x)}
                     // 未开启 Reviewer 时不传回调 = 卡片上根本没有审查按钮（§3.1 默认关闭）
                     {...(reviewerEnabled ? { onReview: (x: Task) => void review(x) } : {})}
+                    {...(workerEffortOptions.length > 0
+                      ? {
+                          effortOptions: workerEffortOptions,
+                          onReasoningEffortChange: (x: Task, level: string) =>
+                            void setTaskEffort(x, level),
+                        }
+                      : {})}
                   />
                 ))}
               </div>

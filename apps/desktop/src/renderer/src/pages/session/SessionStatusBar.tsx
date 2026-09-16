@@ -17,6 +17,11 @@ export interface SessionStatusBarProps {
    * 状态条是「我正在和谁讨论」的唯一常驻答复（§11.2），换掉这个"谁"的入口理应就在旁边。
    */
   readonly actions?: ReactNode;
+  /** T9.11 —— 规划者本轮思考强度（空 = 跟随档案）。 */
+  readonly reasoningEffort?: string;
+  readonly reasoningEffortOptions?: readonly string[];
+  readonly onReasoningEffortChange?: (level: string) => void;
+  readonly reasoningEffortDisabled?: boolean;
 }
 
 /**
@@ -31,6 +36,10 @@ export function SessionStatusBar({
   status,
   resumeKind,
   actions,
+  reasoningEffort,
+  reasoningEffortOptions,
+  onReasoningEffortChange,
+  reasoningEffortDisabled,
 }: SessionStatusBarProps): ReactElement {
   const { t } = useTranslation();
   const roleLabel = useRoleLabel();
@@ -55,7 +64,34 @@ export function SessionStatusBar({
       ) : (
         <span className="text-xs text-fg-subtle">{t("session.noActiveSession")}</span>
       )}
-      {actions !== undefined ? <div className="ml-auto flex items-center">{actions}</div> : null}
+      {reasoningEffortOptions !== undefined &&
+      reasoningEffortOptions.length > 0 &&
+      onReasoningEffortChange !== undefined ? (
+        <label className="ml-auto flex items-center gap-1.5">
+          <span className="text-[10px] text-fg-muted">{t("session.reasoningEffort.label")}</span>
+          <select
+            id="session-reasoning-effort"
+            data-testid="session-reasoning-effort"
+            className="h-6 max-w-[9rem] cursor-pointer rounded border border-border bg-surface px-1 text-xs text-fg"
+            aria-label={t("session.reasoningEffort.label")}
+            value={reasoningEffort ?? ""}
+            disabled={reasoningEffortDisabled === true}
+            onChange={(e) => onReasoningEffortChange(e.target.value)}
+          >
+            <option value="">{t("session.reasoningEffort.followProfile")}</option>
+            {reasoningEffortOptions.map((level) => (
+              <option key={level} value={level}>
+                {t(`settings.profiles.field.reasoningEffortLevel.${level}`)}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+      {actions !== undefined ? (
+        <div className={reasoningEffortOptions !== undefined && reasoningEffortOptions.length > 0 ? "flex items-center" : "ml-auto flex items-center"}>
+          {actions}
+        </div>
+      ) : null}
     </div>
   );
 }

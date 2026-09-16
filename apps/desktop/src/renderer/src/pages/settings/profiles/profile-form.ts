@@ -6,7 +6,9 @@
 import {
   type AgentProfile,
   type AiOutputLanguage,
+  type ConnectionMode,
   type GenericExecDelivery,
+  isConnectionMode,
   isReasoningEffortRuntime,
   type ModelId,
   type PermissionEnvelope,
@@ -37,6 +39,8 @@ export interface ProfileFormState {
   readonly gxDelivery: GenericExecDelivery;
   /** T9.4b：空串 = 未设置（不传）。 */
   readonly reasoningEffort: string;
+  /** T9.11：空串 = 尚未选择连法。 */
+  readonly connectionMode: string;
 }
 
 /**
@@ -68,6 +72,7 @@ export function emptyProfileForm(
     gxArgs: "{task}",
     gxDelivery: "argv",
     reasoningEffort: "",
+    connectionMode: "",
   };
 }
 
@@ -85,6 +90,7 @@ export function formFromProfile(profile: AgentProfile): ProfileFormState {
     gxArgs: profile.genericExec?.args.join("\n") ?? "{task}",
     gxDelivery: profile.genericExec?.taskDelivery ?? "argv",
     reasoningEffort: profile.reasoningEffort ?? "",
+    connectionMode: profile.connectionMode ?? "",
   };
 }
 
@@ -125,5 +131,8 @@ export function buildProfileDraft(form: ProfileFormState): ProfileDraftWire {
         }
       : {}),
     ...(isReasoningEffortRuntime(runtime) && reasoningEffort.length > 0 ? { reasoningEffort } : {}),
+    ...(isConnectionMode(form.connectionMode)
+      ? { connectionMode: form.connectionMode as ConnectionMode }
+      : {}),
   };
 }

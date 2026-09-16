@@ -1,6 +1,7 @@
 import type { SessionRecord } from "@ff-pane/shared";
+import { isReasoningEffortLevel, resolveReasoningEffortOptions } from "@ff-pane/shared";
 import { ArrowLeftRight, MessageSquarePlus, RotateCcw } from "lucide-react";
-import { type ReactElement, useEffect, useRef, useState } from "react";
+import { type ReactElement, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -8,7 +9,8 @@ import { LoadingState } from "../../components/states/LoadingState";
 import { Button } from "../../components/ui/Button";
 import { useActiveProject } from "../../hooks/useActiveProject";
 import { useDiscussionProfiles } from "../../hooks/useRoleProfile";
-import { invokeQuery } from "../../ipc/query";
+import { invokeQuery, queryData } from "../../ipc/query";
+import { useInvokeQuery } from "../../ipc/useInvokeQuery";
 import { PageHeader } from "../../layout/PageHeader";
 import { cancelSessionTurn, startSessionTurn } from "../../lib/session-run";
 import { currentSessionTurns, sessionStatusView, useSessionStore } from "../../stores/session";
@@ -101,6 +103,23 @@ export function SessionPage(): ReactElement {
   // 两个入口共用同一个对话框（同一条交接包管线），只差缺省选中与文案。
   const [handoffIntent, setHandoffIntent] = useState<HandoffIntent | null>(null);
   const startNewSession = useSessionStore((s) => s.startNewSession);
+  const plannerReasoningEffort = useSessionStore((s) => s.plannerReasoningEffort);
+  const setPlannerReasoningEffort = useSessionStore((s) => s.setPlannerReasoningEffort);
+  const effortModel = activeProfile?.model ?? "";
+  const { state: effortState } = useInvokeQuery("runtimes:reasoning-effort-levels", {
+    runtime: activeProfile?.runtime ?? "",
+    ...(effortModel.length > 0 ? { model: effortModel } : {}),
+  });
+  const effortCatalog = queryData(effortState);
+  const plannerEffortOptions = useMemo(() => {
+    if (activeProfile === null) {
+      return [];
+    }
+    if (effortCatalog !== undefined) {
+      return effortCatalog.levels.filter(isReasoningEffortLevel);
+    }
+    return [...resolveReasoningEffortOptions(activeProfile.runtime)];
+  }, [activeProfile, effortCatalog]);
 
   // 自动续接（T8.2b-b）：进入会话页且该项目尚未处理过时，取最近会话并回放其对话。
   // 无历史会话时只记「已处理」保持空态。in-flight 守卫（loadReplay 内亦有）：用户已在
@@ -274,6 +293,10 @@ export function SessionPage(): ReactElement {
             model={statusView.model}
             status={statusView.status}
             resumeKind={statusView.resumeKind}
+            reasoningEffort={plannerReasoningEffort}
+            reasoningEffortOptions={plannerEffortOptions}
+            onReasoningEffortChange={setPlannerReasoningEffort}
+            reasoningEffortDisabled={busy}
             actions={
               <div className="flex items-center gap-2">
                 {/* 讨论 Profile 选择（T8.4）：仅当有多个可选（planner + 自定义角色）时呈现；

@@ -230,6 +230,23 @@ describe("迁移表（7×7 全矩阵）", () => {
   });
 });
 
+describe("failReason（完成门槛未过时留给 UI / 结算）", () => {
+  it("failTask 可写入原因；再次派发清掉", () => {
+    const failed = failTask(makeTask("running"), "verify-result-missing");
+    expect(failed.status).toBe("failed");
+    expect(failed.failReason).toBe("verify-result-missing");
+    const retried = dispatchTask(failed);
+    expect(retried.status).toBe("running");
+    expect(retried.failReason).toBeUndefined();
+  });
+
+  it("failTask 不给原因则不带 failReason 字段", () => {
+    const failed = failTask(makeTask("running"));
+    expect(failed.status).toBe("failed");
+    expect(failed.failReason).toBeUndefined();
+  });
+});
+
 describe("done 判定规则", () => {
   it("有 verifyCmd：验证命令一致且退出码 0 → done，标记 verify-cmd-passed", () => {
     const task = makeTask("running", { verifyCmd: VERIFY_CMD });

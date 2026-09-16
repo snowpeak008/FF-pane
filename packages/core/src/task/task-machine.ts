@@ -40,7 +40,8 @@ function assertTransition(
  */
 export function dispatchTask(task: Task): Task {
   assertTransition(task, ["pending", "failed"], "running", "dispatchTask");
-  return { ...task, status: "running" };
+  const { failReason: _failReason, ...rest } = task;
+  return { ...rest, status: "running" };
 }
 
 /**
@@ -67,10 +68,18 @@ export function resumeTask(task: Task): Task {
   return { ...rest, status: "running" };
 }
 
-/** 失败：running→failed（可重试，重试经 dispatchTask + startRun 产生新 Run，§6.3）。 */
-export function failTask(task: Task): Task {
+/**
+ * 失败：running→failed（可重试，重试经 dispatchTask + startRun 产生新 Run，§6.3）。
+ * reason 有则写入 Task.failReason（证据门槛未过 / 落盘失败），缺省不带该字段。
+ */
+export function failTask(task: Task, reason?: string): Task {
   assertTransition(task, ["running"], "failed", "failTask");
-  return { ...task, status: "failed" };
+  const trimmed = reason?.trim();
+  if (trimmed !== undefined && trimmed.length > 0) {
+    return { ...task, status: "failed", failReason: trimmed };
+  }
+  const { failReason: _failReason, ...rest } = task;
+  return { ...rest, status: "failed" };
 }
 
 /**

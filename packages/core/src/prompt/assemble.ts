@@ -45,7 +45,7 @@ export interface AssemblePromptParams {
 }
 
 /** 渲染任务合同为第 4 层文本（Worker/Reviewer）。 */
-function renderTaskContract(contract: TaskContract): string {
+function renderTaskContract(contract: TaskContract, forExecutor: boolean): string {
   const lines: string[] = [`任务目标：${contract.goal}`];
   if (contract.writeScope.length > 0) {
     lines.push(`可写范围（仅这些路径可改）：${contract.writeScope.join("、")}`);
@@ -59,11 +59,24 @@ function renderTaskContract(contract: TaskContract): string {
   if (contract.verifyCmd !== undefined) {
     lines.push(`验证命令：${contract.verifyCmd}`);
   }
+  // 完成门槛只写给执行轮（内置 worker / 自定义执行角色）。审查者走审查材料，
+  // 不该被「必须写完成报告」带跑。
+  if (forExecutor) {
+    if (contract.verifyCmd !== undefined) {
+      lines.push(
+        "完成门槛：收工前必须原样执行上述验证命令（字符级一致；外面包一层 shell / 先 cd 到项目根可以）。不跑或命令对不上，任务会被记失败。收工时再写一段非空完成报告。",
+      );
+    } else {
+      lines.push(
+        "完成门槛：本任务没有验证命令。收工时必须写一段非空完成报告（改了什么、结果如何）；只改文件不说话会被记失败。",
+      );
+    }
+  }
   return lines.join("\n");
 }
 
-function renderInput(input: PromptInput): string {
-  return input.kind === "message" ? input.text : renderTaskContract(input.contract);
+function renderInput(input: PromptInput, forExecutor: boolean): string {
+  return input.kind === "message" ? input.text : renderTaskContract(input.contract, forExecutor);
 }
 
 /** 组装 Prompt（四层 + 语言指令），返回可直接作为系统提示的整段文本。 */
@@ -91,7 +104,7 @@ export function assemblePrompt(params: AssemblePromptParams): string {
     `# 角色\n${resolveRoleDefinition(params.role, params.customRoleDefinition)}`,
     `# 用户习惯\n${habit !== undefined && habit.length > 0 ? habit : "（暂无）"}`,
     `# 项目记忆\n${memoryLines.length > 0 ? memoryLines.join("\n") : "（暂无）"}`,
-    `# 当前输入\n${renderInput(params.input)}`,
+    `# 当前输入\n${renderInput(params.input, params.role !== "planner" && params.role !== "reviewer")}`,
     outputLanguageInstruction(language),
   ];
   return sections.join("\n\n");

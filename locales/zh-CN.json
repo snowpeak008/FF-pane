@@ -333,7 +333,7 @@
   "settings": {
     "providers": {
       "title": "模型来源（Provider）",
-      "subtitle": "配置对话 / 嵌入模型的来源、密钥与默认模型。",
+      "subtitle": "中转来源填独立网址和密钥。本机 CLI 在档案里选「本地 CLI」，不必在这里填网址。",
       "new": "新建 Provider",
       "empty": "还没有 Provider。它是配置的第一步：先连接模型来源，之后才能新建 Profile。",
       "loadError": "读取 Provider 列表失败",
@@ -350,9 +350,9 @@
       "testConnection": "测试连接",
       "testOk": "连接成功（{{latency}} ms）",
       "type": {
-        "openai_compatible": "OpenAI 兼容",
-        "anthropic": "Anthropic",
-        "cli_login": "CLI 登录",
+        "openai_compatible": "中转（OpenAI 兼容）",
+        "anthropic": "中转（Anthropic）",
+        "cli_login": "本机 CLI",
         "custom": "自定义"
       },
       "modelKind": {
@@ -448,7 +448,7 @@
     },
     "profiles": {
       "title": "Agent Profile",
-      "subtitle": "把 Runtime + Provider + 模型 + 角色 + 权限组合成可复用的运行配置。",
+      "subtitle": "先选本地 CLI 或中转网址，再选 Runtime、角色与权限。",
       "new": "新建 Profile",
       "empty": "还没有 Profile。新建一个以绑定角色与模型（需先在上方建好 Provider）。",
       "loadError": "读取 Profile 列表失败",
@@ -468,10 +468,18 @@
       },
       "field": {
         "name": "名称",
+        "connectionMode": "连法",
+        "connectionModeHint": "本地 CLI 走本机登录；中转走你单独配好的网址。DeepSeek 只有中转。",
+        "selectConnection": "选择连法",
+        "connectionLocal": "本地 CLI",
+        "connectionRelay": "中转网址",
         "runtime": "Runtime",
         "selectRuntime": "选择 Runtime",
-        "provider": "Provider",
-        "selectProvider": "选择 Provider",
+        "provider": "中转来源",
+        "selectProvider": "选择带网址的来源",
+        "providerRelayHint": "只列出填了独立网址的来源。DeepSeek 在这里选。",
+        "providerLocalHint": "本机登录，不填网址。保存时自动绑定。",
+        "providerLocalValue": "本机 CLI 登录",
         "model": "模型",
         "modelDefault": "（用 Provider 默认）",
         "modelCliDefault": "（用 CLI 默认模型）",
@@ -701,6 +709,10 @@
   },
   "session": {
     "empty": "当前会话还没有消息。在下方输入框向 Planner 发起讨论。",
+    "reasoningEffort": {
+      "label": "思考强度",
+      "followProfile": "跟随档案"
+    },
     "noActiveSession": "无进行中会话",
     "send": "发送",
     "sendDisabledHint": "会话执行链路在 Phase 4 接通，暂不能发送。",
@@ -750,6 +762,7 @@
         "timeoutS": "超时（秒）",
         "enabled": "是否启用",
         "runtime": "Runtime",
+        "connectionMode": "连法",
         "providerId": "Provider",
         "model": "模型",
         "defaultRole": "默认角色",
@@ -870,8 +883,23 @@
     "loadError": "读取任务失败",
     "dispatch": "派发",
     "retry": "重试",
+    "reasoningEffort": {
+      "label": "思考强度",
+      "followProfile": "跟随档案",
+      "error": "改思考强度失败"
+    },
     "noWorkerProfile": "未配置 Worker Profile，请到设置中新建。",
     "dispatchError": "派发失败",
+    "failReason": {
+      "verify-result-missing": "活干完了，但合同要求的验证命令没按原样跑到",
+      "verify-command-mismatch": "验证命令与合同不一致",
+      "verify-cmd-failed": "验证命令没有通过",
+      "report-missing": "执行者没有留下完成报告",
+      "run-not-completed": "执行没有正常结束",
+      "run-task-mismatch": "执行记录对不上这条任务",
+      "persist-failed": "执行记录没能落盘",
+      "settle-rejected": "完成门槛没过"
+    },
     "parallel": {
       "activeTitle": "在飞轮次",
       "startedAt": "开始于{{time}}",

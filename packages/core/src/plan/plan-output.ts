@@ -8,6 +8,7 @@
  */
 
 import type { PlanVersion, TaskContract, TaskId } from "@ff-pane/shared";
+import { isReasoningEffortLevel } from "@ff-pane/shared";
 import { extractLastJsonBlock, nonEmptyString, toStringList } from "../text/json-block.js";
 import type { PlanDraftChanges } from "./next-draft.js";
 
@@ -35,12 +36,15 @@ export const PLAN_OUTPUT_CONTRACT = `# 生成计划（结构化输出）
       "forbidden": ["禁止事项"],
       "dependsOn": ["前置任务的 id"],
       "acceptance": ["该任务验收标准"],
-      "verifyCmd": "验证命令（可选，如 npm test）"
+      "verifyCmd": "验证命令（可选，如 npm test）",
+      "reasoningEffort": "执行者思考强度（可选：none/minimal/low/medium/high/xhigh/max）"
     }
   ]
 }
 \`\`\`
-3. tasks 至少一条；每条 id 唯一、goal 非空；dependsOn 只引用本计划内的任务 id。`;
+3. tasks 至少一条；每条 id 唯一、goal 非空；dependsOn 只引用本计划内的任务 id。
+4. reasoningEffort 可选。写出即安排该任务执行者的思考强度；不写则跟随执行者档案默认。不要改执行者档案本身的默认强度。
+5. verifyCmd 只在执行者收工前必须原样跑的检查命令时才写（如 npm test）。纯写文件 / 改文档任务不要写 verifyCmd，完成凭执行者报告。不要用 git status 充数。写出的字符串必须与执行者将要运行的命令完全一致。`;
 
 /** 解析结果：成功给出计划变更，失败给出面向用户的中文原因（不写盘）。 */
 export type ParsePlanResult =
@@ -58,6 +62,7 @@ interface RawTask {
   readonly dependsOn?: unknown;
   readonly acceptance?: unknown;
   readonly verifyCmd?: unknown;
+  readonly reasoningEffort?: unknown;
 }
 
 /**
@@ -95,6 +100,9 @@ function parseTasks(value: unknown): TaskContract[] {
       .filter((dep) => usedIds.has(dep) && dep !== id)
       .map((dep) => dep as TaskId);
     const verifyCmd = nonEmptyString(raw.verifyCmd);
+    const effortRaw = nonEmptyString(raw.reasoningEffort);
+    const reasoningEffort =
+      effortRaw !== undefined && isReasoningEffortLevel(effortRaw) ? effortRaw : undefined;
     const contract: TaskContract = {
       id: id as TaskId,
       planVersion: PLACEHOLDER_VERSION,
@@ -105,6 +113,7 @@ function parseTasks(value: unknown): TaskContract[] {
       contextRefs: [],
       acceptance: toStringList(raw.acceptance),
       ...(verifyCmd !== undefined ? { verifyCmd } : {}),
+      ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
     };
     return contract;
   });

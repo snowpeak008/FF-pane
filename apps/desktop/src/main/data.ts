@@ -38,6 +38,7 @@ import {
   type ApiKeyRef,
   type HabitEntry,
   type HabitEntryId,
+  isReasoningEffortLevel,
   type MemoryEntryId,
   type Plan,
   type PlanVersion,
@@ -79,6 +80,7 @@ import {
 } from "@ff-pane/storage";
 import { type BrowserWindow, dialog, type OpenDialogOptions } from "electron";
 import type { InvokeHandlers } from "../shared-ipc/server";
+import { materializeProfileDraft, resetLegacyAgentConfigIfNeeded } from "./connection-mode";
 import { resolveGlobalRoot } from "./data-root";
 import { createMemoryIndexService } from "./memory-index";
 import { type ProjectSummarySources, summarizeProjects } from "./project-summary";
@@ -118,6 +120,7 @@ type DataChannel =
   | "tasks:list"
   | "tasks:accept"
   | "tasks:cancel"
+  | "tasks:set-reasoning-effort"
   | "runs:list"
   | "memory:list"
   | "memory:approve"
@@ -148,6 +151,14 @@ export async function createDataHandlers(
 ): Promise<Pick<InvokeHandlers, DataChannel>> {
   // 全局数据根经共享解析（FF_PANE_DATA_ROOT 覆盖优先）；session 层必须共用同一解析。
   const layout = await initGlobalLayout(resolveGlobalRoot());
+  // T9.11：旧来源/档案/角色/密钥一次性丢掉，按「本地 CLI / 中转」重配。
+  await resetLegacyAgentConfigIfNeeded({
+    rootDir: layout.rootDir,
+    providersFile: layout.providersFile,
+    profilesFile: layout.profilesFile,
+    rolesFile: layout.rolesFile,
+    secretsFile: resolveSecretsFile(layout.rootDir),
+  });
   const registry = createProjectRegistry(layout.projectsFile);
   const providers = createProviderStore(layout.providersFile);
   const profiles = createProfileStore(layout.profilesFile);
@@ -437,10 +448,15 @@ export async function createDataHandlers(
 
     "profiles:list": () => profiles.listProfiles(),
 
-    "profiles:create": (request) => profiles.createProfile(request.draft, validateProfile),
+    "profiles:create": async (request) => {
+      const draft = await materializeProfileDraft(request.draft, providers);
+      return profiles.createProfile(draft, validateProfile);
+    },
 
-    "profiles:update": (request) =>
-      profiles.updateProfile(request.id, request.draft, validateProfile),
+    "profiles:update": async (request) => {
+      const draft = await materializeProfileDraft(request.draft, providers);
+      return profiles.updateProfile(request.id, draft, validateProfile);
+    },
 
     "profiles:remove": async (request) => {
       await profiles.deleteProfile(request.id);
@@ -514,6 +530,27 @@ export async function createDataHandlers(
       const cancelled = cancelTask(loaded.value);
       await saveTask(layout, cancelled);
       return cancelled;
+    },
+
+    "tasks:set-reasoning-effort": async (request) => {
+      const projectLayout = resolveProjectLayout(request.projectRoot);
+      const loaded = await loadTask(projectLayout, request.id);
+      if (!loaded.ok) {
+        throw loaded.error;
+      }
+      const raw = request.reasoningEffort?.trim() ?? "";
+      if (raw.length > 0 && !isReasoningEffortLevel(raw)) {
+        throw new Error(`未知思考强度：${raw}`);
+      }
+      if (raw.length > 0) {
+        const next = { ...loaded.value, reasoningEffort: raw };
+        await saveTask(projectLayout, next);
+        return next;
+      }
+      const { reasoningEffort: unusedEffort, ...cleared } = loaded.value;
+      void unusedEffort;
+      await saveTask(projectLayout, cleared);
+      return cleared;
     },
 
     "runs:list": async (request) => {

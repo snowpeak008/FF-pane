@@ -480,6 +480,11 @@ export interface TaskActionRequest extends ProjectScopedRequest {
   readonly id: TaskId;
 }
 
+/** T9.11 —— 用户改一条任务的执行者思考强度。空串 / 缺省 = 清回跟随档案。 */
+export interface SetTaskReasoningEffortRequest extends TaskActionRequest {
+  readonly reasoningEffort?: string;
+}
+
 /** 接受任务的结果（T4.4）：迁移后的任务 + 本次派生的记忆候选条数。 */
 export interface AcceptTaskResult {
   readonly task: Task;
@@ -940,6 +945,11 @@ export interface StartSessionRequest extends ProjectScopedRequest {
    * （§10.4"预览可编辑，确认后注入"）。若传结构体再由主进程渲染，用户的编辑会被静默丢弃。
    */
   readonly handoffText?: string;
+  /**
+   * T9.11 —— 本轮思考强度覆盖（会话顶栏）。缺省 = 跟随档案默认。
+   * Worker 轮若任务合同已写 reasoningEffort，本字段仍优先（用户当场改）。
+   */
+  readonly reasoningEffort?: string;
 }
 
 /**
@@ -1233,6 +1243,8 @@ export interface IpcInvokeContracts {
   "tasks:accept": { request: TaskActionRequest; response: AcceptTaskResult };
   /** 取消任务（→ cancelled 终态）。 */
   "tasks:cancel": { request: TaskActionRequest; response: Task };
+  /** T9.11 —— 改任务合同上的执行者思考强度（不改档案默认）。 */
+  "tasks:set-reasoning-effort": { request: SetTaskReasoningEffortRequest; response: Task };
   /** 列出当前项目的全部执行记录（§11.5，含 file_changes/commands/verify_result）。 */
   "runs:list": { request: ProjectScopedRequest; response: readonly Run[] };
   /** 列出当前项目的全部记忆条目（§11.6；含 active / candidate / archived）。 */
@@ -1431,6 +1443,7 @@ export const INVOKE_CHANNELS = [
   "tasks:list",
   "tasks:accept",
   "tasks:cancel",
+  "tasks:set-reasoning-effort",
   "runs:list",
   "memory:list",
   "memory:approve",

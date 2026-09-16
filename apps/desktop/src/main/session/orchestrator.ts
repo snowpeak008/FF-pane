@@ -64,6 +64,7 @@ import {
   createNextDraft,
   decideResumeKind,
   dispatchTask,
+  DoneEvidenceError,
   EMPTY_ACTIVE_TURN_TABLE,
   endRun,
   failTask,
@@ -72,6 +73,7 @@ import {
   intersectEnvelopes,
   isDirectExecuteRequest,
   listActiveTurns as listActiveTurnRecords,
+  matchesVerifyCommand,
   PLAN_OUTPUT_CONTRACT,
   PLANNER_DEFAULT_ENVELOPE,
   parsePlannerPlanDraft,
@@ -123,7 +125,7 @@ import type {
 import {
   isCustomRoleId,
   REASONING_EFFORT_UNSET,
-  resolveDispatchedReasoningEffort,
+  resolveTurnReasoningEffort,
 } from "@ff-pane/shared";
 import type { ProjectLayout } from "@ff-pane/storage";
 import type {
@@ -474,6 +476,49 @@ export function normalizeProjectRootKey(projectRoot: string): string {
 }
 
 /**
+ * 从一条命令事件认出合同 verifyCmd。认包装（powershell / cd &&）后，
+ * VerifyResult.command 仍写成合同原文，供 completeTask 整串比对。
+ */
+function captureVerifyResult(
+  verifyCmd: string | undefined,
+  command: string,
+  status: string | undefined,
+  exitCode: number | undefined,
+  output: string | undefined,
+): VerifyResult | undefined {
+  if (
+    verifyCmd === undefined ||
+    (status !== "completed" && status !== "failed") ||
+    !matchesVerifyCommand(command, verifyCmd)
+  ) {
+    return undefined;
+  }
+  return {
+    command: verifyCmd,
+    exitCode: exitCode ?? -1,
+    output: output ?? "",
+  };
+}
+
+/** 事件流没对上时，再扫一遍证据里的命令（同一套包装识别）。取最后一次命中。 */
+function recoverVerifyResult(
+  verifyCmd: string | undefined,
+  commands: readonly CommandRecord[],
+): VerifyResult | undefined {
+  if (verifyCmd === undefined) {
+    return undefined;
+  }
+  let found: VerifyResult | undefined;
+  for (const entry of commands) {
+    const hit = captureVerifyResult(verifyCmd, entry.command, "completed", entry.exitCode, "");
+    if (hit !== undefined) {
+      found = hit;
+    }
+  }
+  return found;
+}
+
+/**
  * 互斥拒绝的一句话概括（T8.3b）：reason 面向既有消费方（toast 描述），
  * 结构化明细另走 ack.conflicts。首条 conflict 的 reason 已含四要素
  * （哪两个任务、哪两条路径、何种关系），多处相交时补一个总数。
@@ -765,14 +810,28 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         runtime: profile.runtime,
         provider,
         ...(apiKeyPlaintext !== undefined ? { apiKeyPlaintext } : {}),
+        ...(profile.connectionMode !== undefined
+          ? { connectionMode: profile.connectionMode }
+          : {}),
       });
       const model: ModelId | undefined = profile.model ?? provider.defaultModel;
-      // T9.4b：白名单 + 显式档才下发；opencode 读不到该模型 effort values 则不下发。
+      // T9.11：用户/会话覆盖 > 任务合同（规划者安排）> 档案默认。
+      // Worker 轮先偷看任务合同，好让规划者写在任务上的强度生效。
+      const taskForEffort =
+        request.input.kind === "worker-task"
+          ? await deps.loadTask(layout, request.input.taskId)
+          : undefined;
       const effortCatalog =
         profile.runtime === "opencode" ? await readOpenCodeEffortValues(model) : undefined;
-      const reasoningEffort = resolveDispatchedReasoningEffort({
+      const reasoningEffort = resolveTurnReasoningEffort({
         runtime: profile.runtime,
-        reasoningEffort: profile.reasoningEffort,
+        ...(request.reasoningEffort !== undefined
+          ? { sessionOverride: request.reasoningEffort }
+          : {}),
+        ...(taskForEffort?.reasoningEffort !== undefined
+          ? { taskEffort: taskForEffort.reasoningEffort }
+          : {}),
+        ...(profile.reasoningEffort !== undefined ? { profileEffort: profile.reasoningEffort } : {}),
         ...(effortCatalog !== undefined ? { catalogLevels: effortCatalog } : {}),
       });
       // 运行时配置覆盖（如 openai_compatible → codex model_provider 路由，§T4.5 方案 A）
@@ -780,6 +839,9 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         runtime: profile.runtime,
         provider,
         ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+        ...(profile.connectionMode !== undefined
+          ? { connectionMode: profile.connectionMode }
+          : {}),
       });
 
       // 组装 Prompt + 权限信封（Worker 从任务合同派生，Planner 用只读角色默认）
@@ -1211,18 +1273,19 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
           turn.partialPendingBytes += Buffer.byteLength(event.content, "utf8");
           flushPartialIfDue(turnId, turn);
         }
-        // 捕获验证命令结果（供 completeTask 的 done 门槛判定）
-        if (
-          verifyCmd !== undefined &&
-          event.kind === "command" &&
-          (event.status === "completed" || event.status === "failed") &&
-          event.command.trim() === verifyCmd.trim()
-        ) {
-          verifyResult = {
-            command: verifyCmd,
-            exitCode: event.exitCode ?? -1,
-            output: event.output ?? "",
-          };
+        // 捕获验证命令结果（供 completeTask 的 done 门槛判定）。
+        // Windows Codex 命令是完整 powershell 串，不能只做 trim 全等。
+        if (event.kind === "command") {
+          const hit = captureVerifyResult(
+            verifyCmd,
+            event.command,
+            event.status,
+            event.exitCode,
+            event.output,
+          );
+          if (hit !== undefined) {
+            verifyResult = hit;
+          }
         }
         const mapped = mapAgentEvent(turnId, event);
         if (mapped !== null) {
@@ -1473,12 +1536,14 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         reasoningEffort: workerCtx.reasoningEffort,
       });
       const report = outcome.report.trim();
+      const verifyResult =
+        outcome.verifyResult ?? recoverVerifyResult(runningTask.verifyCmd, evidence.commands);
       const ended = endRun(started, {
         endedAt: deps.now(),
         endReason: outcome.reason,
         fileChanges: evidence.fileChanges as readonly FileChange[],
         commands: evidence.commands as readonly CommandRecord[],
-        ...(outcome.verifyResult !== undefined ? { verifyResult: outcome.verifyResult } : {}),
+        ...(verifyResult !== undefined ? { verifyResult } : {}),
         ...(report.length > 0 ? { report } : {}),
         ...(knowledgeQueries !== undefined ? { knowledgeQueries } : {}),
         ...(configToolCalls !== undefined ? { configToolCalls } : {}),
@@ -1489,18 +1554,20 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         .join("\n");
       await deps.persistRun(layout, ended, outcome.report, changesDiff);
 
-      // 推进任务：completed 走 completeTask 证据门槛（不合格则记一次失败）
+      // 推进任务：completed 走 completeTask 证据门槛（不合格则记一次失败，原因落盘）
       let settled: Task;
       try {
         settled = settleTaskAfterRun(runningTask, ended, "fail-task");
-      } catch {
-        // completeTask 的 done 门槛未过（缺验证结果 / 缺报告）：记为一次失败尝试，可重试
-        settled = failTask(runningTask);
+      } catch (thrown) {
+        settled = failTask(
+          runningTask,
+          thrown instanceof DoneEvidenceError ? thrown.reason : "settle-rejected",
+        );
       }
       await deps.saveTask(layout, settled);
     } catch (thrown) {
       // 落库/推进失败：尽力把任务记为失败，避免卡在 running
-      const settled = failTask(runningTask);
+      const settled = failTask(runningTask, "persist-failed");
       await deps.saveTask(layout, settled).catch(() => undefined);
       const message = thrown instanceof Error ? thrown.message : String(thrown);
       deps.publish({ turnId, kind: "end", reason: "failed", message });

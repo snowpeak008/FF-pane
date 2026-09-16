@@ -171,6 +171,11 @@ export interface SessionUiState {
    * 不持久化——重启后回退字符估算，下一轮结束即恢复真实值。
    */
   readonly contextUsage: ReadonlyMap<LocalSessionId, SessionContextUsage>;
+  /**
+   * T9.11 —— 会话顶栏选的规划者思考强度。空串 = 跟随档案默认。
+   * 不随「新建会话」清掉：人还在这场对话里，强度选择应跟着人走。
+   */
+  readonly plannerReasoningEffort: string;
 }
 
 export interface SessionUiActions {
@@ -219,6 +224,8 @@ export interface SessionUiActions {
    * 结束计数；本会话有在飞轮时横幅本就禁用，不会走到这里。
    */
   readonly startNewSession: () => void;
+  /** T9.11 —— 会话顶栏改规划者下一轮思考强度。空串 = 跟随档案。 */
+  readonly setPlannerReasoningEffort: (level: string) => void;
 }
 
 export type SessionStore = SessionUiState & SessionUiActions;
@@ -244,6 +251,7 @@ export const INITIAL_SESSION_UI_STATE: SessionUiState = {
   replay: null,
   autoResumeDoneRoot: null,
   contextUsage: EMPTY_CONTEXT_USAGE,
+  plannerReasoningEffort: "",
 };
 
 /**
@@ -593,5 +601,8 @@ export const useSessionStore = create<SessionStore>()((set) => ({
       lastActivity: null,
       lastEndedView: null,
     });
+  },
+  setPlannerReasoningEffort: (level) => {
+    set({ plannerReasoningEffort: level });
   },
 }));

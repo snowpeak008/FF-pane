@@ -41,6 +41,11 @@ export async function startSessionTurn(params: {
    * 状态条在 started 事件到达前就显示正确角色。权威值仍是 started.role（到达即覆盖）。
    */
   readonly localRole?: RoleRef;
+  /**
+   * T9.11 —— 本轮思考强度。讨论/计划轮缺省读会话顶栏；
+   * Worker 轮不读顶栏（用任务合同或档案默认）。
+   */
+  readonly reasoningEffort?: string;
 }): Promise<{
   readonly turnId: string;
   readonly ack: StartSessionAck | null;
@@ -59,6 +64,16 @@ export async function startSessionTurn(params: {
       : undefined;
   store.startLocalTurn(turnId, role, userText);
 
+  const fromStore =
+    params.input.kind === "planner-message" || params.input.kind === "planner-plan"
+      ? useSessionStore.getState().plannerReasoningEffort
+      : undefined;
+  const reasoningEffort =
+    params.reasoningEffort !== undefined && params.reasoningEffort.length > 0
+      ? params.reasoningEffort
+      : fromStore !== undefined && fromStore.length > 0
+        ? fromStore
+        : undefined;
   const settled = await invokeQuery("session:start", {
     turnId,
     projectRoot: params.projectRoot,
@@ -66,6 +81,7 @@ export async function startSessionTurn(params: {
     input: params.input,
     ...(params.sessionId !== undefined ? { sessionId: params.sessionId } : {}),
     ...(params.handoffText !== undefined ? { handoffText: params.handoffText } : {}),
+    ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
   });
   if (settled.status === "error") {
     store.failLocalTurn(turnId, settled.error.message);

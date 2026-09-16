@@ -31,6 +31,7 @@ import {
   CONFIG_TOOL_LIST_PROFILES,
   CONFIG_TOOL_LIST_PROVIDERS,
   GENERIC_EXEC_DELIVERIES,
+  isConnectionMode,
   isGenericExecDelivery,
   isProviderType,
   isShellPolicy,
@@ -79,6 +80,7 @@ export const CONFIG_PROFILE_DRAFT_FIELDS = [
   "outputLanguage",
   "genericExec",
   "reasoningEffort",
+  "connectionMode",
 ] as const;
 
 /** Provider 草案（AI 可填的全部字段）：**类型层面就没有 apiKeyRef**。 */
@@ -476,6 +478,10 @@ export function parseProfileDraftArgs(
   const model = nonEmptyString(args["model"]);
   const outputLanguage = nonEmptyString(args["outputLanguage"]);
   const reasoningEffort = nonEmptyString(args["reasoningEffort"]);
+  const connectionModeRaw = nonEmptyString(args["connectionMode"]);
+  if (connectionModeRaw !== undefined && !isConnectionMode(connectionModeRaw)) {
+    return { ok: false, error: '"connectionMode" must be local_cli or relay.' };
+  }
   const id = nonEmptyString(args["id"]);
 
   // preset 缺省在此以占位表达：主进程收到后用全局 defaultPermissionPreset 补齐再校验。
@@ -491,6 +497,9 @@ export function parseProfileDraftArgs(
     ...(outputLanguage !== undefined ? { outputLanguage: outputLanguage as AiOutputLanguage } : {}),
     ...(genericExec !== undefined ? { genericExec } : {}),
     ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+    ...(connectionModeRaw !== undefined && isConnectionMode(connectionModeRaw)
+      ? { connectionMode: connectionModeRaw }
+      : {}),
   };
   return { ok: true, parsed: { kind: "profile", ...(id !== undefined ? { id } : {}), draft } };
 }

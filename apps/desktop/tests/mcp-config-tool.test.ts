@@ -220,6 +220,16 @@ describe("parseProfileDraftArgs", () => {
     expect(parseProfileDraftArgs({ ...VALID, token: "x" }).ok).toBe(false);
   });
 
+  it("T9.11 connectionMode 合法进草稿，非法拒收", () => {
+    const local = parseProfileDraftArgs({ ...VALID, connectionMode: "local_cli" });
+    expect(local.ok).toBe(true);
+    if (local.ok && local.parsed.kind === "profile") {
+      expect(local.parsed.draft.connectionMode).toBe("local_cli");
+    }
+    const bad = parseProfileDraftArgs({ ...VALID, connectionMode: "hybrid" });
+    expect(bad.ok).toBe(false);
+  });
+
   it("T9.4b reasoningEffort 非空进草稿，空串省略", () => {
     const withEffort = parseProfileDraftArgs({ ...VALID, reasoningEffort: "high" });
     expect(withEffort.ok).toBe(true);

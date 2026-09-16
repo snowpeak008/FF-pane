@@ -1,14 +1,19 @@
+import { ROLE_DEFAULT_ENVELOPES } from "@ff-pane/core";
 import {
   type AgentProfile,
   AI_OUTPUT_LANGUAGES,
   DEFAULT_PERMISSION_PRESET,
   GENERIC_EXEC_DELIVERIES,
   type GenericExecDelivery,
+  isConnectionMode,
   isReasoningEffortLevel,
   isReasoningEffortRuntime,
+  isRole,
+  LOCAL_CLI_RUNTIMES,
   ROLES,
   resolveContextWindow,
   resolveReasoningEffortOptions,
+  runtimeSupportsLocalCli,
 } from "@ff-pane/shared";
 import { type ReactElement, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -183,9 +188,17 @@ export function ProfileEditorDialog({
 
   const selectClass = cn(inputVariants({}), "cursor-pointer");
   const isGenericExec = form.runtime === "generic-exec";
+  const isLocalCli = form.connectionMode === "local_cli";
+  const isRelay = form.connectionMode === "relay";
+  const runtimeChoices = isLocalCli
+    ? [...LOCAL_CLI_RUNTIMES, "generic-exec"]
+    : RUNTIME_OPTIONS.filter((rt) => rt !== "generic-exec");
+  const relayProviders = providers.filter((p) => p.type !== "cli_login");
   const canSave =
     form.name.trim().length > 0 &&
-    form.providerId.length > 0 &&
+    form.runtime.trim().length > 0 &&
+    isConnectionMode(form.connectionMode) &&
+    (isLocalCli || form.providerId.length > 0) &&
     (!isGenericExec || form.gxCommand.trim().length > 0) &&
     !saving;
 
@@ -205,34 +218,82 @@ export function ProfileEditorDialog({
                 onChange={(e) => patch({ name: e.target.value })}
               />
             </Field>
+            <Field
+              htmlFor="profile-connection"
+              label={t("settings.profiles.field.connectionMode")}
+              required
+              hint={t("settings.profiles.field.connectionModeHint")}
+            >
+              <select
+                id="profile-connection"
+                className={selectClass}
+                value={form.connectionMode}
+                onChange={(e) => {
+                  const connectionMode = e.target.value;
+                  if (connectionMode === "local_cli") {
+                    const runtime = runtimeSupportsLocalCli(form.runtime) ? form.runtime : "";
+                    patch({
+                      connectionMode,
+                      runtime,
+                      providerId: "",
+                      model: "",
+                      ...(!isReasoningEffortRuntime(runtime) ? { reasoningEffort: "" } : {}),
+                    });
+                    return;
+                  }
+                  if (connectionMode === "relay") {
+                    const runtime = form.runtime === "generic-exec" ? "" : form.runtime;
+                    patch({
+                      connectionMode,
+                      runtime,
+                      providerId: "",
+                      model: "",
+                    });
+                    return;
+                  }
+                  patch({ connectionMode });
+                }}
+              >
+                <option value="">{t("settings.profiles.field.selectConnection")}</option>
+                <option value="local_cli">{t("settings.profiles.field.connectionLocal")}</option>
+                <option value="relay">{t("settings.profiles.field.connectionRelay")}</option>
+              </select>
+            </Field>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
             <Field htmlFor="profile-runtime" label={t("settings.profiles.field.runtime")} required>
               <select
                 id="profile-runtime"
                 className={selectClass}
                 value={form.runtime}
+                disabled={!isConnectionMode(form.connectionMode)}
                 onChange={(e) => {
                   const runtime = e.target.value;
                   patch({
                     runtime,
+                    ...(runtime === "generic-exec" ? { connectionMode: "local_cli" } : {}),
+                    ...(!runtimeSupportsLocalCli(runtime) && isLocalCli
+                      ? { connectionMode: "relay", providerId: "", model: "" }
+                      : {}),
                     ...(!isReasoningEffortRuntime(runtime) ? { reasoningEffort: "" } : {}),
                   });
                 }}
               >
                 <option value="">{t("settings.profiles.field.selectRuntime")}</option>
-                {RUNTIME_OPTIONS.map((rt) => (
+                {runtimeChoices.map((rt) => (
                   <option key={rt} value={rt}>
                     {rt}
                   </option>
                 ))}
               </select>
             </Field>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
+            {isRelay ? (
             <Field
               htmlFor="profile-provider"
               label={t("settings.profiles.field.provider")}
               required
+              hint={t("settings.profiles.field.providerRelayHint")}
             >
               <select
                 id="profile-provider"
@@ -241,18 +302,35 @@ export function ProfileEditorDialog({
                 onChange={(e) => patch({ providerId: e.target.value, model: "" })}
               >
                 <option value="">{t("settings.profiles.field.selectProvider")}</option>
-                {providers.map((p) => (
+                {relayProviders.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
                   </option>
                 ))}
               </select>
             </Field>
+            ) : (
+            <Field
+              htmlFor="profile-provider"
+              label={t("settings.profiles.field.provider")}
+              hint={t("settings.profiles.field.providerLocalHint")}
+            >
+              <Input
+                id="profile-provider"
+                value={t("settings.profiles.field.providerLocalValue")}
+                disabled
+                readOnly
+              />
+            </Field>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
             <Field
               htmlFor="profile-model"
               label={t("settings.profiles.field.model")}
               // cli_login 模型可选化（T9.2 ④）：缺省 = CLI 默认模型（派发不传 -m 类参数）
-              {...(selectedProvider?.type === "cli_login"
+              {...(isLocalCli || selectedProvider?.type === "cli_login"
                 ? { hint: t("settings.profiles.field.modelCliDefaultHint") }
                 : {})}
             >
@@ -261,11 +339,11 @@ export function ProfileEditorDialog({
                   id="profile-model"
                   className={selectClass}
                   value={form.model}
-                  disabled={selectedProvider === undefined}
+                  disabled={selectedProvider === undefined && !isLocalCli}
                   onChange={(e) => patch({ model: e.target.value })}
                 >
                   <option value="">
-                    {selectedProvider?.type === "cli_login"
+                    {isLocalCli || selectedProvider?.type === "cli_login"
                       ? t("settings.profiles.field.modelCliDefault")
                       : t("settings.profiles.field.modelDefault")}
                   </option>
@@ -293,7 +371,18 @@ export function ProfileEditorDialog({
                 id="profile-role"
                 className={selectClass}
                 value={form.defaultRole}
-                onChange={(e) => patch({ defaultRole: e.target.value })}
+                onChange={(e) => {
+                  const defaultRole = e.target.value;
+                  if (isRole(defaultRole)) {
+                    patch({ defaultRole, permission: ROLE_DEFAULT_ENVELOPES[defaultRole] });
+                    return;
+                  }
+                  const custom = customRoles.find((role) => role.id === defaultRole);
+                  patch({
+                    defaultRole,
+                    ...(custom !== undefined ? { permission: custom.permissionPreset } : {}),
+                  });
+                }}
               >
                 {ROLES.map((role) => (
                   <option key={role} value={role}>

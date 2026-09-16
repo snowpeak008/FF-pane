@@ -161,6 +161,12 @@ export interface AgentProfile {
    * 取值须为规范档 {@link REASONING_EFFORT_LEVELS}。旧档缺字段 = 未设置。
    */
   readonly reasoningEffort?: string;
+  /**
+   * T9.11 —— 连法：本机 CLI 登录，或独立配置的中转网址。
+   * 缺省时由 Provider 类型推断（cli_login → local_cli，其余 → relay）。
+   * 新档案保存时必须显式二选一。
+   */
+  readonly connectionMode?: ConnectionMode;
 }
 
 /**
@@ -205,6 +211,51 @@ export const isReasoningEffortRuntime = createLiteralGuard(REASONING_EFFORT_RUNT
  * 其余白名单 Runtime 无目录时仍显示完整规范档。
  */
 export const REASONING_EFFORT_CATALOG_REQUIRED_RUNTIMES = ["opencode"] as const;
+
+/** T9.11 —— 档案连法：本机 CLI / 独立配置的中转网址。 */
+export const CONNECTION_MODES = ["local_cli", "relay"] as const;
+
+/** 档案连法。 */
+export type ConnectionMode = (typeof CONNECTION_MODES)[number];
+
+/** ConnectionMode 运行时守卫。 */
+export const isConnectionMode = createLiteralGuard(CONNECTION_MODES);
+
+/**
+ * 有本机 CLI 登录态的 Runtime（Claude / Codex / Gemini / Grok / OpenCode）。
+ * DeepSeek 不是 Runtime，它只作为中转来源（openai_compatible 网址）。
+ */
+export const LOCAL_CLI_RUNTIMES = [
+  "codex",
+  "claude-code",
+  "gemini-cli",
+  "grok-build",
+  "opencode",
+] as const;
+
+/** 本机 CLI Runtime。 */
+export type LocalCliRuntime = (typeof LOCAL_CLI_RUNTIMES)[number];
+
+/** LocalCliRuntime 运行时守卫。 */
+export const isLocalCliRuntime = createLiteralGuard(LOCAL_CLI_RUNTIMES);
+
+/** 该 Runtime 能否走本机 CLI（generic-exec 是本地命令，也算本地连法）。 */
+export function runtimeSupportsLocalCli(runtime: string): boolean {
+  return isLocalCliRuntime(runtime) || runtime === "generic-exec";
+}
+
+/** 按 Provider 类型推断连法（旧档缺字段 / 测试夹具）。 */
+export function inferConnectionMode(providerType: string): ConnectionMode {
+  return providerType === "cli_login" ? "local_cli" : "relay";
+}
+
+/** 显式连法优先；缺省按 Provider 类型推断。 */
+export function resolveConnectionMode(
+  explicit: string | undefined,
+  providerType: string,
+): ConnectionMode {
+  return isConnectionMode(explicit) ? explicit : inferConnectionMode(providerType);
+}
 
 /** Run 落档：本轮未下发 effort 时的哨兵（可追溯，不要事后猜）。 */
 export const REASONING_EFFORT_UNSET = "unset";
@@ -271,4 +322,26 @@ export function resolveDispatchedReasoningEffort(input: {
   }
   const options = resolveReasoningEffortOptions(input.runtime, input.catalogLevels);
   return options.includes(normalized) ? normalized : undefined;
+}
+
+/**
+ * T9.11 —— 本轮实际下发的思考强度。
+ * 优先级：会话/请求覆盖 → 任务合同（规划者或用户安排的执行者档）→ 档案默认。
+ */
+export function resolveTurnReasoningEffort(input: {
+  readonly runtime: string;
+  readonly sessionOverride?: string;
+  readonly taskEffort?: string;
+  readonly profileEffort?: string;
+  readonly catalogLevels?: readonly string[];
+}): ReasoningEffortLevel | undefined {
+  const picked =
+    normalizeReasoningEffort(input.sessionOverride) ??
+    normalizeReasoningEffort(input.taskEffort) ??
+    normalizeReasoningEffort(input.profileEffort);
+  return resolveDispatchedReasoningEffort({
+    runtime: input.runtime,
+    reasoningEffort: picked,
+    ...(input.catalogLevels !== undefined ? { catalogLevels: input.catalogLevels } : {}),
+  });
 }

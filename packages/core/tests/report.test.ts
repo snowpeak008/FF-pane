@@ -117,6 +117,18 @@ describe("composeSettlementSummary（落定三态的一句话摘要）", () => {
     expect(summary).toContain("进程异常退出");
   });
 
+  it("failed：Run 是 completed 但任务失败 → 不写「原因 completed」，改说完成门槛", () => {
+    const summary = composeSettlementSummary({
+      task: task({ status: "failed", failReason: "verify-result-missing" }),
+      status: "failed",
+      run: run({ endReason: "completed", report: "已经写了 notes.md" }),
+    });
+    expect(summary).toContain("执行失败");
+    expect(summary).toContain("缺验证结果");
+    expect(summary).not.toContain("原因 completed");
+    expect(summary).toContain("已经写了 notes.md");
+  });
+
   it("failed：无 Run（修正路径铸 Run 失败）给简版摘要，不抛错", () => {
     const summary = composeSettlementSummary({
       task: task({ status: "failed" }),

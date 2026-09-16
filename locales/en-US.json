@@ -333,7 +333,7 @@
   "settings": {
     "providers": {
       "title": "Model providers",
-      "subtitle": "Configure where chat / embedding models come from, keys and defaults.",
+      "subtitle": "Relay sources need their own URL and key. For local CLI, pick “Local CLI” on the profile — do not fill a URL here.",
       "new": "New provider",
       "empty": "No provider yet. This is step one: connect a model source first, then you can create profiles.",
       "loadError": "Failed to load the provider list",
@@ -350,9 +350,9 @@
       "testConnection": "Test connection",
       "testOk": "Connected ({{latency}} ms)",
       "type": {
-        "openai_compatible": "OpenAI-compatible",
-        "anthropic": "Anthropic",
-        "cli_login": "CLI login",
+        "openai_compatible": "Relay (OpenAI-compatible)",
+        "anthropic": "Relay (Anthropic)",
+        "cli_login": "Local CLI",
         "custom": "Custom"
       },
       "modelKind": {
@@ -448,7 +448,7 @@
     },
     "profiles": {
       "title": "Agent profiles",
-      "subtitle": "Combine runtime + provider + model + role + permissions into reusable configs.",
+      "subtitle": "Choose local CLI or a relay URL, then runtime, role and permissions.",
       "new": "New profile",
       "empty": "No profile yet. Create one to bind a role and model (requires a provider from the section above).",
       "loadError": "Failed to load the profile list",
@@ -468,10 +468,18 @@
       },
       "field": {
         "name": "Name",
+        "connectionMode": "Connection",
+        "connectionModeHint": "Local CLI uses this machine's login. Relay uses a URL you configured separately. DeepSeek is relay-only.",
+        "selectConnection": "Select a connection",
+        "connectionLocal": "Local CLI",
+        "connectionRelay": "Relay URL",
         "runtime": "Runtime",
         "selectRuntime": "Select a runtime",
-        "provider": "Provider",
-        "selectProvider": "Select a provider",
+        "provider": "Relay source",
+        "selectProvider": "Select a source with a URL",
+        "providerRelayHint": "Only sources with their own URL are listed. Pick DeepSeek here.",
+        "providerLocalHint": "Uses local CLI login. No URL. Bound automatically on save.",
+        "providerLocalValue": "Local CLI login",
         "model": "Model",
         "modelDefault": "(use provider default)",
         "modelCliDefault": "(use CLI default model)",
@@ -701,6 +709,10 @@
   },
   "session": {
     "empty": "No messages in this session yet. Use the box below to start a discussion with the Planner.",
+    "reasoningEffort": {
+      "label": "Reasoning",
+      "followProfile": "Follow profile"
+    },
     "noActiveSession": "No active session",
     "send": "Send",
     "sendDisabledHint": "Session execution is wired in Phase 4; sending is disabled for now.",
@@ -750,6 +762,7 @@
         "timeoutS": "Timeout (s)",
         "enabled": "Enabled",
         "runtime": "Runtime",
+        "connectionMode": "Connection",
         "providerId": "Provider",
         "model": "Model",
         "defaultRole": "Default role",
@@ -870,8 +883,23 @@
     "loadError": "Failed to load tasks",
     "dispatch": "Dispatch",
     "retry": "Retry",
+    "reasoningEffort": {
+      "label": "Reasoning",
+      "followProfile": "Follow profile",
+      "error": "Failed to update reasoning effort"
+    },
     "noWorkerProfile": "No Worker profile configured. Add one in Settings.",
     "dispatchError": "Dispatch failed",
+    "failReason": {
+      "verify-result-missing": "The run finished, but the contract verify command never ran as written",
+      "verify-command-mismatch": "The verify command did not match the contract",
+      "verify-cmd-failed": "The verify command did not pass",
+      "report-missing": "The worker left no completion report",
+      "run-not-completed": "The run did not finish normally",
+      "run-task-mismatch": "The run does not belong to this task",
+      "persist-failed": "The run record could not be saved",
+      "settle-rejected": "The completion gate was not met"
+    },
     "parallel": {
       "activeTitle": "Turns in flight",
       "startedAt": "started {{time}}",

@@ -71,11 +71,39 @@ export function composeSettlementSummary(input: SettlementSummaryInput): string 
     return `${head}已完成（${meta}）${detailSuffix}`;
   }
 
-  // failed：带 Run 的结束原因（crashed / interrupted 与 failed 对任务同义，
-  // 但对 Planner 判断「要不要换个思路重派」是有用信息）
-  const reason = run?.endReason !== undefined ? `原因 ${run.endReason}` : undefined;
+  // failed：优先用任务上的 failReason（completeTask 门槛未过），
+  // 不要把 Run.endReason=completed 写成「原因 completed」——活干完了仍失败时那是误导。
+  const reason = formatFailedReason(task.failReason, run?.endReason);
   const meta = [attempt, reason].filter((part) => part !== undefined).join("，");
   return meta.length > 0
     ? `${head}执行失败（${meta}）${detailSuffix}`
     : `${head}执行失败${detailSuffix}`;
+}
+
+/** 结算摘要里失败原因的中文标签（Planner 注入 / 待汇报队列用，不走 UI 语言包）。 */
+export const TASK_FAIL_REASON_LABELS: Readonly<Record<string, string>> = {
+  "verify-result-missing": "缺验证结果（合同要求的验证命令未按原样跑到）",
+  "verify-command-mismatch": "验证命令与合同不一致",
+  "verify-cmd-failed": "验证命令未通过",
+  "report-missing": "缺完成报告",
+  "run-not-completed": "执行未正常结束",
+  "run-task-mismatch": "执行记录不属于该任务",
+  "persist-failed": "执行记录落盘失败",
+  "settle-rejected": "完成门槛未过",
+};
+
+function formatFailedReason(
+  failReason: string | undefined,
+  endReason: Run["endReason"] | undefined,
+): string | undefined {
+  if (failReason !== undefined && failReason.length > 0) {
+    return TASK_FAIL_REASON_LABELS[failReason] ?? failReason;
+  }
+  if (endReason === undefined) {
+    return undefined;
+  }
+  if (endReason === "completed") {
+    return TASK_FAIL_REASON_LABELS["settle-rejected"];
+  }
+  return `原因 ${endReason}`;
 }

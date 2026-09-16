@@ -51,6 +51,7 @@ test("新建自定义角色 → 出现在列表与 Profile 角色下拉 → 绑�
   await gotoRoute(page, "/settings");
   await page.getByRole("button", { name: "New profile" }).click();
   await page.locator("#profile-name").fill("E2E Docs Agent");
+  await page.locator("#profile-connection").selectOption("relay");
   await page.locator("#profile-runtime").selectOption("codex");
   await page.locator("#profile-provider").selectOption({ label: "E2E Role Provider" });
   await page.locator("#profile-model").selectOption({ label: "e2e-chat" });

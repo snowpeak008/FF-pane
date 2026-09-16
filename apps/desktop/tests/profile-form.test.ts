@@ -55,6 +55,7 @@ describe("buildProfileDraft", () => {
         model: " claude-sonnet ",
         defaultRole: "worker",
         outputLanguage: "zh-CN",
+        connectionMode: "relay",
       }),
     );
     expect(draft).toEqual({
@@ -65,6 +66,7 @@ describe("buildProfileDraft", () => {
       defaultRole: "worker",
       permissionPreset: PRESET,
       outputLanguage: "zh-CN",
+      connectionMode: "relay",
     });
   });
 

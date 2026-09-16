@@ -43,6 +43,7 @@ test("设置页加载后新建的 Provider 与角色出现在 Profile 编辑器�
 
   // 打开 Profile 编辑器：修复让打开时 refetch，两个新档案必须已在下拉里
   await page.getByRole("button", { name: "New profile" }).click();
+  await page.locator("#profile-connection").selectOption("relay");
   await expect(page.locator("#profile-provider option", { hasText: "Fresh Provider" })).toHaveCount(
     1,
   );

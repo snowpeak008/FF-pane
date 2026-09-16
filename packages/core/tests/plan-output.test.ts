@@ -67,6 +67,23 @@ describe("parsePlannerPlanDraft", () => {
     expect("verifyCmd" in (c.tasks?.[1] ?? {})).toBe(false);
   });
 
+  it("任务带合法 reasoningEffort 则写入合同；非法值丢弃", () => {
+    const withEffort = parsePlannerPlanDraft(
+      fenced({
+        goal: "g",
+        tasks: [{ id: "t1", goal: "do", reasoningEffort: "high" }],
+      }),
+    );
+    expect(withEffort.ok && withEffort.changes.tasks?.[0]?.reasoningEffort).toBe("high");
+    const junk = parsePlannerPlanDraft(
+      fenced({
+        goal: "g",
+        tasks: [{ id: "t1", goal: "do", reasoningEffort: "ultra" }],
+      }),
+    );
+    expect(junk.ok && !("reasoningEffort" in (junk.changes.tasks?.[0] ?? {}))).toBe(true);
+  });
+
   it("多个围栏块 → 取最后一个 json 块", () => {
     const first = fenced({ goal: "旧", tasks: [{ id: "a", goal: "x" }] });
     const second = fenced({ goal: "新", tasks: [{ id: "b", goal: "y" }] });
@@ -145,6 +162,8 @@ describe("parsePlannerPlanDraft", () => {
   it("PLAN_OUTPUT_CONTRACT 提及 json 与 tasks（供 Planner 遵循）", () => {
     expect(PLAN_OUTPUT_CONTRACT).toContain("json");
     expect(PLAN_OUTPUT_CONTRACT).toContain("tasks");
+    expect(PLAN_OUTPUT_CONTRACT).toContain("纯写文件");
+    expect(PLAN_OUTPUT_CONTRACT).toContain("不要用 git status 充数");
   });
 });
 

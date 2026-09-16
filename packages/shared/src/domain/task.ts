@@ -89,12 +89,24 @@ export interface TaskContract {
    * done 的判定规则由 W1.4b 定义。
    */
   readonly verifyCmd?: string;
+  /**
+   * T9.11 —— 本任务派发给执行者时的思考强度。
+   * 缺省 = 用执行者档案默认。规划者可在计划 JSON 里写；用户可在任务页改。
+   * 取值须为 {@link ReasoningEffortLevel}；非法值解析时丢弃。
+   */
+  readonly reasoningEffort?: string;
 }
 
 /** 设计文档 §6.2 / §6.3 —— 任务记录 = 任务合同 + 运行状态。 */
 export interface Task extends TaskContract {
   /** 设计文档 §6.3 —— status。 */
   readonly status: TaskStatus;
+  /**
+   * 最近一次失败原因（可选）。
+   * running→failed 时写入（completeTask 证据被拒的 reason，或落盘/推进失败码）；
+   * 再次派发时清掉。供任务卡与结算摘要说明「为什么活干完了仍是失败」。
+   */
+  readonly failReason?: string;
 }
 
 /** 设计文档 §6.5 —— 澄清请求的回答方：由用户或 Planner 回答后任务继续。 */

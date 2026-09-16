@@ -92,10 +92,9 @@ test("设置页建 generic-exec Profile：runtime 选中即出现命令配置区
 
   // 选中 generic-exec 前命令配置区不存在，选中后出现（条件渲染）
   await expect(page.locator("#profile-gx-command")).toBeHidden();
+  await page.locator("#profile-connection").selectOption("local_cli");
   await page.locator("#profile-runtime").selectOption("generic-exec");
   await expect(page.locator("#profile-gx-command")).toBeVisible();
-
-  await page.locator("#profile-provider").selectOption({ label: "E2E GX Provider" });
   await page.locator("#profile-gx-command").fill("node");
   await page.locator("#profile-gx-delivery").selectOption("stdin");
   // 一行一个参数：node -e "<脚本>"（脚本忽略 stdin，打印哨兵后自然退出）

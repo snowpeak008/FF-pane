@@ -77,6 +77,7 @@ import {
 import { PRESET_FROM_GLOBAL_DEFAULT } from "../../mcp/config-tool";
 import { DEFAULT_TRANSCRIPT_LIMIT } from "../../shared-ipc/contracts";
 import { type InvokeHandlers, publishEvent, type WebContentsLike } from "../../shared-ipc/server";
+import { materializeProfileDraft, resetLegacyAgentConfigIfNeeded } from "../connection-mode";
 import { resolveGlobalRoot } from "../data-root";
 import { createSafeStorageBackend, createSecretStore, resolveSecretsFile } from "../secrets";
 import { createConfigDraftHub, type PrepareDraftResult } from "./config-draft-hub";
@@ -179,6 +180,13 @@ function createRepairDeps(
  */
 export async function createSessionLayer(getWindow: SessionWindowGetter): Promise<SessionLayer> {
   const layout = await initGlobalLayout(resolveGlobalRoot());
+  await resetLegacyAgentConfigIfNeeded({
+    rootDir: layout.rootDir,
+    providersFile: layout.providersFile,
+    profilesFile: layout.profilesFile,
+    rolesFile: layout.rolesFile,
+    secretsFile: resolveSecretsFile(layout.rootDir),
+  });
   const projects = createProjectRegistry(layout.projectsFile);
   const providers = createProviderStore(layout.providersFile);
   const profiles = createProfileStore(layout.profilesFile);
@@ -451,10 +459,11 @@ export async function createSessionLayer(getWindow: SessionWindowGetter): Promis
             }
           }
           const globalConfig = await config.readConfig();
-          const draft =
+          const filled =
             parsed.draft.permissionPreset === PRESET_FROM_GLOBAL_DEFAULT
               ? { ...parsed.draft, permissionPreset: globalConfig.defaultPermissionPreset }
               : parsed.draft;
+          const draft = await materializeProfileDraft(filled, providers);
           const result = await validateProfileDraft(draft, {
             getProvider: (id) => providers.getProvider(id),
             getCustomRole: (id) => roles.getRole(id),
@@ -510,12 +519,15 @@ export async function createSessionLayer(getWindow: SessionWindowGetter): Promis
             }
           };
           if (parsed.id === undefined) {
-            const created = await profiles.createProfile(parsed.draft, validate);
+            const created = await profiles.createProfile(
+              await materializeProfileDraft(parsed.draft, providers),
+              validate,
+            );
             return created.id;
           }
           const updated = await profiles.updateProfile(
             parsed.id as ProfileId,
-            parsed.draft,
+            await materializeProfileDraft(parsed.draft, providers),
             validate,
           );
           return updated.id;

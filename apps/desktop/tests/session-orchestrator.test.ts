@@ -791,6 +791,33 @@ describe("createSessionOrchestrator", () => {
     expect(h.persistedRuns[0]?.reasoningEffort).toBe("high");
   });
 
+  it("T9.11：任务合同 effort 覆盖档案默认；请求覆盖优先", async () => {
+    const events: AgentEvent[] = [
+      { kind: "text", content: "done", final: true, channel: "answer" },
+      { kind: "end", reason: "completed" },
+    ];
+    const fromTask = makeHarness(events, {
+      runtime: "claude-code",
+      profile: profile({ runtime: "claude-code", reasoningEffort: "low" }),
+      task: task({ reasoningEffort: "high" }),
+    });
+    await createSessionOrchestrator(fromTask.deps).start(workerRequest());
+    await flushUntilEnd(fromTask.published);
+    expect(fromTask.captured[0]?.reasoningEffort).toBe("high");
+
+    const fromRequest = makeHarness(events, {
+      runtime: "claude-code",
+      profile: profile({ runtime: "claude-code", reasoningEffort: "low" }),
+      task: task({ reasoningEffort: "high" }),
+    });
+    await createSessionOrchestrator(fromRequest.deps).start({
+      ...workerRequest(),
+      reasoningEffort: "medium",
+    });
+    await flushUntilEnd(fromRequest.published);
+    expect(fromRequest.captured[0]?.reasoningEffort).toBe("medium");
+  });
+
   it("T9.4b：codex effort 并入 configOverrides；gemini 不下发", async () => {
     const events: AgentEvent[] = [
       { kind: "text", content: "done", final: true, channel: "answer" },
@@ -814,6 +841,50 @@ describe("createSessionOrchestrator", () => {
     expect(gemini.captured[0]?.reasoningEffort).toBeUndefined();
     expect(gemini.captured[0]?.configOverrides).toBeUndefined();
     expect(gemini.persistedRuns[0]?.reasoningEffort).toBe("unset");
+  });
+
+  it("Worker 轮：Windows powershell 包装的 verifyCmd 仍能过完成门槛", async () => {
+    const events: AgentEvent[] = [
+      { kind: "session_start" },
+      { kind: "text", content: "已创建 notes.md", final: true, channel: "answer" },
+      {
+        kind: "command",
+        command:
+          '"C:\\\\Windows\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe" -Command "git status"',
+        status: "completed",
+        exitCode: 0,
+        output: "?? notes.md",
+      },
+      { kind: "end", reason: "completed" },
+    ];
+    const h = makeHarness(events, { task: task({ verifyCmd: "git status" }) });
+    await createSessionOrchestrator(h.deps).start(workerRequest());
+    await flushUntilEnd(h.published);
+
+    expect(h.savedTasks.map((t) => t.status)).toEqual(["running", "done"]);
+    expect(h.persistedRuns[0]?.verifyResult).toEqual({
+      command: "git status",
+      exitCode: 0,
+      output: "?? notes.md",
+    });
+  });
+
+  it("Worker 轮：有 verifyCmd 但没跑到 → failed 并留下 failReason", async () => {
+    const events: AgentEvent[] = [
+      { kind: "session_start" },
+      { kind: "text", content: "文件已经写好", final: true, channel: "answer" },
+      { kind: "command", command: "echo wrote notes.md", status: "completed", exitCode: 0 },
+      { kind: "end", reason: "completed" },
+    ];
+    const h = makeHarness(events, { task: task({ verifyCmd: "git status" }) });
+    await createSessionOrchestrator(h.deps).start(workerRequest());
+    await flushUntilEnd(h.published);
+
+    expect(h.persistedRuns[0]?.endReason).toBe("completed");
+    expect(h.savedTasks.at(-1)).toMatchObject({
+      status: "failed",
+      failReason: "verify-result-missing",
+    });
   });
 
   it("失败结束的 Worker 轮：任务转 failed，不 done", async () => {

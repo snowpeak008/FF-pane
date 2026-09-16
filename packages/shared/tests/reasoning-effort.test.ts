@@ -4,11 +4,16 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  inferConnectionMode,
+  isConnectionMode,
   narrowReasoningEffortLevels,
   normalizeReasoningEffort,
   REASONING_EFFORT_LEVELS,
+  resolveConnectionMode,
   resolveDispatchedReasoningEffort,
   resolveReasoningEffortOptions,
+  resolveTurnReasoningEffort,
+  runtimeSupportsLocalCli,
 } from "../src/index.js";
 
 describe("normalizeReasoningEffort", () => {
@@ -58,5 +63,56 @@ describe("resolveDispatchedReasoningEffort", () => {
         catalogLevels: ["high", "max"],
       }),
     ).toBe("high");
+  });
+});
+
+describe("resolveTurnReasoningEffort", () => {
+  it("会话覆盖 > 任务合同 > 档案默认", () => {
+    expect(
+      resolveTurnReasoningEffort({
+        runtime: "claude-code",
+        sessionOverride: "medium",
+        taskEffort: "high",
+        profileEffort: "low",
+      }),
+    ).toBe("medium");
+    expect(
+      resolveTurnReasoningEffort({
+        runtime: "claude-code",
+        taskEffort: "high",
+        profileEffort: "low",
+      }),
+    ).toBe("high");
+    expect(
+      resolveTurnReasoningEffort({
+        runtime: "claude-code",
+        profileEffort: "low",
+      }),
+    ).toBe("low");
+  });
+});
+
+describe("connectionMode（T9.11）", () => {
+  it("cli_login 推断本地 CLI；其余推断中转；显式值优先", () => {
+    expect(inferConnectionMode("cli_login")).toBe("local_cli");
+    expect(inferConnectionMode("openai_compatible")).toBe("relay");
+    expect(inferConnectionMode("anthropic")).toBe("relay");
+    expect(resolveConnectionMode("relay", "cli_login")).toBe("relay");
+    expect(resolveConnectionMode("local_cli", "openai_compatible")).toBe("local_cli");
+    expect(resolveConnectionMode(undefined, "cli_login")).toBe("local_cli");
+    expect(resolveConnectionMode("hybrid", "cli_login")).toBe("local_cli");
+    expect(isConnectionMode("local_cli")).toBe(true);
+    expect(isConnectionMode("relay")).toBe(true);
+    expect(isConnectionMode("hybrid")).toBe(false);
+  });
+
+  it("本机 CLI Runtime + generic-exec 可走本地；DeepSeek 不是 Runtime", () => {
+    expect(runtimeSupportsLocalCli("claude-code")).toBe(true);
+    expect(runtimeSupportsLocalCli("codex")).toBe(true);
+    expect(runtimeSupportsLocalCli("gemini-cli")).toBe(true);
+    expect(runtimeSupportsLocalCli("grok-build")).toBe(true);
+    expect(runtimeSupportsLocalCli("opencode")).toBe(true);
+    expect(runtimeSupportsLocalCli("generic-exec")).toBe(true);
+    expect(runtimeSupportsLocalCli("iflow")).toBe(false);
   });
 });

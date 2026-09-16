@@ -397,21 +397,30 @@ describe("generic-exec 命令配置（T8.4b 多实例装配）", () => {
     taskDelivery: "argv",
   } as const satisfies GenericExecProfileConfig;
 
+  function gxDraft(overrides: Partial<ProfileDraft> = {}): ProfileDraft {
+    return workerDraft({
+      runtime: "generic-exec",
+      providerId: NO_DEFAULT_PROVIDER.id,
+      connectionMode: "local_cli",
+      model: undefined,
+      genericExec: GX,
+      ...overrides,
+    });
+  }
+
   it("generic-exec Profile 带合法配置（argv + 占位符）：通过", async () => {
-    const draft = workerDraft({ runtime: "generic-exec", genericExec: GX });
-    expect(await validateProfileDraft(draft, DEPS)).toEqual({ ok: true });
+    expect(await validateProfileDraft(gxDraft(), DEPS)).toEqual({ ok: true });
   });
 
   it("stdin 模式（args 无占位符）同样通过", async () => {
-    const draft = workerDraft({
-      runtime: "generic-exec",
+    const draft = gxDraft({
       genericExec: { command: "mytool", args: ["--quiet"], taskDelivery: "stdin" },
     });
     expect(await validateProfileDraft(draft, DEPS)).toEqual({ ok: true });
   });
 
   it("generic-exec Profile 缺配置：genericExec 违规（实例化无米下锅）", async () => {
-    const draft = workerDraft({ runtime: "generic-exec" });
+    const draft = gxDraft({ genericExec: undefined });
     expectViolationFields(await validateProfileDraft(draft, DEPS), ["genericExec"]);
   });
 
@@ -423,14 +432,14 @@ describe("generic-exec 命令配置（T8.4b 多实例装配）", () => {
   it("命令为空 / 命令含 {task}：genericExec.command 违规", async () => {
     expectViolationFields(
       await validateProfileDraft(
-        workerDraft({ runtime: "generic-exec", genericExec: { ...GX, command: "  " } }),
+        gxDraft({ genericExec: { ...GX, command: "  " } }),
         DEPS,
       ),
       ["genericExec.command"],
     );
     expectViolationFields(
       await validateProfileDraft(
-        workerDraft({ runtime: "generic-exec", genericExec: { ...GX, command: "run-{task}" } }),
+        gxDraft({ genericExec: { ...GX, command: "run-{task}" } }),
         DEPS,
       ),
       ["genericExec.command"],
@@ -438,24 +447,21 @@ describe("generic-exec 命令配置（T8.4b 多实例装配）", () => {
   });
 
   it("argv 模式无占位符：genericExec.args 违规（任务文本无处可去）", async () => {
-    const draft = workerDraft({
-      runtime: "generic-exec",
+    const draft = gxDraft({
       genericExec: { command: "mytool", args: ["--run"], taskDelivery: "argv" },
     });
     expectViolationFields(await validateProfileDraft(draft, DEPS), ["genericExec.args"]);
   });
 
   it("stdin 模式残留占位符：genericExec.args 违规（两处投递会重复）", async () => {
-    const draft = workerDraft({
-      runtime: "generic-exec",
+    const draft = gxDraft({
       genericExec: { command: "mytool", args: ["{task}"], taskDelivery: "stdin" },
     });
     expectViolationFields(await validateProfileDraft(draft, DEPS), ["genericExec.args"]);
   });
 
   it("投递方式非法（JSON / IPC 边界防线）：genericExec.taskDelivery 违规，占位符检查跳过", async () => {
-    const draft = workerDraft({
-      runtime: "generic-exec",
+    const draft = gxDraft({
       genericExec: {
         command: "mytool",
         args: [],
@@ -466,8 +472,7 @@ describe("generic-exec 命令配置（T8.4b 多实例装配）", () => {
   });
 
   it("配置违规与其他违规一次全部收集", async () => {
-    const draft = workerDraft({
-      runtime: "generic-exec",
+    const draft = gxDraft({
       model: "gpt-99",
       genericExec: { command: "", args: [], taskDelivery: "argv" },
     });
@@ -522,6 +527,52 @@ describe("reasoningEffort（T9.4b）", () => {
       await validateProfileDraft(workerDraft({ reasoningEffort: "high" }), deps),
       ["reasoningEffort"],
     );
+  });
+});
+
+describe("connectionMode / 空 runtime（T9.11）", () => {
+  it("空 runtime 拒存", async () => {
+    expectViolationFields(await validateProfileDraft(workerDraft({ runtime: "" }), DEPS), [
+      "runtime",
+    ]);
+  });
+
+  it("本地 CLI + 中转来源拒存", async () => {
+    expectViolationFields(
+      await validateProfileDraft(workerDraft({ connectionMode: "local_cli" }), DEPS),
+      ["providerId"],
+    );
+  });
+
+  it("中转 + 本机登录来源拒存", async () => {
+    expectViolationFields(
+      await validateProfileDraft(
+        workerDraft({
+          connectionMode: "relay",
+          providerId: NO_DEFAULT_PROVIDER.id,
+          model: undefined,
+        }),
+        DEPS,
+      ),
+      ["providerId"],
+    );
+  });
+
+  it("本地 CLI + cli_login + claude-code 通过", async () => {
+    expect(
+      await validateProfileDraft(
+        workerDraft({
+          connectionMode: "local_cli",
+          providerId: NO_DEFAULT_PROVIDER.id,
+          model: undefined,
+        }),
+        DEPS,
+      ),
+    ).toEqual({ ok: true });
+  });
+
+  it("中转 + 带网址来源通过（缺字段时按 Provider 类型推断）", async () => {
+    expect(await validateProfileDraft(workerDraft(), DEPS)).toEqual({ ok: true });
   });
 });
 

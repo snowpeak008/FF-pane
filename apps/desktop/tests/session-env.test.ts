@@ -93,6 +93,50 @@ describe("resolveRuntimeEnv", () => {
     const env = resolveRuntimeEnv({ runtime: "codex", provider: provider() });
     expect(env).toEqual({});
   });
+
+  it("T9.11：本地 CLI 即使有密钥和网址也不注入", () => {
+    const env = resolveRuntimeEnv({
+      runtime: "claude-code",
+      provider: provider({
+        type: "openai_compatible",
+        baseUrl: "https://hub.example/v1",
+      }),
+      apiKeyPlaintext: "sk-x",
+      connectionMode: "local_cli",
+    });
+    expect(env).toEqual({});
+  });
+
+  it("T9.11：中转时 Claude / Gemini / Grok 注入各家网址变量", () => {
+    const relay = {
+      type: "openai_compatible" as const,
+      baseUrl: "https://hub.example/v1",
+    };
+    expect(
+      resolveRuntimeEnv({
+        runtime: "claude-code",
+        provider: provider(relay),
+        apiKeyPlaintext: "sk-x",
+        connectionMode: "relay",
+      }),
+    ).toEqual({ ANTHROPIC_API_KEY: "sk-x", ANTHROPIC_BASE_URL: "https://hub.example/v1" });
+    expect(
+      resolveRuntimeEnv({
+        runtime: "gemini-cli",
+        provider: provider(relay),
+        apiKeyPlaintext: "sk-g",
+        connectionMode: "relay",
+      }),
+    ).toEqual({ GEMINI_API_KEY: "sk-g", GEMINI_API_BASE: "https://hub.example/v1" });
+    expect(
+      resolveRuntimeEnv({
+        runtime: "grok-build",
+        provider: provider(relay),
+        apiKeyPlaintext: "sk-z",
+        connectionMode: "relay",
+      }),
+    ).toEqual({ XAI_API_KEY: "sk-z", XAI_BASE_URL: "https://hub.example/v1" });
+  });
 });
 
 describe("resolveRuntimeConfigOverrides", () => {
@@ -172,6 +216,16 @@ describe("resolveRuntimeConfigOverrides", () => {
       reasoningEffort: "high",
     });
     expect(cliLogin).toEqual({ model_reasoning_effort: '"high"' });
+  });
+
+  it("T9.11：本地 CLI 即使 Provider 带网址也不装配 codex 路由", () => {
+    expect(
+      resolveRuntimeConfigOverrides({
+        runtime: "codex",
+        provider: provider({ type: "openai_compatible", baseUrl: "https://x.test" }),
+        connectionMode: "local_cli",
+      }),
+    ).toEqual({});
   });
 
   it("T9.4b：gemini-cli 即使传入 effort 也不进 overrides", () => {

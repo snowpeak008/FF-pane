@@ -9,3 +9,4 @@ export * from "./model.js";
 export * from "./run-lifecycle.js";
 export * from "./task-machine.js";
 export * from "./transitions.js";
+export * from "./verify-cmd.js";

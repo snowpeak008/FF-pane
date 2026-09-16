@@ -213,4 +213,36 @@ describe("自定义角色第 1 层（T8.4）", () => {
     });
     expect(out).toContain(`# 角色\n${ROLE_DEFINITIONS.worker}`);
   });
+
+  it("执行轮第 4 层写明完成门槛：有 verifyCmd 必须原样跑，无则必须写报告", () => {
+    const withVerify = assemblePrompt({
+      role: "worker",
+      input: { kind: "task", contract: contract({ verifyCmd: "git status" }) },
+      projectMemory: [],
+      outputLanguage: LANG,
+    });
+    expect(withVerify).toContain("验证命令：git status");
+    expect(withVerify).toContain("完成门槛");
+    expect(withVerify).toContain("原样执行");
+
+    const withoutVerify = assemblePrompt({
+      role: "worker",
+      input: { kind: "task", contract: contract({}) },
+      projectMemory: [],
+      outputLanguage: LANG,
+    });
+    expect(withoutVerify).toContain("没有验证命令");
+    expect(withoutVerify).toContain("非空完成报告");
+  });
+
+  it("审查者任务输入不带执行者完成门槛（避免往「我该做点什么」带）", () => {
+    const out = assemblePrompt({
+      role: "reviewer",
+      input: { kind: "task", contract: contract({ verifyCmd: "npm test" }) },
+      projectMemory: [],
+      outputLanguage: LANG,
+    });
+    expect(out).toContain("验证命令：npm test");
+    expect(out).not.toContain("完成门槛");
+  });
 });

@@ -7,7 +7,13 @@
  * 本模块不接触密钥库、不记录明文。
  */
 
-import { type Provider, type RuntimeId, resolveDispatchedReasoningEffort } from "@ff-pane/shared";
+import {
+  type ConnectionMode,
+  type Provider,
+  type RuntimeId,
+  resolveConnectionMode,
+  resolveDispatchedReasoningEffort,
+} from "@ff-pane/shared";
 
 /** 各 Runtime 读取 API 密钥的环境变量名（CLI 自管登录态的 Runtime 返回 undefined）。 */
 export function runtimeApiKeyEnvVar(runtime: RuntimeId): string | undefined {
@@ -59,12 +65,22 @@ export function runtimeApiKeyEnvVar(runtime: RuntimeId): string | undefined {
  * `https://apis.iflow.cn/v1`——iFlow 官方后端本就说 OpenAI 兼容协议）。
  */
 function runtimeBaseUrlEnvVar(runtime: RuntimeId): string | undefined {
-  if (runtime === "iflow") {
-    return "IFLOW_BASE_URL";
+  switch (runtime) {
+    case "iflow":
+      return "IFLOW_BASE_URL";
+    case "codex":
+    case "aider":
+    case "qwen-code":
+      return "OPENAI_BASE_URL";
+    case "claude-code":
+      return "ANTHROPIC_BASE_URL";
+    case "gemini-cli":
+      return "GEMINI_API_BASE";
+    case "grok-build":
+      return "XAI_BASE_URL";
+    default:
+      return undefined;
   }
-  return runtime === "codex" || runtime === "aider" || runtime === "qwen-code"
-    ? "OPENAI_BASE_URL"
-    : undefined;
 }
 
 /** 单 Provider 每轮临时装配的 codex model_provider 槽名（无跨轮共享，故固定即可）。 */
@@ -86,10 +102,14 @@ export function resolveRuntimeConfigOverrides(input: {
   readonly provider: Provider;
   /** T9.4b —— 显式选中的推理强度档；缺席 / 空 = 不传（跟随用户本机 toml）。 */
   readonly reasoningEffort?: string;
+  /** T9.11 —— 显式连法；缺席按 Provider 类型推断。 */
+  readonly connectionMode?: ConnectionMode;
 }): Record<string, string> {
   const { runtime, provider } = input;
+  const mode = resolveConnectionMode(input.connectionMode, provider.type);
   const overrides: Record<string, string> = {};
   if (
+    mode === "relay" &&
     runtime === "codex" &&
     provider.type === "openai_compatible" &&
     provider.baseUrl !== undefined &&
@@ -116,24 +136,26 @@ export function resolveRuntimeConfigOverrides(input: {
 
 /**
  * 组装本轮注入环境变量。
- * - cli_login 类型的 Provider 不注入密钥（凭证由 CLI 自管，§4.2）。
- * - 无解密明文（未配置密钥 / 解密失败）时该变量缺席，交由 Runtime 自身报错，
- *   不静默塞空串。
- * - base_url 仅在 Provider 显式配置且 Runtime 支持时注入。
+ * - 本地 CLI：不注入密钥、不注入网址（凭证由 CLI 自管）。
+ * - 中转：注入密钥 + 各家 CLI 认的网址变量（Claude / Codex / Gemini / Grok 等同路）。
+ * - 无解密明文时该变量缺席，不静默塞空串。
  */
 export function resolveRuntimeEnv(input: {
   readonly runtime: RuntimeId;
   readonly provider: Provider;
   readonly apiKeyPlaintext?: string;
+  /** T9.11 —— 显式连法；缺席按 Provider 类型推断。 */
+  readonly connectionMode?: ConnectionMode;
 }): Record<string, string> {
   const env: Record<string, string> = {};
   const { runtime, provider, apiKeyPlaintext } = input;
+  const mode = resolveConnectionMode(input.connectionMode, provider.type);
 
-  if (
-    provider.type !== "cli_login" &&
-    apiKeyPlaintext !== undefined &&
-    apiKeyPlaintext.length > 0
-  ) {
+  if (mode === "local_cli") {
+    return env;
+  }
+
+  if (apiKeyPlaintext !== undefined && apiKeyPlaintext.length > 0) {
     const keyVar = runtimeApiKeyEnvVar(runtime);
     if (keyVar !== undefined) {
       env[keyVar] = apiKeyPlaintext;

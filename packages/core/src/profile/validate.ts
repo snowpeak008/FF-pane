@@ -31,6 +31,7 @@ import {
   GENERIC_EXEC_DELIVERIES,
   GENERIC_EXEC_TASK_PLACEHOLDER,
   isAiOutputLanguage,
+  isConnectionMode,
   isCustomRoleId,
   isGenericExecDelivery,
   isReasoningEffortLevel,
@@ -39,7 +40,9 @@ import {
   isShellPolicy,
   REASONING_EFFORT_LEVELS,
   REASONING_EFFORT_RUNTIMES,
+  resolveConnectionMode,
   ROLES,
+  runtimeSupportsLocalCli,
 } from "@ff-pane/shared";
 import { intersectEnvelopes, ROLE_DEFAULT_ENVELOPES } from "../permission/index.js";
 
@@ -195,31 +198,79 @@ export async function validateProfileDraft(
 ): Promise<ProfileValidationResult> {
   const violations: ProfileValidationViolation[] = [];
 
+  if (typeof draft.runtime !== "string" || draft.runtime.trim() === "") {
+    violations.push({ field: "runtime", reason: "必须选择 Runtime" });
+  }
+
+  if (draft.connectionMode !== undefined && !isConnectionMode(draft.connectionMode)) {
+    violations.push({
+      field: "connectionMode",
+      reason: `连法非法：${String(draft.connectionMode)}（应为 local_cli / relay）`,
+    });
+  }
+
   const provider = await deps.getProvider(draft.providerId);
   if (provider === undefined) {
     violations.push({ field: "providerId", reason: `Provider 不存在：${draft.providerId}` });
-  } else if (draft.model === undefined) {
-    // §4.4：Model 缺省 = 用 Provider 的 defaultModel，此时该默认必须已配置。
-    // T9.2 ④ 例外：cli_login 类型缺省 = CLI 自身的默认模型（编排器不给 ctx.model、
-    // 适配器不传 -m 类参数，各家实测均支持无模型参数运行）——不要求 defaultModel。
-    if (provider.type !== "cli_login" && provider.defaultModel === undefined) {
-      violations.push({
-        field: "model",
-        reason: `model 缺省表示使用 Provider 默认模型，但 Provider「${provider.name}」未配置 defaultModel`,
-      });
-    }
   } else {
-    const target = provider.models.find((model) => model.id === draft.model);
-    if (target === undefined) {
-      violations.push({
-        field: "model",
-        reason: `模型不在 Provider「${provider.name}」的 models 中：${draft.model}`,
-      });
-    } else if (target.kind !== "chat") {
-      violations.push({
-        field: "model",
-        reason: `模型 ${draft.model} 的 kind 应为 chat，实际为 ${target.kind}`,
-      });
+    const mode = resolveConnectionMode(draft.connectionMode, provider.type);
+    if (mode === "local_cli") {
+      if (!runtimeSupportsLocalCli(draft.runtime)) {
+        violations.push({
+          field: "connectionMode",
+          reason: `${draft.runtime} 没有本机 CLI，只能走中转网址`,
+        });
+      }
+      if (provider.type !== "cli_login") {
+        violations.push({
+          field: "providerId",
+          reason: "本地 CLI 档案必须绑本机登录来源，不能绑带网址的中转",
+        });
+      }
+    } else {
+      if (draft.runtime === "generic-exec") {
+        violations.push({
+          field: "connectionMode",
+          reason: "generic-exec 是本地命令，只能走本地 CLI",
+        });
+      }
+      if (provider.type === "cli_login") {
+        violations.push({
+          field: "providerId",
+          reason: "中转档案必须绑带网址的来源，不能用本机登录",
+        });
+      } else if (provider.baseUrl === undefined || provider.baseUrl.trim() === "") {
+        violations.push({
+          field: "providerId",
+          reason: "中转来源必须填写独立配置的网址",
+        });
+      }
+    }
+  }
+  if (provider !== undefined) {
+    if (draft.model === undefined) {
+      // §4.4：Model 缺省 = 用 Provider 的 defaultModel，此时该默认必须已配置。
+      // T9.2 ④ 例外：cli_login 类型缺省 = CLI 自身的默认模型（编排器不给 ctx.model、
+      // 适配器不传 -m 类参数，各家实测均支持无模型参数运行）——不要求 defaultModel。
+      if (provider.type !== "cli_login" && provider.defaultModel === undefined) {
+        violations.push({
+          field: "model",
+          reason: `model 缺省表示使用 Provider 默认模型，但 Provider「${provider.name}」未配置 defaultModel`,
+        });
+      }
+    } else {
+      const target = provider.models.find((model) => model.id === draft.model);
+      if (target === undefined) {
+        violations.push({
+          field: "model",
+          reason: `模型不在 Provider「${provider.name}」的 models 中：${draft.model}`,
+        });
+      } else if (target.kind !== "chat") {
+        violations.push({
+          field: "model",
+          reason: `模型 ${draft.model} 的 kind 应为 chat，实际为 ${target.kind}`,
+        });
+      }
     }
   }
 

@@ -28,6 +28,9 @@ export interface TaskCardProps {
   /** 该任务的审查态（由 runs 派生，见 task-review）。 */
   readonly review?: TaskReviewState;
   readonly busy: boolean;
+  /** T9.11 —— 执行者思考强度可选项（空 = 该 Runtime 不下发，不显示）。 */
+  readonly effortOptions?: readonly string[];
+  readonly onReasoningEffortChange?: (task: Task, level: string) => void;
 }
 
 /**
@@ -44,6 +47,8 @@ export function TaskCard({
   onReview,
   review,
   busy,
+  effortOptions,
+  onReasoningEffortChange,
 }: TaskCardProps): ReactElement {
   const { t } = useTranslation();
   const canAccept = task.status === "done";
@@ -74,9 +79,42 @@ export function TaskCard({
       <p className="line-clamp-2 text-sm font-medium text-fg" title={task.goal}>
         {task.goal}
       </p>
+      {effortOptions !== undefined &&
+      effortOptions.length > 0 &&
+      onReasoningEffortChange !== undefined ? (
+        <label className="flex items-center gap-1.5">
+          <span className="text-2xs text-fg-muted">{t("tasks.reasoningEffort.label")}</span>
+          <select
+            className="h-6 max-w-full flex-1 cursor-pointer rounded border border-border bg-surface px-1 text-2xs text-fg"
+            aria-label={t("tasks.reasoningEffort.label")}
+            data-testid={`task-reasoning-effort-${task.id}`}
+            value={task.reasoningEffort ?? ""}
+            disabled={busy || !canDispatch}
+            onChange={(e) => onReasoningEffortChange(task, e.target.value)}
+          >
+            <option value="">{t("tasks.reasoningEffort.followProfile")}</option>
+            {effortOptions.map((level) => (
+              <option key={level} value={level}>
+                {t(`settings.profiles.field.reasoningEffortLevel.${level}`)}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       {task.writeScope.length > 0 ? (
         <p className="truncate font-mono text-xs text-fg-muted" title={task.writeScope.join("\n")}>
           {task.writeScope.join(", ")}
+        </p>
+      ) : null}
+      {task.status === "failed" && task.failReason !== undefined && task.failReason.length > 0 ? (
+        <p
+          className="text-2xs text-danger-text"
+          data-testid={`task-fail-reason-${task.id}`}
+          title={task.failReason}
+        >
+          {t(`tasks.failReason.${task.failReason}`, {
+            defaultValue: t("tasks.failReason.settle-rejected"),
+          })}
         </p>
       ) : null}
       {/* 不通过时给一行提示，说明这不构成否决——否则一个红徽章旁边的可点按钮会让人以为是 bug。 */}
