@@ -3,16 +3,18 @@ import type { SmokeReport } from "../shared-ipc/contracts";
 import { publishEvent, registerInvokeHandlers } from "../shared-ipc/server";
 import { runSecretsCheck } from "./secrets";
 import { runSqliteCheck } from "./sqlite-check";
+import { runPtyCheck } from "./terminal";
 
 /**
  * 冒烟自测模式（pnpm smoke → electron . --smoke），本任务的客观验收手段：
  * 1. 主进程直接验证 better-sqlite3 内存库查询（风险 R1）
  * 2. 主进程验证真实 safeStorage 密钥往返（W1.5b：store→reveal + maskedTail + delete）
- * 3. 创建隐藏窗口加载 renderer（URL 带 ?smoke=1；该模式下 renderer 只跑自检、
+ * 3. 主进程验证 PTY 加载并 spawn 拿到输出（T10.1）
+ * 4. 创建隐藏窗口加载 renderer（URL 带 ?smoke=1；该模式下 renderer 只跑自检、
  *    **不挂载全功能 App**——本模式只装配下面那几个通道，挂上 App 会让默认页发起
  *    一个没有 handler 的页面级查询，见 renderer/src/main.tsx 的说明）
- * 4. renderer 依次执行：IPC ping-pong / app-info / 经 IPC 的 sqlite 检查 / 事件订阅 / CSP 拦截 eval
- * 5. renderer 经 smoke:report 上报，全部通过退出码 0，任一失败退出码 1；超时兜底退出码 1
+ * 5. renderer 依次执行：IPC ping-pong / app-info / 经 IPC 的 sqlite 检查 / 事件订阅 / CSP 拦截 eval
+ * 6. renderer 经 smoke:report 上报，全部通过退出码 0，任一失败退出码 1；超时兜底退出码 1
  */
 const SMOKE_TIMEOUT_MS = 30_000;
 const EXIT_DELAY_MS = 100;
@@ -42,6 +44,26 @@ export function startSmokeMode(createWindow: () => BrowserWindow): void {
     const message = thrown instanceof Error ? thrown.message : String(thrown);
     console.error(`[smoke] FAIL main-sqlite —— ${message}`);
   }
+
+  // T10.1：PTY 自检与 secrets 一样异步并行，结果在 finish 统一汇总
+  const ptyCheck: Promise<SecretsCheckOutcome> = Promise.race([
+    runPtyCheck().then(
+      (report): SecretsCheckOutcome => ({
+        ok: true,
+        detail: `shell=${report.shell} marker=${report.marker}`,
+      }),
+      (thrown: unknown): SecretsCheckOutcome => ({
+        ok: false,
+        detail: thrown instanceof Error ? thrown.message : String(thrown),
+      }),
+    ),
+    new Promise<SecretsCheckOutcome>((resolve) =>
+      setTimeout(
+        () => resolve({ ok: false, detail: `${SECRETS_CHECK_TIMEOUT_MS}ms 内未完成` }),
+        SECRETS_CHECK_TIMEOUT_MS,
+      ),
+    ),
+  ]);
 
   // W1.5b：真实 safeStorage 的密钥往返自测（Node 单测拿不到 safeStorage，只能在此回归）。
   // 与 renderer 检查并行执行，结果在 finish 阶段统一输出
@@ -73,7 +95,7 @@ export function startSmokeMode(createWindow: () => BrowserWindow): void {
     },
     "smoke:report": (report) => {
       clearTimeout(timeout);
-      void finish(report, mainSqliteOk, secretsCheck);
+      void finish(report, mainSqliteOk, secretsCheck, ptyCheck);
       return { acknowledged: true as const };
     },
   });
@@ -89,6 +111,7 @@ async function finish(
   report: SmokeReport,
   mainSqliteOk: boolean,
   secretsCheck: Promise<SecretsCheckOutcome>,
+  ptyCheck: Promise<SecretsCheckOutcome>,
 ): Promise<void> {
   for (const check of report.checks) {
     const line = `[smoke] ${check.ok ? "PASS" : "FAIL"} ${check.name} —— ${check.detail}`;
@@ -105,10 +128,23 @@ async function finish(
   } else {
     console.error(secretsLine);
   }
+  const pty = await ptyCheck;
+  const ptyLine = `[smoke] ${pty.ok ? "PASS" : "FAIL"} main-pty —— ${pty.detail}`;
+  if (pty.ok) {
+    console.log(ptyLine);
+  } else {
+    console.error(ptyLine);
+  }
   const allOk =
-    mainSqliteOk && secrets.ok && report.checks.length > 0 && report.checks.every((c) => c.ok);
+    mainSqliteOk &&
+    secrets.ok &&
+    pty.ok &&
+    report.checks.length > 0 &&
+    report.checks.every((c) => c.ok);
   if (allOk) {
-    console.log("[smoke] ALL PASS：IPC ping-pong、事件订阅、better-sqlite3、CSP、密钥往返全部通过");
+    console.log(
+      "[smoke] ALL PASS：IPC ping-pong、事件订阅、better-sqlite3、CSP、密钥往返、PTY 全部通过",
+    );
   } else {
     console.error("[smoke] 存在失败项，退出码 1");
   }

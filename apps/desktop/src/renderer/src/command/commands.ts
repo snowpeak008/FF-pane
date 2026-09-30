@@ -41,8 +41,9 @@ function pageCommand(id: CommandId, page: PageKey): CommandDescriptor {
 }
 
 export const COMMAND_TABLE: readonly CommandDescriptor[] = [
-  // 导航组：七个页面 + 前进后退 + 切换项目
+  // 导航组：主页面 + 前进后退 + 切换项目
   pageCommand("nav-projects", "projects"),
+  pageCommand("nav-workbench", "workbench"),
   pageCommand("nav-session", "session"),
   pageCommand("nav-plan", "plan"),
   pageCommand("nav-tasks", "tasks"),
@@ -97,7 +98,7 @@ export function commandsInGroup(group: CommandGroup): readonly CommandDescriptor
 
 /**
  * 命令在面板里展示的键位。
- * 七个页面导航命令自身没有独立登记，键位来自 §7 的 Ctrl+1~7（按页面序号推导），
+ * 七个页面导航命令自身没有独立登记，键位来自 §7 的 Ctrl+N（按页面序号推导），
  * 这样面板里每个页面条目都能显示自己的键位。
  */
 export function commandShortcutDisplay(

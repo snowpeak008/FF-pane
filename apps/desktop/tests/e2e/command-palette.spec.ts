@@ -58,7 +58,7 @@ test("面板里选中一条导航命令即跳转（命令项经注入的 navigat
   await expect.poll(currentRoute).toBe("/memory");
 });
 
-test("Ctrl+1~7 逐个落在对应页面，Alt+← 退回上一页", async () => {
+test("Ctrl+1~8 逐个落在对应页面，Alt+← 退回上一页", async () => {
   const { page } = launched;
   // 页面切换键位现在由注册表独家处理（AppLayout 那条自建监听已删）。
   //
@@ -72,12 +72,13 @@ test("Ctrl+1~7 逐个落在对应页面，Alt+← 退回上一页", async () => 
   // 「不存在第二个实现」由 command-ipc.test.ts 的源码断言守，本条守的是键位确实好使。
   const expected = [
     ["Control+1", "/projects"],
-    ["Control+2", "/session"],
-    ["Control+3", "/plan"],
-    ["Control+4", "/tasks"],
-    ["Control+5", "/runs"],
-    ["Control+6", "/memory"],
-    ["Control+7", "/knowledge"],
+    ["Control+2", "/workbench"],
+    ["Control+3", "/session"],
+    ["Control+4", "/plan"],
+    ["Control+5", "/tasks"],
+    ["Control+6", "/runs"],
+    ["Control+7", "/memory"],
+    ["Control+8", "/knowledge"],
   ] as const;
 
   for (const [key, route] of expected) {

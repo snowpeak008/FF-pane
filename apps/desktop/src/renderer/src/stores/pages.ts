@@ -12,9 +12,10 @@
  * 改一份忘了另一份不会有任何检查报错——与界面语言那两份清单同一形状的隐患。
  */
 
-/** 七个页面（§11.1~§11.7）+ 设置页。顺序即侧栏顺序。 */
+/** 七个页面（§11.1~§11.7）+ 工作台（T10.1）+ 设置页。顺序即侧栏顺序。 */
 export const PAGE_KEYS = [
   "projects",
+  "workbench",
   "session",
   "plan",
   "tasks",
@@ -27,11 +28,12 @@ export const PAGE_KEYS = [
 export type PageKey = (typeof PAGE_KEYS)[number];
 
 /**
- * Ctrl+1 ~ Ctrl+7 的页面顺序（设计系统 §7 快捷键表）。
+ * Ctrl+1 ~ Ctrl+N 的页面顺序（设计系统 §7 快捷键表；T10.1 起含工作台共 8 项）。
  * 设置页不在其中——它走 Ctrl+,。
  */
 export const PAGE_SHORTCUT_ORDER = [
   "projects",
+  "workbench",
   "session",
   "plan",
   "tasks",

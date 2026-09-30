@@ -69,6 +69,10 @@
         "title": "Go to projects",
         "keywords": "projects list home 项目 列表 首页"
       },
+      "nav-workbench": {
+        "title": "Go to workbench",
+        "keywords": "workbench terminal pty shell 工作台 终端"
+      },
       "nav-session": {
         "title": "Go to session",
         "keywords": "session chat conversation 会话 对话 聊天"
@@ -212,6 +216,10 @@
       "label": "Projects",
       "question": "Which projects do I have, and where is each one?"
     },
+    "workbench": {
+      "label": "Workbench",
+      "question": "Where are my terminal panes?"
+    },
     "session": {
       "label": "Session",
       "question": "Who am I talking to, and about what?"
@@ -253,6 +261,18 @@
   "project": {
     "noneSelected": "No project selected yet. Pick one from the project list first.",
     "goToList": "Go to projects"
+  },
+  "workbench": {
+    "cwd": {
+      "home": "Working directory: home (no project selected)",
+      "project": "Working directory: {{path}}"
+    },
+    "terminal": {
+      "exited": "Exited (code {{code}})",
+      "restart": "Restart",
+      "copy": "Copy",
+      "paste": "Paste"
+    }
   },
   "plan": {
     "empty": "This project has no plan yet. Ask the Planner to draft one.",

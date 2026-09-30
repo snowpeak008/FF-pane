@@ -8,6 +8,7 @@ import {
   type LucideIcon,
   MessageSquare,
   Settings,
+  SquareTerminal,
 } from "lucide-react";
 import type { AnyNavId } from "./nav";
 
@@ -17,6 +18,7 @@ import type { AnyNavId } from "./nav";
  */
 export const NAV_ICONS: Readonly<Record<AnyNavId, LucideIcon>> = {
   projects: LayoutGrid,
+  workbench: SquareTerminal,
   session: MessageSquare,
   plan: FileText,
   tasks: ListChecks,

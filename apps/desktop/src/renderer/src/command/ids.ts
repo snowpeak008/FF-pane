@@ -26,6 +26,7 @@ export const COMMAND_IDS = [
   "nav-toggle-sidebar",
   "nav-toggle-secondary-panel",
   "nav-projects",
+  "nav-workbench",
   "nav-session",
   "nav-plan",
   "nav-tasks",

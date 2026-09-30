@@ -39,6 +39,7 @@ export interface NavItem {
 /** 承接各页面的工单号（占位页据此说明"这里归谁做"）。 */
 const NAV_TICKETS: Readonly<Record<NavId, string>> = {
   projects: "W3.3",
+  workbench: "T10.1",
   session: "W3.4a",
   plan: "W3.5a",
   tasks: "W3.6a",

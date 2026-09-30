@@ -69,6 +69,10 @@
         "title": "转到项目列表",
         "keywords": "projects list home 项目 列表 首页"
       },
+      "nav-workbench": {
+        "title": "转到工作台",
+        "keywords": "workbench terminal pty shell 工作台 终端"
+      },
       "nav-session": {
         "title": "转到会话页",
         "keywords": "session chat conversation 会话 对话 聊天"
@@ -212,6 +216,10 @@
       "label": "项目列表",
       "question": "我有哪些项目，各自到哪了"
     },
+    "workbench": {
+      "label": "工作台",
+      "question": "我的终端窗口在哪"
+    },
     "session": {
       "label": "会话",
       "question": "我正在和谁讨论什么"
@@ -253,6 +261,18 @@
   "project": {
     "noneSelected": "还没有选择项目。到项目列表选一个再来。",
     "goToList": "去项目列表"
+  },
+  "workbench": {
+    "cwd": {
+      "home": "工作目录：用户主目录（未选项目）",
+      "project": "工作目录：{{path}}"
+    },
+    "terminal": {
+      "exited": "已退出（退出码 {{code}}）",
+      "restart": "重新启动",
+      "copy": "复制",
+      "paste": "粘贴"
+    }
   },
   "plan": {
     "empty": "这个项目还没有计划。让 Planner 出一版。",

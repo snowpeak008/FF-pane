@@ -9,7 +9,7 @@
  *   - `Alt+←` / `Alt+→`        → 后退、前进 2 条（两个命令）
  *   - `↑` / `↓`                → 上移、下移 2 条（两个命令）
  *   - `Ctrl+Shift+A`           → 任务接受、记忆候选通过 2 条（同键位、两个作用域）
- *   - `Ctrl+1` ~ `Ctrl+7`      → 1 条（同一个"按序号切页"命令，7 个键位）
+ *   - `Ctrl+1` ~ `Ctrl+N`      → 1 条（同一个"按序号切页"命令，N 个键位；T10.1 起 N=8）
  * 18 + 1 + 1 + 1 = **21**。`Ctrl+Enter` 在 §7 本来就分两行（会话发送 / 任务派发），
  * 同键位不同作用域不算冲突——这是本表的既有先例。
  *
@@ -343,7 +343,7 @@ export const SHORTCUT_TABLE: readonly ShortcutRegistration[] = [
   },
   {
     commandId: "nav-page-by-index",
-    keys: ["Ctrl+1", "Ctrl+2", "Ctrl+3", "Ctrl+4", "Ctrl+5", "Ctrl+6", "Ctrl+7"],
+    keys: ["Ctrl+1", "Ctrl+2", "Ctrl+3", "Ctrl+4", "Ctrl+5", "Ctrl+6", "Ctrl+7", "Ctrl+8"],
     scopes: ["global"],
     disabledInTextInput: false,
     preventDefault: true,

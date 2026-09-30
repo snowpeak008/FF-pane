@@ -8,6 +8,7 @@ import { createKnowledgeHandlers } from "./knowledge";
 import { createQuitCoordinator, createSessionLayer } from "./session";
 import { startSmokeMode } from "./smoke";
 import { runSqliteCheck } from "./sqlite-check";
+import { createTerminalLayer, runPtyCheck, type TerminalLayer } from "./terminal";
 import { loadWindowState, trackWindowState } from "./window-state";
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
@@ -17,6 +18,8 @@ const devRendererUrl = process.env["ELECTRON_RENDERER_URL"];
 
 /** 当前主窗口引用（目录选择器等原生弹窗挂靠父窗口时惰性取用）。 */
 let mainWindow: BrowserWindow | null = null;
+/** 终端层（T10.1）；退出时杀掉全部 PTY。 */
+let terminalLayer: TerminalLayer | null = null;
 
 function createMainWindow(options: { readonly hidden: boolean }): BrowserWindow {
   const state = loadWindowState();
@@ -96,6 +99,7 @@ function registerAppHandlers(): void {
       repliedAt: Date.now(),
     }),
     "diagnostics:check-sqlite": () => runSqliteCheck(),
+    "diagnostics:check-pty": () => runPtyCheck(),
   });
 }
 
@@ -117,6 +121,9 @@ async function bootstrap(): Promise<void> {
     console.error(`[main] ${message}`);
     dialog.showErrorBox("FF-pane：SQLite 自检失败", message);
   }
+
+  // T10.1：普通启动不做 PTY 预检（避免 await 挡首屏）。自检只在 --smoke（见 smoke.ts）；
+  // 工作台页 create 失败时由页面错误条呈现，不在此弹阻塞对话框。
 
   // 数据层接线：解析全局根、幂等初始化布局、注册 projects / dialog handlers。
   // 失败不阻止窗口打开（页面自身的错误态会呈现 IPC 失败原文）。
@@ -164,6 +171,24 @@ async function bootstrap(): Promise<void> {
   } catch (thrown) {
     const message = thrown instanceof Error ? thrown.message : String(thrown);
     console.error(`[main] knowledge layer init failed: ${message}`);
+  }
+
+  // 终端层（T10.1）：内嵌 PTY 管理；失败只让工作台不可用。
+  try {
+    terminalLayer = createTerminalLayer(() => mainWindow);
+    registerInvokeHandlers(ipcMain, terminalLayer.handlers);
+    app.on("will-quit", () => {
+      const layer = terminalLayer;
+      if (layer === null) {
+        return;
+      }
+      // 同步尽力杀；异步收尾不等待——进程即将退出
+      void layer.dispose();
+      terminalLayer = null;
+    });
+  } catch (thrown) {
+    const message = thrown instanceof Error ? thrown.message : String(thrown);
+    console.error(`[main] terminal layer init failed: ${message}`);
   }
 
   createMainWindow({ hidden: false });

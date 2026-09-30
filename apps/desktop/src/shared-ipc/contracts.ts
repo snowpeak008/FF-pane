@@ -159,6 +159,71 @@ export interface SqliteCheckReport {
   readonly checkedAt: number;
 }
 
+/** diagnostics:check-pty 响应（T10.1；失败路径经由 IpcResult 错误信封传递）。 */
+export interface PtyCheckReport {
+  readonly shell: string;
+  readonly marker: string;
+  readonly checkedAt: number;
+}
+
+/** terminal:create 请求（T10.1）。cwd 缺省时主进程回退用户主目录；shell 仅允许白名单裸名。
+ * args / env **不在契约内**：renderer 不得传入；T10.4 起由主进程内部组装。 */
+export interface CreateTerminalRequest {
+  readonly id?: string;
+  readonly cwd?: string;
+  readonly shell?: string;
+  readonly cols: number;
+  readonly rows: number;
+  /** 扩展点：角色 / CLI / 令牌等元数据，本单主进程原样保存不解释。 */
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+/** 终端快照（create / list 响应）。 */
+export interface TerminalInfo {
+  readonly id: string;
+  readonly pid: number;
+  readonly cwd: string;
+  readonly shell: string;
+  readonly cols: number;
+  readonly rows: number;
+  readonly createdAt: number;
+  readonly lastOutputAt: number;
+  readonly lastInputAt: number;
+  readonly exited: boolean;
+  readonly exitCode: number | undefined;
+  readonly metadata: Readonly<Record<string, unknown>> | undefined;
+}
+
+export interface TerminalIdRequest {
+  readonly id: string;
+}
+
+export interface TerminalWriteRequest {
+  readonly id: string;
+  readonly data: string;
+}
+
+export interface TerminalResizeRequest {
+  readonly id: string;
+  readonly cols: number;
+  readonly rows: number;
+}
+
+export interface TerminalReplayResponse {
+  readonly id: string;
+  readonly data: string;
+}
+
+export interface TerminalOutputEvent {
+  readonly id: string;
+  readonly data: string;
+}
+
+export interface TerminalExitEvent {
+  readonly id: string;
+  readonly exitCode: number;
+}
+
 /** 冒烟自测中单个检查项的结果。 */
 export interface SmokeCheck {
   readonly name: string;
@@ -1145,8 +1210,17 @@ export interface IpcInvokeContracts {
   "app:get-locale": { request: undefined; response: LocaleInfo };
   "app:ping": { request: PingRequest; response: PingResponse };
   "diagnostics:check-sqlite": { request: undefined; response: SqliteCheckReport };
+  /** PTY 自检（T10.1；启动期 / smoke 用，渲染层一般不调）。 */
+  "diagnostics:check-pty": { request: undefined; response: PtyCheckReport };
   /** 打开系统目录选择器，返回选定目录的绝对路径（取消经判别字段区分，不走错误）。 */
   "dialog:pick-directory": { request: undefined; response: PickDirectoryResult };
+  /** 创建内嵌终端（T10.1）；shell 白名单 pwsh/powershell/cmd，cwd 必须是已存在目录。 */
+  "terminal:create": { request: CreateTerminalRequest; response: TerminalInfo };
+  "terminal:write": { request: TerminalWriteRequest; response: { readonly ok: true } };
+  "terminal:resize": { request: TerminalResizeRequest; response: { readonly ok: true } };
+  "terminal:kill": { request: TerminalIdRequest; response: { readonly ok: true } };
+  "terminal:list": { request: undefined; response: readonly TerminalInfo[] };
+  "terminal:get-replay": { request: TerminalIdRequest; response: TerminalReplayResponse };
   /** 列出工作台已登记的全部项目（注册表原样，只读 projects.json，不碰任何项目目录）。 */
   "projects:list": { request: undefined; response: readonly ProjectRegistryEntry[] };
   /**
@@ -1390,6 +1464,10 @@ export interface IpcEventContracts {
   "knowledge:import-progress": { payload: KnowledgeImportProgressEvent };
   /** 任务落定通知（T9.7 B 栏落定高亮）：done / failed / blocked 时推送。 */
   "tasks:settled": { payload: TaskSettledEvent };
+  /** 终端批量输出（T10.1，约 8–16ms 合并一批）。 */
+  "terminal:output": { payload: TerminalOutputEvent };
+  /** 终端进程退出（T10.1）。 */
+  "terminal:exit": { payload: TerminalExitEvent };
 }
 
 export type InvokeChannel = keyof IpcInvokeContracts;
@@ -1412,7 +1490,14 @@ export const INVOKE_CHANNELS = [
   "app:get-locale",
   "app:ping",
   "diagnostics:check-sqlite",
+  "diagnostics:check-pty",
   "dialog:pick-directory",
+  "terminal:create",
+  "terminal:write",
+  "terminal:resize",
+  "terminal:kill",
+  "terminal:list",
+  "terminal:get-replay",
   "projects:list",
   "projects:summary",
   "projects:create",
@@ -1488,6 +1573,8 @@ export const EVENT_CHANNELS = [
   "habits:suggestion",
   "knowledge:import-progress",
   "tasks:settled",
+  "terminal:output",
+  "terminal:exit",
 ] as const satisfies readonly EventChannel[];
 
 type AssertNever<T extends never> = T;

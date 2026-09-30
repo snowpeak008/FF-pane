@@ -326,10 +326,10 @@ describe("错误原文提取（设计系统 §6.2：禁止把错误吞掉）", (
 });
 
 describe("导航表与路由表结构（项目设计计划 §11 / 设计系统 §7）", () => {
-  it("七个主页面 + 一个设置入口，共八条路由", () => {
-    expect(NAV_ITEMS).toHaveLength(7);
-    expect(ALL_NAV_ITEMS).toHaveLength(8);
-    expect(NAV_IDS).toHaveLength(7);
+  it("八个主页面 + 一个设置入口，共九条路由", () => {
+    expect(NAV_ITEMS).toHaveLength(8);
+    expect(ALL_NAV_ITEMS).toHaveLength(9);
+    expect(NAV_IDS).toHaveLength(8);
     expect(NAV_ITEMS.map((item) => item.id)).toEqual([...NAV_IDS]);
     expect(SETTINGS_NAV_ITEM.id).toBe("settings");
   });
@@ -345,8 +345,8 @@ describe("导航表与路由表结构（项目设计计划 §11 / 设计系统 �
     }
   });
 
-  it("Ctrl+1~7 连续覆盖七个主页面，设置页不占键位", () => {
-    expect(NAV_ITEMS.map((item) => item.shortcut)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+  it("Ctrl+1~8 连续覆盖八个主页面，设置页不占键位", () => {
+    expect(NAV_ITEMS.map((item) => item.shortcut)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
     expect(SETTINGS_NAV_ITEM.shortcut).toBeUndefined();
   });
 
@@ -385,7 +385,7 @@ describe("页面顺序只此一份注册表（T8.1 收敛）", () => {
 
   it("侧栏的键位提示串与 §7 的写法一致", () => {
     expect(shortcutHint(1)).toBe("Ctrl+1");
-    expect(shortcutHint(7)).toBe("Ctrl+7");
+    expect(shortcutHint(8)).toBe("Ctrl+8");
   });
 
   it("布局层不再自带页面切换键位的匹配实现（键位判定唯一，归 command/ 注册表）", async () => {

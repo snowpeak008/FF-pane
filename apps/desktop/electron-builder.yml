@@ -57,11 +57,14 @@ asar: true
 # @koromix/koffi-<platform>-<arch> 里的 koffi.node，走 dlopen 加载，asar 内路径喂不进去。
 # 它承载的是「取消任务时把子进程树整个圈禁终止」这条路径（见 process/job-object.ts）；
 # 加载失败会降级回 taskkill /T（功能仍在，只是重父化的孙进程可能残留），但那是兜底。
+# @lydell/node-pty（T10.1）同理：入口包是 JS，平台包 @lydell/node-pty-<os>-<arch> 内的
+# conpty.node / conpty.dll / OpenConsole.exe（Windows）必须解包才能 dlopen / CreateProcess。
 asarUnpack:
   - node_modules/better-sqlite3/build/Release/**
   - node_modules/better-sqlite3/prebuilds/**
   - node_modules/sqlite-vec-*/**
   - node_modules/@koromix/koffi-*/**
+  - node_modules/@lydell/node-pty-*/**
 
 win:
   target:
