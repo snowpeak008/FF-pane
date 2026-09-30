@@ -141,6 +141,34 @@
         "title": "Memory candidate: reject",
         "keywords": "reject memory candidate 拒绝 记忆 候选"
       },
+      "workbench-new-tab": {
+        "title": "Workbench: new tab",
+        "keywords": "workbench new tab 工作台 标签"
+      },
+      "workbench-new-window": {
+        "title": "Workbench: new window",
+        "keywords": "workbench new window shell 工作台 窗口 终端"
+      },
+      "workbench-split-right": {
+        "title": "Workbench: split right",
+        "keywords": "workbench split right horizontal 分屏 右"
+      },
+      "workbench-split-down": {
+        "title": "Workbench: split down",
+        "keywords": "workbench split down vertical 分屏 下"
+      },
+      "workbench-close-window": {
+        "title": "Workbench: close window",
+        "keywords": "workbench close window kill 关闭 窗口"
+      },
+      "workbench-close-tab": {
+        "title": "Workbench: close tab",
+        "keywords": "workbench close tab 关闭 标签"
+      },
+      "workbench-maximize-window": {
+        "title": "Workbench: maximize/restore window",
+        "keywords": "workbench maximize restore 最大化 还原"
+      },
       "nav-toggle-sidebar": {
         "title": "Toggle navigation sidebar",
         "keywords": "sidebar collapse expand 侧栏 导航 收起 展开"
@@ -265,13 +293,41 @@
   "workbench": {
     "cwd": {
       "home": "Working directory: home (no project selected)",
-      "project": "Working directory: {{path}}"
+      "project": "Working directory: {{path}}",
+      "fallback": "The original working directory no longer exists; fell back to the project root."
     },
     "terminal": {
       "exited": "Exited (code {{code}})",
       "restart": "Restart",
       "copy": "Copy",
       "paste": "Paste"
+    },
+    "empty": {
+      "noProject": "No project selected. Create or pick one on the projects page, then open a terminal.",
+      "goProjects": "Go to projects",
+      "noWindow": "This project has no terminal windows yet. Create one to start.",
+      "newWindow": "New window"
+    },
+    "tab": {
+      "new": "New tab",
+      "close": "Close tab",
+      "closeConfirmTitle": "Close tab?",
+      "closeConfirmBody": "This tab still has running terminals. Closing it will terminate those processes."
+    },
+    "window": {
+      "status": {
+        "running": "Running",
+        "exited": "Exited",
+        "starting": "Starting"
+      },
+      "splitRight": "Split right",
+      "splitDown": "Split down",
+      "maximize": "Maximize",
+      "restore": "Restore",
+      "close": "Close window"
+    },
+    "limit": {
+      "reached": "Reached the concurrent window limit ({{max}}). Close some windows, or raise the limit in Settings."
     }
   },
   "plan": {
@@ -465,6 +521,14 @@
       "optionPercent": "{{percent}}%",
       "loadError": "Failed to load",
       "error": "Failed to save context threshold"
+    },
+    "workbenchLimit": {
+      "title": "Workbench windows",
+      "label": "Concurrent limit",
+      "hint": "Total terminal windows across all projects. New ones are rejected at the limit; the main process enforces it too.",
+      "option": "{{count}}",
+      "loadError": "Failed to load",
+      "error": "Failed to save window limit"
     },
     "profiles": {
       "title": "Agent profiles",
@@ -866,7 +930,8 @@
       "session": "Session page",
       "session-input": "Session composer",
       "tasks": "Tasks page",
-      "memory-review": "Memory review"
+      "memory-review": "Memory review",
+      "workbench": "Workbench"
     },
     "action": {
       "palette-open": "Command palette (projects, pages, actions)",
@@ -888,6 +953,13 @@
       "tasks-accept": "Tasks: accept (approve)",
       "memory-approve": "Memory candidate: approve",
       "memory-reject": "Memory candidate: reject",
+      "workbench-new-tab": "Workbench: new tab",
+      "workbench-new-window": "Workbench: new window",
+      "workbench-split-right": "Workbench: split right",
+      "workbench-split-down": "Workbench: split down",
+      "workbench-close-window": "Workbench: close window",
+      "workbench-close-tab": "Workbench: close tab",
+      "workbench-maximize-window": "Workbench: maximize/restore window",
       "nav-toggle-sidebar": "Toggle navigation sidebar (rail A)",
       "nav-toggle-secondary-panel": "Toggle secondary panel (rail B)"
     }
@@ -1180,6 +1252,7 @@
       "failed": "A task failed (unread)",
       "blocked": "A task is blocked (unread)"
     },
-    "switchTo": "Switch to project: {{name}}"
+    "switchTo": "Switch to project: {{name}}",
+    "windowCount": "{{count}} running window(s)"
   }
 }

@@ -177,6 +177,8 @@ describe("目录布局 resolve / init", () => {
       communication: join(root, "habits", "communication"),
       environment: join(root, "habits", "environment"),
     });
+    expect(layout.observationsFile).toBe(join(root, "observations.json"));
+    expect(layout.workbenchLayoutsFile).toBe(join(root, "workbench-layouts.json"));
     expect(layout.knowledgeDir).toBe(join(root, "knowledge"));
     expect(layout.knowledgeSourcesDir).toBe(join(root, "knowledge", "sources"));
     expect(layout.knowledgeNotesDir).toBe(join(root, "knowledge", "notes"));

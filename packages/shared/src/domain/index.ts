@@ -22,3 +22,4 @@ export * from "./report.js";
 export * from "./run.js";
 export * from "./session.js";
 export * from "./task.js";
+export * from "./workbench.js";

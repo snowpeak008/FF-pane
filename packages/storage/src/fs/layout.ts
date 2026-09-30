@@ -53,6 +53,11 @@ export interface GlobalLayout {
   readonly habitCategoryDirs: Readonly<Record<HabitCategory, string>>;
   /** observations.json —— 跨会话「纠正观察」记录（来源三累计依据，§8.2.4）。 */
   readonly observationsFile: string;
+  /**
+   * workbench-layouts.json —— 各项目工作台标签页 / 分屏树 / 窗口元数据（T10.2）。
+   * 不含终端输出；损坏时回退空布局。
+   */
+  readonly workbenchLayoutsFile: string;
   /** knowledge/ —— 知识库根目录。 */
   readonly knowledgeDir: string;
   /** knowledge/sources/ —— 导入的原文件（保留导入时的目录结构）。 */
@@ -124,6 +129,7 @@ export function resolveGlobalLayout(rootDir: string): GlobalLayout {
     habitsDir,
     habitCategoryDirs,
     observationsFile: join(rootDir, "observations.json"),
+    workbenchLayoutsFile: join(rootDir, "workbench-layouts.json"),
     knowledgeDir,
     knowledgeSourcesDir: join(knowledgeDir, "sources"),
     knowledgeNotesDir: join(knowledgeDir, "notes"),

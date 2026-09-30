@@ -1,14 +1,20 @@
 /**
- * 终端 IPC 装配（T10.1）：create / write / resize / kill / list / replay + 输出与退出推送。
- * renderer 不得经 IPC 传入 args / env（由主进程内部 API 保留，供 T10.4）。
+ * 终端 IPC 装配（T10.1 / T10.2）：create / write / resize / kill / list / replay。
+ * T10.2：create 强制校验同时存活窗口上限（读全局 config）。
  */
 
+import { clampMaxWorkbenchWindows, DEFAULT_MAX_WORKBENCH_WINDOWS } from "@ff-pane/shared";
 import type { BrowserWindow } from "electron";
 import type { InvokeHandlers } from "../../shared-ipc/server";
 import { publishEvent } from "../../shared-ipc/server";
 import { createNodePtyFactory } from "./factory";
 import { PtyManager } from "./manager";
 import { assertTerminalCreateIpcSafe, defaultTerminalCwd } from "./shell";
+
+export interface TerminalLayerOptions {
+  /** 读取同时窗口上限；缺省回退出厂默认。 */
+  readonly getMaxWorkbenchWindows?: () => number | Promise<number>;
+}
 
 export interface TerminalLayer {
   readonly handlers: Pick<
@@ -24,10 +30,21 @@ export interface TerminalLayer {
   readonly dispose: () => Promise<void>;
 }
 
+/** 上限拒绝错误前缀（渲染层可据此出友好提示）。 */
+export const WORKBENCH_WINDOW_LIMIT_ERROR_PREFIX = "workbench window limit reached:";
+
+export function isWorkbenchWindowLimitError(message: string): boolean {
+  return message.startsWith(WORKBENCH_WINDOW_LIMIT_ERROR_PREFIX);
+}
+
 /**
  * 创建终端层：推送事件绑定到当前主窗口；cwd 缺省时回退用户主目录。
  */
-export function createTerminalLayer(getWindow: () => BrowserWindow | null): TerminalLayer {
+export function createTerminalLayer(
+  getWindow: () => BrowserWindow | null,
+  options: TerminalLayerOptions = {},
+): TerminalLayer {
+  const getMax = options.getMaxWorkbenchWindows ?? (() => DEFAULT_MAX_WORKBENCH_WINDOWS);
   const manager = new PtyManager({
     factory: createNodePtyFactory(),
     listeners: {
@@ -49,8 +66,13 @@ export function createTerminalLayer(getWindow: () => BrowserWindow | null): Term
   });
 
   const handlers: TerminalLayer["handlers"] = {
-    "terminal:create": (request) => {
+    "terminal:create": async (request) => {
       assertTerminalCreateIpcSafe(request);
+      const max = await getMax();
+      const limit = clampMaxWorkbenchWindows(max);
+      if (manager.aliveCount() >= limit) {
+        throw new Error(`${WORKBENCH_WINDOW_LIMIT_ERROR_PREFIX} ${limit}`);
+      }
       const cwd =
         request.cwd === undefined || request.cwd.trim() === "" ? defaultTerminalCwd() : request.cwd;
       return manager.create({

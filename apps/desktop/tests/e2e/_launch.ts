@@ -62,6 +62,10 @@ export interface LaunchOptions {
    * Windows 下环境变量键可能是 Path / path，按大小写不敏感语义就地改写。
    */
   readonly pathPrepend?: string;
+  /** 复用已有全局数据根（T10.2 重启恢复布局）；缺省则新建临时目录。 */
+  readonly dataRoot?: string;
+  /** cleanup 时是否删除 dataRoot（复用场景传 false）。 */
+  readonly retainDataRoot?: boolean;
 }
 
 /**
@@ -69,8 +73,9 @@ export interface LaunchOptions {
  * 调用方负责在 finally 中 await cleanup()。
  */
 export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedApp> {
-  const dataRoot = mkdtempSync(join(tmpdir(), "ffpane-e2e-data-"));
+  const dataRoot = options.dataRoot ?? mkdtempSync(join(tmpdir(), "ffpane-e2e-data-"));
   const userDataDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-udata-"));
+  const retainDataRoot = options.retainDataRoot === true;
 
   const env = stringEnv(process.env);
   env["FF_PANE_DATA_ROOT"] = dataRoot;
@@ -134,7 +139,9 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
       // 给内核一点时间收走进程树，随后的目录删除才不撞句柄
       await new Promise((resolve) => setTimeout(resolve, 2_000));
     }
-    rmSync(dataRoot, { recursive: true, force: true, maxRetries: 3 });
+    if (!retainDataRoot) {
+      rmSync(dataRoot, { recursive: true, force: true, maxRetries: 3 });
+    }
     rmSync(userDataDir, { recursive: true, force: true, maxRetries: 3 });
   };
 

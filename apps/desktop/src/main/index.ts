@@ -1,15 +1,18 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createConfigStore, resolveGlobalLayout } from "@ff-pane/storage";
 import { app, BrowserWindow, dialog, ipcMain, session, shell } from "electron";
 import { registerInvokeHandlers } from "../shared-ipc/server";
 import { installCsp } from "./csp";
 import { createDataHandlers } from "./data";
+import { resolveGlobalRoot } from "./data-root";
 import { createKnowledgeHandlers } from "./knowledge";
-import { createQuitCoordinator, createSessionLayer } from "./session";
+import { createQuitCoordinator, createSessionLayer, type QuitCoordinatorDeps } from "./session";
 import { startSmokeMode } from "./smoke";
 import { runSqliteCheck } from "./sqlite-check";
 import { createTerminalLayer, runPtyCheck, type TerminalLayer } from "./terminal";
 import { loadWindowState, trackWindowState } from "./window-state";
+import { createLayoutFlushBridge } from "./workbench-flush";
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 const isSmokeMode = process.argv.includes("--smoke");
@@ -127,8 +130,19 @@ async function bootstrap(): Promise<void> {
 
   // 数据层接线：解析全局根、幂等初始化布局、注册 projects / dialog handlers。
   // 失败不阻止窗口打开（页面自身的错误态会呈现 IPC 失败原文）。
+  const projectPtyCleanup: {
+    killProject: (projectId: string) => void;
+  } = {
+    killProject: () => {
+      // 终端层稍后注入
+    },
+  };
   try {
-    const dataHandlers = await createDataHandlers(() => mainWindow);
+    const dataHandlers = await createDataHandlers(() => mainWindow, {
+      onProjectRemoved: (projectId) => {
+        projectPtyCleanup.killProject(projectId);
+      },
+    });
     registerInvokeHandlers(ipcMain, dataHandlers);
   } catch (thrown) {
     const message = thrown instanceof Error ? thrown.message : String(thrown);
@@ -136,25 +150,38 @@ async function bootstrap(): Promise<void> {
     dialog.showErrorBox("FF-pane：数据目录初始化失败", message);
   }
 
+  // 布局 flush 桥（T10.2'）：退出前向渲染端请求落盘防抖；ack 经 IPC 回传。
+  const layoutFlush = createLayoutFlushBridge(() => {
+    if (mainWindow === null || mainWindow.isDestroyed()) {
+      return null;
+    }
+    return mainWindow.webContents;
+  });
+  registerInvokeHandlers(ipcMain, layoutFlush.handlers);
+
   // 会话执行层接线（T4.2）：适配器注册表 + 编排器 + 流式事件推送。
   // 独立 try：装配失败只让会话执行不可用，不牵连数据层与窗口。
+  let quitDeps: QuitCoordinatorDeps = {
+    hasInflight: () => false,
+    prepare: async () => undefined,
+    hasRuntimeResources: () => false,
+    closeRuntimes: async () => undefined,
+    flushLayouts: () => layoutFlush.requestFlush(),
+    quit: () => app.quit(),
+    log: (message: string) => console.log(`[main] ${message}`),
+  };
   try {
     const sessionLayer = await createSessionLayer(() => mainWindow);
     registerInvokeHandlers(ipcMain, sessionLayer.handlers);
-
-    // 退出钩子（T8.2b；T8.5c 增补 opencode server 关停）：有在飞轮次时先就地收尾
-    // （transcript / Run / 任务 / 标记）再退出，总时长上限 QUIT_TOTAL_BUDGET_MS；
-    // 常驻 server 在收尾之后、退出之前关停（独立小预算）。子进程由 Job Object 兜底（T8.2）。
-    const quitCoordinator = createQuitCoordinator({
+    quitDeps = {
       hasInflight: () => sessionLayer.orchestrator.activeCount() > 0,
       prepare: () => sessionLayer.orchestrator.prepareForQuit(),
       hasRuntimeResources: () => sessionLayer.registry.hasRuntimeResources(),
       closeRuntimes: () => sessionLayer.registry.closeRuntimes(),
+      flushLayouts: () => layoutFlush.requestFlush(),
       quit: () => app.quit(),
-      log: (message) => console.log(`[main] ${message}`),
-    });
-    app.on("before-quit", (event) => quitCoordinator.onBeforeQuit(event));
-
+      log: (message: string) => console.log(`[main] ${message}`),
+    };
     // 启动修正（T8.2b）：对已登记项目各扫一遍上次被中断的轮次。后台进行、不挡窗口；
     // 会话层 handlers 首次触碰某项目时还会按项目再保证一次（幂等）。
     void sessionLayer.repairRegisteredProjects();
@@ -162,6 +189,10 @@ async function bootstrap(): Promise<void> {
     const message = thrown instanceof Error ? thrown.message : String(thrown);
     console.error(`[main] session layer init failed: ${message}`);
   }
+
+  // 退出钩子（T8.2b / T8.5c / T10.2'）：flush 布局 → 在飞收尾 → 关 opencode server。
+  const quitCoordinator = createQuitCoordinator(quitDeps);
+  app.on("before-quit", (event) => quitCoordinator.onBeforeQuit(event));
 
   // 知识库层接线（T6.5）：索引库连接 + sqlite-vec 装载 + 导入编排。
   // 独立 try：装配失败（索引库损坏等）只让知识库页不可用，不牵连数据层与会话层。
@@ -173,9 +204,17 @@ async function bootstrap(): Promise<void> {
     console.error(`[main] knowledge layer init failed: ${message}`);
   }
 
-  // 终端层（T10.1）：内嵌 PTY 管理；失败只让工作台不可用。
+  // 终端层（T10.1 / T10.2）：内嵌 PTY 管理；失败只让工作台不可用。
   try {
-    terminalLayer = createTerminalLayer(() => mainWindow);
+    const configStore = createConfigStore(resolveGlobalLayout(resolveGlobalRoot()).configFile);
+    terminalLayer = createTerminalLayer(() => mainWindow, {
+      getMaxWorkbenchWindows: async () => (await configStore.readConfig()).maxWorkbenchWindows,
+    });
+    projectPtyCleanup.killProject = (projectId) => {
+      terminalLayer?.manager.killWhere(
+        (metadata) => metadata !== undefined && metadata["projectId"] === projectId,
+      );
+    };
     registerInvokeHandlers(ipcMain, terminalLayer.handlers);
     app.on("will-quit", () => {
       const layer = terminalLayer;

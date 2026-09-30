@@ -52,6 +52,7 @@ import {
   createProviderStore,
   createRoleStore,
   createSessionStore,
+  createWorkbenchLayoutStore,
   deleteEntry,
   deleteHabit,
   initGlobalLayout,
@@ -109,6 +110,9 @@ type DataChannel =
   | "secrets:masked-tail"
   | "config:get"
   | "config:update"
+  | "workbench:get-layouts"
+  | "workbench:save-layout"
+  | "workbench:remove-layout"
   | "profiles:list"
   | "profiles:create"
   | "profiles:update"
@@ -142,12 +146,18 @@ type DataChannel =
 /** 目录选择器挂靠的父窗口取值器（窗口在数据层装配后才创建，故惰性取用）。 */
 export type MainWindowGetter = () => BrowserWindow | null;
 
+export interface DataHandlersOptions {
+  /** 项目从注册表移除后的清场（杀该项目 PTY 等）；可在终端层装配后注入。 */
+  readonly onProjectRemoved?: (projectId: string) => void | Promise<void>;
+}
+
 /**
  * 解析全局数据根、幂等初始化布局、绑定项目注册表，返回契约化的 handler 表。
  * 在 app.whenReady 之后、注册窗口之前调用一次。
  */
 export async function createDataHandlers(
   getWindow: MainWindowGetter,
+  options: DataHandlersOptions = {},
 ): Promise<Pick<InvokeHandlers, DataChannel>> {
   // 全局数据根经共享解析（FF_PANE_DATA_ROOT 覆盖优先）；session 层必须共用同一解析。
   const layout = await initGlobalLayout(resolveGlobalRoot());
@@ -164,6 +174,7 @@ export async function createDataHandlers(
   const profiles = createProfileStore(layout.profilesFile);
   const roles = createRoleStore(layout.rolesFile);
   const config = createConfigStore(layout.configFile);
+  const workbenchLayouts = createWorkbenchLayoutStore(layout.workbenchLayoutsFile);
 
   // Profile 落盘前的校验（W1.6，T8.4 扩展）：provider 引用 / 模型 kind / 角色
   // （内置字面量或已存在的自定义角色）/ 权限预设 vs 角色默认（自定义角色以其预设为默认层）。
@@ -308,7 +319,12 @@ export async function createDataHandlers(
       return registry.addProject({ name: request.name, rootPath });
     },
 
-    "projects:remove": (request) => registry.removeProject(request.id),
+    "projects:remove": async (request) => {
+      const removed = await registry.removeProject(request.id);
+      await workbenchLayouts.removeProject(request.id);
+      await options.onProjectRemoved?.(request.id);
+      return removed;
+    },
 
     "projects:restore": (request) => registry.restoreProject(request.entry),
 
@@ -445,6 +461,16 @@ export async function createDataHandlers(
     "config:get": () => config.readConfig(),
 
     "config:update": (request) => config.updateConfig(request),
+
+    "workbench:get-layouts": () => workbenchLayouts.readAll(),
+    "workbench:save-layout": async (request) => {
+      await workbenchLayouts.saveProject(request.layout);
+      return { ok: true as const };
+    },
+    "workbench:remove-layout": async (request) => {
+      await workbenchLayouts.removeProject(request.projectId);
+      return { ok: true as const };
+    },
 
     "profiles:list": () => profiles.listProfiles(),
 

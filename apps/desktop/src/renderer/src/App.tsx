@@ -19,6 +19,7 @@ import { AppRoutes } from "./pages/AppRoutes";
 import { ConfigDraftDialog } from "./pages/session/ConfigDraftDialog";
 import { HabitSuggestionBridge } from "./pages/session/HabitSuggestionBridge";
 import { SessionEventBridge } from "./pages/session/SessionEventBridge";
+import { WorkbenchFlushBridge } from "./pages/workbench/WorkbenchFlushBridge";
 import { useUiStore } from "./stores/ui";
 import { useTheme } from "./theme";
 
@@ -128,6 +129,8 @@ export function App(): ReactElement {
         <HabitSuggestionBridge />
         {/* 配置草案确认对话框（T9.1 铁律 2）：全局模态，用户在任何页面都能裁决。 */}
         <ConfigDraftDialog />
+        {/* 工作台布局退出 flush（T10.2'）：before-quit / pagehide 落盘防抖。 */}
+        <WorkbenchFlushBridge />
         <AppToaster />
       </TooltipProvider>
     </HashRouter>

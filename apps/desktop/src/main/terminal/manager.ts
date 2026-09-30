@@ -173,6 +173,34 @@ export class PtyManager {
     return [...this.sessions.values()].map(toRecord);
   }
 
+  /** 未退出的会话数（T10.2 上限校验）。 */
+  aliveCount(): number {
+    let count = 0;
+    for (const session of this.sessions.values()) {
+      if (!session.exited) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  /**
+   * 按 metadata 谓词主动终止匹配会话（项目移除清场）。
+   * 返回被杀的 id 列表。
+   */
+  killWhere(
+    predicate: (metadata: Readonly<Record<string, unknown>> | undefined) => boolean,
+  ): readonly string[] {
+    const killed: string[] = [];
+    for (const session of [...this.sessions.values()]) {
+      if (predicate(session.metadata)) {
+        this.kill(session.id);
+        killed.push(session.id);
+      }
+    }
+    return killed;
+  }
+
   get(id: string): TerminalRecord | undefined {
     const session = this.sessions.get(id);
     return session === undefined ? undefined : toRecord(session);

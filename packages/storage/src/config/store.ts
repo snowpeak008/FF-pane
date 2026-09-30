@@ -9,9 +9,21 @@
  * - JSON 语法损坏由 W1.2a 隔离并上抛 StorageCorruptJsonError；结构不符抛 ConfigFileInvalidError。
  */
 
-import { DEFAULT_GLOBAL_CONFIG, type GlobalConfig } from "@ff-pane/shared";
+import {
+  clampMaxWorkbenchWindows,
+  DEFAULT_GLOBAL_CONFIG,
+  type GlobalConfig,
+} from "@ff-pane/shared";
 import { readJson, writeJsonAtomic } from "../fs/index.js";
 import { ConfigFileInvalidError } from "./errors.js";
+
+/** 读入 / 合并后钳制易越界字段，避免极端值落盘或生效。 */
+function normalizeConfig(config: GlobalConfig): GlobalConfig {
+  return {
+    ...config,
+    maxWorkbenchWindows: clampMaxWorkbenchWindows(config.maxWorkbenchWindows),
+  };
+}
 
 /** config.json 的当前格式版本。 */
 export const CONFIG_FILE_VERSION = 1;
@@ -54,7 +66,7 @@ async function loadConfig(configFile: string): Promise<GlobalConfig> {
     typeof file.config === "object" && file.config !== null ? file.config : {}
   ) as Partial<GlobalConfig>;
   // 缺失字段补默认：读出来永远是完整设置（JSON 边界，字段写入时已受控）
-  return { ...DEFAULT_GLOBAL_CONFIG, ...stored };
+  return normalizeConfig({ ...DEFAULT_GLOBAL_CONFIG, ...stored });
 }
 
 async function saveConfig(configFile: string, config: GlobalConfig): Promise<void> {
@@ -72,7 +84,7 @@ export function createConfigStore(configFile: string): ConfigStore {
 
     async updateConfig(patch: Partial<GlobalConfig>): Promise<GlobalConfig> {
       const current = await loadConfig(configFile);
-      const merged: GlobalConfig = { ...current, ...patch };
+      const merged = normalizeConfig({ ...current, ...patch });
       await saveConfig(configFile, merged);
       return merged;
     },

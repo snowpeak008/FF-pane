@@ -4,13 +4,14 @@
  * ════════════════════════════════════════════════════════════════════════════
  * 一、21 条从哪来（拆分规则，别当魔数）
  * ════════════════════════════════════════════════════════════════════════════
- * §7 表格 18 行（T9.7 增 Ctrl+B / Ctrl+Shift+B 两行），本注册表按
+ * §7 表格 18 行（T9.7 增 Ctrl+B / Ctrl+Shift+B 两行；T10.2 增工作台 7 行），本注册表按
  * **一个「命令 × 作用域」一条** 展开：
  *   - `Alt+←` / `Alt+→`        → 后退、前进 2 条（两个命令）
  *   - `↑` / `↓`                → 上移、下移 2 条（两个命令）
  *   - `Ctrl+Shift+A`           → 任务接受、记忆候选通过 2 条（同键位、两个作用域）
  *   - `Ctrl+1` ~ `Ctrl+N`      → 1 条（同一个"按序号切页"命令，N 个键位；T10.1 起 N=8）
- * 18 + 1 + 1 + 1 = **21**。`Ctrl+Enter` 在 §7 本来就分两行（会话发送 / 任务派发），
+ *   - 工作台 7 条（Ctrl+Shift+T/N/\/D/W/F4/M）
+ * 18 + 1 + 1 + 1 + 7 = **28**。`Ctrl+Enter` 在 §7 本来就分两行（会话发送 / 任务派发），
  * 同键位不同作用域不算冲突——这是本表的既有先例。
  *
  * ════════════════════════════════════════════════════════════════════════════
@@ -48,6 +49,8 @@ export const SHORTCUT_SCOPES = [
   "tasks",
   /** 记忆页的待审核候选标签。 */
   "memory-review",
+  /** 工作台页（T10.2 分屏 / 标签）。 */
+  "workbench",
 ] as const;
 
 export type ShortcutScope = (typeof SHORTCUT_SCOPES)[number];
@@ -148,6 +151,7 @@ const KEY_DISPLAY: Readonly<Record<string, string>> = {
   arrowright: "\u2192",
   arrowup: "\u2191",
   arrowdown: "\u2193",
+  f4: "F4",
   " ": "Space",
 };
 
@@ -439,10 +443,59 @@ export const SHORTCUT_TABLE: readonly ShortcutRegistration[] = [
     disabledInTextInput: false,
     preventDefault: true,
   },
+  {
+    commandId: "workbench-new-tab",
+    keys: ["Ctrl+Shift+T"],
+    scopes: ["workbench"],
+    disabledInTextInput: false,
+    preventDefault: true,
+  },
+  {
+    commandId: "workbench-new-window",
+    keys: ["Ctrl+Shift+N"],
+    scopes: ["workbench"],
+    disabledInTextInput: false,
+    preventDefault: true,
+  },
+  {
+    commandId: "workbench-split-right",
+    keys: ["Ctrl+Shift+\\"],
+    scopes: ["workbench"],
+    disabledInTextInput: false,
+    preventDefault: true,
+  },
+  {
+    commandId: "workbench-split-down",
+    keys: ["Ctrl+Shift+D"],
+    scopes: ["workbench"],
+    disabledInTextInput: false,
+    preventDefault: true,
+  },
+  {
+    commandId: "workbench-close-window",
+    keys: ["Ctrl+Shift+W"],
+    scopes: ["workbench"],
+    disabledInTextInput: false,
+    preventDefault: true,
+  },
+  {
+    commandId: "workbench-close-tab",
+    keys: ["Ctrl+Shift+F4"],
+    scopes: ["workbench"],
+    disabledInTextInput: false,
+    preventDefault: true,
+  },
+  {
+    commandId: "workbench-maximize-window",
+    keys: ["Ctrl+Shift+M"],
+    scopes: ["workbench"],
+    disabledInTextInput: false,
+    preventDefault: true,
+  },
 ];
 
-/** §7 表格行数（= 本注册表条目数），拆分规则见文件头注。 */
-export const SHORTCUT_TABLE_SIZE = 21;
+/** §7 表格行数（= 本注册表条目数），拆分规则见文件头注。T10.2 增 7 条工作台 → 28。 */
+export const SHORTCUT_TABLE_SIZE = 28;
 
 export interface ShortcutRegistry {
   /** 注册一条；键位冲突抛 ShortcutConflictError。 */

@@ -1,5 +1,5 @@
 /**
- * xterm 终端视图（T10.1）：挂载回放 → 订阅增量；卸载只退订不杀进程。
+ * xterm 终端视图（T10.1 / T10.2）：按 windowId 槽位复用 PTY；卸载只退订不杀进程。
  */
 
 import { FitAddon } from "@xterm/addon-fit";
@@ -12,12 +12,21 @@ import { invokeQuery } from "../../ipc/query";
 import { useSubscription } from "../../ipc/useSubscription";
 import { cn } from "../../lib/cn";
 import { useTheme } from "../../theme";
+import { forgetLiveTerminal, peekLiveTerminal, rememberLiveTerminal } from "./live-terminals";
 import "@xterm/xterm/css/xterm.css";
 
 export interface TerminalViewProps {
+  /** 工作台窗口 id（槽位键；与 PTY id 分离）。 */
+  readonly windowId: string;
+  readonly projectId: string;
   /** 工作目录；缺省时主进程回退用户主目录。 */
   readonly cwd?: string;
+  /** cwd 不可用时的回退目录（项目根）。 */
+  readonly fallbackCwd?: string;
   readonly className?: string;
+  readonly onTerminalIdChange?: (terminalId: string | undefined) => void;
+  readonly onExitCodeChange?: (exitCode: number | undefined) => void;
+  readonly onCwdFallback?: () => void;
 }
 
 interface ThemeColors {
@@ -42,12 +51,6 @@ function monoFontFamily(): string {
   return fromToken || '"Cascadia Mono", Consolas, ui-monospace, "SFMono-Regular", Menlo, monospace';
 }
 
-const liveTerminalByKey = new Map<string, string>();
-
-function slotKey(cwd: string | undefined): string {
-  return cwd ?? "__home__";
-}
-
 async function tryLoadWebgl(terminal: Terminal): Promise<void> {
   try {
     const { WebglAddon } = await import("@xterm/addon-webgl");
@@ -65,7 +68,16 @@ async function tryLoadWebgl(terminal: Terminal): Promise<void> {
   }
 }
 
-export function TerminalView({ cwd, className }: TerminalViewProps): ReactElement {
+export function TerminalView({
+  windowId,
+  projectId,
+  cwd,
+  fallbackCwd,
+  className,
+  onTerminalIdChange,
+  onExitCodeChange,
+  onCwdFallback,
+}: TerminalViewProps): ReactElement {
   const { t } = useTranslation();
   const { resolvedTheme } = useTheme();
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -77,6 +89,13 @@ export function TerminalView({ cwd, className }: TerminalViewProps): ReactElemen
   const [error, setError] = useState<string | undefined>(undefined);
   const [menu, setMenu] = useState<{ readonly x: number; readonly y: number } | null>(null);
 
+  const onTerminalIdChangeRef = useRef(onTerminalIdChange);
+  onTerminalIdChangeRef.current = onTerminalIdChange;
+  const onExitCodeChangeRef = useRef(onExitCodeChange);
+  onExitCodeChangeRef.current = onExitCodeChange;
+  const onCwdFallbackRef = useRef(onCwdFallback);
+  onCwdFallbackRef.current = onCwdFallback;
+
   const writeToPty = useCallback((data: string) => {
     const current = infoRef.current;
     if (current === null || current.exited) {
@@ -84,6 +103,47 @@ export function TerminalView({ cwd, className }: TerminalViewProps): ReactElemen
     }
     void invokeQuery("terminal:write", { id: current.id, data });
   }, []);
+
+  const attachExisting = useCallback(
+    async (existingId: string, cols: number, rows: number): Promise<boolean> => {
+      const term = termRef.current;
+      if (term === null) {
+        return false;
+      }
+      const listed = await invokeQuery("terminal:list");
+      const found =
+        listed.status === "success"
+          ? listed.data.find((item) => item.id === existingId && !item.exited)
+          : undefined;
+      if (found === undefined) {
+        forgetLiveTerminal(windowId);
+        return false;
+      }
+      infoRef.current = found;
+      setInfo(found);
+      onTerminalIdChangeRef.current?.(found.id);
+      void invokeQuery("terminal:resize", { id: found.id, cols, rows });
+      const replay = await invokeQuery("terminal:get-replay", { id: found.id });
+      if (replay.status === "success" && replay.data.data.length > 0) {
+        term.reset();
+        term.write(replay.data.data);
+      }
+      return true;
+    },
+    [windowId],
+  );
+
+  const createWithCwd = useCallback(
+    async (targetCwd: string | undefined, cols: number, rows: number) => {
+      return invokeQuery("terminal:create", {
+        ...(targetCwd === undefined ? {} : { cwd: targetCwd }),
+        cols,
+        rows,
+        metadata: { windowId, projectId },
+      });
+    },
+    [projectId, windowId],
+  );
 
   const spawnTerminal = useCallback(async () => {
     const host = hostRef.current;
@@ -94,62 +154,52 @@ export function TerminalView({ cwd, className }: TerminalViewProps): ReactElemen
     }
     setError(undefined);
     setExitCode(undefined);
+    onExitCodeChangeRef.current?.(undefined);
     fit.fit();
     const cols = Math.max(term.cols, 2);
     const rows = Math.max(term.rows, 2);
-    const key = slotKey(cwd);
 
-    // StrictMode 双挂载 / 切页回来：复用同槽位未退出的 PTY，只回放+订阅
-    const existingId = liveTerminalByKey.get(key);
+    const existingId = peekLiveTerminal(windowId);
     if (existingId !== undefined) {
-      const listed = await invokeQuery("terminal:list");
-      const found =
-        listed.status === "success"
-          ? listed.data.find((item) => item.id === existingId && !item.exited)
-          : undefined;
-      if (found !== undefined) {
-        infoRef.current = found;
-        setInfo(found);
-        void invokeQuery("terminal:resize", { id: found.id, cols, rows });
-        const replay = await invokeQuery("terminal:get-replay", { id: found.id });
-        if (replay.status === "success" && replay.data.data.length > 0) {
-          term.reset();
-          term.write(replay.data.data);
-        }
+      if (await attachExisting(existingId, cols, rows)) {
         return;
       }
-      liveTerminalByKey.delete(key);
     }
 
-    const settled = await invokeQuery("terminal:create", {
-      ...(cwd === undefined ? {} : { cwd }),
-      cols,
-      rows,
-    });
+    let settled = await createWithCwd(cwd, cols, rows);
+    if (settled.status === "error" && fallbackCwd !== undefined && fallbackCwd !== cwd) {
+      settled = await createWithCwd(fallbackCwd, cols, rows);
+      if (settled.status === "success") {
+        onCwdFallbackRef.current?.();
+      }
+    }
     if (settled.status === "error") {
       setError(settled.error.message);
+      onTerminalIdChangeRef.current?.(undefined);
       return;
     }
-    liveTerminalByKey.set(key, settled.data.id);
+    rememberLiveTerminal(windowId, settled.data.id);
     infoRef.current = settled.data;
     setInfo(settled.data);
+    onTerminalIdChangeRef.current?.(settled.data.id);
     const replay = await invokeQuery("terminal:get-replay", { id: settled.data.id });
     if (replay.status === "success" && replay.data.data.length > 0) {
       term.write(replay.data.data);
     }
-  }, [cwd]);
+  }, [attachExisting, createWithCwd, cwd, fallbackCwd, windowId]);
 
   const restart = useCallback(async () => {
     const previous = infoRef.current;
     if (previous !== null) {
-      liveTerminalByKey.delete(slotKey(cwd));
+      forgetLiveTerminal(windowId);
       await invokeQuery("terminal:kill", { id: previous.id });
     }
     infoRef.current = null;
     setInfo(null);
+    onTerminalIdChangeRef.current?.(undefined);
     termRef.current?.reset();
     await spawnTerminal();
-  }, [cwd, spawnTerminal]);
+  }, [spawnTerminal, windowId]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -236,7 +286,6 @@ export function TerminalView({ cwd, className }: TerminalViewProps): ReactElemen
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
-      // 卸载只退订 / 销毁视图，不杀 PTY 进程（由 infoRef 保留 id；进程由主进程管）
     };
   }, [spawnTerminal, writeToPty]);
 
@@ -245,7 +294,6 @@ export function TerminalView({ cwd, className }: TerminalViewProps): ReactElemen
     if (term === null) {
       return;
     }
-    // resolvedTheme 变化时重读 CSS 变量（readThemeColors 读的是 DOM，biome 看不到依赖）
     void resolvedTheme;
     const colors = readThemeColors();
     term.options.theme = {
@@ -282,10 +330,11 @@ export function TerminalView({ cwd, className }: TerminalViewProps): ReactElemen
     if (current === null || payload.id !== current.id) {
       return;
     }
-    liveTerminalByKey.delete(slotKey(cwd));
+    forgetLiveTerminal(windowId);
     infoRef.current = { ...current, exited: true, exitCode: payload.exitCode };
     setInfo(infoRef.current);
     setExitCode(payload.exitCode);
+    onExitCodeChangeRef.current?.(payload.exitCode);
   });
 
   const copySelection = (): void => {
@@ -359,6 +408,9 @@ export function TerminalView({ cwd, className }: TerminalViewProps): ReactElemen
           {info.id}
         </span>
       ) : null}
+      <span className="sr-only" data-testid="workbench-window-id">
+        {windowId}
+      </span>
     </div>
   );
 }

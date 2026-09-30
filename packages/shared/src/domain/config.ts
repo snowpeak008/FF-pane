@@ -8,6 +8,7 @@
 import { DEFAULT_CONTEXT_WARN_PERCENT } from "./context-window.js";
 import type { AiOutputLanguage } from "./language.js";
 import type { PermissionEnvelope } from "./permission.js";
+import { DEFAULT_MAX_WORKBENCH_WINDOWS } from "./workbench.js";
 
 /**
  * 设计文档 §8.3.5 路径二 —— Agent 只读知识库检索工具的 MCP 接入设置。
@@ -51,6 +52,11 @@ export interface GlobalConfig {
    * 轻装重开）。出厂默认 DEFAULT_CONTEXT_WARN_PERCENT（70）。
    */
   readonly contextWarnPercent: number;
+  /**
+   * T10.2 —— 同时运行的工作台窗口上限（主进程强制校验）。
+   * 出厂默认 DEFAULT_MAX_WORKBENCH_WINDOWS（12）。
+   */
+  readonly maxWorkbenchWindows: number;
 }
 
 /** AI 输出语言的出厂默认（产品中文优先）。 */
@@ -118,4 +124,5 @@ export const DEFAULT_GLOBAL_CONFIG: GlobalConfig = {
   aiOutputLanguage: DEFAULT_AI_OUTPUT_LANGUAGE,
   defaultPermissionPreset: DEFAULT_PERMISSION_PRESET,
   contextWarnPercent: DEFAULT_CONTEXT_WARN_PERCENT,
+  maxWorkbenchWindows: DEFAULT_MAX_WORKBENCH_WINDOWS,
 };

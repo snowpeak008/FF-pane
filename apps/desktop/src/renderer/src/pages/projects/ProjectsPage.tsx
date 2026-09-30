@@ -13,6 +13,7 @@ import { useInvokeQuery } from "../../ipc/useInvokeQuery";
 import { NAV_ICONS } from "../../layout/nav-icons";
 import { PageHeader } from "../../layout/PageHeader";
 import { useUiStore } from "../../stores/ui";
+import { useWorkbenchStore } from "../../stores/workbench";
 import { CreateProjectDialog } from "./CreateProjectDialog";
 import { ProjectCard } from "./ProjectCard";
 
@@ -86,6 +87,7 @@ export function ProjectsPage(): ReactElement {
         toast.error(t("projects.remove.error"), { description: settled.error.message });
         return;
       }
+      useWorkbenchStore.getState().dropProject(entry.id);
       refetch();
       bumpProjectsRefresh();
       toast.success(t("projects.remove.toast", { name: entry.name }), {

@@ -1,6 +1,6 @@
 {
   "name": "@ff-pane/desktop",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "productName": "FF-pane",
   "private": true,
   "type": "module",
@@ -57,6 +57,7 @@
     "lucide-react": "^1.35.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
+    "react-resizable-panels": "2.1.9",
     "react-router-dom": "^7.18.3",
     "sonner": "^2.0.8",
     "tailwind-merge": "^3.6.0",

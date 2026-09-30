@@ -1,6 +1,12 @@
 /** 主进程终端模块出口（T10.1）。 */
 export { createNodePtyFactory } from "./factory";
-export { createTerminalLayer, type TerminalLayer } from "./handlers";
+export {
+  createTerminalLayer,
+  isWorkbenchWindowLimitError,
+  type TerminalLayer,
+  type TerminalLayerOptions,
+  WORKBENCH_WINDOW_LIMIT_ERROR_PREFIX,
+} from "./handlers";
 export { MAX_EXITED_SESSIONS, PtyManager, type PtyManagerOptions } from "./manager";
 export { runPtyCheck } from "./pty-check";
 export { ByteRingBuffer } from "./ring-buffer";

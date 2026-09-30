@@ -69,7 +69,7 @@ afterEach(() => {
 
 const APP_INFO: AppInfo = {
   name: "FF-pane",
-  version: "0.10.1",
+  version: "0.10.2",
   runtime: { electron: "44.0.0", chrome: "140", node: "24.0.0" },
 };
 
@@ -105,6 +105,13 @@ const EXPECTED_KEY_DISPLAYS: readonly string[] = [
   "Ctrl+Shift+R",
   "Ctrl+Shift+A",
   "Ctrl+Shift+X",
+  "Ctrl+Shift+T",
+  "Ctrl+Shift+N",
+  "Ctrl+Shift+\\",
+  "Ctrl+Shift+D",
+  "Ctrl+Shift+W",
+  "Ctrl+Shift+F4",
+  "Ctrl+Shift+M",
 ];
 
 function keyEvent(
@@ -120,13 +127,13 @@ function keyEvent(
   };
 }
 
-describe("快捷键表：§7 的 21 条预登记齐全", () => {
+describe("快捷键表：§7 的 28 条预登记齐全（含 T10.2 工作台）", () => {
   const registry = createShortcutRegistry(SHORTCUT_TABLE);
 
-  it("条目数正好 21（一个「命令 × 作用域」一条）", () => {
+  it("条目数正好 28（一个「命令 × 作用域」一条）", () => {
     expect(SHORTCUT_TABLE).toHaveLength(SHORTCUT_TABLE_SIZE);
-    expect(SHORTCUT_TABLE_SIZE).toBe(21);
-    expect(registry.entries()).toHaveLength(21);
+    expect(SHORTCUT_TABLE_SIZE).toBe(28);
+    expect(registry.entries()).toHaveLength(28);
   });
 
   it("命令 ID 全部合法且互不重复", () => {
@@ -144,9 +151,9 @@ describe("快捷键表：§7 的 21 条预登记齐全", () => {
     }
   });
 
-  it("键位覆盖 §7 全表：28 个绑定、26 个去重键位", () => {
+  it("键位覆盖 §7 全表：35 个绑定（Ctrl+1~8 展开）", () => {
     const bindings = registry.bindings();
-    expect(bindings).toHaveLength(28);
+    expect(bindings).toHaveLength(35);
     const displays = [...new Set(bindings.map((binding) => binding.display))].sort();
     expect(displays).toEqual([...EXPECTED_KEY_DISPLAYS].sort());
   });
@@ -900,7 +907,7 @@ describe("语言包：命令与快捷键文案两语言齐全", () => {
     }
   });
 
-  it("21 条快捷键都有作用描述，7 个作用域都有名称", () => {
+  it("全部快捷键都有作用描述，作用域都有名称", () => {
     for (const tag of tags) {
       const pack = loadLocale(tag);
       for (const entry of SHORTCUT_TABLE) {

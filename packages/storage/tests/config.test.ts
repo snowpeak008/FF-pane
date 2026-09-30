@@ -73,6 +73,15 @@ describe("ConfigStore", () => {
     expect(config.defaultPermissionPreset).toEqual(DEFAULT_GLOBAL_CONFIG.defaultPermissionPreset);
   });
 
+  it("maxWorkbenchWindows 写入时钳制到 1–32", async () => {
+    const tooHigh = await store.updateConfig({ maxWorkbenchWindows: 999 });
+    expect(tooHigh.maxWorkbenchWindows).toBe(32);
+    const tooLow = await store.updateConfig({ maxWorkbenchWindows: 0 });
+    expect(tooLow.maxWorkbenchWindows).toBe(1);
+    const ok = await store.updateConfig({ maxWorkbenchWindows: 8 });
+    expect(ok.maxWorkbenchWindows).toBe(8);
+  });
+
   it("版本不支持：抛 ConfigFileInvalidError", async () => {
     await writeTextAtomic(configFile, JSON.stringify({ version: 999, config: {} }));
     await expect(store.readConfig()).rejects.toThrow(ConfigFileInvalidError);

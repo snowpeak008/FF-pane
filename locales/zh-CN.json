@@ -141,6 +141,34 @@
         "title": "记忆候选：拒绝",
         "keywords": "reject memory candidate 拒绝 记忆 候选"
       },
+      "workbench-new-tab": {
+        "title": "工作台：新建标签页",
+        "keywords": "workbench new tab 工作台 标签"
+      },
+      "workbench-new-window": {
+        "title": "工作台：新建窗口",
+        "keywords": "workbench new window shell 工作台 窗口 终端"
+      },
+      "workbench-split-right": {
+        "title": "工作台：向右分屏",
+        "keywords": "workbench split right horizontal 分屏 右"
+      },
+      "workbench-split-down": {
+        "title": "工作台：向下分屏",
+        "keywords": "workbench split down vertical 分屏 下"
+      },
+      "workbench-close-window": {
+        "title": "工作台：关闭窗口",
+        "keywords": "workbench close window kill 关闭 窗口"
+      },
+      "workbench-close-tab": {
+        "title": "工作台：关闭标签页",
+        "keywords": "workbench close tab 关闭 标签"
+      },
+      "workbench-maximize-window": {
+        "title": "工作台：最大化/还原窗口",
+        "keywords": "workbench maximize restore 最大化 还原"
+      },
       "nav-toggle-sidebar": {
         "title": "收起/展开导航侧栏",
         "keywords": "sidebar collapse expand 侧栏 导航 收起 展开"
@@ -265,13 +293,41 @@
   "workbench": {
     "cwd": {
       "home": "工作目录：用户主目录（未选项目）",
-      "project": "工作目录：{{path}}"
+      "project": "工作目录：{{path}}",
+      "fallback": "原工作目录已不存在，已回退到项目根目录。"
     },
     "terminal": {
       "exited": "已退出（退出码 {{code}}）",
       "restart": "重新启动",
       "copy": "复制",
       "paste": "粘贴"
+    },
+    "empty": {
+      "noProject": "还没有选中项目。到项目列表新建或选一个，再回来开终端。",
+      "goProjects": "去项目列表",
+      "noWindow": "这个项目还没有终端窗口。新建一个开始工作。",
+      "newWindow": "新建窗口"
+    },
+    "tab": {
+      "new": "新建标签页",
+      "close": "关闭标签页",
+      "closeConfirmTitle": "关闭标签页？",
+      "closeConfirmBody": "该标签页内仍有运行中的终端，关闭将终止这些进程。"
+    },
+    "window": {
+      "status": {
+        "running": "运行中",
+        "exited": "已退出",
+        "starting": "启动中"
+      },
+      "splitRight": "向右分屏",
+      "splitDown": "向下分屏",
+      "maximize": "最大化",
+      "restore": "还原",
+      "close": "关闭窗口"
+    },
+    "limit": {
+      "reached": "已达到同时运行窗口上限（{{max}}）。请先关闭一些窗口，或在设置中提高上限。"
     }
   },
   "plan": {
@@ -465,6 +521,14 @@
       "optionPercent": "{{percent}}%",
       "loadError": "读取失败",
       "error": "保存上下文阈值失败"
+    },
+    "workbenchLimit": {
+      "title": "工作台窗口",
+      "label": "同时运行上限",
+      "hint": "所有项目合计的终端窗口数；到达后新建会被拒绝。主进程也会强制校验。",
+      "option": "{{count}} 个",
+      "loadError": "读取失败",
+      "error": "保存窗口上限失败"
     },
     "profiles": {
       "title": "Agent Profile",
@@ -866,7 +930,8 @@
       "session": "会话页",
       "session-input": "会话页输入框",
       "tasks": "任务页",
-      "memory-review": "记忆审核"
+      "memory-review": "记忆审核",
+      "workbench": "工作台"
     },
     "action": {
       "palette-open": "命令面板（含项目/页面/操作搜索）",
@@ -888,6 +953,13 @@
       "tasks-accept": "任务：接受（通过）",
       "memory-approve": "记忆候选：通过",
       "memory-reject": "记忆候选：拒绝",
+      "workbench-new-tab": "工作台：新建标签页",
+      "workbench-new-window": "工作台：新建窗口",
+      "workbench-split-right": "工作台：向右分屏",
+      "workbench-split-down": "工作台：向下分屏",
+      "workbench-close-window": "工作台：关闭窗口",
+      "workbench-close-tab": "工作台：关闭标签页",
+      "workbench-maximize-window": "工作台：最大化/还原窗口",
       "nav-toggle-sidebar": "收起/展开导航侧栏（A 栏）",
       "nav-toggle-secondary-panel": "收起/展开次级侧栏（B 栏）"
     }
@@ -1180,6 +1252,7 @@
       "failed": "有任务已失败（未读）",
       "blocked": "有任务被阻塞（未读）"
     },
-    "switchTo": "切换到项目：{{name}}"
+    "switchTo": "切换到项目：{{name}}",
+    "windowCount": "{{count}} 个运行中窗口"
   }
 }

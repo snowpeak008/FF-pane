@@ -46,6 +46,7 @@ import type {
   ProfileId,
   ProjectId,
   ProjectRegistryEntry,
+  ProjectWorkbenchLayout,
   Provider,
   ProviderId,
   ReviewVerdict,
@@ -212,6 +213,26 @@ export interface TerminalResizeRequest {
 export interface TerminalReplayResponse {
   readonly id: string;
   readonly data: string;
+}
+
+/** workbench:save-layout 请求（T10.2）：单项目布局整表覆盖。 */
+export interface SaveWorkbenchLayoutRequest {
+  readonly layout: ProjectWorkbenchLayout;
+}
+
+/** workbench:remove-layout 请求。 */
+export interface RemoveWorkbenchLayoutRequest {
+  readonly projectId: ProjectId;
+}
+
+/** workbench:flush-request 事件：主进程请渲染端立刻落盘防抖中的布局。 */
+export interface WorkbenchFlushRequestEvent {
+  readonly requestId: string;
+}
+
+/** workbench:flush-ack 请求：渲染端确认 flush 完成。 */
+export interface WorkbenchFlushAckRequest {
+  readonly requestId: string;
 }
 
 export interface TerminalOutputEvent {
@@ -1221,6 +1242,26 @@ export interface IpcInvokeContracts {
   "terminal:kill": { request: TerminalIdRequest; response: { readonly ok: true } };
   "terminal:list": { request: undefined; response: readonly TerminalInfo[] };
   "terminal:get-replay": { request: TerminalIdRequest; response: TerminalReplayResponse };
+  /** 读取全部项目工作台布局（T10.2；损坏条目已跳过）。 */
+  "workbench:get-layouts": {
+    request: undefined;
+    response: Readonly<Record<string, ProjectWorkbenchLayout>>;
+  };
+  /** 原子写入单项目布局（剥离 terminalId）。 */
+  "workbench:save-layout": {
+    request: SaveWorkbenchLayoutRequest;
+    response: { readonly ok: true };
+  };
+  /** 删除单项目布局（项目移除时）。 */
+  "workbench:remove-layout": {
+    request: RemoveWorkbenchLayoutRequest;
+    response: { readonly ok: true };
+  };
+  /** 渲染端确认布局 flush 完成（T10.2' 退出协调）。 */
+  "workbench:flush-ack": {
+    request: WorkbenchFlushAckRequest;
+    response: { readonly ok: true };
+  };
   /** 列出工作台已登记的全部项目（注册表原样，只读 projects.json，不碰任何项目目录）。 */
   "projects:list": { request: undefined; response: readonly ProjectRegistryEntry[] };
   /**
@@ -1460,7 +1501,7 @@ export interface IpcEventContracts {
   "session:event": { payload: SessionStreamEvent };
   /** 系统观察建议（来源三，§8.2.4）：据反复纠正生成的 observed 习惯候选，非阻塞提示。 */
   "habits:suggestion": { payload: HabitSuggestionEvent };
-  /** 知识库导入 / 重建进度（§8.3.2「导入进度」）。 */
+  /** 知识库导入 / 重建进度（T6.5 / §8.3.2「导入进度」）。 */
   "knowledge:import-progress": { payload: KnowledgeImportProgressEvent };
   /** 任务落定通知（T9.7 B 栏落定高亮）：done / failed / blocked 时推送。 */
   "tasks:settled": { payload: TaskSettledEvent };
@@ -1468,6 +1509,8 @@ export interface IpcEventContracts {
   "terminal:output": { payload: TerminalOutputEvent };
   /** 终端进程退出（T10.1）。 */
   "terminal:exit": { payload: TerminalExitEvent };
+  /** 请渲染端立刻 flush 工作台布局防抖（T10.2' 退出前）。 */
+  "workbench:flush-request": { payload: WorkbenchFlushRequestEvent };
 }
 
 export type InvokeChannel = keyof IpcInvokeContracts;
@@ -1498,6 +1541,10 @@ export const INVOKE_CHANNELS = [
   "terminal:kill",
   "terminal:list",
   "terminal:get-replay",
+  "workbench:get-layouts",
+  "workbench:save-layout",
+  "workbench:remove-layout",
+  "workbench:flush-ack",
   "projects:list",
   "projects:summary",
   "projects:create",
@@ -1575,6 +1622,7 @@ export const EVENT_CHANNELS = [
   "tasks:settled",
   "terminal:output",
   "terminal:exit",
+  "workbench:flush-request",
 ] as const satisfies readonly EventChannel[];
 
 type AssertNever<T extends never> = T;

@@ -28,6 +28,9 @@
 /** 退出收尾的总时长上限（含 prepareForQuit 内部对取消的 1.5 s 等待）。 */
 export const QUIT_TOTAL_BUDGET_MS = 3_000;
 
+/** 退出前等待渲染端 flush 布局防抖的预算（T10.2'）。 */
+export const QUIT_LAYOUT_FLUSH_BUDGET_MS = 800;
+
 /**
  * 常驻 Runtime 资源（opencode serve）关停的时长上限（T8.5c）。
  *
@@ -53,6 +56,11 @@ export interface QuitCoordinatorDeps {
   readonly hasRuntimeResources?: () => boolean;
   /** 关停常驻 Runtime 资源（注册表 closeRuntimes，幂等）。抛错视同完成。 */
   readonly closeRuntimes?: () => Promise<unknown>;
+  /**
+   * 退出前 flush 工作台布局防抖（T10.2'）：向渲染端请求落盘。
+   * 抛错视同完成——不能因为 flush 失败而退不出去。
+   */
+  readonly flushLayouts?: () => Promise<unknown>;
   /** 收尾完成 / 超时后真正退出（接线为 app.quit）。 */
   readonly quit: () => void;
   /** 记一行诊断日志（英文，开发者日志约定）。 */
@@ -61,6 +69,8 @@ export interface QuitCoordinatorDeps {
   readonly budgetMs?: number;
   /** Runtime 资源关停时长上限；缺省 QUIT_RUNTIME_CLOSE_BUDGET_MS。 */
   readonly runtimeCloseBudgetMs?: number;
+  /** 布局 flush 时长上限；缺省 QUIT_LAYOUT_FLUSH_BUDGET_MS。 */
+  readonly layoutFlushBudgetMs?: number;
   /** 定时器注入（单测用假时钟）；缺省全局 setTimeout / clearTimeout。 */
   readonly timers?: {
     readonly setTimeout: (fn: () => void, ms: number) => unknown;
@@ -90,6 +100,7 @@ export function createQuitCoordinator(deps: QuitCoordinatorDeps): QuitCoordinato
   };
   const budgetMs = deps.budgetMs ?? QUIT_TOTAL_BUDGET_MS;
   const closeBudgetMs = deps.runtimeCloseBudgetMs ?? QUIT_RUNTIME_CLOSE_BUDGET_MS;
+  const flushBudgetMs = deps.layoutFlushBudgetMs ?? QUIT_LAYOUT_FLUSH_BUDGET_MS;
   const log = deps.log ?? (() => undefined);
   let phase: QuitPhase = "idle";
 
@@ -131,6 +142,21 @@ export function createQuitCoordinator(deps: QuitCoordinatorDeps): QuitCoordinato
     }
   }
 
+  /** 退出前 flush 布局防抖（T10.2'；独立小预算，不并入 3 s 收尾）。 */
+  async function flushLayouts(): Promise<void> {
+    if (deps.flushLayouts === undefined) {
+      return;
+    }
+    log("[quit] flushing workbench layouts");
+    const flushing = deps.flushLayouts().catch((thrown: unknown) => {
+      log(`[quit] flushLayouts failed: ${String(thrown)}`);
+    });
+    const outcome = await raceBudget(flushing, flushBudgetMs);
+    if (outcome === "timeout") {
+      log(`[quit] layout flush budget ${flushBudgetMs} ms exceeded; continuing quit`);
+    }
+  }
+
   function onBeforeQuit(event: PreventableEvent): void {
     if (phase === "quitting") {
       return;
@@ -140,29 +166,36 @@ export function createQuitCoordinator(deps: QuitCoordinatorDeps): QuitCoordinato
       return;
     }
     const inflight = deps.hasInflight();
-    if (!inflight && deps.hasRuntimeResources?.() !== true) {
+    const needRuntime = deps.hasRuntimeResources?.() === true;
+    const needFlush = deps.flushLayouts !== undefined;
+    if (!inflight && !needRuntime && !needFlush) {
       phase = "quitting";
       return;
     }
     event.preventDefault();
     phase = "preparing";
-    log(
-      inflight
-        ? "[quit] in-flight turns present; settling before quit"
-        : "[quit] runtime resources present; closing before quit",
-    );
+    if (inflight) {
+      log("[quit] in-flight turns present; settling before quit");
+    } else if (needRuntime) {
+      log("[quit] runtime resources present; closing before quit");
+    } else {
+      log("[quit] flushing layouts before quit");
+    }
 
-    const prepared = inflight
-      ? raceBudget(
-          deps.prepare().catch((thrown: unknown) => {
-            log(`[quit] prepareForQuit failed: ${String(thrown)}`);
-          }),
-          budgetMs,
-        )
-      : Promise.resolve("done" as const);
-    void prepared
+    // flush 布局与会话收尾并行（各自独立预算）；都完成后再关 server。
+    void Promise.all([
+      flushLayouts(),
+      inflight
+        ? raceBudget(
+            deps.prepare().catch((thrown: unknown) => {
+              log(`[quit] prepareForQuit failed: ${String(thrown)}`);
+            }),
+            budgetMs,
+          )
+        : Promise.resolve("done" as const),
+    ])
       // 先收尾（取消波要经 server 的 /abort 端点）再关 server，见模块头规则 5
-      .then((outcome) => closeRuntimeResources().then(() => outcome))
+      .then(([, outcome]) => closeRuntimeResources().then(() => outcome))
       .then((outcome) => {
         finishAndQuit(
           outcome === "done" ? "quit sequence settled" : `budget ${budgetMs} ms exceeded`,

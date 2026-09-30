@@ -1,0 +1,303 @@
+/**
+ * 工作台布局持久化（T10.2）：~/.aiworkbench/workbench-layouts.json。
+ * 只存标签页 / 分屏树 / 窗口元数据（剥离 terminalId）；损坏时回退空布局。
+ */
+
+import type {
+  PaneNode,
+  ProjectId,
+  ProjectWorkbenchLayout,
+  WorkbenchTab,
+  WorkbenchWindow,
+  WorkbenchWindowKind,
+} from "@ff-pane/shared";
+import { readJson, writeJsonAtomic } from "../fs/index.js";
+import { WorkbenchLayoutsFileInvalidError } from "./errors.js";
+
+export const WORKBENCH_LAYOUTS_FILE_VERSION = 1;
+
+export interface WorkbenchLayoutsFile {
+  readonly version: typeof WORKBENCH_LAYOUTS_FILE_VERSION;
+  readonly layouts: Readonly<Record<string, ProjectWorkbenchLayout>>;
+}
+
+export interface WorkbenchLayoutStore {
+  /** 读全部布局；文件缺失 / 损坏归一为空表（不抛，便于启动恢复）。 */
+  readAll(): Promise<Readonly<Record<string, ProjectWorkbenchLayout>>>;
+  /** 读单项目布局；无则 undefined。 */
+  readProject(projectId: ProjectId): Promise<ProjectWorkbenchLayout | undefined>;
+  /** 写入（覆盖）单项目布局。 */
+  saveProject(layout: ProjectWorkbenchLayout): Promise<void>;
+  /** 删除单项目布局（项目移除时）。 */
+  removeProject(projectId: ProjectId): Promise<void>;
+}
+
+function isPaneNode(value: unknown): value is PaneNode {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const raw = value as { readonly type?: unknown };
+  if (raw.type === "leaf") {
+    const leaf = value as { readonly windowId?: unknown };
+    return typeof leaf.windowId === "string" && leaf.windowId.trim() !== "";
+  }
+  if (raw.type === "split") {
+    const split = value as {
+      readonly direction?: unknown;
+      readonly sizes?: unknown;
+      readonly children?: unknown;
+    };
+    if (split.direction !== "horizontal" && split.direction !== "vertical") {
+      return false;
+    }
+    if (
+      !Array.isArray(split.sizes) ||
+      split.sizes.length !== 2 ||
+      typeof split.sizes[0] !== "number" ||
+      typeof split.sizes[1] !== "number"
+    ) {
+      return false;
+    }
+    if (!Array.isArray(split.children) || split.children.length !== 2) {
+      return false;
+    }
+    return isPaneNode(split.children[0]) && isPaneNode(split.children[1]);
+  }
+  return false;
+}
+
+function parseWindow(value: unknown, projectId: ProjectId): WorkbenchWindow | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const raw = value as Record<string, unknown>;
+  if (typeof raw["id"] !== "string" || raw["id"].trim() === "") {
+    return null;
+  }
+  if (typeof raw["title"] !== "string") {
+    return null;
+  }
+  if (raw["kind"] !== "shell") {
+    return null;
+  }
+  if (typeof raw["cwd"] !== "string" || raw["cwd"].trim() === "") {
+    return null;
+  }
+  if (typeof raw["createdAt"] !== "number" || !Number.isFinite(raw["createdAt"])) {
+    return null;
+  }
+  const window: WorkbenchWindow = {
+    id: raw["id"],
+    projectId: typeof raw["projectId"] === "string" ? (raw["projectId"] as ProjectId) : projectId,
+    title: raw["title"],
+    kind: raw["kind"] as WorkbenchWindowKind,
+    cwd: raw["cwd"],
+    createdAt: raw["createdAt"],
+    ...(typeof raw["role"] === "string" ? { role: raw["role"] } : {}),
+    ...(typeof raw["permission"] === "string" ? { permission: raw["permission"] } : {}),
+    ...(typeof raw["parentWindowId"] === "string" ? { parentWindowId: raw["parentWindowId"] } : {}),
+    ...(typeof raw["openedBy"] === "string" ? { openedBy: raw["openedBy"] } : {}),
+  };
+  return window;
+}
+
+function parseTab(value: unknown): WorkbenchTab | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const raw = value as Record<string, unknown>;
+  if (typeof raw["id"] !== "string" || raw["id"].trim() === "") {
+    return null;
+  }
+  if (typeof raw["title"] !== "string") {
+    return null;
+  }
+  if (!isPaneNode(raw["root"])) {
+    return null;
+  }
+  return { id: raw["id"], title: raw["title"], root: raw["root"] };
+}
+
+function parseLayout(projectId: string, value: unknown): ProjectWorkbenchLayout | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const raw = value as Record<string, unknown>;
+  if (!Array.isArray(raw["tabs"])) {
+    return null;
+  }
+  const tabs: WorkbenchTab[] = [];
+  for (const tab of raw["tabs"]) {
+    const parsed = parseTab(tab);
+    if (parsed === null) {
+      return null;
+    }
+    tabs.push(parsed);
+  }
+  if (
+    typeof raw["windows"] !== "object" ||
+    raw["windows"] === null ||
+    Array.isArray(raw["windows"])
+  ) {
+    return null;
+  }
+  const windows: Record<string, WorkbenchWindow> = {};
+  for (const [id, windowValue] of Object.entries(raw["windows"] as Record<string, unknown>)) {
+    const parsed = parseWindow(windowValue, projectId as ProjectId);
+    if (parsed === null || parsed.id !== id) {
+      return null;
+    }
+    windows[id] = parsed;
+  }
+  const activeTabId =
+    raw["activeTabId"] === null
+      ? null
+      : typeof raw["activeTabId"] === "string"
+        ? raw["activeTabId"]
+        : null;
+  const maximizedWindowId =
+    raw["maximizedWindowId"] === null
+      ? null
+      : typeof raw["maximizedWindowId"] === "string"
+        ? raw["maximizedWindowId"]
+        : null;
+  const focusedWindowId =
+    raw["focusedWindowId"] === null
+      ? null
+      : typeof raw["focusedWindowId"] === "string"
+        ? raw["focusedWindowId"]
+        : null;
+  return {
+    projectId: projectId as ProjectId,
+    tabs,
+    activeTabId,
+    windows,
+    maximizedWindowId,
+    focusedWindowId,
+  };
+}
+
+/** 持久化前剥离运行期字段（terminalId）。 */
+export function stripRuntimeFields(layout: ProjectWorkbenchLayout): ProjectWorkbenchLayout {
+  const windows: Record<string, WorkbenchWindow> = {};
+  for (const [id, window] of Object.entries(layout.windows)) {
+    const { terminalId: _terminalId, ...rest } = window;
+    void _terminalId;
+    windows[id] = rest;
+  }
+  return { ...layout, windows };
+}
+
+async function loadFile(
+  filePath: string,
+): Promise<Readonly<Record<string, ProjectWorkbenchLayout>>> {
+  const result = await readJson<unknown>(filePath);
+  if (!result.ok) {
+    if (result.error.code === "not-found") {
+      return {};
+    }
+    // JSON 语法损坏：回退空布局（合同：损坏时回退）
+    console.warn(`[workbench-layouts] corrupt json, fallback empty: ${filePath}`);
+    return {};
+  }
+  const raw = result.value;
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    console.warn(`[workbench-layouts] invalid root, fallback empty: ${filePath}`);
+    return {};
+  }
+  const file = raw as { readonly version?: unknown; readonly layouts?: unknown };
+  if (file.version !== WORKBENCH_LAYOUTS_FILE_VERSION) {
+    console.warn(
+      `[workbench-layouts] unsupported version ${String(file.version)}, fallback empty: ${filePath}`,
+    );
+    return {};
+  }
+  if (typeof file.layouts !== "object" || file.layouts === null || Array.isArray(file.layouts)) {
+    console.warn(`[workbench-layouts] invalid layouts map, fallback empty: ${filePath}`);
+    return {};
+  }
+  const layouts: Record<string, ProjectWorkbenchLayout> = {};
+  for (const [projectId, layoutValue] of Object.entries(file.layouts as Record<string, unknown>)) {
+    const parsed = parseLayout(projectId, layoutValue);
+    if (parsed === null) {
+      console.warn(`[workbench-layouts] skip corrupt project layout ${projectId}: ${filePath}`);
+      continue;
+    }
+    layouts[projectId] = parsed;
+  }
+  return layouts;
+}
+
+async function saveFile(
+  filePath: string,
+  layouts: Readonly<Record<string, ProjectWorkbenchLayout>>,
+): Promise<void> {
+  const stripped: Record<string, ProjectWorkbenchLayout> = {};
+  for (const [id, layout] of Object.entries(layouts)) {
+    stripped[id] = stripRuntimeFields(layout);
+  }
+  const file: WorkbenchLayoutsFile = {
+    version: WORKBENCH_LAYOUTS_FILE_VERSION,
+    layouts: stripped,
+  };
+  await writeJsonAtomic(filePath, file);
+}
+
+/**
+ * 创建绑定到指定路径的布局存取。
+ * 接线：`createWorkbenchLayoutStore(resolveGlobalLayout(root).workbenchLayoutsFile)`。
+ */
+export function createWorkbenchLayoutStore(filePath: string): WorkbenchLayoutStore {
+  return {
+    readAll: () => loadFile(filePath),
+
+    async readProject(projectId) {
+      const all = await loadFile(filePath);
+      return all[projectId];
+    },
+
+    async saveProject(layout) {
+      const all = { ...(await loadFile(filePath)) };
+      all[layout.projectId] = stripRuntimeFields(layout);
+      await saveFile(filePath, all);
+    },
+
+    async removeProject(projectId) {
+      const all = { ...(await loadFile(filePath)) };
+      if (all[projectId] === undefined) {
+        return;
+      }
+      delete all[projectId];
+      await saveFile(filePath, all);
+    },
+  };
+}
+
+/** 供单测：严格解析（损坏抛错）。 */
+export function parseWorkbenchLayoutsFileStrict(
+  filePath: string,
+  raw: unknown,
+): WorkbenchLayoutsFile {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new WorkbenchLayoutsFileInvalidError(filePath, "顶层必须是对象");
+  }
+  const file = raw as { readonly version?: unknown; readonly layouts?: unknown };
+  if (file.version !== WORKBENCH_LAYOUTS_FILE_VERSION) {
+    throw new WorkbenchLayoutsFileInvalidError(
+      filePath,
+      `不支持的 version：${String(file.version)}`,
+    );
+  }
+  if (typeof file.layouts !== "object" || file.layouts === null || Array.isArray(file.layouts)) {
+    throw new WorkbenchLayoutsFileInvalidError(filePath, "layouts 必须是对象");
+  }
+  const layouts: Record<string, ProjectWorkbenchLayout> = {};
+  for (const [projectId, layoutValue] of Object.entries(file.layouts as Record<string, unknown>)) {
+    const parsed = parseLayout(projectId, layoutValue);
+    if (parsed === null) {
+      throw new WorkbenchLayoutsFileInvalidError(filePath, `项目 ${projectId} 布局损坏`);
+    }
+    layouts[projectId] = parsed;
+  }
+  return { version: WORKBENCH_LAYOUTS_FILE_VERSION, layouts };
+}

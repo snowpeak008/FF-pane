@@ -8,6 +8,7 @@ import { queryData } from "../ipc/query";
 import { useInvokeQuery } from "../ipc/useInvokeQuery";
 import { cn } from "../lib/cn";
 import { useUiStore } from "../stores/ui";
+import { useWorkbenchStore } from "../stores/workbench";
 import { ProjectSwitcher } from "./ProjectSwitcher";
 import { useSecondaryPanel } from "./secondary-panel";
 
@@ -35,9 +36,14 @@ export function SecondaryPanel(): ReactElement | null {
   const collapsed = useUiStore((s) => s.secondaryPanelCollapsed);
   const toggle = useUiStore((s) => s.toggleSecondaryPanelCollapsed);
   const refreshSeq = useUiStore((s) => s.projectsRefreshSeq);
+  const hydrateWorkbench = useWorkbenchStore((s) => s.hydrate);
   const { content } = useSecondaryPanel();
   const { state, refetch } = useInvokeQuery("projects:list");
   const entries = useMemo(() => queryData(state) ?? EMPTY_ENTRIES, [state]);
+
+  useEffect(() => {
+    void hydrateWorkbench();
+  }, [hydrateWorkbench]);
 
   // 项目增删信号：seq 变了就重取（refetch 引用稳定，effect 只随 seq 触发）
   useEffect(() => {

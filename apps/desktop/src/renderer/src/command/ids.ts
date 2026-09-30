@@ -48,6 +48,14 @@ export const COMMAND_IDS = [
   // 记忆审核
   "memory-approve",
   "memory-reject",
+  // 工作台布局（T10.2）
+  "workbench-new-tab",
+  "workbench-new-window",
+  "workbench-split-right",
+  "workbench-split-down",
+  "workbench-close-window",
+  "workbench-close-tab",
+  "workbench-maximize-window",
 ] as const;
 
 export type CommandId = (typeof COMMAND_IDS)[number];

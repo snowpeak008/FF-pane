@@ -101,6 +101,30 @@ describe("createQuitCoordinator", () => {
     expect(coordinator.phase()).toBe("quitting");
   });
 
+  it("无在飞但有 flushLayouts → preventDefault，flush 后 quit", async () => {
+    const flushes: number[] = [];
+    let releaseFlush: () => void = () => undefined;
+    const h = makeHarness({ inflight: false });
+    const coordinator = createQuitCoordinator({
+      ...h.deps,
+      flushLayouts: () => {
+        flushes.push(1);
+        return new Promise<void>((resolve) => {
+          releaseFlush = resolve;
+        });
+      },
+    });
+    const e = event();
+    coordinator.onBeforeQuit(e);
+    expect(e.prevented).toBe(1);
+    expect(flushes).toHaveLength(1);
+    expect(h.quits).toHaveLength(0);
+    releaseFlush();
+    await flushMicrotasks();
+    expect(h.quits).toHaveLength(1);
+    expect(coordinator.phase()).toBe("quitting");
+  });
+
   it("有在飞轮 → 首次 preventDefault 并收尾，收尾完成后调 quit 恰好一次", async () => {
     const h = makeHarness({ inflight: true });
     const coordinator = createQuitCoordinator(h.deps);
