@@ -23,7 +23,7 @@ import type {
   PermissionEnvelope,
   Provider,
   ProviderModel,
-  ProviderType,
+  ProviderTemplateId,
 } from "@ff-pane/shared";
 import {
   CONFIG_TOOL_DRAFT_PROFILE,
@@ -33,10 +33,10 @@ import {
   GENERIC_EXEC_DELIVERIES,
   isConnectionMode,
   isGenericExecDelivery,
-  isProviderType,
+  isProviderTemplateId,
   isShellPolicy,
   MODEL_KINDS,
-  PROVIDER_TYPES,
+  PROVIDER_TEMPLATE_IDS,
   SHELL_POLICIES,
 } from "@ff-pane/shared";
 import type { McpToolDefinition } from "./protocol";
@@ -57,14 +57,15 @@ export const KEY_REFUSAL_NOTE =
 export const CONFIG_PROVIDER_DRAFT_FIELDS = [
   "id",
   "name",
-  "type",
+  "templateId",
   "baseUrl",
   "models",
-  "defaultModel",
+  "defaultModelId",
   "embeddingModel",
   "proxy",
   "timeoutS",
-  "requestTemplate",
+  "extraEnv",
+  "options",
   "enabled",
 ] as const;
 
@@ -104,7 +105,7 @@ export type ParseDraftResult =
 export const CONFIG_LIST_PROVIDERS_TOOL: McpToolDefinition = {
   name: CONFIG_TOOL_LIST_PROVIDERS,
   description:
-    "List the workbench's configured model providers (sanitized view: id, name, type, base URL, " +
+    "List the workbench's configured model providers (sanitized view: id, name, templateId, base URL, " +
     "models, default models, enabled state, and whether an API key is configured as a boolean). " +
     `The API key itself is never returned. ${KEY_REFUSAL_NOTE}`,
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
@@ -123,20 +124,25 @@ const PROVIDER_MODEL_SCHEMA = {
   type: "object",
   properties: {
     id: { type: "string", description: "Model ID as defined by the provider." },
-    displayName: { type: "string", description: "Human-readable model name." },
+    label: { type: "string", description: "Human-readable model name." },
     kind: { type: "string", enum: [...MODEL_KINDS], description: "chat or embedding." },
+    contextWindowSize: {
+      type: "integer",
+      minimum: 1,
+      description: "Optional context window size in tokens (maps to contextWindowTokens).",
+    },
   },
-  required: ["id", "displayName", "kind"],
+  required: ["id"],
   additionalProperties: false,
 } as const;
 
 export const CONFIG_DRAFT_PROVIDER_TOOL: McpToolDefinition = {
   name: CONFIG_TOOL_DRAFT_PROVIDER,
   description:
-    "Submit a draft to create or update a model provider. The draft is validated by the workbench " +
-    "and then shown to the user in a confirmation dialog; NOTHING is saved until the user " +
-    "explicitly confirms. Pass `id` to update an existing provider; omit it to create a new one. " +
-    `${KEY_REFUSAL_NOTE}`,
+    "Submit a draft to create or update a model provider from a built-in template. The draft is " +
+    "validated by the workbench and then shown to the user in a confirmation dialog; NOTHING is " +
+    "saved until the user explicitly confirms. Pass `id` to update an existing provider; omit it " +
+    `to create a new one. ${KEY_REFUSAL_NOTE}`,
   inputSchema: {
     type: "object",
     properties: {
@@ -145,21 +151,21 @@ export const CONFIG_DRAFT_PROVIDER_TOOL: McpToolDefinition = {
         description: "Existing provider id to update; omit to create a new provider.",
       },
       name: { type: "string", description: "Display name." },
-      type: {
+      templateId: {
         type: "string",
-        enum: [...PROVIDER_TYPES],
-        description: "Provider type.",
+        enum: [...PROVIDER_TEMPLATE_IDS],
+        description: "Built-in provider template id.",
       },
       baseUrl: {
         type: "string",
-        description: "API base URL (http/https). Required for openai_compatible and anthropic.",
+        description: "API base URL (http/https). Required for compatible relay templates.",
       },
       models: {
         type: "array",
         items: PROVIDER_MODEL_SCHEMA,
         description: "Model list.",
       },
-      defaultModel: {
+      defaultModelId: {
         type: "string",
         description: "Default chat model id (must exist in models with kind=chat).",
       },
@@ -169,13 +175,19 @@ export const CONFIG_DRAFT_PROVIDER_TOOL: McpToolDefinition = {
       },
       proxy: { type: "string", description: "Optional proxy URL." },
       timeoutS: { type: "integer", minimum: 1, description: "Request timeout in seconds." },
-      requestTemplate: {
-        type: "string",
-        description: "Request template (custom type only).",
+      extraEnv: {
+        type: "object",
+        additionalProperties: { type: "string" },
+        description: "Non-secret extra environment variables.",
+      },
+      options: {
+        type: "object",
+        additionalProperties: { type: "string" },
+        description: "Template option values (e.g. authHeaderStyle).",
       },
       enabled: { type: "boolean", description: "Whether the provider is enabled." },
     },
-    required: ["name", "type", "models"],
+    required: ["name", "templateId", "models"],
     additionalProperties: false,
   },
 };
@@ -291,7 +303,7 @@ function parseModels(
   value: unknown,
 ): { readonly ok: true; readonly models: readonly ProviderModel[] } | { readonly error: string } {
   if (!Array.isArray(value)) {
-    return { error: 'Field "models" must be an array of { id, displayName, kind }.' };
+    return { error: 'Field "models" must be an array of { id, label?, kind? }.' };
   }
   const models: ProviderModel[] = [];
   for (const [index, item] of value.entries()) {
@@ -300,24 +312,35 @@ function parseModels(
     }
     const record = item as Record<string, unknown>;
     const id = nonEmptyString(record["id"]);
-    const displayName = nonEmptyString(record["displayName"]);
-    const kind = record["kind"];
-    if (id === undefined || displayName === undefined) {
-      return { error: `models[${index}] needs non-empty "id" and "displayName".` };
+    if (id === undefined) {
+      return { error: `models[${index}] needs non-empty "id".` };
     }
-    if (kind !== "chat" && kind !== "embedding") {
+    const label = nonEmptyString(record["label"]) ?? nonEmptyString(record["displayName"]);
+    const kind = record["kind"];
+    if (kind !== undefined && kind !== "chat" && kind !== "embedding") {
       return { error: `models[${index}].kind must be "chat" or "embedding".` };
     }
-    models.push({ id: id as ModelId, displayName, kind });
+    const contextWindowTokens = record["contextWindowTokens"] ?? record["contextWindowSize"];
+    if (
+      contextWindowTokens !== undefined &&
+      (typeof contextWindowTokens !== "number" ||
+        !Number.isInteger(contextWindowTokens) ||
+        contextWindowTokens <= 0)
+    ) {
+      return { error: `models[${index}].contextWindowTokens must be a positive integer.` };
+    }
+    models.push({
+      id: id as ModelId,
+      ...(label !== undefined ? { label } : {}),
+      ...(kind === "chat" || kind === "embedding" ? { kind } : {}),
+      ...(typeof contextWindowTokens === "number" ? { contextWindowTokens } : {}),
+    });
   }
   return { ok: true, models };
 }
 
 /**
  * 解析 config_draft_provider 的入参。
- * 严进：未知键与密钥字样一律拒绝（拒绝文本回给模型供其修正）；类型不符给指向字段的错误。
- * 领域级约束（baseUrl 必填与否、模型引用一致性）不在此重复——那归主进程复用的
- * validateProviderDraft，本层只保证形状正确、密钥字段物理不存在。
  */
 export function parseProviderDraftArgs(args: Readonly<Record<string, unknown>>): ParseDraftResult {
   const unknown = rejectUnknownKeys(args, CONFIG_PROVIDER_DRAFT_FIELDS);
@@ -328,11 +351,11 @@ export function parseProviderDraftArgs(args: Readonly<Record<string, unknown>>):
   if (name === undefined) {
     return { ok: false, error: 'Field "name" is required and must be a non-empty string.' };
   }
-  const type = args["type"];
-  if (!isProviderType(type)) {
+  const templateId = args["templateId"];
+  if (!isProviderTemplateId(templateId)) {
     return {
       ok: false,
-      error: `Field "type" must be one of: ${PROVIDER_TYPES.join(", ")}.`,
+      error: `Field "templateId" must be one of: ${PROVIDER_TEMPLATE_IDS.join(", ")}.`,
     };
   }
   const modelsResult = parseModels(args["models"]);
@@ -348,24 +371,62 @@ export function parseProviderDraftArgs(args: Readonly<Record<string, unknown>>):
     return { ok: false, error: 'Field "enabled" must be a boolean.' };
   }
   const baseUrl = nonEmptyString(args["baseUrl"]);
-  const defaultModel = nonEmptyString(args["defaultModel"]);
+  const defaultModelId = nonEmptyString(args["defaultModelId"]);
   const embeddingModel = nonEmptyString(args["embeddingModel"]);
   const proxy = nonEmptyString(args["proxy"]);
-  const requestTemplate = nonEmptyString(args["requestTemplate"]);
   const id = nonEmptyString(args["id"]);
+  const now = Date.now();
+
+  let extraEnv: Record<string, string> | undefined;
+  if (args["extraEnv"] !== undefined) {
+    if (
+      typeof args["extraEnv"] !== "object" ||
+      args["extraEnv"] === null ||
+      Array.isArray(args["extraEnv"])
+    ) {
+      return { ok: false, error: 'Field "extraEnv" must be an object of string values.' };
+    }
+    extraEnv = {};
+    for (const [k, v] of Object.entries(args["extraEnv"] as Record<string, unknown>)) {
+      if (typeof v !== "string") {
+        return { ok: false, error: `extraEnv.${k} must be a string.` };
+      }
+      extraEnv[k] = v;
+    }
+  }
+
+  let options: Record<string, string> | undefined;
+  if (args["options"] !== undefined) {
+    if (
+      typeof args["options"] !== "object" ||
+      args["options"] === null ||
+      Array.isArray(args["options"])
+    ) {
+      return { ok: false, error: 'Field "options" must be an object of string values.' };
+    }
+    options = {};
+    for (const [k, v] of Object.entries(args["options"] as Record<string, unknown>)) {
+      if (typeof v !== "string") {
+        return { ok: false, error: `options.${k} must be a string.` };
+      }
+      options[k] = v;
+    }
+  }
 
   const draft: ConfigProviderDraft = {
     name,
-    type: type as ProviderType,
+    templateId: templateId as ProviderTemplateId,
     models: modelsResult.models,
-    // 缺省启用：AI 起草的配置本就是「要用」，禁用态让它显式给 false
     enabled: enabled ?? true,
+    createdAt: now,
+    updatedAt: now,
     ...(baseUrl !== undefined ? { baseUrl } : {}),
-    ...(defaultModel !== undefined ? { defaultModel: defaultModel as ModelId } : {}),
+    ...(defaultModelId !== undefined ? { defaultModelId: defaultModelId as ModelId } : {}),
     ...(embeddingModel !== undefined ? { embeddingModel: embeddingModel as ModelId } : {}),
     ...(proxy !== undefined ? { proxy } : {}),
     ...(typeof timeoutS === "number" ? { timeoutS } : {}),
-    ...(requestTemplate !== undefined ? { requestTemplate } : {}),
+    ...(extraEnv !== undefined ? { extraEnv } : {}),
+    ...(options !== undefined ? { options } : {}),
   };
   return { ok: true, parsed: { kind: "provider", ...(id !== undefined ? { id } : {}), draft } };
 }
@@ -523,10 +584,10 @@ export const PRESET_FROM_GLOBAL_DEFAULT: PermissionEnvelope = {
 export interface SanitizedProviderView {
   readonly id: string;
   readonly name: string;
-  readonly type: ProviderType;
+  readonly templateId: ProviderTemplateId;
   readonly baseUrl?: string;
   readonly models: readonly ProviderModel[];
-  readonly defaultModel?: string;
+  readonly defaultModelId?: string;
   readonly embeddingModel?: string;
   readonly proxy?: string;
   readonly timeoutS?: number;
@@ -540,10 +601,10 @@ export function sanitizeProvider(provider: Provider): SanitizedProviderView {
   return {
     id: provider.id,
     name: provider.name,
-    type: provider.type,
+    templateId: provider.templateId,
     ...(provider.baseUrl !== undefined ? { baseUrl: provider.baseUrl } : {}),
     models: provider.models,
-    ...(provider.defaultModel !== undefined ? { defaultModel: provider.defaultModel } : {}),
+    ...(provider.defaultModelId !== undefined ? { defaultModelId: provider.defaultModelId } : {}),
     ...(provider.embeddingModel !== undefined ? { embeddingModel: provider.embeddingModel } : {}),
     ...(provider.proxy !== undefined ? { proxy: provider.proxy } : {}),
     ...(provider.timeoutS !== undefined ? { timeoutS: provider.timeoutS } : {}),

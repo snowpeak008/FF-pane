@@ -184,9 +184,9 @@ test.beforeAll(async () => {
     const provider = await invoke("providers:create", {
       draft: {
         name: "E2E CLI",
-        type: "cli_login",
-        models: [{ id: "m1", displayName: "M1", kind: "chat" }],
-        defaultModel: "m1",
+        templateId: "local-login",
+        models: [{ id: "m1", label: "M1", kind: "chat" }],
+        defaultModelId: "m1",
         enabled: true,
       },
     });
@@ -241,11 +241,11 @@ test("config MCP sidecar：拉起 → 四工具 schema 无密钥字段 → list 
         {
           id: "provider-e2e",
           name: "SecretProv",
-          type: "openai_compatible",
+          templateId: "openai-compatible",
           baseUrl: "https://api.example.com/v1",
           apiKeyRef: "super-secret-ref-do-not-leak",
-          models: [{ id: "m1", displayName: "M1", kind: "chat" }],
-          defaultModel: "m1",
+          models: [{ id: "m1", label: "M1", kind: "chat" }],
+          defaultModelId: "m1",
           enabled: true,
         },
       ],
@@ -278,8 +278,8 @@ test("config MCP sidecar：拉起 → 四工具 schema 无密钥字段 → list 
           name: "config_draft_provider",
           arguments: {
             name: "Drafted",
-            type: "cli_login",
-            models: [{ id: "m", displayName: "M", kind: "chat" }],
+            templateId: "local-login",
+            models: [{ id: "m", label: "M", kind: "chat" }],
           },
         },
       },
@@ -389,9 +389,9 @@ test("全链路：设置页开开关 → 派发在飞轮 → 草案 → 确认�
       tool: "config_draft_provider",
       args: {
         name: "E2E Drafted",
-        type: "cli_login",
-        models: [{ id: "m9", displayName: "M9", kind: "chat" }],
-        defaultModel: "m9",
+        templateId: "local-login",
+        models: [{ id: "m9", label: "M9", kind: "chat" }],
+        defaultModelId: "m9",
       },
       at: Date.now(),
     }),

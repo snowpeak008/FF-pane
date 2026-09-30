@@ -24,8 +24,9 @@ test("填写 openai_compatible 表单 → 保存，Provider 行出现", async ()
 
   await gotoRoute(page, "/settings");
 
-  // Provider 区空态主操作（默认类型即 openai_compatible）
+  // Provider 区空态主操作 → 选 openai-compatible 模板 → 填表
   await page.getByRole("button", { name: "New provider" }).click();
+  await page.getByTestId("provider-template-openai-compatible").click();
 
   const providerName = "E2E Provider";
   const baseUrl = "https://api.example.com/v1";

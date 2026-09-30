@@ -132,10 +132,10 @@ export function ProfileEditorDialog({
     [providers, form.providerId],
   );
   const chatModels = useMemo(
-    () => (selectedProvider?.models ?? []).filter((m) => m.kind === "chat"),
+    () => (selectedProvider?.models ?? []).filter((m) => (m.kind ?? "chat") === "chat"),
     [selectedProvider],
   );
-  const effortModel = form.model.trim() || selectedProvider?.defaultModel || "";
+  const effortModel = form.model.trim() || selectedProvider?.defaultModelId || "";
   const { state: effortState } = useInvokeQuery("runtimes:reasoning-effort-levels", {
     runtime: form.runtime,
     ...(effortModel.length > 0 ? { model: effortModel } : {}),
@@ -151,10 +151,10 @@ export function ProfileEditorDialog({
   const contextWindow = useMemo(
     () =>
       resolveContextWindow(
-        form.model.trim() || selectedProvider?.defaultModel,
+        form.model.trim() || selectedProvider?.defaultModelId,
         form.runtime.length > 0 ? form.runtime : undefined,
       ),
-    [form.model, form.runtime, selectedProvider?.defaultModel],
+    [form.model, form.runtime, selectedProvider?.defaultModelId],
   );
 
   useEffect(() => {
@@ -193,7 +193,7 @@ export function ProfileEditorDialog({
   const runtimeChoices = isLocalCli
     ? [...LOCAL_CLI_RUNTIMES, "generic-exec"]
     : RUNTIME_OPTIONS.filter((rt) => rt !== "generic-exec");
-  const relayProviders = providers.filter((p) => p.type !== "cli_login");
+  const relayProviders = providers.filter((p) => p.templateId !== "local-login");
   const canSave =
     form.name.trim().length > 0 &&
     form.runtime.trim().length > 0 &&
@@ -329,8 +329,8 @@ export function ProfileEditorDialog({
             <Field
               htmlFor="profile-model"
               label={t("settings.profiles.field.model")}
-              // cli_login 模型可选化（T9.2 ④）：缺省 = CLI 默认模型（派发不传 -m 类参数）
-              {...(isLocalCli || selectedProvider?.type === "cli_login"
+              // local-login 模型可选化：缺省 = CLI 默认模型
+              {...(isLocalCli || selectedProvider?.templateId === "local-login"
                 ? { hint: t("settings.profiles.field.modelCliDefaultHint") }
                 : {})}
             >
@@ -343,13 +343,13 @@ export function ProfileEditorDialog({
                   onChange={(e) => patch({ model: e.target.value })}
                 >
                   <option value="">
-                    {isLocalCli || selectedProvider?.type === "cli_login"
+                    {isLocalCli || selectedProvider?.templateId === "local-login"
                       ? t("settings.profiles.field.modelCliDefault")
                       : t("settings.profiles.field.modelDefault")}
                   </option>
                   {chatModels.map((m) => (
                     <option key={m.id} value={m.id}>
-                      {m.displayName.length > 0 ? m.displayName : m.id}
+                      {(m.label ?? "").length > 0 ? m.label : m.id}
                     </option>
                   ))}
                 </select>

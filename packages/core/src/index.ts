@@ -31,7 +31,8 @@ export * from "./plan/index.js";
 export * from "./profile/index.js";
 /** Prompt 组装层（T4.1）：四层系统提示 + 记忆注入 + 输出语言级联。 */
 export * from "./prompt/index.js";
-
+/** Provider → CLI 注入解析（T10.3）：表驱动 env / configOverrides。 */
+export * from "./provider-injection/index.js";
 /** Provider 连接探测（W1.5c）：连接测试 + /models 拉取，纯网络逻辑、零密钥存取。 */
 export * from "./provider-probe/index.js";
 

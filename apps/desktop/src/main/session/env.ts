@@ -1,21 +1,22 @@
 /**
- * Run 级密钥注入映射（T4.2，设计文档 §4.3 密钥红线）。
+ * Run 级密钥注入映射（T4.2 / T10.3）。
  *
- * 唯一的密钥下发通道是 AdapterTurnContext.env（见 adapter.ts）。本模块把
- * Provider 的密钥引用解密所得明文，按 Runtime 约定的环境变量名装进注入表。
- * 纯逻辑：解密动作由调用方（持有 secrets store）完成后把明文传进来，
- * 本模块不接触密钥库、不记录明文。
+ * claude-code / codex：委托 @ff-pane/core resolveProviderInjection（表驱动）。
+ * 其它 Runtime：保留旧 switch 路径（Grok 等本阶段不改坏）。
  */
 
+import { ProviderInjectionError, resolveProviderInjection } from "@ff-pane/core";
 import {
   type ConnectionMode,
+  isLocalLoginProvider,
   type Provider,
+  type ProviderTemplateCli,
   type RuntimeId,
   resolveConnectionMode,
   resolveDispatchedReasoningEffort,
 } from "@ff-pane/shared";
 
-/** 各 Runtime 读取 API 密钥的环境变量名（CLI 自管登录态的 Runtime 返回 undefined）。 */
+/** 各 Runtime 读取 API 密钥的环境变量名（旧路径 / 非 claude·codex）。 */
 export function runtimeApiKeyEnvVar(runtime: RuntimeId): string | undefined {
   switch (runtime) {
     case "codex":
@@ -24,46 +25,19 @@ export function runtimeApiKeyEnvVar(runtime: RuntimeId): string | undefined {
       return "ANTHROPIC_API_KEY";
     case "gemini-cli":
       return "GEMINI_API_KEY";
-    // grok 的凭据解析顺序里 XAI_API_KEY 是全局兜底（grok-build.md §5），
-    // 且它正落在「密钥只经 env 下发」的红线内。cli_login 型 Provider 走
-    // 用户自己的 `grok login` 登录态，本函数的返回值对其无效（上层不注入）。
     case "grok-build":
       return "XAI_API_KEY";
-    // aider 的认证完全由 litellm 按 Provider 读环境变量，没有 cli_login 登录态可用
-    // （aider.md §5.2）。默认走 OpenAI 兼容链路的标准变量名；用别家 Provider 时
-    // 由 Profile 侧的自定义配置覆盖。
-    // 注意：这个变量是 aider 唯一的认证材料来源，缺席会让它进 onboarding 并唤起
-    // 浏览器（§7.3 坑 1），故适配器在 startTurn 里对它做启动前快速失败。
     case "aider":
       return "OPENAI_API_KEY";
-    // qwen-code 走 --auth-type openai 兼容协议（适配器默认下发；qwen OAuth 免费层
-    // 2026-04-15 已废止，qwen-code.md §6）：密钥变量与 codex/aider 同名，覆盖
-    // ModelStudio/Dashscope/OpenRouter 等一切 OpenAI 兼容端点。
     case "qwen-code":
       return "OPENAI_API_KEY";
-    // iflow 仅 openai-compatible 认证类型可用（2026-04-16 日期开关后，iflow.md §5.2），
-    // 但变量名必须是 IFLOW_ 前缀（CT() 查找序，§5.3——错误提示里的裸 apiKey 写法无效）。
-    // 受管 settings 只钉 selectedAuthType，三件套全走本通道（密钥不落盘，§4.3）。
     case "iflow":
       return "IFLOW_API_KEY";
-    // opencode 的 Provider 在其自身配置内声明；generic-exec 由 Profile 的自定义
-    // 配置决定，均不由本层按固定变量名注入。
     default:
       return undefined;
   }
 }
 
-/**
- * 各 Runtime 读取自定义 base_url 的环境变量名（仅 openai 兼容链路需要）。
- *
- * aider 也用 `OPENAI_BASE_URL` 而非 `OPENAI_API_BASE`：实测（aider.md §5.2）
- * litellm 优先取 `OPENAI_BASE_URL`，它**会压过** aider 自己的 `--openai-api-base`
- * 参数。既然优先级最高的那个就是它，注入它才能保证路由确定。
- * qwen-code 同用 `OPENAI_BASE_URL`（真机实测生效，qwen-code.md §6——指向
- * Dashscope/ModelStudio/OpenRouter 等端点的唯一 env 通道）。
- * iflow 是 `IFLOW_BASE_URL`（iflow.md §5.3 的 CT() 变量名；缺席时 CLI 缺省
- * `https://apis.iflow.cn/v1`——iFlow 官方后端本就说 OpenAI 兼容协议）。
- */
 function runtimeBaseUrlEnvVar(runtime: RuntimeId): string | undefined {
   switch (runtime) {
     case "iflow":
@@ -83,75 +57,25 @@ function runtimeBaseUrlEnvVar(runtime: RuntimeId): string | undefined {
   }
 }
 
-/** 单 Provider 每轮临时装配的 codex model_provider 槽名（无跨轮共享，故固定即可）。 */
-const CODEX_PROVIDER_SLUG = "ffpane";
-
-/**
- * 组装本轮运行时配置覆盖（AdapterTurnContext.configOverrides）。
- *
- * 目前仅 codex 需要：把一个 openai_compatible Provider 装配成 codex 的自定义
- * model_provider 路由，使 codex 走 Provider 的 base_url + 由 env_key 指向的 OPENAI_API_KEY，
- * 而非其内置 openai/ChatGPT 登录（后者会覆盖裸 OPENAI_BASE_URL，实测 §T4.5 验收）。
- *
- * 值按 codex `-c` 的 TOML 语义：model_provider 用裸 slug；name/base_url/env_key 为
- * 基本字符串，用 JSON.stringify 产出合法带引号串（含转义）。cli_login / 非 codex / 非
- * openai_compatible / 无 baseUrl → 不装配路由（可仍带 T9.4b 的 model_reasoning_effort）。
- */
-export function resolveRuntimeConfigOverrides(input: {
-  readonly runtime: RuntimeId;
-  readonly provider: Provider;
-  /** T9.4b —— 显式选中的推理强度档；缺席 / 空 = 不传（跟随用户本机 toml）。 */
-  readonly reasoningEffort?: string;
-  /** T9.11 —— 显式连法；缺席按 Provider 类型推断。 */
-  readonly connectionMode?: ConnectionMode;
-}): Record<string, string> {
-  const { runtime, provider } = input;
-  const mode = resolveConnectionMode(input.connectionMode, provider.type);
-  const overrides: Record<string, string> = {};
-  if (
-    mode === "relay" &&
-    runtime === "codex" &&
-    provider.type === "openai_compatible" &&
-    provider.baseUrl !== undefined &&
-    provider.baseUrl.length > 0
-  ) {
-    const slug = CODEX_PROVIDER_SLUG;
-    const name = provider.name.length > 0 ? provider.name : slug;
-    overrides["model_provider"] = slug;
-    overrides[`model_providers.${slug}.name`] = JSON.stringify(name);
-    overrides[`model_providers.${slug}.base_url`] = JSON.stringify(provider.baseUrl);
-    // env_key 指向 resolveRuntimeEnv 为 codex 注入的密钥变量（下方常量），二者必须一致。
-    overrides[`model_providers.${slug}.env_key`] = JSON.stringify("OPENAI_API_KEY");
+function asTemplateCli(runtime: RuntimeId): ProviderTemplateCli | undefined {
+  if (runtime === "claude-code" || runtime === "codex") {
+    return runtime;
   }
-  // T9.4b：即使 cli_login / 无 openai_compatible 路由，显式档位仍要下发。
-  const effort = resolveDispatchedReasoningEffort({
-    runtime,
-    reasoningEffort: input.reasoningEffort,
-  });
-  if (effort !== undefined && runtime === "codex") {
-    overrides["model_reasoning_effort"] = JSON.stringify(effort);
-  }
-  return overrides;
+  return undefined;
 }
 
-/**
- * 组装本轮注入环境变量。
- * - 本地 CLI：不注入密钥、不注入网址（凭证由 CLI 自管）。
- * - 中转：注入密钥 + 各家 CLI 认的网址变量（Claude / Codex / Gemini / Grok 等同路）。
- * - 无解密明文时该变量缺席，不静默塞空串。
- */
-export function resolveRuntimeEnv(input: {
+/** 旧路径：非 claude/codex Runtime 的 env 组装。 */
+function resolveLegacyRuntimeEnv(input: {
   readonly runtime: RuntimeId;
   readonly provider: Provider;
   readonly apiKeyPlaintext?: string;
-  /** T9.11 —— 显式连法；缺席按 Provider 类型推断。 */
   readonly connectionMode?: ConnectionMode;
 }): Record<string, string> {
   const env: Record<string, string> = {};
   const { runtime, provider, apiKeyPlaintext } = input;
-  const mode = resolveConnectionMode(input.connectionMode, provider.type);
+  const mode = resolveConnectionMode(input.connectionMode, provider.templateId);
 
-  if (mode === "local_cli") {
+  if (mode === "local_cli" || isLocalLoginProvider(provider)) {
     return env;
   }
 
@@ -170,4 +94,103 @@ export function resolveRuntimeEnv(input: {
   }
 
   return env;
+}
+
+/**
+ * 组装本轮运行时配置覆盖（AdapterTurnContext.configOverrides）。
+ * claude-code / codex 走解析器；其它 Runtime 仅可能带 reasoning effort（codex 已含）。
+ */
+export function resolveRuntimeConfigOverrides(input: {
+  readonly runtime: RuntimeId;
+  readonly provider: Provider;
+  readonly reasoningEffort?: string;
+  readonly connectionMode?: ConnectionMode;
+}): Record<string, string> {
+  const { runtime, provider } = input;
+  const mode = resolveConnectionMode(input.connectionMode, provider.templateId);
+  const overrides: Record<string, string> = {};
+
+  const cli = asTemplateCli(runtime);
+  if (cli !== undefined && mode === "relay" && !isLocalLoginProvider(provider)) {
+    try {
+      const injection = resolveProviderInjection({
+        provider,
+        cli,
+        ...(provider.defaultModelId !== undefined ? { model: provider.defaultModelId } : {}),
+      });
+      Object.assign(overrides, injection.configOverrides);
+    } catch (error) {
+      if (!(error instanceof ProviderInjectionError)) {
+        throw error;
+      }
+      // unsupported-cli / missing-base-url：不写路由（与旧行为一致）
+    }
+  }
+
+  const effort = resolveDispatchedReasoningEffort({
+    runtime,
+    reasoningEffort: input.reasoningEffort,
+  });
+  if (effort !== undefined && runtime === "codex") {
+    overrides["model_reasoning_effort"] = JSON.stringify(effort);
+  }
+  return overrides;
+}
+
+/**
+ * 组装本轮注入环境变量。
+ * claude-code / codex → resolveProviderInjection；其它 Runtime 走旧路径。
+ */
+export function resolveRuntimeEnv(input: {
+  readonly runtime: RuntimeId;
+  readonly provider: Provider;
+  readonly apiKeyPlaintext?: string;
+  readonly connectionMode?: ConnectionMode;
+  readonly model?: string;
+}): Record<string, string> {
+  const { runtime, provider, apiKeyPlaintext } = input;
+  const mode = resolveConnectionMode(input.connectionMode, provider.templateId);
+
+  if (mode === "local_cli") {
+    return {};
+  }
+
+  if (isLocalLoginProvider(provider)) {
+    const cli = asTemplateCli(runtime);
+    if (cli !== undefined) {
+      try {
+        return { ...resolveProviderInjection({ provider, cli }).env };
+      } catch {
+        return {};
+      }
+    }
+    return {};
+  }
+
+  const cli = asTemplateCli(runtime);
+  if (cli !== undefined) {
+    try {
+      const injection = resolveProviderInjection({
+        provider,
+        cli,
+        ...(apiKeyPlaintext !== undefined ? { secret: apiKeyPlaintext } : {}),
+        ...(input.model !== undefined
+          ? { model: input.model }
+          : provider.defaultModelId !== undefined
+            ? { model: provider.defaultModelId }
+            : {}),
+      });
+      return { ...injection.env };
+    } catch (error) {
+      if (
+        error instanceof ProviderInjectionError &&
+        (error.code === "unsupported-cli" || error.code === "missing-base-url")
+      ) {
+        return resolveLegacyRuntimeEnv(input);
+      }
+      throw error;
+    }
+  }
+
+  return resolveLegacyRuntimeEnv(input);
 }

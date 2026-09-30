@@ -62,9 +62,9 @@ test.beforeAll(async () => {
     await invoke("providers:create", {
       draft: {
         name: "E2E GX Provider",
-        type: "cli_login",
-        models: [{ id: "m1", displayName: "M1", kind: "chat" }],
-        defaultModel: "m1",
+        templateId: "local-login",
+        models: [{ id: "m1", label: "M1", kind: "chat" }],
+        defaultModelId: "m1",
         enabled: true,
       },
     });

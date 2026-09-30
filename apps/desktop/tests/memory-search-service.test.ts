@@ -96,7 +96,7 @@ function makeProvider(baseUrl: string): Provider {
   return {
     id: "prov-embed" as ProviderId,
     name: "Fake Embeddings",
-    type: "openai_compatible",
+    templateId: "openai-compatible",
     baseUrl: `${baseUrl}/v1`,
     models: [],
     embeddingModel: MODEL,

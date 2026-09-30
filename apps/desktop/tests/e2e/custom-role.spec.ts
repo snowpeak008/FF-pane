@@ -34,6 +34,7 @@ test("新建自定义角色 → 出现在列表与 Profile 角色下拉 → 绑�
 
   // 2) 建一个 Provider（Profile 表单必填 Provider；手填一个 chat 模型供 Profile 指定）
   await page.getByRole("button", { name: "New provider" }).click();
+  await page.getByTestId("provider-template-openai-compatible").click();
   await page.locator("#provider-name").fill("E2E Role Provider");
   await page.locator("#provider-baseurl").fill("https://api.example.com/v1");
   await page.locator("#provider-apikey").fill("sk-e2e-dummy-key");

@@ -15,6 +15,7 @@
 import type { Embedder } from "@ff-pane/rag";
 import { resolveProviderEmbedder } from "@ff-pane/rag";
 import type { ApiKeyRef, Provider } from "@ff-pane/shared";
+import { isOpenAiFamilyTemplate } from "@ff-pane/shared";
 import type { KnowledgeEmbeddingStatus } from "../../shared-ipc/contracts";
 
 /** 已建向量索引的规格（来自向量状态行）；未建过索引时缺席。 */
@@ -52,7 +53,7 @@ export interface EmbedderResolution {
 function canEmbed(provider: Provider): boolean {
   return (
     provider.enabled &&
-    provider.type === "openai_compatible" &&
+    isOpenAiFamilyTemplate(provider.templateId) &&
     (provider.embeddingModel?.trim() ?? "") !== "" &&
     (provider.baseUrl?.trim() ?? "") !== ""
   );

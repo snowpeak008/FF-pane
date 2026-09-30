@@ -174,7 +174,7 @@ async function probeThrough(
     return outlet.failure;
   }
   const params = {
-    provider: { type: "openai_compatible" as const, baseUrl, timeoutS: 5 },
+    provider: { templateId: "openai-compatible" as const, baseUrl, timeoutS: 5 },
     apiKey: API_KEY,
     ...(outlet.fetchImpl !== undefined ? { fetchImpl: outlet.fetchImpl } : {}),
   };

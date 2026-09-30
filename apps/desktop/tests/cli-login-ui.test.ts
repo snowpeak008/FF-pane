@@ -122,11 +122,11 @@ describe("登录态探测缓存（cli-login-probe）", () => {
   });
 });
 
-describe("cli_login 模型手填禁用判定（T9.2 ③）", () => {
-  it("仅 cli_login 类型走 CLI 枚举（手填入口隐藏）", () => {
-    expect(usesCliEnumeratedModels("cli_login")).toBe(true);
-    expect(usesCliEnumeratedModels("openai_compatible")).toBe(false);
-    expect(usesCliEnumeratedModels("anthropic")).toBe(false);
-    expect(usesCliEnumeratedModels("custom")).toBe(false);
+describe("local-login 模型手填禁用判定（T9.2 ③ / T10.3）", () => {
+  it("仅 local-login 模板走 CLI 枚举（手填入口隐藏）", () => {
+    expect(usesCliEnumeratedModels("local-login")).toBe(true);
+    expect(usesCliEnumeratedModels("openai-compatible")).toBe(false);
+    expect(usesCliEnumeratedModels("anthropic-compatible")).toBe(false);
+    expect(usesCliEnumeratedModels("openai-official")).toBe(false);
   });
 });

@@ -10,6 +10,7 @@
  */
 
 import type { Provider } from "@ff-pane/shared";
+import { isOpenAiFamilyTemplate } from "@ff-pane/shared";
 import { createOllamaEmbedder } from "./ollama.js";
 import { createOpenAiEmbedder } from "./openai.js";
 import type { Embedder, EmbedderConfig } from "./types.js";
@@ -47,12 +48,11 @@ export interface ProviderEmbedderOptions {
  * Provider → 嵌入配置。**不满足条件一律返回 undefined**（调用方据此走纯 FTS）：
  * - Provider 未启用；
  * - 未设 embeddingModel（§4.1 的可选字段，正是「没配嵌入模型」的表达）；
- * - 类型不是 openai_compatible —— anthropic 官方没有嵌入端点，
- *   cli_login 的凭证不对外暴露、custom 只有对话模板，三者都无从发起 /embeddings；
+ * - 模板不是 OpenAI 族 —— anthropic / local-login 无从发起 /embeddings；
  * - 缺 baseUrl。
  *
  * 注意：本函数只产 api:"openai" 的配置。本地 Ollama 有两条路——
- * 配成 openai_compatible + baseUrl ".../v1"（走这里），
+ * 配成 openai-compatible + baseUrl ".../v1"（走这里），
  * 或由调用方直接构造 `{ api:"ollama", baseUrl: OLLAMA_DEFAULT_BASE_URL, model }`（走原生端点）。
  */
 export function embedderConfigFromProvider(
@@ -62,7 +62,7 @@ export function embedderConfigFromProvider(
   if (!provider.enabled) {
     return undefined;
   }
-  if (provider.type !== "openai_compatible") {
+  if (!isOpenAiFamilyTemplate(provider.templateId)) {
     return undefined;
   }
   const model = provider.embeddingModel?.trim() ?? "";

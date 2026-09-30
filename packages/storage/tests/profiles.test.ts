@@ -241,7 +241,7 @@ describe("profileReferencesProvider 与 W1.5a 删除保护的组装", () => {
     );
     const provider = await providerStore.createProvider({
       name: "Claude 订阅登录",
-      type: "cli_login",
+      templateId: "local-login",
       models: [],
       enabled: true,
     });

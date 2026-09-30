@@ -7,13 +7,7 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type {
-  ApiKeyRef,
-  ModelKind,
-  ProviderId,
-  ProviderModel,
-  ProviderType,
-} from "@ff-pane/shared";
+import type { ApiKeyRef, ProviderId, ProviderModel, ProviderTemplateId } from "@ff-pane/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createProviderStore,
@@ -48,23 +42,23 @@ afterEach(async () => {
 
 const CHAT_MODEL: ProviderModel = {
   id: "deepseek-chat",
-  displayName: "DeepSeek Chat",
+  label: "DeepSeek Chat",
   kind: "chat",
 };
 const EMBEDDING_MODEL: ProviderModel = {
   id: "text-embedding-v1",
-  displayName: "嵌入模型",
+  label: "嵌入模型",
   kind: "embedding",
 };
 
 function openAiDraft(): ProviderDraft {
   return {
     name: "我的 DeepSeek",
-    type: "openai_compatible",
+    templateId: "openai-compatible",
     baseUrl: "https://api.deepseek.com/v1",
     apiKeyRef: "keyref-deepseek-001" as ApiKeyRef,
     models: [CHAT_MODEL, EMBEDDING_MODEL],
-    defaultModel: "deepseek-chat",
+    defaultModelId: "deepseek-chat",
     embeddingModel: "text-embedding-v1",
     timeoutS: 120,
     enabled: true,
@@ -74,11 +68,11 @@ function openAiDraft(): ProviderDraft {
 function anthropicDraft(): ProviderDraft {
   return {
     name: "Anthropic 官方",
-    type: "anthropic",
+    templateId: "anthropic-official",
     baseUrl: "https://api.anthropic.com",
     apiKeyRef: "keyref-anthropic-001" as ApiKeyRef,
-    models: [{ id: "claude-sonnet", displayName: "Claude Sonnet", kind: "chat" }],
-    defaultModel: "claude-sonnet",
+    models: [{ id: "claude-sonnet", label: "Claude Sonnet", kind: "chat" }],
+    defaultModelId: "claude-sonnet",
     enabled: true,
   };
 }
@@ -86,7 +80,7 @@ function anthropicDraft(): ProviderDraft {
 function cliLoginDraft(): ProviderDraft {
   return {
     name: "Claude 订阅登录",
-    type: "cli_login",
+    templateId: "local-login",
     models: [],
     enabled: true,
   };
@@ -95,10 +89,11 @@ function cliLoginDraft(): ProviderDraft {
 function customDraft(): ProviderDraft {
   return {
     name: "自定义服务",
-    type: "custom",
-    requestTemplate: '{ "method": "POST", "path": "/v1/chat" }',
+    templateId: "openai-compatible",
+    baseUrl: "https://custom.example/v1",
+    apiKeyRef: "keyref-custom-001" as ApiKeyRef,
     models: [CHAT_MODEL],
-    defaultModel: "deepseek-chat",
+    defaultModelId: "deepseek-chat",
     enabled: true,
   };
 }
@@ -187,11 +182,11 @@ describe("CRUD round-trip", () => {
     expect(await store.listProviders()).toHaveLength(2);
   });
 
-  it("update 全量替换（id 不变），可清除可选字段以切换类型", async () => {
+  it("update 全量替换（id 不变），可清除可选字段以切换模板", async () => {
     const created = await store.createProvider(openAiDraft());
     const updated = await store.updateProvider(created.id, cliLoginDraft());
     expect(updated.id).toBe(created.id);
-    expect(updated.type).toBe("cli_login");
+    expect(updated.templateId).toBe("local-login");
     expect(updated.baseUrl).toBeUndefined();
     expect(updated.apiKeyRef).toBeUndefined();
 
@@ -227,60 +222,50 @@ describe("CRUD round-trip", () => {
   });
 });
 
-describe("四类型校验矩阵（设计文档 §4.2）", () => {
-  it("openai_compatible / anthropic 合法草稿通过", () => {
+describe("模板校验矩阵（T10.3）", () => {
+  it("openai-compatible / anthropic-official 合法草稿通过", () => {
     expect(() => validateProviderDraft(openAiDraft())).not.toThrow();
     expect(() => validateProviderDraft(anthropicDraft())).not.toThrow();
   });
 
-  it("openai_compatible / anthropic：缺 baseUrl 拒绝", () => {
+  it("openai-compatible 缺 baseUrl 拒绝；anthropic-official 可缺", () => {
     const { baseUrl: _baseUrl, ...withoutBaseUrl } = openAiDraft();
     expectViolation(withoutBaseUrl, "baseUrl");
     const { baseUrl: _anthropicBaseUrl, ...anthropicWithout } = anthropicDraft();
-    expectViolation(anthropicWithout, "baseUrl");
+    expect(() => validateProviderDraft(anthropicWithout)).not.toThrow();
   });
 
-  it("openai_compatible：baseUrl 非 URL 形式 / 非 http(s) 协议拒绝", () => {
+  it("openai-compatible：baseUrl 非 URL 形式 / 非 http(s) 协议拒绝", () => {
     expectViolation({ ...openAiDraft(), baseUrl: "不是 URL" }, "baseUrl");
     expectViolation({ ...openAiDraft(), baseUrl: "ftp://example.com" }, "baseUrl");
     expectViolation({ ...openAiDraft(), baseUrl: "" }, "baseUrl");
   });
 
-  it("openai_compatible / anthropic：缺 apiKeyRef 或空引用拒绝", () => {
+  it("需密钥模板：缺 apiKeyRef 或空引用拒绝", () => {
     const { apiKeyRef: _apiKeyRef, ...withoutKeyRef } = openAiDraft();
     expectViolation(withoutKeyRef, "apiKeyRef");
     expectViolation({ ...anthropicDraft(), apiKeyRef: "" as ApiKeyRef }, "apiKeyRef");
   });
 
-  it("cli_login：无 baseUrl / apiKeyRef 的合法草稿通过", () => {
+  it("local-login：无 baseUrl / apiKeyRef 的合法草稿通过", () => {
     expect(() => validateProviderDraft(cliLoginDraft())).not.toThrow();
   });
 
-  it("cli_login：设置了 baseUrl 或 apiKeyRef 拒绝（必须无，§4.2）", () => {
+  it("local-login：设置了 baseUrl 或 apiKeyRef 拒绝", () => {
     expectViolation({ ...cliLoginDraft(), baseUrl: "https://api.example.com" }, "baseUrl");
     expectViolation({ ...cliLoginDraft(), apiKeyRef: "keyref-x" as ApiKeyRef }, "apiKeyRef");
   });
 
-  it("custom：带 requestTemplate 通过，可选搭配合法 baseUrl 与 apiKeyRef", () => {
+  it("openai-compatible 中转草稿通过", () => {
     expect(() => validateProviderDraft(customDraft())).not.toThrow();
-    expect(() =>
-      validateProviderDraft({
-        ...customDraft(),
-        baseUrl: "https://special.example.com",
-        apiKeyRef: "keyref-custom" as ApiKeyRef,
-      }),
-    ).not.toThrow();
   });
 
-  it("custom：缺 requestTemplate 或空模板拒绝；baseUrl 若设置必须是 http(s) URL", () => {
-    const { requestTemplate: _requestTemplate, ...withoutTemplate } = customDraft();
-    expectViolation(withoutTemplate, "requestTemplate");
-    expectViolation({ ...customDraft(), requestTemplate: "" }, "requestTemplate");
+  it("未知 templateId 拒绝；baseUrl 非法拒绝", () => {
+    expectViolation(
+      { ...openAiDraft(), templateId: "grpc_magic" as ProviderTemplateId },
+      "templateId",
+    );
     expectViolation({ ...customDraft(), baseUrl: "无效地址" }, "baseUrl");
-  });
-
-  it("未知 Provider 类型拒绝（IPC / JSON 边界防线）", () => {
-    expectViolation({ ...openAiDraft(), type: "grpc_magic" as ProviderType }, "type");
   });
 
   it("create / update 均强制执行校验（store 接线验证）", async () => {
@@ -291,8 +276,8 @@ describe("四类型校验矩阵（设计文档 §4.2）", () => {
 
     const created = await store.createProvider(customDraft());
     await expect(
-      store.updateProvider(created.id, { ...customDraft(), requestTemplate: "" }),
-    ).rejects.toMatchObject({ code: "provider-validation", field: "requestTemplate" });
+      store.updateProvider(created.id, { ...customDraft(), baseUrl: "不是URL" }),
+    ).rejects.toMatchObject({ code: "provider-validation", field: "baseUrl" });
   });
 });
 
@@ -300,21 +285,21 @@ describe("通用校验（设计文档 §4.1）", () => {
   it("models 内 id 重复拒绝，id 为空拒绝，kind 非法拒绝", () => {
     expectViolation({ ...openAiDraft(), models: [CHAT_MODEL, CHAT_MODEL] }, "models");
     expectViolation(
-      { ...openAiDraft(), models: [{ id: "", displayName: "空 id", kind: "chat" }] },
+      { ...openAiDraft(), models: [{ id: "", label: "空 id", kind: "chat" }] },
       "models",
     );
     expectViolation(
       {
         ...openAiDraft(),
-        models: [{ id: "vision-x", displayName: "越界", kind: "vision" as ModelKind }],
+        models: [{ id: "vision-x", label: "越界", kind: "vision" as "chat" }],
       },
       "models",
     );
   });
 
-  it("defaultModel 不在 models 中拒绝；指向 embedding 模型（kind 不匹配）拒绝", () => {
-    expectViolation({ ...openAiDraft(), defaultModel: "不存在的模型" }, "defaultModel");
-    expectViolation({ ...openAiDraft(), defaultModel: EMBEDDING_MODEL.id }, "defaultModel");
+  it("defaultModelId 不在 models 中拒绝；指向 embedding 模型（kind 不匹配）拒绝", () => {
+    expectViolation({ ...openAiDraft(), defaultModelId: "不存在的模型" }, "defaultModelId");
+    expectViolation({ ...openAiDraft(), defaultModelId: EMBEDDING_MODEL.id }, "defaultModelId");
   });
 
   it("embeddingModel 不在 models 中拒绝；指向 chat 模型（kind 不匹配）拒绝", () => {
@@ -327,6 +312,21 @@ describe("通用校验（设计文档 §4.1）", () => {
     expectViolation({ ...openAiDraft(), timeoutS: -5 }, "timeoutS");
     expectViolation({ ...openAiDraft(), timeoutS: 1.5 }, "timeoutS");
     expect(() => validateProviderDraft({ ...openAiDraft(), timeoutS: 300 })).not.toThrow();
+  });
+
+  it("extraEnv 危险变量在落盘校验时拒绝", () => {
+    expectViolation({ ...openAiDraft(), extraEnv: { PATH: "/evil" } }, "extraEnv");
+    expectViolation({ ...openAiDraft(), extraEnv: { NODE_OPTIONS: "--require x" } }, "extraEnv");
+    expectViolation({ ...openAiDraft(), extraEnv: { LD_PRELOAD: "/x.so" } }, "extraEnv");
+    expectViolation(
+      { ...openAiDraft(), extraEnv: { DYLD_INSERT_LIBRARIES: "/x.dylib" } },
+      "extraEnv",
+    );
+    expectViolation({ ...openAiDraft(), extraEnv: { ELECTRON_RUN_AS_NODE: "1" } }, "extraEnv");
+    expectViolation({ ...openAiDraft(), extraEnv: { PATHEXT: ".EVIL" } }, "extraEnv");
+    expect(() =>
+      validateProviderDraft({ ...openAiDraft(), extraEnv: { MY_SAFE_FLAG: "1" } }),
+    ).not.toThrow();
   });
 });
 

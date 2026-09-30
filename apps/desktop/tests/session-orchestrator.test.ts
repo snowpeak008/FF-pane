@@ -126,7 +126,7 @@ function provider(): Provider {
   return {
     id: "prov-1",
     name: "V",
-    type: "cli_login",
+    templateId: "local-login",
     models: [],
     enabled: true,
   } as unknown as Provider;
@@ -622,7 +622,7 @@ describe("createSessionOrchestrator", () => {
       provider: {
         id: "prov-1",
         name: "DeepSeek",
-        type: "openai_compatible",
+        templateId: "openai-compatible",
         baseUrl: "https://api.deepseek.com/v1",
         models: [],
         enabled: true,

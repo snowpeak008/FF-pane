@@ -7,6 +7,7 @@ import {
   CONNECTION_MODE_RESET_ID,
   ensureLocalCliProvider,
   LOCAL_CLI_PROVIDER_NAME,
+  type LocalCliProviderDraft,
   materializeProfileDraft,
   type ProfileDraft,
   resetLegacyAgentConfigIfNeeded,
@@ -16,11 +17,13 @@ function provider(overrides: Partial<Provider> = {}): Provider {
   return {
     id: "provider-relay" as ProviderId,
     name: "Hub",
-    type: "openai_compatible",
+    templateId: "openai-compatible",
     models: [],
     enabled: true,
+    createdAt: 1,
+    updatedAt: 1,
     ...overrides,
-  };
+  } as Provider;
 }
 
 describe("resetLegacyAgentConfigIfNeeded", () => {
@@ -81,20 +84,20 @@ describe("ensureLocalCliProvider / materializeProfileDraft", () => {
     const created: Provider[] = [];
     const store = {
       listProviders: async () => created,
-      createProvider: async (draft: {
-        readonly name: string;
-        readonly type: "cli_login";
-        readonly models: readonly [];
-        readonly enabled: true;
-      }) => {
-        const next: Provider = { id: "provider-local" as ProviderId, ...draft };
+      createProvider: async (draft: LocalCliProviderDraft) => {
+        const next: Provider = {
+          id: "provider-local" as ProviderId,
+          createdAt: 1,
+          updatedAt: 1,
+          ...draft,
+        };
         created.push(next);
         return next;
       },
     };
     const local = await ensureLocalCliProvider(store);
     expect(local.name).toBe(LOCAL_CLI_PROVIDER_NAME);
-    expect(local.type).toBe("cli_login");
+    expect(local.templateId).toBe("local-login");
     expect(await ensureLocalCliProvider(store)).toBe(local);
   });
 
@@ -102,7 +105,7 @@ describe("ensureLocalCliProvider / materializeProfileDraft", () => {
     const local = provider({
       id: "provider-cli" as ProviderId,
       name: "本地 CLI",
-      type: "cli_login",
+      templateId: "local-login",
     });
     const store = {
       listProviders: async () => [local],

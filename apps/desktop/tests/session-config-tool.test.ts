@@ -141,10 +141,10 @@ describe("createConfigDraftHub（草案流转三态 + 校验回传）", () => {
 
   const PROVIDER_ARGS = {
     name: "DeepSeek",
-    type: "openai_compatible",
+    templateId: "openai-compatible",
     baseUrl: "https://api.deepseek.com/v1",
-    models: [{ id: "deepseek-chat", displayName: "Chat", kind: "chat" }],
-    defaultModel: "deepseek-chat",
+    models: [{ id: "deepseek-chat", label: "Chat", kind: "chat" }],
+    defaultModelId: "deepseek-chat",
   };
 
   function makeHub(opts: {

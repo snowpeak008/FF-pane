@@ -396,11 +396,13 @@ describe("Provider → 嵌入配置（未配置即降级）", () => {
   const base: Provider = {
     id: "p1" as Provider["id"],
     name: "本地",
-    type: "openai_compatible",
+    templateId: "openai-compatible",
     baseUrl: "http://127.0.0.1:1234/v1",
     models: [],
     embeddingModel: "bge-m3" as Provider["embeddingModel"],
     enabled: true,
+    createdAt: 1,
+    updatedAt: 1,
   };
 
   it("配齐即产出配置，并能直接造出嵌入器", () => {
@@ -425,9 +427,13 @@ describe("Provider → 嵌入配置（未配置即降级）", () => {
       embedderConfigFromProvider({ ...withoutModel, embeddingModel: undefined }),
     ).toBeUndefined();
     expect(embedderConfigFromProvider({ ...base, baseUrl: "  " })).toBeUndefined();
-    expect(embedderConfigFromProvider({ ...base, type: "anthropic" })).toBeUndefined();
-    expect(embedderConfigFromProvider({ ...base, type: "cli_login" })).toBeUndefined();
-    expect(resolveProviderEmbedder({ ...base, type: "custom" })).toBeUndefined();
+    expect(
+      embedderConfigFromProvider({ ...base, templateId: "anthropic-compatible" }),
+    ).toBeUndefined();
+    expect(embedderConfigFromProvider({ ...base, templateId: "local-login" })).toBeUndefined();
+    expect(
+      embedderConfigFromProvider({ ...base, templateId: "anthropic-official" }),
+    ).toBeUndefined();
   });
 });
 

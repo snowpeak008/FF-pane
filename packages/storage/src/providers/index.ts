@@ -5,5 +5,6 @@
  */
 
 export * from "./errors.js";
+export * from "./migrate.js";
 export * from "./store.js";
 export * from "./validate.js";

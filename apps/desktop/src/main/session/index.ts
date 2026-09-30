@@ -399,13 +399,13 @@ export async function createSessionLayer(getWindow: SessionWindowGetter): Promis
         profilesFile: layout.profilesFile,
       });
 
-      /** 该 Provider 类型是否需要 API key（§4.2：openai_compatible / anthropic）。 */
-      const typeNeedsKey = (type: Provider["type"]): boolean =>
-        type === "openai_compatible" || type === "anthropic";
+      /** 该模板是否需要 API key。 */
+      const templateNeedsKey = (templateId: Provider["templateId"]): boolean =>
+        templateId !== "local-login";
 
       /**
-       * 校验用的密钥引用占位：草案物理无 key 字段（铁律 1），而 §4.2 的领域校验要求
-       * 这两类 Provider 必有 apiKeyRef。key 由用户在确认对话框的安全输入框亲手补填
+       * 校验用的密钥引用占位：草案物理无 key 字段（铁律 1），而领域校验要求
+       * 需密钥的模板必有 apiKeyRef。key 由用户在确认对话框的安全输入框亲手补填
        * （apply 时经 storeSecret 换真引用），故校验阶段以哨兵放行「key 缺席」这一项、
        * 其余领域规则照常执行。哨兵永不落盘——apply 从不消费它。
        */
@@ -432,11 +432,13 @@ export async function createSessionLayer(getWindow: SessionWindowGetter): Promis
               return { ok: false, error: `Provider not found: ${parsed.id}` };
             }
             const keyRef = existing?.apiKeyRef ?? PENDING_KEY_REF;
+            const now = Date.now();
             try {
-              // 复用既有领域校验（storage validateProviderDraft，不另写一套）
               validateProviderDraft({
                 ...parsed.draft,
-                ...(typeNeedsKey(parsed.draft.type) ? { apiKeyRef: keyRef } : {}),
+                createdAt: parsed.draft.createdAt ?? existing?.createdAt ?? now,
+                updatedAt: now,
+                ...(templateNeedsKey(parsed.draft.templateId) ? { apiKeyRef: keyRef } : {}),
               });
             } catch (thrown) {
               return {
@@ -447,8 +449,8 @@ export async function createSessionLayer(getWindow: SessionWindowGetter): Promis
             return {
               ok: true,
               normalized: parsed,
-              // 已有密钥引用的更新不再要求补填（换 key 走设置页）
-              needsApiKey: typeNeedsKey(parsed.draft.type) && existing?.apiKeyRef === undefined,
+              needsApiKey:
+                templateNeedsKey(parsed.draft.templateId) && existing?.apiKeyRef === undefined,
             };
           }
           // Profile 草案：预设哨兵（缺省）替换为全局默认，再走 core 校验

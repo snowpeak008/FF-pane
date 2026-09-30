@@ -225,6 +225,11 @@
       "proxy": "代理",
       "timeoutS": "超时（秒）",
       "requestTemplate": "请求模板",
+      "extraEnv": "附加环境变量",
+      "options": "高级选项",
+      "templateId": "模板",
+      "defaultModelId": "默认对话模型",
+      "enabled": "启用",
       "providerId": "Provider",
       "model": "模型",
       "defaultRole": "默认角色",
@@ -456,7 +461,7 @@
         "listModels": "读取本地模型",
         "noEnumeration": "该 CLI 无本地模型枚举途径；模型留空即使用 CLI 默认模型。",
         "modelsEmpty": "模型清单来自 CLI 枚举（不支持手填）。留空即使用 CLI 默认模型。",
-        "modelHint": "cli_login 类型的模型由 CLI 自管：清单只能经「读取本地模型」枚举，Profile 侧留空即用 CLI 默认模型。",
+        "modelHint": "本机登录模板的模型由 CLI 自管：清单只能经「读取本地模型」枚举，Profile 侧留空即用 CLI 默认模型。",
         "listError": {
           "unsupported": "该 CLI 不支持本地模型枚举",
           "cli_missing": "PATH 中找不到该 CLI，请确认已安装",
@@ -491,7 +496,45 @@
         "timeout": "超时（秒）",
         "enabled": "启用",
         "requestTemplateHint": "仅供不兼容标准 API 格式的特殊服务使用；标准 OpenAI 兼容服务（如 DeepSeek）请选「OpenAI 兼容」类型。当前版本运行时尚未消费该模板。",
-        "customTypeNotice": "自定义类型不支持「测试连接」与「拉取模型」。"
+        "customTypeNotice": "自定义类型不支持「测试连接」与「拉取模型」。",
+        "extraEnv": "附加环境变量",
+        "extraEnvHint": "每行 KEY=VALUE；不得覆盖密钥变量；禁止 PATH / NODE_OPTIONS / LD_PRELOAD 等危险变量。"
+      },
+      "pickTemplate": "选择模板",
+      "pickTemplateHint": "先选一种接入方式，再填写地址与密钥。",
+      "changeTemplate": "更换模板",
+      "advanced": "高级",
+      "applicableCli": "适用 CLI：{{clis}}",
+      "template": {
+        "anthropic-official": {
+          "name": "Anthropic 官方",
+          "description": "Anthropic 官方 API Key，用于 Claude Code。"
+        },
+        "anthropic-compatible": {
+          "name": "Anthropic 兼容中转",
+          "description": "兼容 Anthropic 协议的中转站，需填写地址；用于 Claude Code。"
+        },
+        "openai-official": {
+          "name": "OpenAI 官方",
+          "description": "OpenAI 官方 API，用于 Codex。"
+        },
+        "openai-compatible": {
+          "name": "OpenAI 兼容中转",
+          "description": "兼容 OpenAI 协议的中转站，需填写地址；用于 Codex（也可给 Claude Code 作中转）。"
+        },
+        "local-login": {
+          "name": "本机已登录",
+          "description": "使用本机 Claude Code / Codex 已登录账号，不注入密钥或地址。"
+        }
+      },
+      "option": {
+        "authHeaderStyle": "认证头风格"
+      },
+      "optionValue": {
+        "authHeaderStyle": {
+          "auth_token": "ANTHROPIC_AUTH_TOKEN（Bearer）",
+          "api_key": "ANTHROPIC_API_KEY（x-api-key）"
+        }
       }
     },
     "appearance": {
@@ -837,7 +880,6 @@
       "secretShapeWarning": "该草案的值疑似包含密钥，密钥不应经 AI 填写。请确认这不是真实密钥，或拒绝草案后在设置页亲手填写。",
       "field": {
         "name": "名称",
-        "type": "类型",
         "baseUrl": "API 地址",
         "models": "模型列表",
         "defaultModel": "默认模型",
@@ -852,7 +894,8 @@
         "defaultRole": "默认角色",
         "permissionPreset": "权限预设",
         "outputLanguage": "输出语言",
-        "genericExec": "命令配置"
+        "genericExec": "命令配置",
+        "templateId": "模板"
       }
     },
     "turnStatus": {

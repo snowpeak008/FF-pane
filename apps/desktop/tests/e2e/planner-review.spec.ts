@@ -118,9 +118,9 @@ test("Worker 落定 → 摘要入队落盘；复盘按钮发起 Planner 轮携�
     const provider = await invoke("providers:create", {
       draft: {
         name: "E2E PR CLI",
-        type: "cli_login",
-        models: [{ id: "m1", displayName: "M1", kind: "chat" }],
-        defaultModel: "m1",
+        templateId: "local-login",
+        models: [{ id: "m1", label: "M1", kind: "chat" }],
+        defaultModelId: "m1",
         enabled: true,
       },
     });

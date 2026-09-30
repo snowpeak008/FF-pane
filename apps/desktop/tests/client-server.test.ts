@@ -76,7 +76,7 @@ describe("IPC 客户端/服务端端到端（假线路）", () => {
     registerInvokeHandlers(ipcMain, {
       "app:get-info": () => ({
         name: "FF-pane",
-        version: "0.10.2",
+        version: "0.10.3",
         runtime: { electron: "e", chrome: "c", node: "n" },
       }),
     });
@@ -121,7 +121,7 @@ describe("IPC 客户端/服务端端到端（假线路）", () => {
 
     const client = createIpcClient(ipcRenderer);
     const raw = await client.invokeEnvelope?.("providers:create", {
-      draft: { name: "x", type: "openai_compatible", models: [], enabled: true },
+      draft: { name: "x", templateId: "openai-compatible", models: [], enabled: true },
     });
     // 信封是纯数据（contextBridge 结构化克隆无损），错误的结构化字段全在
     expect(raw).toMatchObject({
@@ -137,7 +137,7 @@ describe("IPC 客户端/服务端端到端（假线路）", () => {
     // 这正是 invokeEnvelope 存在的理由——假线路上字段还在，真桥上会丢）
     await expect(
       client.invoke("providers:create", {
-        draft: { name: "x", type: "openai_compatible", models: [], enabled: true },
+        draft: { name: "x", templateId: "openai-compatible", models: [], enabled: true },
       }),
     ).rejects.toBeInstanceOf(IpcInvokeError);
   });

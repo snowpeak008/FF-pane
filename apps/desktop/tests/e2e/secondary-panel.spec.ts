@@ -102,9 +102,9 @@ test("项目列表为空时 B 栏整栏隐藏；登记项目后常显且列出�
       const provider = await invoke("providers:create", {
         draft: {
           name: "E2E BP CLI",
-          type: "cli_login",
-          models: [{ id: "m1", displayName: "M1", kind: "chat" }],
-          defaultModel: "m1",
+          templateId: "local-login",
+          models: [{ id: "m1", label: "M1", kind: "chat" }],
+          defaultModelId: "m1",
           enabled: true,
         },
       });

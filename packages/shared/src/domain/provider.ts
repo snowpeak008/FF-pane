@@ -1,71 +1,179 @@
 /**
- * Provider：模型来源配置（设计文档 §4）。
+ * Provider：模型来源配置（T10.3 模板填表化）。
  * 密钥红线（§4.3）：本文件只出现 ApiKeyRef 引用，密钥本体永不进入任何领域类型。
  */
 
-import type { ApiKeyRef, ModelId, ProviderId } from "./common.js";
+import type { ApiKeyRef, EpochMillis, ModelId, ProviderId } from "./common.js";
 import { createLiteralGuard } from "./common.js";
 
-/** 设计文档 §4.2 —— 四种 Provider 类型。 */
-export const PROVIDER_TYPES = ["openai_compatible", "anthropic", "cli_login", "custom"] as const;
+/** 内置 Provider 模板 ID（模板即数据，见 provider-templates.ts）。 */
+export const PROVIDER_TEMPLATE_IDS = [
+  "anthropic-official",
+  "anthropic-compatible",
+  "openai-official",
+  "openai-compatible",
+  "local-login",
+] as const;
 
-/** 设计文档 §4.2 —— Provider 类型。 */
-export type ProviderType = (typeof PROVIDER_TYPES)[number];
+/** Provider 模板 ID。 */
+export type ProviderTemplateId = (typeof PROVIDER_TEMPLATE_IDS)[number];
 
-/** ProviderType 运行时守卫。 */
-export const isProviderType = createLiteralGuard(PROVIDER_TYPES);
+/** ProviderTemplateId 运行时守卫。 */
+export const isProviderTemplateId = createLiteralGuard(PROVIDER_TEMPLATE_IDS);
 
-/** 设计文档 §4.1 —— 模型条目的用途：对话模型 / 嵌入模型（知识库 RAG，§8.3.3）。 */
+/**
+ * 旧版 providers.json（version 1）的 type 字面量。
+ * 仅迁移与历史文档引用；新代码以 templateId 为准。
+ */
+export const LEGACY_PROVIDER_TYPES = [
+  "openai_compatible",
+  "anthropic",
+  "cli_login",
+  "custom",
+] as const;
+
+/** 旧版 Provider type。 */
+export type LegacyProviderType = (typeof LEGACY_PROVIDER_TYPES)[number];
+
+/** LegacyProviderType 运行时守卫。 */
+export const isLegacyProviderType = createLiteralGuard(LEGACY_PROVIDER_TYPES);
+
+/**
+ * @deprecated T10.3 起用 ProviderTemplateId；保留别名以免外部瞬间炸裂。
+ * 新代码请用 ProviderTemplateId / isProviderTemplateId。
+ */
+export type ProviderType = ProviderTemplateId | LegacyProviderType;
+
+/** @deprecated 见 ProviderType。 */
+export const PROVIDER_TYPES = PROVIDER_TEMPLATE_IDS;
+
+/** @deprecated 见 isProviderTemplateId；同时接受旧 type（迁移期）。 */
+export function isProviderType(value: unknown): value is ProviderType {
+  return isProviderTemplateId(value) || isLegacyProviderType(value);
+}
+
+/** 模型用途：对话 / 嵌入（知识库 RAG）。 */
 export const MODEL_KINDS = ["chat", "embedding"] as const;
 
-/** 设计文档 §4.1 —— 模型用途。 */
+/** 模型用途。 */
 export type ModelKind = (typeof MODEL_KINDS)[number];
 
 /** ModelKind 运行时守卫。 */
 export const isModelKind = createLiteralGuard(MODEL_KINDS);
 
-/** 设计文档 §4.1 —— timeout_s 缺省值（秒）。 */
+/** 探测超时缺省（秒）。 */
 export const PROVIDER_DEFAULT_TIMEOUT_S = 120;
 
-/** 设计文档 §4.1 —— Provider 模型列表条目 `{ id, display_name, kind }`。 */
+/** Anthropic 官方 API 根地址（迁移 anthropic→official 判定用）。 */
+export const ANTHROPIC_OFFICIAL_BASE_URL = "https://api.anthropic.com";
+
+/** OpenAI 官方 API 根地址。 */
+export const OPENAI_OFFICIAL_BASE_URL = "https://api.openai.com/v1";
+
+/** Provider 模型列表条目。 */
 export interface ProviderModel {
-  /** 设计文档 §4.1 —— 模型 ID（Provider 方定义，如 "deepseek-chat"）。 */
+  /** 模型 ID（Provider 方定义）。 */
   readonly id: ModelId;
-  /** 设计文档 §4.1 —— display_name 显示名。 */
-  readonly displayName: string;
-  /** 设计文档 §4.1 —— kind: chat | embedding。 */
-  readonly kind: ModelKind;
+  /** 显示名；缺省时 UI 回退到 id。 */
+  readonly label?: string;
+  /** 上下文窗口（token）；缺省由 Runtime/模型目录推断。 */
+  readonly contextWindowTokens?: number;
+  /**
+   * 用途。缺省视为 chat。
+   * 产品决策：保留 kind 以支持嵌入模型与 RAG（任务 schema 未列，但知识库依赖）。
+   */
+  readonly kind?: ModelKind;
 }
 
 /**
- * 设计文档 §4.1 —— Provider 数据结构。
- * 各类型的必填约束（§4.2）：openai_compatible / anthropic 需 baseUrl + apiKeyRef；
- * cli_login 两者皆无（凭证由 CLI 自管）；custom 按 requestTemplate 填写。
- * 该约束的校验属 W1.5a / W1.6，类型层保持扁平结构以贴合配置编辑界面。
+ * Provider 数据结构（T10.3，providers.json version 2）。
+ *
+ * 产品决策（相对任务裸 schema 的最小增补，见报告）：
+ * - `enabled`：列表停用 / RAG 门槛仍需要；
+ * - `embeddingModel` + model.kind：知识库嵌入仍需要；
+ * - `timeoutS`：探测与嵌入超时仍需要。
  */
 export interface Provider {
-  /** 设计文档 §4.1 —— id 内部唯一 ID。 */
   readonly id: ProviderId;
-  /** 设计文档 §4.1 —— name 显示名，用户自定义。 */
   readonly name: string;
-  /** 设计文档 §4.1 / §4.2 —— type 四种 Provider 类型之一。 */
-  readonly type: ProviderType;
-  /** 设计文档 §4.1 —— base_url API 地址（cli_login 类型不需要）。 */
+  /** 选用的内置模板。 */
+  readonly templateId: ProviderTemplateId;
   readonly baseUrl?: string;
-  /** 设计文档 §4.1 / §4.3 —— api_key_ref 密钥引用（本体在系统密钥库）。 */
   readonly apiKeyRef?: ApiKeyRef;
-  /** 设计文档 §4.1 —— models 模型列表。 */
   readonly models: readonly ProviderModel[];
-  /** 设计文档 §4.1 —— default_model 默认对话模型（引用 models 中 kind=chat 的条目）。 */
-  readonly defaultModel?: ModelId;
-  /** 设计文档 §4.1 —— embedding_model 可选默认嵌入模型（知识库 RAG 使用，§8.3）。 */
+  /** 默认对话模型（引用 models 中 chat 条目）。 */
+  readonly defaultModelId?: ModelId;
+  /** 默认嵌入模型（知识库 RAG）。 */
   readonly embeddingModel?: ModelId;
-  /** 设计文档 §4.1 —— proxy 可选代理地址。 */
   readonly proxy?: string;
-  /** 设计文档 §4.1 —— timeout_s 可选超时秒数，缺省 PROVIDER_DEFAULT_TIMEOUT_S。 */
+  /** 非密钥附加环境变量（解析器合并；不得覆盖密钥变量 / 危险变量）。 */
+  readonly extraEnv?: Readonly<Record<string, string>>;
+  /** 模板声明的可选项取值（如 authHeaderStyle）。 */
+  readonly options?: Readonly<Record<string, string>>;
   readonly timeoutS?: number;
-  /** 设计文档 §4.2 —— custom 类型的自定义请求模板（其余类型不使用）。 */
-  readonly requestTemplate?: string;
-  /** 设计文档 §4.1 —— enabled 是否启用。 */
   readonly enabled: boolean;
+  /** 创建时间；缺省由 store 在落盘时补齐。 */
+  readonly createdAt?: EpochMillis;
+  /** 最近修改时间；缺省由 store 在落盘时补齐。 */
+  readonly updatedAt?: EpochMillis;
+}
+
+/**
+ * 禁止出现在 extraEnv 中的危险变量（大小写不敏感）。
+ * 落盘校验与注入解析共用同一名单。
+ */
+export const DANGEROUS_EXTRA_ENV_NAMES = [
+  "PATH",
+  "PATHEXT",
+  "COMSPEC",
+  "SYSTEMROOT",
+  "SYSTEMDRIVE",
+  "WINDIR",
+  "PSMODULEPATH",
+  "LD_LIBRARY_PATH",
+  "DYLD_LIBRARY_PATH",
+  "LD_PRELOAD",
+  "DYLD_INSERT_LIBRARIES",
+  "NODE_OPTIONS",
+  "ELECTRON_RUN_AS_NODE",
+] as const;
+
+const DANGEROUS_EXTRA_ENV_SET = new Set(
+  DANGEROUS_EXTRA_ENV_NAMES.map((name) => name.toLowerCase()),
+);
+
+/** 判断 extraEnv 键是否为危险变量。 */
+export function isDangerousExtraEnvName(name: string): boolean {
+  return DANGEROUS_EXTRA_ENV_SET.has(name.trim().toLowerCase());
+}
+
+/** 模型显示名：label → id。 */
+export function providerModelLabel(model: ProviderModel): string {
+  const label = model.label?.trim();
+  return label !== undefined && label.length > 0 ? label : model.id;
+}
+
+/** 模型用途：缺省 chat。 */
+export function providerModelKind(model: ProviderModel): ModelKind {
+  return model.kind ?? "chat";
+}
+
+/** 是否为本机 CLI 登录模板（不注入密钥/地址）。 */
+export function isLocalLoginProvider(provider: Pick<Provider, "templateId">): boolean {
+  return provider.templateId === "local-login";
+}
+
+/** 该模板是否可能携带 API 密钥（local-login 除外）。 */
+export function providerTemplateNeedsApiKey(templateId: ProviderTemplateId): boolean {
+  return templateId !== "local-login";
+}
+
+/** OpenAI 族模板（可做 /embeddings）。 */
+export function isOpenAiFamilyTemplate(templateId: ProviderTemplateId): boolean {
+  return templateId === "openai-official" || templateId === "openai-compatible";
+}
+
+/** Anthropic 族模板。 */
+export function isAnthropicFamilyTemplate(templateId: ProviderTemplateId): boolean {
+  return templateId === "anthropic-official" || templateId === "anthropic-compatible";
 }

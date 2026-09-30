@@ -244,17 +244,22 @@ export function runtimeSupportsLocalCli(runtime: string): boolean {
   return isLocalCliRuntime(runtime) || runtime === "generic-exec";
 }
 
-/** 按 Provider 类型推断连法（旧档缺字段 / 测试夹具）。 */
-export function inferConnectionMode(providerType: string): ConnectionMode {
-  return providerType === "cli_login" ? "local_cli" : "relay";
+/**
+ * 按 Provider 模板 / 旧 type 推断连法（旧档缺字段 / 测试夹具）。
+ * 接受 templateId（local-login）与旧 type（cli_login）。
+ */
+export function inferConnectionMode(providerTypeOrTemplateId: string): ConnectionMode {
+  return providerTypeOrTemplateId === "cli_login" || providerTypeOrTemplateId === "local-login"
+    ? "local_cli"
+    : "relay";
 }
 
-/** 显式连法优先；缺省按 Provider 类型推断。 */
+/** 显式连法优先；缺省按 Provider 模板 / 旧 type 推断。 */
 export function resolveConnectionMode(
   explicit: string | undefined,
-  providerType: string,
+  providerTypeOrTemplateId: string,
 ): ConnectionMode {
-  return isConnectionMode(explicit) ? explicit : inferConnectionMode(providerType);
+  return isConnectionMode(explicit) ? explicit : inferConnectionMode(providerTypeOrTemplateId);
 }
 
 /** Run 落档：本轮未下发 effort 时的哨兵（可追溯，不要事后猜）。 */

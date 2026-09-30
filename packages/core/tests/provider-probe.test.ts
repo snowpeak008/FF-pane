@@ -123,14 +123,14 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 }
 
 const openAiProvider = (baseUrl: string, defaultModel?: string) => ({
-  type: "openai_compatible" as const,
+  templateId: "openai-compatible" as const,
   baseUrl,
   timeoutS: 5,
   ...(defaultModel === undefined ? {} : { defaultModel }),
 });
 
 const anthropicProvider = (baseUrl: string, defaultModel?: string) => ({
-  type: "anthropic" as const,
+  templateId: "anthropic-compatible" as const,
   baseUrl,
   timeoutS: 5,
   ...(defaultModel === undefined ? {} : { defaultModel }),
@@ -421,14 +421,12 @@ describe("网络出口注入（ProbeFetch）", () => {
 
 describe("testConnection · 不支持的类型与非法配置", () => {
   it("cli_login / custom 返回 stage=unsupported", async () => {
-    const cliResult = await testConnection({ provider: { type: "cli_login" } });
+    const cliResult = await testConnection({ provider: { templateId: "local-login" } });
     expect(expectFailure(cliResult).stage).toBe("unsupported");
-    const customResult = await testConnection({ provider: { type: "custom" } });
-    expect(expectFailure(customResult).stage).toBe("unsupported");
   });
 
   it("缺 baseUrl / 非法 URL / 非 http 协议均为 invalid-config", async () => {
-    const missing = await testConnection({ provider: { type: "openai_compatible" } });
+    const missing = await testConnection({ provider: { templateId: "openai-compatible" } });
     expect(expectFailure(missing).stage).toBe("invalid-config");
     const malformed = await testConnection({
       provider: openAiProvider("这不是一个 URL"),
@@ -480,9 +478,9 @@ describe("fetchModels · openai_compatible", () => {
     });
     const success = expectSuccess(result);
     expect(success.models).toEqual([
-      { id: "gpt-4o", displayName: "gpt-4o", kind: "chat" },
-      { id: "text-embedding-3-small", displayName: "text-embedding-3-small", kind: "embedding" },
-      { id: "nomic-embed-text", displayName: "nomic-embed-text", kind: "embedding" },
+      { id: "gpt-4o", label: "gpt-4o", kind: "chat" },
+      { id: "text-embedding-3-small", label: "text-embedding-3-small", kind: "embedding" },
+      { id: "nomic-embed-text", label: "nomic-embed-text", kind: "embedding" },
     ]);
   });
 
@@ -528,7 +526,7 @@ describe("fetchModels · openai_compatible", () => {
   });
 
   it("cli_login / custom 直接 unsupported（上层走手动输入回退）", async () => {
-    const result = await fetchModels({ provider: { type: "cli_login" } });
+    const result = await fetchModels({ provider: { templateId: "local-login" } });
     expect(expectFailure(result).stage).toBe("unsupported");
   });
 });
@@ -554,8 +552,8 @@ describe("fetchModels · anthropic", () => {
     });
     const success = expectSuccess(result);
     expect(success.models).toEqual([
-      { id: "claude-sonnet-4-5", displayName: "Claude Sonnet 4.5", kind: "chat" },
-      { id: "claude-haiku-4", displayName: "claude-haiku-4", kind: "chat" },
+      { id: "claude-sonnet-4-5", label: "Claude Sonnet 4.5", kind: "chat" },
+      { id: "claude-haiku-4", label: "claude-haiku-4", kind: "chat" },
     ]);
     const request = mock.requests[0];
     expect(request?.url).toContain("limit=1000");

@@ -47,15 +47,17 @@ function DraftFields({ pending }: { readonly pending: PendingConfigDraft }): Rea
     return (
       <div className="flex flex-col gap-1.5" data-testid="config-draft-fields">
         <FieldRow label={t("session.configDraft.field.name")} value={draft.name} />
-        <FieldRow label={t("session.configDraft.field.type")} value={draft.type} />
+        <FieldRow label={t("session.configDraft.field.templateId")} value={draft.templateId} />
         <FieldRow label={t("session.configDraft.field.baseUrl")} value={draft.baseUrl ?? ""} />
         <FieldRow
           label={t("session.configDraft.field.models")}
-          value={draft.models.map((m) => `${m.id} (${m.kind})`).join(", ")}
+          value={draft.models
+            .map((m) => `${m.id}${m.kind !== undefined ? ` (${m.kind})` : ""}`)
+            .join(", ")}
         />
         <FieldRow
           label={t("session.configDraft.field.defaultModel")}
-          value={draft.defaultModel ?? ""}
+          value={draft.defaultModelId ?? ""}
         />
         <FieldRow
           label={t("session.configDraft.field.embeddingModel")}

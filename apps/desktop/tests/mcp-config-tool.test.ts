@@ -49,14 +49,16 @@ function collectPropertyKeys(schema: unknown, out: string[] = []): string[] {
 const PROVIDER: Provider = {
   id: "provider-abc123" as Provider["id"],
   name: "DeepSeek",
-  type: "openai_compatible",
+  templateId: "openai-compatible",
   baseUrl: "https://api.deepseek.com/v1",
   apiKeyRef: "secret-ref-xyz" as NonNullable<Provider["apiKeyRef"]>,
   models: [
-    { id: "deepseek-chat" as Provider["models"][number]["id"], displayName: "Chat", kind: "chat" },
+    { id: "deepseek-chat" as Provider["models"][number]["id"], label: "Chat", kind: "chat" },
   ],
-  defaultModel: "deepseek-chat" as NonNullable<Provider["defaultModel"]>,
+  defaultModelId: "deepseek-chat" as NonNullable<Provider["defaultModelId"]>,
   enabled: true,
+  createdAt: 1,
+  updatedAt: 1,
 };
 
 describe("铁律 1 —— 工具 schema 物理不含密钥字段（合同验收：读 schema 断言）", () => {
@@ -121,10 +123,10 @@ describe("铁律 1 —— 脱敏视图（list 工具的输出）", () => {
 describe("parseProviderDraftArgs（严进白名单）", () => {
   const VALID = {
     name: "DeepSeek",
-    type: "openai_compatible",
+    templateId: "openai-compatible",
     baseUrl: "https://api.deepseek.com/v1",
-    models: [{ id: "deepseek-chat", displayName: "Chat", kind: "chat" }],
-    defaultModel: "deepseek-chat",
+    models: [{ id: "deepseek-chat", label: "Chat", kind: "chat" }],
+    defaultModelId: "deepseek-chat",
   };
 
   it("合法入参 → 解析成功，enabled 缺省补 true", () => {
@@ -167,12 +169,14 @@ describe("parseProviderDraftArgs（严进白名单）", () => {
   });
 
   it("必填缺失 / models 结构不符 → 指向字段的错误", () => {
-    expect(parseProviderDraftArgs({ type: "custom", models: [] }).ok).toBe(false);
-    const bad = parseProviderDraftArgs({ ...VALID, models: [{ id: "m" }] });
+    expect(parseProviderDraftArgs({ templateId: "openai-compatible", models: [] }).ok).toBe(false);
+    const bad = parseProviderDraftArgs({ ...VALID, models: ["not-an-object"] });
     expect(bad.ok).toBe(false);
     if (!bad.ok) {
       expect(bad.error).toContain("models[0]");
     }
+    const okMinimal = parseProviderDraftArgs({ ...VALID, models: [{ id: "m" }] });
+    expect(okMinimal.ok).toBe(true);
   });
 });
 
@@ -258,8 +262,8 @@ describe("结果渲染（回给模型的文本）", () => {
   it("describeDraft：create/update × kind × 名称", () => {
     const parsed = parseProviderDraftArgs({
       name: "X",
-      type: "cli_login",
-      models: [{ id: "m", displayName: "M", kind: "chat" }],
+      templateId: "local-login",
+      models: [{ id: "m", label: "M", kind: "chat" }],
     });
     expect(parsed.ok && describeDraft(parsed.parsed)).toBe('create provider "X"');
   });

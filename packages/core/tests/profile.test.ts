@@ -30,14 +30,14 @@ import {
 const CHAT_PROVIDER: Provider = {
   id: "provider-3f2a9c1d8e4b" as ProviderId,
   name: "我的 DeepSeek",
-  type: "openai_compatible",
+  templateId: "openai-compatible",
   baseUrl: "https://api.deepseek.com/v1",
   apiKeyRef: "keyref-deepseek-001" as ApiKeyRef,
   models: [
-    { id: "deepseek-chat", displayName: "DeepSeek Chat", kind: "chat" },
-    { id: "text-embedding-v1", displayName: "嵌入模型", kind: "embedding" },
+    { id: "deepseek-chat", label: "DeepSeek Chat", kind: "chat" },
+    { id: "text-embedding-v1", label: "嵌入模型", kind: "embedding" },
   ],
-  defaultModel: "deepseek-chat",
+  defaultModelId: "deepseek-chat",
   enabled: true,
 };
 
@@ -45,7 +45,7 @@ const CHAT_PROVIDER: Provider = {
 const NO_DEFAULT_PROVIDER: Provider = {
   id: "provider-9b8c7d6e5f4a" as ProviderId,
   name: "Claude 订阅登录",
-  type: "cli_login",
+  templateId: "local-login",
   models: [],
   enabled: true,
 };
@@ -54,10 +54,10 @@ const NO_DEFAULT_PROVIDER: Provider = {
 const NO_DEFAULT_HTTP_PROVIDER: Provider = {
   id: "provider-1a2b3c4d5e6f" as ProviderId,
   name: "无默认模型的兼容端点",
-  type: "openai_compatible",
+  templateId: "openai-compatible",
   baseUrl: "https://api.example.com/v1",
   apiKeyRef: "keyref-example-001" as ApiKeyRef,
-  models: [{ id: "some-chat", displayName: "Some Chat", kind: "chat" }],
+  models: [{ id: "some-chat", label: "Some Chat", kind: "chat" }],
   enabled: true,
 };
 

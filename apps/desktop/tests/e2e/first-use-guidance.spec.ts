@@ -78,9 +78,9 @@ test("⑤ 零 Profile 时新建对话框默认角色 = planner；已有 Profile 
     const provider = await invoke("providers:create", {
       draft: {
         name: "E2E Guide CLI",
-        type: "cli_login",
-        models: [{ id: "m1", displayName: "M1", kind: "chat" }],
-        defaultModel: "m1",
+        templateId: "local-login",
+        models: [{ id: "m1", label: "M1", kind: "chat" }],
+        defaultModelId: "m1",
         enabled: true,
       },
     });

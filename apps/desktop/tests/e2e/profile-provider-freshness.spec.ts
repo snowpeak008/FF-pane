@@ -28,6 +28,7 @@ test("设置页加载后新建的 Provider 与角色出现在 Profile 编辑器�
   // 进页即挂载 ProfileEditorDialog，其 providers:list / roles:list 已拉过（空集）。
   // 先建 Provider（走 ProvidersSection 自己的对话框与 hook 实例）
   await page.getByRole("button", { name: "New provider" }).click();
+  await page.getByTestId("provider-template-openai-compatible").click();
   await page.locator("#provider-name").fill("Fresh Provider");
   await page.locator("#provider-baseurl").fill("https://api.fresh.example/v1");
   await page.locator("#provider-apikey").fill("sk-e2e-dummy-key");

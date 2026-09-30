@@ -25,13 +25,14 @@ function ProviderRow({
   readonly removing: boolean;
 }): ReactElement {
   const { t } = useTranslation();
-  const chatCount = provider.models.filter((m) => m.kind === "chat").length;
   return (
     <Card padding="compact" className="flex items-center justify-between gap-3">
       <div className="flex min-w-0 flex-col gap-1">
         <div className="flex items-center gap-2">
           <span className="truncate text-sm font-medium text-fg">{provider.name}</span>
-          <Badge className="shrink-0">{t(`settings.providers.type.${provider.type}`)}</Badge>
+          <Badge className="shrink-0">
+            {t(`settings.providers.template.${provider.templateId}.name`)}
+          </Badge>
           {!provider.enabled ? (
             <Badge className="shrink-0 text-fg-subtle">{t("settings.providers.disabled")}</Badge>
           ) : null}
@@ -43,7 +44,9 @@ function ProviderRow({
             </span>
           ) : null}
           <span className="shrink-0">
-            {t("settings.providers.modelCount", { count: chatCount })}
+            {t("settings.providers.modelCount", {
+              count: provider.models.filter((m) => (m.kind ?? "chat") === "chat").length,
+            })}
           </span>
         </div>
       </div>

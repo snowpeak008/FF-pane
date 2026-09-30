@@ -1,14 +1,8 @@
 /**
- * 连接测试（W1.5c，设计文档 §4.2）：发送一次最小请求，返回 成功 / 失败 + 错误原文。
- * 各类型策略：
- * - openai_compatible：GET {baseUrl}/models（带 Bearer）。404/405 视为服务端未实现
- *   模型列表接口，回退 POST {baseUrl}/chat/completions 最小请求（max_tokens=1，
- *   模型取调用方指定的 model，缺省 provider.defaultModel）。
- * - anthropic：POST {baseUrl→/v1}/messages 最小请求（max_tokens=1，
- *   x-api-key + anthropic-version 头）；模型 ID 是必填字段，缺失返回 invalid-config。
- * - cli_login / custom：不支持 HTTP 探测，返回 stage="unsupported"。
+ * 连接测试（W1.5c / T10.3）：按模板声明的 probe kind 分发。
  */
 
+import { providerProbeKind } from "@ff-pane/shared";
 import {
   anthropicHeaders,
   attemptFailure,
@@ -18,16 +12,26 @@ import {
   timedFetch,
 } from "./http.js";
 import { redactSecret } from "./raw-error.js";
-import type { ConnectionTestResult, TestConnectionParams } from "./types.js";
+import type { ConnectionTestResult, ProbeProviderInput, TestConnectionParams } from "./types.js";
 import { joinAnthropicV1, joinUrl } from "./url.js";
 
-/** 最小探测请求共用的消息体：单条用户消息，配合 max_tokens=1 把消耗压到最低。 */
 const PROBE_MESSAGES = [{ role: "user", content: "ping" }];
 
-/**
- * 连接测试入口。不抛业务异常，一切预期内失败都落在 ok:false 分支；
- * 返回前对输出做明文 key 兜底脱敏（密钥红线，§4.3）。
- */
+function resolveProbeKind(provider: ProbeProviderInput): ReturnType<typeof providerProbeKind> {
+  if (provider.probe !== undefined) {
+    return provider.probe;
+  }
+  if (provider.templateId !== undefined) {
+    return providerProbeKind(provider.templateId);
+  }
+  return "none";
+}
+
+function resolveDefaultModel(provider: ProbeProviderInput): string | undefined {
+  const id = provider.defaultModelId ?? provider.defaultModel;
+  return id !== undefined && id.length > 0 ? id : undefined;
+}
+
 export async function testConnection(params: TestConnectionParams): Promise<ConnectionTestResult> {
   const result = await dispatchTestConnection(params);
   if (result.ok) {
@@ -37,30 +41,24 @@ export async function testConnection(params: TestConnectionParams): Promise<Conn
 }
 
 function dispatchTestConnection(params: TestConnectionParams): Promise<ConnectionTestResult> {
-  const { provider } = params;
-  switch (provider.type) {
-    case "openai_compatible":
+  const kind = resolveProbeKind(params.provider);
+  switch (kind) {
+    case "openai":
       return testOpenAiCompatible(params);
     case "anthropic":
       return testAnthropic(params);
-    case "cli_login":
+    case "none":
       return Promise.resolve({
         ok: false,
         stage: "unsupported",
-        rawError: "cli_login Provider 的凭证由 CLI 自管，不支持 HTTP 连接测试",
-      });
-    case "custom":
-      return Promise.resolve({
-        ok: false,
-        stage: "unsupported",
-        rawError: "custom Provider 使用自定义请求模板，无法通用构造最小探测请求",
+        rawError: "该 Provider 模板不支持 HTTP 连接测试（本机 CLI 或未声明探测方式）",
       });
     default: {
-      const exhausted: never = provider.type;
+      const exhausted: never = kind;
       return Promise.resolve({
         ok: false,
         stage: "unsupported",
-        rawError: `未知的 Provider 类型：${String(exhausted)}`,
+        rawError: `未知的探测方式：${String(exhausted)}`,
       });
     }
   }
@@ -96,13 +94,12 @@ async function testOpenAiCompatible(params: TestConnectionParams): Promise<Conne
     return { ok: false, stage: "http", rawError: modelsFailure };
   }
 
-  // 404/405：服务端未实现 /models，回退最小 chat 请求继续探测连通性与鉴权。
-  const model = params.model ?? params.provider.defaultModel;
+  const model = params.model ?? resolveDefaultModel(params.provider);
   if (model === undefined || model === "") {
     return {
       ok: false,
       stage: "http",
-      rawError: `${modelsFailure}\n（未设置 defaultModel 且调用方未指定 model，无法回退最小 chat 请求探测）`,
+      rawError: `${modelsFailure}\n（未设置 defaultModelId 且调用方未指定 model，无法回退最小 chat 请求探测）`,
     };
   }
   const chatUrl = joinUrl(target.baseUrl, "chat/completions");
@@ -140,13 +137,13 @@ async function testAnthropic(params: TestConnectionParams): Promise<ConnectionTe
   if (!target.ok) {
     return target.failure;
   }
-  const model = params.model ?? params.provider.defaultModel;
+  const model = params.model ?? resolveDefaultModel(params.provider);
   if (model === undefined || model === "") {
     return {
       ok: false,
       stage: "invalid-config",
       rawError:
-        "anthropic 连接测试需要模型 ID（messages 请求的必填字段）：请设置 defaultModel 或在调用时指定 model",
+        "anthropic 连接测试需要模型 ID（messages 请求的必填字段）：请设置 defaultModelId 或在调用时指定 model",
     };
   }
   const url = joinAnthropicV1(target.baseUrl, "messages");

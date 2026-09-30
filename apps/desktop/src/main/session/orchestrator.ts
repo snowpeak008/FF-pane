@@ -812,7 +812,7 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         ...(apiKeyPlaintext !== undefined ? { apiKeyPlaintext } : {}),
         ...(profile.connectionMode !== undefined ? { connectionMode: profile.connectionMode } : {}),
       });
-      const model: ModelId | undefined = profile.model ?? provider.defaultModel;
+      const model: ModelId | undefined = profile.model ?? provider.defaultModelId;
       // T9.11：用户/会话覆盖 > 任务合同（规划者安排）> 档案默认。
       // Worker 轮先偷看任务合同，好让规划者写在任务上的强度生效。
       const taskForEffort =

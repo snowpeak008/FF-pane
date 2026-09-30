@@ -1,160 +1,188 @@
 /**
- * Provider 编辑表单的纯逻辑（W3.2a）：类型 → 字段可见性、既有 Provider → 表单态、
- * 表单态 → 线上草稿。无 React / DOM 依赖，可直接单测（见 tests/provider-form.test.ts）。
- *
- * 校验的权威在 storage 层 validateProviderDraft（create/update 时强制执行）；
- * 本层只做"构造草稿 + 决定字段显隐"，不复制后端校验规则（避免两处漂移）。
+ * Provider 编辑表单纯逻辑（T10.3）：模板驱动字段显隐 / 草稿构造。
  */
 
-import type { ModelKind, Provider, ProviderType } from "@ff-pane/shared";
+import type { ModelKind, Provider, ProviderTemplateId } from "@ff-pane/shared";
+import {
+  BUILTIN_PROVIDER_TEMPLATES,
+  getProviderTemplate,
+  providerModelKind,
+  providerModelLabel,
+  providerProbeKind,
+  providerTemplateNeedsApiKey,
+} from "@ff-pane/shared";
 import type { ProviderDraftWire } from "../../../../../shared-ipc/contracts";
 
-/** 类型下拉的展示顺序（cli_login 无需网络配置，custom 高阶，排后）。 */
-export const PROVIDER_TYPE_ORDER: readonly ProviderType[] = [
-  "openai_compatible",
-  "anthropic",
-  "cli_login",
-  "custom",
-];
+/** 模板卡片顺序。 */
+export const PROVIDER_TEMPLATE_ORDER: readonly ProviderTemplateId[] =
+  BUILTIN_PROVIDER_TEMPLATES.map((template) => template.id);
 
-/** 该类型是否需要 baseUrl（openai/anthropic 必填；custom 选填；cli_login 不用）。 */
-export function usesBaseUrl(type: ProviderType): boolean {
-  return type === "openai_compatible" || type === "anthropic" || type === "custom";
+export function usesBaseUrl(templateId: ProviderTemplateId): boolean {
+  const req = getProviderTemplate(templateId)?.fields.baseUrl;
+  return req === "required" || req === "optional";
 }
 
-/** 该类型是否经手 API 密钥（cli_login 凭证由 CLI 自管；custom 走模板，不在此收密钥）。 */
-export function usesApiKey(type: ProviderType): boolean {
-  return type === "openai_compatible" || type === "anthropic";
+export function baseUrlRequired(templateId: ProviderTemplateId): boolean {
+  return getProviderTemplate(templateId)?.fields.baseUrl === "required";
 }
 
-/**
- * 该类型是否谈得上代理出口。与 usesBaseUrl 同域且刻意共用判定：代理是"这条 HTTP
- * 出口怎么走"的问题，没有 baseUrl 的 cli_login 由 CLI 自管端点与网络，
- * 其代理走用户 shell 的环境变量，工作台不代管。
- */
-export function usesProxy(type: ProviderType): boolean {
-  return usesBaseUrl(type);
+export function usesApiKey(templateId: ProviderTemplateId): boolean {
+  return providerTemplateNeedsApiKey(templateId);
 }
 
-/** 该类型是否需要 requestTemplate（仅 custom）。 */
-export function usesRequestTemplate(type: ProviderType): boolean {
-  return type === "custom";
+export function usesProxy(templateId: ProviderTemplateId): boolean {
+  return usesBaseUrl(templateId);
 }
 
-/** 是否支持 HTTP 探测（cli_login / custom 不支持，见 provider-probe types）。 */
-export function supportsProbe(type: ProviderType): boolean {
-  return type === "openai_compatible" || type === "anthropic";
+export function supportsProbe(templateId: ProviderTemplateId): boolean {
+  return providerProbeKind(templateId) !== "none";
 }
 
-/**
- * 该类型的模型清单是否只能来自 CLI 本地枚举（T9.2 ③：cli_login 禁手填）。
- * 手填模型名对 cli_login 既易错（CLI 认不出就整轮失败）又无必要（CLI 有默认模型、
- * 支持枚举的家能拉真实清单），故手填入口对该类型隐藏。
- */
-export function usesCliEnumeratedModels(type: ProviderType): boolean {
-  return type === "cli_login";
+export function usesCliEnumeratedModels(templateId: ProviderTemplateId): boolean {
+  return templateId === "local-login";
 }
 
-/** 编辑表单里的单个模型行（均为字符串态，提交时裁剪）。 */
 export interface ModelRow {
   readonly id: string;
-  readonly displayName: string;
+  readonly label: string;
   readonly kind: ModelKind;
 }
 
-/** 编辑表单的完整状态（全字符串 / 布尔，贴合受控输入）。 */
 export interface ProviderFormState {
   readonly name: string;
-  readonly type: ProviderType;
+  readonly templateId: ProviderTemplateId;
   readonly baseUrl: string;
   readonly models: readonly ModelRow[];
-  readonly defaultModel: string;
+  readonly defaultModelId: string;
   readonly embeddingModel: string;
-  /** 代理地址（§4.1 proxy），空串即直连。 */
   readonly proxy: string;
   readonly timeoutS: string;
-  readonly requestTemplate: string;
   readonly enabled: boolean;
+  readonly extraEnvText: string;
+  readonly options: Readonly<Record<string, string>>;
+  /** 编辑既有条目时保留；新建为 0（写出时改成 now）。 */
+  readonly createdAt: number;
 }
 
-/** 空表单（新建默认：openai_compatible、启用、无模型）。 */
-export function emptyProviderForm(): ProviderFormState {
+export function emptyProviderForm(
+  templateId: ProviderTemplateId = "openai-compatible",
+): ProviderFormState {
+  const template = getProviderTemplate(templateId);
+  const options: Record<string, string> = {};
+  for (const option of template?.options ?? []) {
+    options[option.key] = option.defaultValue;
+  }
   return {
     name: "",
-    type: "openai_compatible",
-    baseUrl: "",
+    templateId,
+    baseUrl: template?.defaultBaseUrl ?? "",
     models: [],
-    defaultModel: "",
+    defaultModelId: "",
     embeddingModel: "",
     proxy: "",
     timeoutS: "",
-    requestTemplate: "",
     enabled: true,
+    extraEnvText: "",
+    options,
+    createdAt: 0,
   };
 }
 
-/**
- * 既有 Provider → 编辑表单态（读入侧）。与 buildProviderDraft（写出侧）成对，
- * 两者必须闭合：读进来的可选字段若在此漏掉，用户编辑一次就会被 providers:update
- * 的整表单替换语义静默抹掉（proxy 曾经就是这样丢值的）。
- * apiKeyRef 刻意不进表单：密钥只以尾 4 位占位显示，明文永不回渲染层（§4.3）。
- */
 export function formFromProvider(provider: Provider): ProviderFormState {
+  const template = getProviderTemplate(provider.templateId);
+  const options: Record<string, string> = {};
+  for (const option of template?.options ?? []) {
+    options[option.key] = provider.options?.[option.key] ?? option.defaultValue;
+  }
   return {
     name: provider.name,
-    type: provider.type,
-    baseUrl: provider.baseUrl ?? "",
+    templateId: provider.templateId,
+    baseUrl: provider.baseUrl ?? template?.defaultBaseUrl ?? "",
     models: provider.models.map((model) => ({
       id: model.id,
-      displayName: model.displayName,
-      kind: model.kind,
+      label:
+        providerModelLabel(model) === model.id ? (model.label ?? "") : providerModelLabel(model),
+      kind: providerModelKind(model),
     })),
-    defaultModel: provider.defaultModel ?? "",
+    defaultModelId: provider.defaultModelId ?? "",
     embeddingModel: provider.embeddingModel ?? "",
     proxy: provider.proxy ?? "",
     timeoutS: provider.timeoutS !== undefined ? String(provider.timeoutS) : "",
-    requestTemplate: provider.requestTemplate ?? "",
     enabled: provider.enabled,
+    extraEnvText:
+      provider.extraEnv !== undefined
+        ? Object.entries(provider.extraEnv)
+            .map(([k, v]) => `${k}=${v}`)
+            .join("\n")
+        : "",
+    options,
+    createdAt: provider.createdAt ?? 0,
   };
 }
 
-/** 裁剪后的有效模型行（id 非空），按类型分组供下拉使用。 */
 export function cleanModels(models: readonly ModelRow[]): readonly ModelRow[] {
   return models
-    .map((row) => ({ ...row, id: row.id.trim(), displayName: row.displayName.trim() }))
+    .map((row) => ({ ...row, id: row.id.trim(), label: row.label.trim() }))
     .filter((row) => row.id.length > 0);
 }
 
-/**
- * 表单态 → 线上草稿（ProviderDraftWire）。
- * exactOptionalPropertyTypes：可选字段一律"有值才带"，空串 / 空数组视为未设置并省略。
- * apiKeyRef 不由本层构造——密钥经明文 apiKey 交主进程加密（§4.3）。
- */
+function parseExtraEnvText(text: string): Record<string, string> | undefined {
+  const out: Record<string, string> = {};
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0 || trimmed.startsWith("#")) {
+      continue;
+    }
+    const eq = trimmed.indexOf("=");
+    if (eq <= 0) {
+      continue;
+    }
+    const key = trimmed.slice(0, eq).trim();
+    const value = trimmed.slice(eq + 1);
+    if (key.length > 0) {
+      out[key] = value;
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 export function buildProviderDraft(form: ProviderFormState): ProviderDraftWire {
+  const now = Date.now();
   const models = cleanModels(form.models).map((row) => ({
     id: row.id,
-    displayName: row.displayName.length > 0 ? row.displayName : row.id,
+    ...(row.label.length > 0 ? { label: row.label } : {}),
     kind: row.kind,
   }));
   const modelIds = new Set(models.map((model) => model.id));
   const baseUrl = form.baseUrl.trim();
-  const defaultModel = form.defaultModel.trim();
+  const defaultModelId = form.defaultModelId.trim();
   const embeddingModel = form.embeddingModel.trim();
   const proxy = form.proxy.trim();
   const timeoutRaw = form.timeoutS.trim();
   const timeoutS = timeoutRaw.length > 0 ? Number(timeoutRaw) : undefined;
-  const requestTemplate = form.requestTemplate.trim();
+  const extraEnv = parseExtraEnvText(form.extraEnvText);
+  const template = getProviderTemplate(form.templateId);
+  const options: Record<string, string> = {};
+  for (const def of template?.options ?? []) {
+    const value = form.options[def.key]?.trim();
+    if (value !== undefined && value.length > 0) {
+      options[def.key] = value;
+    }
+  }
 
   return {
     name: form.name.trim(),
-    type: form.type,
+    templateId: form.templateId,
     models,
     enabled: form.enabled,
-    ...(usesBaseUrl(form.type) && baseUrl.length > 0 ? { baseUrl } : {}),
-    ...(defaultModel.length > 0 && modelIds.has(defaultModel) ? { defaultModel } : {}),
+    createdAt: form.createdAt > 0 ? form.createdAt : now,
+    updatedAt: now,
+    ...(usesBaseUrl(form.templateId) && baseUrl.length > 0 ? { baseUrl } : {}),
+    ...(defaultModelId.length > 0 && modelIds.has(defaultModelId) ? { defaultModelId } : {}),
     ...(embeddingModel.length > 0 && modelIds.has(embeddingModel) ? { embeddingModel } : {}),
-    ...(usesProxy(form.type) && proxy.length > 0 ? { proxy } : {}),
+    ...(usesProxy(form.templateId) && proxy.length > 0 ? { proxy } : {}),
     ...(timeoutS !== undefined && Number.isFinite(timeoutS) ? { timeoutS } : {}),
-    ...(usesRequestTemplate(form.type) && requestTemplate.length > 0 ? { requestTemplate } : {}),
+    ...(extraEnv !== undefined ? { extraEnv } : {}),
+    ...(Object.keys(options).length > 0 ? { options } : {}),
   };
 }

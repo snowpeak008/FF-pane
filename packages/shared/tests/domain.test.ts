@@ -121,8 +121,14 @@ const ALL_LITERAL_ARRAYS: ReadonlyArray<readonly string[]> = [
 ];
 
 describe("常量数组 ↔ 设计文档定值对照", () => {
-  it("§4.2 Provider 四类型", () => {
-    expect(PROVIDER_TYPES).toEqual(["openai_compatible", "anthropic", "cli_login", "custom"]);
+  it("T10.3 Provider 内置模板", () => {
+    expect(PROVIDER_TYPES).toEqual([
+      "anthropic-official",
+      "anthropic-compatible",
+      "openai-official",
+      "openai-compatible",
+      "local-login",
+    ]);
   });
 
   it("§4.1 模型条目 kind：chat | embedding", () => {
@@ -400,16 +406,18 @@ describe("聚合结构冒烟（品牌 ID 断言 + 字段形态）", () => {
     const provider: Provider = {
       id: providerId,
       name: "我的 OpenRouter",
-      type: "openai_compatible",
+      templateId: "openai-compatible",
       baseUrl: "https://openrouter.ai/api/v1",
       apiKeyRef: "key-ref-1" as ApiKeyRef,
       models: [
-        { id: "deepseek-chat", displayName: "DeepSeek Chat", kind: "chat" },
-        { id: "text-embedding-3-small", displayName: "Embedding Small", kind: "embedding" },
+        { id: "deepseek-chat", label: "DeepSeek Chat", kind: "chat" },
+        { id: "text-embedding-3-small", label: "Embedding Small", kind: "embedding" },
       ],
-      defaultModel: "deepseek-chat",
+      defaultModelId: "deepseek-chat",
       embeddingModel: "text-embedding-3-small",
       enabled: true,
+      createdAt: 1,
+      updatedAt: 1,
     };
     expect(Object.keys(provider)).not.toContain("apiKey");
     expect(provider.models.filter((m) => m.kind === "embedding")).toHaveLength(1);

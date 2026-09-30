@@ -194,14 +194,14 @@ describe("密钥形状检测（T9.2 ⑤，仅提示不拦截）", () => {
     expect(
       draftContainsSecretShape({
         name: "ok name",
-        models: [{ id: "sk-live-4f9aXXXXXXXX", displayName: "x", kind: "chat" }],
+        models: [{ id: "sk-live-4f9aXXXXXXXX", label: "x", kind: "chat" }],
       }),
     ).toBe(true);
     expect(
       draftContainsSecretShape({
         name: "clean",
         baseUrl: "https://api.example.com/v1",
-        models: [{ id: "chat-1", displayName: "Chat", kind: "chat" }],
+        models: [{ id: "chat-1", label: "Chat", kind: "chat" }],
       }),
     ).toBe(false);
   });

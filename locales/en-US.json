@@ -225,6 +225,11 @@
       "proxy": "Proxy",
       "timeoutS": "Timeout (s)",
       "requestTemplate": "Request template",
+      "extraEnv": "Extra environment variables",
+      "options": "Advanced options",
+      "templateId": "Template",
+      "defaultModelId": "Default chat model",
+      "enabled": "Enabled",
       "providerId": "Provider",
       "model": "Model",
       "defaultRole": "Default role",
@@ -456,7 +461,7 @@
         "listModels": "Read local models",
         "noEnumeration": "This CLI has no local model enumeration. Leave the model empty to use the CLI default.",
         "modelsEmpty": "The model list comes from CLI enumeration (manual entry is disabled). Leave empty to use the CLI default model.",
-        "modelHint": "cli_login models are managed by the CLI: the list can only be read via \"Read local models\", and leaving the profile model empty uses the CLI default.",
+        "modelHint": "Models for local-login come from the CLI: list them via Read local models; leave Profile model empty for CLI default.",
         "listError": {
           "unsupported": "This CLI does not support local model enumeration",
           "cli_missing": "The CLI was not found on PATH. Please make sure it is installed",
@@ -491,7 +496,45 @@
         "timeout": "Timeout (s)",
         "enabled": "Enabled",
         "requestTemplateHint": "Only for special services incompatible with the standard API formats; for standard OpenAI-compatible services (e.g. DeepSeek), pick the OpenAI-compatible type. The current version does not consume this template at runtime yet.",
-        "customTypeNotice": "The custom type supports neither connection tests nor model fetching."
+        "customTypeNotice": "The custom type supports neither connection tests nor model fetching.",
+        "extraEnv": "Extra environment variables",
+        "extraEnvHint": "One KEY=VALUE per line. Cannot override secret vars; PATH / NODE_OPTIONS / LD_PRELOAD and similar are forbidden."
+      },
+      "pickTemplate": "Choose a template",
+      "pickTemplateHint": "Pick how you connect, then fill in the endpoint and API key.",
+      "changeTemplate": "Change template",
+      "advanced": "Advanced",
+      "applicableCli": "Works with: {{clis}}",
+      "template": {
+        "anthropic-official": {
+          "name": "Anthropic official",
+          "description": "Official Anthropic API key for Claude Code."
+        },
+        "anthropic-compatible": {
+          "name": "Anthropic-compatible relay",
+          "description": "Anthropic-compatible relay; requires a base URL. For Claude Code."
+        },
+        "openai-official": {
+          "name": "OpenAI official",
+          "description": "Official OpenAI API for Codex."
+        },
+        "openai-compatible": {
+          "name": "OpenAI-compatible relay",
+          "description": "OpenAI-compatible relay; requires a base URL. For Codex (also usable as a Claude Code relay)."
+        },
+        "local-login": {
+          "name": "Local CLI login",
+          "description": "Use the Claude Code / Codex account already logged in on this machine. Injects nothing."
+        }
+      },
+      "option": {
+        "authHeaderStyle": "Auth header style"
+      },
+      "optionValue": {
+        "authHeaderStyle": {
+          "auth_token": "ANTHROPIC_AUTH_TOKEN (Bearer)",
+          "api_key": "ANTHROPIC_API_KEY (x-api-key)"
+        }
       }
     },
     "appearance": {
@@ -837,7 +880,6 @@
       "secretShapeWarning": "A value in this draft looks like a secret key. Secrets should never be filled in by AI. Confirm only if it is not a real key, or reject the draft and enter the key yourself in Settings.",
       "field": {
         "name": "Name",
-        "type": "Type",
         "baseUrl": "Base URL",
         "models": "Models",
         "defaultModel": "Default model",
@@ -852,7 +894,8 @@
         "defaultRole": "Default role",
         "permissionPreset": "Permission preset",
         "outputLanguage": "Output language",
-        "genericExec": "Command config"
+        "genericExec": "Command config",
+        "templateId": "Template"
       }
     },
     "turnStatus": {

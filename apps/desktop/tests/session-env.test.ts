@@ -1,6 +1,5 @@
 /**
- * T4.2 Run 级密钥注入映射单测（§4.3）：按 Runtime 取环境变量名、cli_login 不注入、
- * 无明文不塞空串、codex 注入 base_url。纯逻辑。
+ * T4.2 / T10.3 Run 级密钥注入映射单测。
  */
 
 import type { Provider } from "@ff-pane/shared";
@@ -15,9 +14,11 @@ function provider(overrides: Partial<Record<keyof Provider, unknown>> = {}): Pro
   return {
     id: "prov-1",
     name: "V",
-    type: "openai_compatible",
+    templateId: "openai-compatible",
     models: [],
     enabled: true,
+    createdAt: 1,
+    updatedAt: 1,
     ...overrides,
   } as unknown as Provider;
 }
@@ -27,10 +28,7 @@ describe("runtimeApiKeyEnvVar", () => {
     expect(runtimeApiKeyEnvVar("codex")).toBe("OPENAI_API_KEY");
     expect(runtimeApiKeyEnvVar("claude-code")).toBe("ANTHROPIC_API_KEY");
     expect(runtimeApiKeyEnvVar("gemini-cli")).toBe("GEMINI_API_KEY");
-    // qwen-code 走 --auth-type openai 兼容协议（qwen-code.md §6）
     expect(runtimeApiKeyEnvVar("qwen-code")).toBe("OPENAI_API_KEY");
-    // iflow 的 openai-compatible 三件套必须 IFLOW_ 前缀（iflow.md §5.3——
-    // CLI 错误提示里的裸 apiKey 写法是坑）
     expect(runtimeApiKeyEnvVar("iflow")).toBe("IFLOW_API_KEY");
     expect(runtimeApiKeyEnvVar("opencode")).toBeUndefined();
     expect(runtimeApiKeyEnvVar("generic-exec")).toBeUndefined();
@@ -38,38 +36,45 @@ describe("runtimeApiKeyEnvVar", () => {
 });
 
 describe("resolveRuntimeEnv", () => {
-  it("按 Runtime 变量名注入密钥", () => {
+  it("anthropic-compatible 默认 AUTH_TOKEN", () => {
     const env = resolveRuntimeEnv({
       runtime: "claude-code",
-      provider: provider({ type: "anthropic" }),
+      provider: provider({
+        templateId: "anthropic-compatible",
+        baseUrl: "https://relay.example",
+      }),
       apiKeyPlaintext: "sk-x",
     });
-    expect(env).toEqual({ ANTHROPIC_API_KEY: "sk-x" });
+    expect(env).toEqual({
+      ANTHROPIC_AUTH_TOKEN: "sk-x",
+      ANTHROPIC_BASE_URL: "https://relay.example",
+    });
   });
 
-  it("cli_login 不注入密钥（凭证由 CLI 自管）", () => {
+  it("local-login 不注入密钥", () => {
     const env = resolveRuntimeEnv({
       runtime: "claude-code",
-      provider: provider({ type: "cli_login" }),
+      provider: provider({ templateId: "local-login" }),
       apiKeyPlaintext: "sk-x",
     });
     expect(env["ANTHROPIC_API_KEY"]).toBeUndefined();
+    expect(env["ANTHROPIC_AUTH_TOKEN"]).toBeUndefined();
   });
 
-  it("codex 附带注入 base_url", () => {
+  it("codex 密钥进 env，base_url 进 configOverrides 而非 env", () => {
     const env = resolveRuntimeEnv({
       runtime: "codex",
-      provider: provider({ type: "openai_compatible", baseUrl: "https://x.test" }),
+      provider: provider({ templateId: "openai-compatible", baseUrl: "https://x.test" }),
       apiKeyPlaintext: "k",
     });
-    expect(env).toEqual({ OPENAI_API_KEY: "k", OPENAI_BASE_URL: "https://x.test" });
+    expect(env).toEqual({ OPENAI_API_KEY: "k" });
   });
 
-  it("qwen-code 同走 OPENAI_API_KEY + OPENAI_BASE_URL（openai 兼容协议）", () => {
+  it("qwen-code 同走 OPENAI_API_KEY + OPENAI_BASE_URL（旧路径）", () => {
     const env = resolveRuntimeEnv({
       runtime: "qwen-code",
       provider: provider({
-        type: "openai_compatible",
+        templateId: "openai-compatible",
         baseUrl: "https://dashscope.example/compatible-mode/v1",
       }),
       apiKeyPlaintext: "sk-q",
@@ -80,17 +85,20 @@ describe("resolveRuntimeEnv", () => {
     });
   });
 
-  it("iflow 走 IFLOW_API_KEY + IFLOW_BASE_URL（openai-compatible 的 IFLOW_ 前缀形态）", () => {
+  it("iflow 走 IFLOW_API_KEY + IFLOW_BASE_URL（旧路径）", () => {
     const env = resolveRuntimeEnv({
       runtime: "iflow",
-      provider: provider({ type: "openai_compatible", baseUrl: "https://apis.iflow.cn/v1" }),
+      provider: provider({ templateId: "openai-compatible", baseUrl: "https://apis.iflow.cn/v1" }),
       apiKeyPlaintext: "sk-i",
     });
     expect(env).toEqual({ IFLOW_API_KEY: "sk-i", IFLOW_BASE_URL: "https://apis.iflow.cn/v1" });
   });
 
   it("无明文时该密钥变量缺席（不塞空串）", () => {
-    const env = resolveRuntimeEnv({ runtime: "codex", provider: provider() });
+    const env = resolveRuntimeEnv({
+      runtime: "codex",
+      provider: provider({ baseUrl: "https://x.test" }),
+    });
     expect(env).toEqual({});
   });
 
@@ -98,7 +106,7 @@ describe("resolveRuntimeEnv", () => {
     const env = resolveRuntimeEnv({
       runtime: "claude-code",
       provider: provider({
-        type: "openai_compatible",
+        templateId: "openai-compatible",
         baseUrl: "https://hub.example/v1",
       }),
       apiKeyPlaintext: "sk-x",
@@ -108,14 +116,13 @@ describe("resolveRuntimeEnv", () => {
   });
 
   it("T9.11：中转时 Claude / Gemini / Grok 注入各家网址变量", () => {
-    const relay = {
-      type: "openai_compatible" as const,
-      baseUrl: "https://hub.example/v1",
-    };
     expect(
       resolveRuntimeEnv({
         runtime: "claude-code",
-        provider: provider(relay),
+        provider: provider({
+          templateId: "openai-compatible",
+          baseUrl: "https://hub.example/v1",
+        }),
         apiKeyPlaintext: "sk-x",
         connectionMode: "relay",
       }),
@@ -123,7 +130,10 @@ describe("resolveRuntimeEnv", () => {
     expect(
       resolveRuntimeEnv({
         runtime: "gemini-cli",
-        provider: provider(relay),
+        provider: provider({
+          templateId: "openai-compatible",
+          baseUrl: "https://hub.example/v1",
+        }),
         apiKeyPlaintext: "sk-g",
         connectionMode: "relay",
       }),
@@ -131,7 +141,10 @@ describe("resolveRuntimeEnv", () => {
     expect(
       resolveRuntimeEnv({
         runtime: "grok-build",
-        provider: provider(relay),
+        provider: provider({
+          templateId: "openai-compatible",
+          baseUrl: "https://hub.example/v1",
+        }),
         apiKeyPlaintext: "sk-z",
         connectionMode: "relay",
       }),
@@ -140,11 +153,11 @@ describe("resolveRuntimeEnv", () => {
 });
 
 describe("resolveRuntimeConfigOverrides", () => {
-  it("codex + openai_compatible + baseUrl → 装配 model_provider 路由（TOML 值）", () => {
+  it("codex + openai-compatible + baseUrl → model_provider 路由", () => {
     const overrides = resolveRuntimeConfigOverrides({
       runtime: "codex",
       provider: provider({
-        type: "openai_compatible",
+        templateId: "openai-compatible",
         name: "DeepSeek",
         baseUrl: "https://api.deepseek.com/v1",
       }),
@@ -155,22 +168,27 @@ describe("resolveRuntimeConfigOverrides", () => {
       "model_providers.ffpane.base_url": '"https://api.deepseek.com/v1"',
       "model_providers.ffpane.env_key": '"OPENAI_API_KEY"',
     });
+    expect(overrides["model_providers.ffpane.wire_api"]).toBeUndefined();
   });
 
-  it("env_key 指向与 resolveRuntimeEnv 一致的 OPENAI_API_KEY", () => {
+  it("env_key 指向 OPENAI_API_KEY", () => {
     const overrides = resolveRuntimeConfigOverrides({
       runtime: "codex",
-      provider: provider({ type: "openai_compatible", baseUrl: "https://x.test" }),
+      provider: provider({ templateId: "openai-compatible", baseUrl: "https://x.test" }),
     });
     expect(overrides["model_providers.ffpane.env_key"]).toBe(
       JSON.stringify(runtimeApiKeyEnvVar("codex")),
     );
   });
 
-  it("name 缺省退化为 slug，特殊字符经 JSON.stringify 转义为合法 TOML 串", () => {
+  it("name 缺省退化为 slug，特殊字符经 JSON.stringify 转义", () => {
     const overrides = resolveRuntimeConfigOverrides({
       runtime: "codex",
-      provider: provider({ type: "openai_compatible", name: 'A"B', baseUrl: "https://x.test" }),
+      provider: provider({
+        templateId: "openai-compatible",
+        name: 'A"B',
+        baseUrl: "https://x.test",
+      }),
     });
     expect(overrides["model_providers.ffpane.name"]).toBe('"A\\"B"');
   });
@@ -179,40 +197,40 @@ describe("resolveRuntimeConfigOverrides", () => {
     expect(
       resolveRuntimeConfigOverrides({
         runtime: "claude-code",
-        provider: provider({ type: "openai_compatible", baseUrl: "https://x.test" }),
+        provider: provider({ templateId: "openai-compatible", baseUrl: "https://x.test" }),
       }),
     ).toEqual({});
   });
 
-  it("codex 但非 openai_compatible（如 cli_login）不产生覆盖", () => {
+  it("codex + local-login 不产生路由", () => {
     expect(
       resolveRuntimeConfigOverrides({
         runtime: "codex",
-        provider: provider({ type: "cli_login" }),
+        provider: provider({ templateId: "local-login" }),
       }),
     ).toEqual({});
   });
 
-  it("openai_compatible 但缺 baseUrl 不产生覆盖（无从路由）", () => {
+  it("openai-compatible 但缺 baseUrl 不产生覆盖", () => {
     expect(
       resolveRuntimeConfigOverrides({
         runtime: "codex",
-        provider: provider({ type: "openai_compatible" }),
+        provider: provider({ templateId: "openai-compatible" }),
       }),
     ).toEqual({});
   });
 
-  it("T9.4b：codex 显式 effort 并入 model_reasoning_effort（TOML 字符串）", () => {
+  it("T9.4b：codex 显式 effort 并入 model_reasoning_effort", () => {
     const withRoute = resolveRuntimeConfigOverrides({
       runtime: "codex",
-      provider: provider({ type: "openai_compatible", baseUrl: "https://x.test" }),
+      provider: provider({ templateId: "openai-compatible", baseUrl: "https://x.test" }),
       reasoningEffort: "high",
     });
     expect(withRoute["model_reasoning_effort"]).toBe('"high"');
     expect(withRoute["model_provider"]).toBe("ffpane");
     const cliLogin = resolveRuntimeConfigOverrides({
       runtime: "codex",
-      provider: provider({ type: "cli_login" }),
+      provider: provider({ templateId: "local-login" }),
       reasoningEffort: "high",
     });
     expect(cliLogin).toEqual({ model_reasoning_effort: '"high"' });
@@ -222,7 +240,7 @@ describe("resolveRuntimeConfigOverrides", () => {
     expect(
       resolveRuntimeConfigOverrides({
         runtime: "codex",
-        provider: provider({ type: "openai_compatible", baseUrl: "https://x.test" }),
+        provider: provider({ templateId: "openai-compatible", baseUrl: "https://x.test" }),
         connectionMode: "local_cli",
       }),
     ).toEqual({});
@@ -232,7 +250,7 @@ describe("resolveRuntimeConfigOverrides", () => {
     expect(
       resolveRuntimeConfigOverrides({
         runtime: "gemini-cli",
-        provider: provider({ type: "openai_compatible", baseUrl: "https://x.test" }),
+        provider: provider({ templateId: "openai-compatible", baseUrl: "https://x.test" }),
         reasoningEffort: "high",
       }),
     ).toEqual({});

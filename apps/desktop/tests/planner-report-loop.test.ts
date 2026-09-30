@@ -161,7 +161,7 @@ function makeLoopHarness(
       ({
         id: "prov-1",
         name: "V",
-        type: "cli_login",
+        templateId: "local-login",
         models: [],
         enabled: true,
       }) as unknown as Provider,
