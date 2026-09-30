@@ -62,9 +62,9 @@ import {
   compileHabitProfile,
   createInitialDraft,
   createNextDraft,
+  DoneEvidenceError,
   decideResumeKind,
   dispatchTask,
-  DoneEvidenceError,
   EMPTY_ACTIVE_TURN_TABLE,
   endRun,
   failTask,
@@ -810,9 +810,7 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         runtime: profile.runtime,
         provider,
         ...(apiKeyPlaintext !== undefined ? { apiKeyPlaintext } : {}),
-        ...(profile.connectionMode !== undefined
-          ? { connectionMode: profile.connectionMode }
-          : {}),
+        ...(profile.connectionMode !== undefined ? { connectionMode: profile.connectionMode } : {}),
       });
       const model: ModelId | undefined = profile.model ?? provider.defaultModel;
       // T9.11：用户/会话覆盖 > 任务合同（规划者安排）> 档案默认。
@@ -831,7 +829,9 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         ...(taskForEffort?.reasoningEffort !== undefined
           ? { taskEffort: taskForEffort.reasoningEffort }
           : {}),
-        ...(profile.reasoningEffort !== undefined ? { profileEffort: profile.reasoningEffort } : {}),
+        ...(profile.reasoningEffort !== undefined
+          ? { profileEffort: profile.reasoningEffort }
+          : {}),
         ...(effortCatalog !== undefined ? { catalogLevels: effortCatalog } : {}),
       });
       // 运行时配置覆盖（如 openai_compatible → codex model_provider 路由，§T4.5 方案 A）
@@ -839,9 +839,7 @@ export function createSessionOrchestrator(deps: SessionOrchestratorDeps): Sessio
         runtime: profile.runtime,
         provider,
         ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
-        ...(profile.connectionMode !== undefined
-          ? { connectionMode: profile.connectionMode }
-          : {}),
+        ...(profile.connectionMode !== undefined ? { connectionMode: profile.connectionMode } : {}),
       });
 
       // 组装 Prompt + 权限信封（Worker 从任务合同派生，Planner 用只读角色默认）

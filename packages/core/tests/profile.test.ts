@@ -431,17 +431,11 @@ describe("generic-exec 命令配置（T8.4b 多实例装配）", () => {
 
   it("命令为空 / 命令含 {task}：genericExec.command 违规", async () => {
     expectViolationFields(
-      await validateProfileDraft(
-        gxDraft({ genericExec: { ...GX, command: "  " } }),
-        DEPS,
-      ),
+      await validateProfileDraft(gxDraft({ genericExec: { ...GX, command: "  " } }), DEPS),
       ["genericExec.command"],
     );
     expectViolationFields(
-      await validateProfileDraft(
-        gxDraft({ genericExec: { ...GX, command: "run-{task}" } }),
-        DEPS,
-      ),
+      await validateProfileDraft(gxDraft({ genericExec: { ...GX, command: "run-{task}" } }), DEPS),
       ["genericExec.command"],
     );
   });

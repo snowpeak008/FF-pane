@@ -289,39 +289,39 @@ export function ProfileEditorDialog({
               </select>
             </Field>
             {isRelay ? (
-            <Field
-              htmlFor="profile-provider"
-              label={t("settings.profiles.field.provider")}
-              required
-              hint={t("settings.profiles.field.providerRelayHint")}
-            >
-              <select
-                id="profile-provider"
-                className={selectClass}
-                value={form.providerId}
-                onChange={(e) => patch({ providerId: e.target.value, model: "" })}
+              <Field
+                htmlFor="profile-provider"
+                label={t("settings.profiles.field.provider")}
+                required
+                hint={t("settings.profiles.field.providerRelayHint")}
               >
-                <option value="">{t("settings.profiles.field.selectProvider")}</option>
-                {relayProviders.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
+                <select
+                  id="profile-provider"
+                  className={selectClass}
+                  value={form.providerId}
+                  onChange={(e) => patch({ providerId: e.target.value, model: "" })}
+                >
+                  <option value="">{t("settings.profiles.field.selectProvider")}</option>
+                  {relayProviders.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
             ) : (
-            <Field
-              htmlFor="profile-provider"
-              label={t("settings.profiles.field.provider")}
-              hint={t("settings.profiles.field.providerLocalHint")}
-            >
-              <Input
-                id="profile-provider"
-                value={t("settings.profiles.field.providerLocalValue")}
-                disabled
-                readOnly
-              />
-            </Field>
+              <Field
+                htmlFor="profile-provider"
+                label={t("settings.profiles.field.provider")}
+                hint={t("settings.profiles.field.providerLocalHint")}
+              >
+                <Input
+                  id="profile-provider"
+                  value={t("settings.profiles.field.providerLocalValue")}
+                  disabled
+                  readOnly
+                />
+              </Field>
             )}
           </div>
 

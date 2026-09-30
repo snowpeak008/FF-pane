@@ -19,7 +19,7 @@ A local-first, vendor-agnostic, pluggable multi-agent project workbench.
 
 ## 项目状态
 
-**v0.9.2（M3 完成；Phase 9 按需增强进行中）。** 进度事实源见 [docs/开发进度.md](docs/开发进度.md)。
+**v0.10.0（M3 完成；Phase 10 多窗口终端工作台进行中）。** 进度事实源见 [docs/开发进度.md](docs/开发进度.md)。
 
 ## 启动方式
 
@@ -49,7 +49,9 @@ A local-first, vendor-agnostic, pluggable multi-agent project workbench.
 
 ## 明确不做
 
-宠物 / 成就系统 / 引导动画、内嵌终端分屏、PTY 模拟接入、云端同步、多用户协作、Agent 自由互聊、知识图谱。
+宠物 / 成就系统 / 引导动画、云端同步、多用户协作、知识图谱；MCP 只用 stdio、不引入 HTTP。
+
+> **Phase 10 起调整：** 旧版红线中的「内嵌终端分屏 / PTY 模拟接入 / Agent 自由互聊」已撤销——本阶段做软件内嵌 PTY + xterm.js 分屏/标签页，以及窗口间经 MCP 投递并落盘 `.md` 的通信。详见 [docs/Phase10-多窗口终端工作台计划.md](docs/Phase10-多窗口终端工作台计划.md)。
 
 ## License
 

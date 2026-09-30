@@ -88,7 +88,13 @@ export function SessionStatusBar({
         </label>
       ) : null}
       {actions !== undefined ? (
-        <div className={reasoningEffortOptions !== undefined && reasoningEffortOptions.length > 0 ? "flex items-center" : "ml-auto flex items-center"}>
+        <div
+          className={
+            reasoningEffortOptions !== undefined && reasoningEffortOptions.length > 0
+              ? "flex items-center"
+              : "ml-auto flex items-center"
+          }
+        >
           {actions}
         </div>
       ) : null}

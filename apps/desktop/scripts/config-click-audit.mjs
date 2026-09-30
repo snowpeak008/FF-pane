@@ -116,7 +116,8 @@ try {
   await page.locator("#setting-output-language").selectOption("en-US");
   await page.waitForTimeout(300);
   const cfg = await invoke("config:get");
-  if (cfg.aiOutputLanguage === "en-US") pass("output-language-click", "AI 输出语言写入 config.json");
+  if (cfg.aiOutputLanguage === "en-US")
+    pass("output-language-click", "AI 输出语言写入 config.json");
   else fail("output-language-click", `config.aiOutputLanguage=${cfg.aiOutputLanguage}`);
   await page.locator("#setting-ui-language").selectOption("en-US");
   await page.waitForTimeout(400);
@@ -130,7 +131,9 @@ try {
 
   // 4 空发送禁用；框旁「生成计划」不吃草稿
   await gotoRoute("/session");
-  const sendDisabledEmpty = await page.getByRole("button", { name: "Send", exact: true }).isDisabled();
+  const sendDisabledEmpty = await page
+    .getByRole("button", { name: "Send", exact: true })
+    .isDisabled();
   if (sendDisabledEmpty) pass("send-empty", "空输入时 Send 禁用（点击无效果）");
   else fail("send-empty", "空输入 Send 仍可点");
 
@@ -141,7 +144,9 @@ try {
   const saveBtn = page.getByRole("button", { name: "Save", exact: true });
   const saveEnabled = await saveBtn.isEnabled();
   await saveBtn.click();
-  const errVisible = await page.locator("text=/baseUrl|apiKey|必须|must|required|Invalid/i").count();
+  const errVisible = await page
+    .locator("text=/baseUrl|apiKey|必须|must|required|Invalid/i")
+    .count();
   if (saveEnabled && errVisible > 0) {
     pass("openai-save-bare", "保存钮可点，缺 baseUrl/密钥时校验挡住（未静默成功）");
   } else {
@@ -196,7 +201,8 @@ try {
   await page.getByRole("button", { name: 'Edit "CLI Probe"' }).click();
   await page.locator("#provider-cli-runtime").waitFor({ timeout: 8_000 });
   const reopened = await page.locator("#provider-cli-runtime").inputValue();
-  if (reopened === "codex") pass("cli-runtime-reset", "重开编辑器 CLI 下拉回到默认 codex（上次选 claude-code 丢失）");
+  if (reopened === "codex")
+    pass("cli-runtime-reset", "重开编辑器 CLI 下拉回到默认 codex（上次选 claude-code 丢失）");
   else fail("cli-runtime-reset", `重开值为 ${reopened}`);
   await page.getByRole("button", { name: "Cancel" }).click();
 
@@ -210,7 +216,10 @@ try {
 
   await page.getByRole("button", { name: "New profile" }).click();
   await page.locator("#profile-connection").selectOption("relay");
-  const disabledInDropdown = await page.locator("#profile-provider").locator("option", { hasText: "Disabled CLI" }).count();
+  const disabledInDropdown = await page
+    .locator("#profile-provider")
+    .locator("option", { hasText: "Disabled CLI" })
+    .count();
   if (disabledInDropdown === 0) {
     pass("disabled-still-listed", "中转下拉不列出本机 CLI 来源（含已停用）");
   } else {
@@ -296,7 +305,10 @@ try {
     .filter((p) => p.defaultRole === "planner" || String(p.defaultRole).startsWith("role-"))
     .map((p) => p.name);
   if (!discussion.includes("Born Worker")) {
-    pass("worker-not-in-session", `Worker 不进讨论列表（现讨论：${discussion.join(", ") || "无"}）`);
+    pass(
+      "worker-not-in-session",
+      `Worker 不进讨论列表（现讨论：${discussion.join(", ") || "无"}）`,
+    );
   } else {
     fail("worker-not-in-session", `讨论列表含 Born Worker：${discussion.join(", ")}`);
   }
@@ -316,7 +328,10 @@ try {
       `formWrite=${JSON.stringify(flippedWrite)} defaultRole=${born?.defaultRole} write=${born?.permissionPreset.writePaths}`,
     );
   }
-  await page.getByRole("button", { name: "Cancel" }).click().catch(() => {});
+  await page
+    .getByRole("button", { name: "Cancel" })
+    .click()
+    .catch(() => {});
 
   // 11 角色模板点击预填
   await page.getByRole("button", { name: "New role" }).click();

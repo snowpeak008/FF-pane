@@ -57,9 +57,7 @@ export async function resetLegacyAgentConfigIfNeeded(input: {
 }
 
 /** 找到已有 cli_login 来源，没有就建一条「本地 CLI」。 */
-export async function ensureLocalCliProvider(
-  store: LocalCliProviderStore,
-): Promise<Provider> {
+export async function ensureLocalCliProvider(store: LocalCliProviderStore): Promise<Provider> {
   const existing = (await store.listProviders()).find((provider) => provider.type === "cli_login");
   if (existing !== undefined) {
     return existing;

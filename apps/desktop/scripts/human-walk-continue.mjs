@@ -156,9 +156,11 @@ try {
   await page.getByRole("link", { name: "会话" }).click();
   await page.getByLabel("会话输入").waitFor({ timeout: 10_000 });
   await page.locator("#session-reasoning-effort").selectOption("low");
-  await page.getByLabel("会话输入").fill(
-    "帮我在这个目录新建 notes.md，文件里只写一行：周末先把书桌收拾一下。不要改 README，不要做别的。",
-  );
+  await page
+    .getByLabel("会话输入")
+    .fill(
+      "帮我在这个目录新建 notes.md，文件里只写一行：周末先把书桌收拾一下。不要改 README，不要做别的。",
+    );
   await shot("01-说出需求");
   const chatWait = waitTurnEnd();
   await page.getByRole("button", { name: "发送", exact: true }).click();
@@ -210,9 +212,7 @@ try {
     await approveBtn.click();
     await pause(800);
     const after = await invoke("plans:list", { projectRoot: projectDir });
-    const approved = Array.isArray(after)
-      ? after.find((p) => p.status === "approved")
-      : undefined;
+    const approved = Array.isArray(after) ? after.find((p) => p.status === "approved") : undefined;
     if (approved !== undefined) pass("approve", `批准了 v${approved.version}`);
     else fail("approve", `点了批准，状态=${JSON.stringify(after?.[0]?.status)}`);
   } else {
@@ -225,7 +225,10 @@ try {
   const tasks = await invoke("tasks:list", { projectRoot: projectDir });
   const pending = (Array.isArray(tasks) ? tasks : []).filter((t) => t.status === "pending");
   if (pending.length > 0) {
-    pass("tasks-ready", `任务页有 ${pending.length} 条待办：${pending.map((t) => t.goal).join(" / ")}`);
+    pass(
+      "tasks-ready",
+      `任务页有 ${pending.length} 条待办：${pending.map((t) => t.goal).join(" / ")}`,
+    );
   } else {
     fail("tasks-ready", `批准后没有 pending 任务 ${JSON.stringify(tasks)}`);
   }
@@ -239,7 +242,8 @@ try {
       await pause(500);
       const listed = await invoke("tasks:list", { projectRoot: projectDir });
       const updated = listed.find((t) => t.id === task.id);
-      if (updated?.reasoningEffort === "high") pass("task-effort", `给「${task.goal}」安排执行者强度 high`);
+      if (updated?.reasoningEffort === "high")
+        pass("task-effort", `给「${task.goal}」安排执行者强度 high`);
       else fail("task-effort", `落盘=${updated?.reasoningEffort}`);
     } else {
       fail("task-effort", "任务卡片没有思考强度下拉");
@@ -248,7 +252,10 @@ try {
     const dispatchWait = waitTurnEnd();
     await page.getByRole("button", { name: "派发" }).first().click();
     pass("clicked-dispatch", "点了派发，跟去会话看执行");
-    await page.getByRole("heading", { name: "会话", exact: true }).waitFor({ timeout: 15_000 }).catch(() => undefined);
+    await page
+      .getByRole("heading", { name: "会话", exact: true })
+      .waitFor({ timeout: 15_000 })
+      .catch(() => undefined);
     await shot("07-派发后会话");
     const workEnd = await dispatchWait;
     if (workEnd.reason === "completed" || workEnd.reason === "succeeded") {
@@ -284,7 +291,10 @@ try {
   await pause(600);
   const runs = await invoke("runs:list", { projectRoot: projectDir });
   if (Array.isArray(runs) && runs.length > 0) {
-    pass("runs", `执行记录 ${runs.length} 条 end=${runs[0]?.endReason} effort=${runs[0]?.reasoningEffort}`);
+    pass(
+      "runs",
+      `执行记录 ${runs.length} 条 end=${runs[0]?.endReason} effort=${runs[0]?.reasoningEffort}`,
+    );
   } else {
     fail("runs", "执行记录是空的");
   }

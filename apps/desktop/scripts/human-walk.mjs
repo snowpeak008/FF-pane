@@ -207,7 +207,9 @@ try {
   if (picked === "medium") pass("fiddle-effort", "顶栏先改高再改中，跟人调档一样");
   else fail("fiddle-effort", `最后停在 ${picked}`);
 
-  await page.getByLabel("会话输入").fill("这是我的笔记目录。先用一句话回复：收到，再说半句你看见了什么。不要用工具。");
+  await page
+    .getByLabel("会话输入")
+    .fill("这是我的笔记目录。先用一句话回复：收到，再说半句你看见了什么。不要用工具。");
   await pause(500);
   await shot("07-准备发送");
 

@@ -256,9 +256,14 @@ try {
       `local=${localProviderTag}/${localProviderDisabled} relay=${relayProviderTag} noGx=${relayHidesGeneric}`,
     );
   }
-  await page.getByRole("button", { name: "Cancel" }).click().catch(() => {});
+  await page
+    .getByRole("button", { name: "Cancel" })
+    .click()
+    .catch(() => {});
 
-  await page.getByRole("heading", { name: "Context threshold reminder" }).waitFor({ timeout: 10_000 });
+  await page
+    .getByRole("heading", { name: "Context threshold reminder" })
+    .waitFor({ timeout: 10_000 });
   pass("context-warn", "设置页上下文阈值区可见");
   await page.getByRole("heading", { name: "Language" }).waitFor({ timeout: 10_000 });
   pass("language", "设置页语言区可见");
@@ -436,9 +441,9 @@ try {
       }
     }
     await page.locator("#session-reasoning-effort").selectOption("low");
-    await page.getByLabel("Message composer").fill(
-      "Reply with exactly: DIRTY_OK. No tools. One short sentence.",
-    );
+    await page
+      .getByLabel("Message composer")
+      .fill("Reply with exactly: DIRTY_OK. No tools. One short sentence.");
     const endedPromise = page.evaluate(
       ([budget]) =>
         new Promise((res) => {
@@ -500,7 +505,8 @@ try {
     await page.waitForTimeout(400);
     const htmlLang = await page.locator("html").getAttribute("lang");
     const zhHeading = await page.getByRole("heading", { name: "设置" }).count();
-    if (htmlLang === "zh-CN" || zhHeading > 0) pass("i18n-switch", `切换中文 html.lang=${htmlLang}`);
+    if (htmlLang === "zh-CN" || zhHeading > 0)
+      pass("i18n-switch", `切换中文 html.lang=${htmlLang}`);
     else fail("i18n-switch", `切换后仍 en html.lang=${htmlLang}`);
   } catch (error) {
     fail("i18n-switch", error.message ?? String(error));

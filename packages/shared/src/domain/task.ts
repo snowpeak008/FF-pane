@@ -131,8 +131,9 @@ export interface ClarificationAnswer {
 /**
  * 设计文档 §6.5 —— 结构化澄清请求（格式固定：问题 / 影响 / 选项 / 建议）。
  * Worker 遇不确定问题时提交，任务转 blocked（§6.3）。
- * 这是 Worker 与用户/Planner 之间唯一的沟通通道——不允许 Worker 和 Planner
- * 绕开用户自由对话（§6.5；§13 红线"Agent 自由互聊"）。
+ * 这是旧后台会话流程里 Worker 与用户/Planner 之间的结构化沟通通道——不允许 Worker 和 Planner
+ * 绕开用户自由对话（§6.5）。**Phase 10 起**：窗口间经 MCP 投递 + 落盘 `.md` 的通信另立通道，
+ * 见 Phase10 计划；本类型语义不变。
  */
 export interface ClarificationRequest {
   /** 请求唯一 ID。 */

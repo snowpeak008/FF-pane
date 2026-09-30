@@ -62,7 +62,7 @@ describe("resetLegacyAgentConfigIfNeeded", () => {
     await expect(access(rolesFile)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(access(secretsFile)).rejects.toMatchObject({ code: "ENOENT" });
 
-    await writeFile(providersFile, "{\"kept\":true}", "utf8");
+    await writeFile(providersFile, '{"kept":true}', "utf8");
     await expect(
       resetLegacyAgentConfigIfNeeded({
         rootDir: root,

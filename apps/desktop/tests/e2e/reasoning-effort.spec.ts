@@ -117,10 +117,11 @@ test("任务页可改执行者思考强度并落盘", async () => {
     .poll(async () => {
       const tasks = await page.evaluate(async (dir: string) => {
         const invoke = (channel: string, req?: unknown) =>
-          (window as unknown as { ffpane: { invoke: (c: string, r?: unknown) => Promise<unknown> } }).ffpane.invoke(
-            channel,
-            req,
-          );
+          (
+            window as unknown as {
+              ffpane: { invoke: (c: string, r?: unknown) => Promise<unknown> };
+            }
+          ).ffpane.invoke(channel, req);
         return invoke("tasks:list", { projectRoot: dir }) as Promise<
           ReadonlyArray<{ id: string; reasoningEffort?: string }>
         >;

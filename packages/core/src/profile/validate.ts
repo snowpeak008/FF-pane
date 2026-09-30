@@ -40,8 +40,8 @@ import {
   isShellPolicy,
   REASONING_EFFORT_LEVELS,
   REASONING_EFFORT_RUNTIMES,
-  resolveConnectionMode,
   ROLES,
+  resolveConnectionMode,
   runtimeSupportsLocalCli,
 } from "@ff-pane/shared";
 import { intersectEnvelopes, ROLE_DEFAULT_ENVELOPES } from "../permission/index.js";
