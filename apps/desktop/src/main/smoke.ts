@@ -173,12 +173,21 @@ async function finish(
   } else {
     console.error(roleLine);
   }
+  const workbenchMcp = join(app.getAppPath(), "out", "main", "workbench-mcp.js");
+  const workbenchMcpOk = existsSync(workbenchMcp);
+  const workbenchMcpLine = `[smoke] ${workbenchMcpOk ? "PASS" : "FAIL"} workbench-mcp —— ${workbenchMcpOk ? workbenchMcp : "missing sidecar"}`;
+  if (workbenchMcpOk) {
+    console.log(workbenchMcpLine);
+  } else {
+    console.error(workbenchMcpLine);
+  }
   const allOk =
     mainSqliteOk &&
     secrets.ok &&
     pty.ok &&
     roleOk &&
     hookOk &&
+    workbenchMcpOk &&
     report.checks.length > 0 &&
     report.checks.every((c) => c.ok);
   if (allOk) {

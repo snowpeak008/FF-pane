@@ -101,6 +101,7 @@ export async function setWindowRole(
     if (!deps.authRegistry.setRole(windowId, role)) {
       return { ok: false, reason: "unknown-window" };
     }
+    applyManagerGrant(deps.authRegistry, windowId, role);
     return deliverRoleSwitch(windowId, role, deps);
   }
 
@@ -127,6 +128,9 @@ export async function setWindowRole(
   if (isAi && !deps.authRegistry.setRole(windowId, role)) {
     return { ok: false, reason: "unknown-window" };
   }
+  if (isAi) {
+    applyManagerGrant(deps.authRegistry, windowId, role);
+  }
 
   const nextWindow: WorkbenchWindow = { ...found.window, role };
   await deps.saveLayout({
@@ -138,6 +142,18 @@ export async function setWindowRole(
     return { ok: true, role, delivery: "skipped" };
   }
   return deliverRoleSwitch(windowId, role, deps);
+}
+
+function applyManagerGrant(
+  registry: WorkbenchAuthRegistry,
+  windowId: string,
+  role: WorkbenchRole,
+): void {
+  if (role === "manager") {
+    registry.grantManager(windowId);
+    return;
+  }
+  registry.clearManagerGrant(windowId);
 }
 
 async function deliverRoleSwitch(

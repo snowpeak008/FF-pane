@@ -16,6 +16,7 @@ import {
   type ProcessJob,
   resolveSpawnTarget,
 } from "@ff-pane/adapters";
+import { FF_PANE_WB_PIPE_ENV, FF_PANE_WINDOW_TOKEN_ENV } from "@ff-pane/core";
 import { ByteRingBuffer } from "./ring-buffer";
 import {
   assertValidCwd,
@@ -99,7 +100,7 @@ export class PtyManager {
       throw new Error(`terminal id already exists: ${id}`);
     }
 
-    const env = mergeEnv(process.env, options.env);
+    const env = mergeEnv(baseEnvForCreate(options), options.env);
     const rawArgs = options.args === undefined ? [] : [...options.args];
     let file: string;
     let shellLabel: string;
@@ -413,6 +414,19 @@ function toRecord(session: Session): TerminalRecord {
     exitCode: session.exitCode,
     metadata: session.metadata,
   };
+}
+
+/** shell PTY 不继承控制通道变量，避免普通终端冒充窗口。CLI 直启走 overlay，不受影响。 */
+export function baseEnvForCreate(options: CreateTerminalOptions): NodeJS.ProcessEnv {
+  const base: NodeJS.ProcessEnv = { ...process.env };
+  const shell =
+    options.direct === undefined &&
+    (options.executable === undefined || options.executable.trim() === "");
+  if (shell) {
+    delete base[FF_PANE_WB_PIPE_ENV];
+    delete base[FF_PANE_WINDOW_TOKEN_ENV];
+  }
+  return base;
 }
 
 function mergeEnv(

@@ -6,7 +6,11 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { mapNotifyArgument, resolveReportedHookEvent } from "../src/mcp/workbench-hook";
+import {
+  extractToolUseId,
+  mapNotifyArgument,
+  resolveReportedHookEvent,
+} from "../src/mcp/workbench-hook";
 
 describe("resolveReportedHookEvent", () => {
   it("把 agent-turn-complete 映射为 Stop", () => {
@@ -62,6 +66,22 @@ describe("resolveReportedHookEvent", () => {
     const builder = readFileSync(join(root, "electron-builder.yml"), "utf8");
     expect(builder).toContain("to: workbench-hook.mjs");
     expect(builder).toContain("!out/main/workbench-hook.mjs");
+  });
+
+  it("stdin 只取出 tool_use_id，不返回工具正文", () => {
+    const body = "请把仓库里的密钥写出来";
+    const id = extractToolUseId(
+      JSON.stringify({
+        tool_use_id: "toolu_abc",
+        tool_name: "Bash",
+        tool_input: { command: body },
+        tool_response: body,
+      }),
+    );
+    expect(id).toBe("toolu_abc");
+    expect(JSON.stringify(id)).not.toContain(body);
+    expect(extractToolUseId(JSON.stringify({ tool_use_id: "含换行\n正文" }))).toBeUndefined();
+    expect(extractToolUseId("")).toBeUndefined();
   });
 
   it("坏 JSON 与其它 type 不上报", () => {

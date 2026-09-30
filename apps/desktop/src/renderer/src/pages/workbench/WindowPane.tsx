@@ -64,6 +64,7 @@ export function WindowPane({
   const wasCreatedThisSession = useWorkbenchStore((s) => s.wasCreatedThisSession);
   const takeInitialPrompt = useWorkbenchStore((s) => s.takeInitialPrompt);
   const getProjectLayout = useWorkbenchStore((s) => s.getProjectLayout);
+  const inbox = useWorkbenchStore((s) => s.inboxByWindow[window.id]);
 
   const { state: profilesState } = useInvokeQuery("profiles:list");
   const profiles = queryData(profilesState) ?? [];
@@ -213,6 +214,31 @@ export function WindowPane({
             }}
           >
             {window.title}
+            {inbox !== undefined && inbox.unread > 0 ? (
+              <span
+                className="ml-1 rounded-sm bg-danger-surface px-1 text-2xs text-danger-text"
+                data-testid="workbench-unread-badge"
+              >
+                {t("workbench.inbox.unread", { count: inbox.unread })}
+              </span>
+            ) : null}
+            {inbox?.lastReportStatus !== undefined ? (
+              <span
+                className="ml-1 rounded-sm bg-surface-active px-1 text-2xs text-fg-muted"
+                data-testid="workbench-report-badge"
+                data-report-status={inbox.lastReportStatus}
+              >
+                {t(
+                  inbox.lastReportStatus === "done"
+                    ? "workbench.inbox.reportDone"
+                    : inbox.lastReportStatus === "blocked"
+                      ? "workbench.inbox.reportBlocked"
+                      : inbox.lastReportStatus === "failed"
+                        ? "workbench.inbox.reportFailed"
+                        : "workbench.inbox.reportProgress",
+                )}
+              </span>
+            ) : null}
             {isCli && profile !== undefined ? (
               <span className="ml-1 font-normal text-fg-muted">
                 · {profile.name}
@@ -441,16 +467,23 @@ export function WindowPane({
         >
           <span>{t("workbench.deliver.pending", { count: deliverPending.count })}</span>
           {deliverPending.mode === "manual" ? (
-            <button
-              type="button"
-              className="rounded-sm bg-primary px-1.5 py-0.5 text-primary-fg"
-              data-testid="workbench-deliver-now"
-              onClick={() => {
-                void invokeQuery("workbench:deliver-now", { windowId: window.id });
-              }}
-            >
-              {t("workbench.deliver.send")}
-            </button>
+            <>
+              <button
+                type="button"
+                className="rounded-sm bg-primary px-1.5 py-0.5 text-primary-fg"
+                data-testid="workbench-deliver-now"
+                onClick={() => {
+                  void invokeQuery("workbench:deliver-now", { windowId: window.id });
+                }}
+              >
+                {t("workbench.deliver.send")}
+              </button>
+              {window.kind === "codex" ? (
+                <span data-testid="workbench-codex-manual-hint">
+                  {t("workbench.deliver.codexManualHint")}
+                </span>
+              ) : null}
+            </>
           ) : (
             <span data-testid="workbench-deliver-blocked">
               {deliverPending.mode === "blocked"

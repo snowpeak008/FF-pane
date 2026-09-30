@@ -1,0 +1,155 @@
+/**
+ * 工作台 MCP 工具声明（T10.7a）。
+ * 描述与参数与 Phase 10 §3.2.1 及角色说明书一致。
+ * sidecar 只列出并转发这些工具，不做授权判断。
+ * read_output / close_window / open_panel 留到 T10.7b，这里不列出。
+ */
+
+import type { McpToolDefinition } from "./protocol";
+
+export const WORKBENCH_MCP_SERVER_NAME = "ffpane-workbench";
+
+export const WORKBENCH_MCP_TOOL_NAMES = [
+  "ffpane_whoami",
+  "ffpane_list_windows",
+  "ffpane_set_role",
+  "ffpane_write_brief",
+  "ffpane_open_window",
+  "ffpane_send_message",
+  "ffpane_report",
+  "ffpane_read_inbox",
+] as const;
+
+export type WorkbenchMcpToolName = (typeof WORKBENCH_MCP_TOOL_NAMES)[number];
+
+const ROLE_ENUM = ["manager", "planner", "worker", "reviewer", "none"] as const;
+const PERMISSION_ENUM = ["read-only", "edit", "edit-exec", "yolo"] as const;
+const REPORT_STATUS_ENUM = ["done", "blocked", "failed", "progress"] as const;
+
+export const WORKBENCH_MCP_TOOLS: readonly McpToolDefinition[] = [
+  {
+    name: "ffpane_whoami",
+    description:
+      "返回本窗口的 id、标题、角色、权限、上级（id 与标题）、项目名与项目根目录。任何窗口都可调用。",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "ffpane_list_windows",
+    description:
+      "列出本窗口可见的窗口：自己、自己的后代、以及上级链。不含兄弟和无关窗口。每项含角色、权限、是否在运行、最近一次汇报状态。",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "ffpane_set_role",
+    description:
+      "设定某个窗口的角色（manager 管理者 / planner 规划 / worker 执行 / reviewer 检查 / none 普通）。把自己设为管理者仅限用户开启的顶层窗口；也可以设定自己后代的角色。其余情况会被拒绝。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        windowId: { type: "string", description: "目标窗口 id。把自己设为管理者时填自己的 id。" },
+        role: { type: "string", enum: [...ROLE_ENUM], description: "新角色。" },
+      },
+      required: ["windowId", "role"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "ffpane_write_brief",
+    description:
+      "在本窗口所属项目的 .ffpane/briefs/ 下写一份任务说明 Markdown，返回项目内相对路径和绝对路径。任何角色、任何权限（含只读）都可以调用，因为写入被限定在 briefs 目录。不要传绝对路径或 .. 。重名会自动加序号，不会覆盖。正文上限 256KB；更长的内容请拆分。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "文件名，例如 plan.md。只能是 briefs 目录内的文件名。",
+        },
+        content: { type: "string", description: "Markdown 正文。" },
+      },
+      required: ["name", "content"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "ffpane_open_window",
+    description:
+      "开一个子窗口并派活。仅管理者可调用，且该管理者身份必须是本进程里通过 ffpane_set_role 或界面确认过的（仅从布局里读到的管理者不够）。权限不得超过你自己的有效权限，超出会被封顶并在结果里说明。子窗口工作目录是项目根。briefPath 必须位于该项目 .ffpane/briefs/ 内。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        cli: { type: "string", enum: ["claude", "codex"], description: "子窗口使用的 CLI。" },
+        profileId: {
+          type: "string",
+          description: "启动配置 id。缺省时用该 CLI 最近一次使用的配置，否则用第一条匹配的配置。",
+        },
+        role: { type: "string", enum: [...ROLE_ENUM], description: "子窗口角色。" },
+        permission: {
+          type: "string",
+          enum: [...PERMISSION_ENUM],
+          description: "子窗口权限，不得超过调用者。",
+        },
+        title: { type: "string", description: "子窗口标题。" },
+        briefPath: {
+          type: "string",
+          description: "任务说明的项目内相对路径或绝对路径，必须在 .ffpane/briefs/ 内。",
+        },
+        message: { type: "string", description: "附加给子窗口的第一句话。整段初始指令上限 32KB。" },
+      },
+      required: ["cli", "role", "permission", "title"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "ffpane_send_message",
+    description:
+      "给自己的后代窗口发消息或指令。不能发给自己、上级或兄弟。正文上限 8KB，更长请改用 ffpane_write_brief，消息里只放路径。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        windowId: { type: "string", description: "后代窗口 id。" },
+        text: { type: "string", description: "消息正文。" },
+        briefPath: { type: "string", description: "可选，项目 .ffpane/briefs/ 内的说明路径。" },
+      },
+      required: ["windowId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "ffpane_report",
+    description:
+      "向上级链汇报。windowId 缺省时汇报给直接上级。status 只能是 done、blocked、failed、progress。summary 上限 8KB，更长请改用 ffpane_write_brief。files 是项目内相对路径，不能越出项目根。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        windowId: { type: "string", description: "上级窗口 id。缺省为直接上级。" },
+        status: { type: "string", enum: [...REPORT_STATUS_ENUM], description: "汇报状态。" },
+        summary: { type: "string", description: "摘要。" },
+        files: {
+          type: "array",
+          items: { type: "string" },
+          description: "相关文件的项目内相对路径。",
+        },
+        briefPath: { type: "string", description: "可选，项目 .ffpane/briefs/ 内的说明路径。" },
+      },
+      required: ["status", "summary"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "ffpane_read_inbox",
+    description:
+      "读取本窗口自己的收件箱。不能读别人的。mode=unread 只返回未读，mode=all 返回最近若干条。读取即标记已读。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        mode: {
+          type: "string",
+          enum: ["unread", "all"],
+          description: "unread 或 all，缺省 unread。",
+        },
+        limit: { type: "number", description: "最多返回条数，缺省 20，最大 50。" },
+      },
+      additionalProperties: false,
+    },
+  },
+];

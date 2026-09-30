@@ -105,6 +105,16 @@ export interface WorkbenchAuthRegistry {
   syncLayout(layout: ProjectWorkbenchLayout): ProjectWorkbenchLayout;
   /** 登记 / 更新单个 AI 窗口（T10.7 开子窗时由主进程调用）。 */
   upsert(node: WorkbenchAuthNode, projectId: ProjectId): void;
+  /**
+   * 开子窗口：先登记并钉住。随后若 renderer 用旧布局 sync，也不会把父级丢掉。
+   * launch 成功且布局已含该窗口后再 unpin。
+   */
+  pin(node: WorkbenchAuthNode, projectId: ProjectId): void;
+  unpin(windowId: string): void;
+  /** 本进程里 setWindowRole 设为 manager 才授予开窗口能力。冷读布局不算。 */
+  grantManager(windowId: string): void;
+  clearManagerGrant(windowId: string): void;
+  isManagerGranted(windowId: string): boolean;
   /** 移除。 */
   remove(windowId: string): void;
   get(windowId: string): WorkbenchAuthNode | undefined;
@@ -125,6 +135,15 @@ export interface WorkbenchAuthRegistry {
 
 export function createWorkbenchAuthRegistry(): WorkbenchAuthRegistry {
   const byId = new Map<string, StoredAuthNode>();
+  const pinned = new Map<string, StoredAuthNode>();
+  const managerGranted = new Set<string>();
+
+  const remember = (id: string, node: StoredAuthNode): void => {
+    byId.set(id, node);
+    if (pinned.has(id)) {
+      pinned.set(id, node);
+    }
+  };
 
   return {
     syncLayout(layout) {
@@ -139,6 +158,11 @@ export function createWorkbenchAuthRegistry(): WorkbenchAuthRegistry {
       for (const [id, node] of Object.entries(sanitized.windows)) {
         byId.set(id, { ...node, projectId: layout.projectId });
       }
+      for (const [id, node] of pinned) {
+        if (node.projectId === layout.projectId) {
+          byId.set(id, node);
+        }
+      }
 
       const nextWindows: Record<string, WorkbenchWindow> = {};
       for (const [id, window] of Object.entries(layout.windows)) {
@@ -148,10 +172,31 @@ export function createWorkbenchAuthRegistry(): WorkbenchAuthRegistry {
       return { ...layout, windows: nextWindows };
     },
     upsert(node, projectId) {
-      byId.set(node.id, { ...node, projectId });
+      remember(node.id, { ...node, projectId });
+    },
+    pin(node, projectId) {
+      const stored = { ...node, projectId };
+      pinned.set(node.id, stored);
+      byId.set(node.id, stored);
+    },
+    unpin(windowId) {
+      pinned.delete(windowId);
+    },
+    grantManager(windowId) {
+      if (byId.has(windowId)) {
+        managerGranted.add(windowId);
+      }
+    },
+    clearManagerGrant(windowId) {
+      managerGranted.delete(windowId);
+    },
+    isManagerGranted(windowId) {
+      return managerGranted.has(windowId) && byId.get(windowId)?.role === "manager";
     },
     remove(windowId) {
       byId.delete(windowId);
+      pinned.delete(windowId);
+      managerGranted.delete(windowId);
     },
     get(windowId) {
       const stored = byId.get(windowId);
@@ -193,11 +238,13 @@ export function createWorkbenchAuthRegistry(): WorkbenchAuthRegistry {
       if (stored === undefined) {
         return false;
       }
-      byId.set(windowId, { ...stored, role });
+      remember(windowId, { ...stored, role });
       return true;
     },
     clear() {
       byId.clear();
+      pinned.clear();
+      managerGranted.clear();
     },
   };
 }

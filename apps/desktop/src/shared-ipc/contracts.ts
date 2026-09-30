@@ -63,6 +63,7 @@ import type {
   WorkbenchPermissionLevel,
   WorkbenchRole,
   WorkbenchRoleManualId,
+  WorkbenchWindow,
 } from "@ff-pane/shared";
 
 /** 项目级请求基：一律携带项目根路径，主进程据此 resolveProjectLayout。 */
@@ -337,6 +338,20 @@ export type DeliverWorkbenchPendingResponse =
       readonly ok: false;
       readonly reason: "blocked" | "busy" | "empty" | "unknown-window";
     };
+
+/** 管理者开出的子窗口已经在主进程启动，渲染端把它放进当前布局。 */
+export interface WorkbenchChildWindowEvent {
+  readonly projectId: ProjectId;
+  readonly window: WorkbenchWindow;
+  readonly managerWindowId: string;
+}
+
+/** 未读数与最近汇报状态。只带发生变化的字段。 */
+export interface WorkbenchInboxNoticeEvent {
+  readonly windowId: string;
+  readonly unread?: number;
+  readonly lastReportStatus?: "done" | "blocked" | "failed" | "progress";
+}
 
 /** 某窗口待投递条数。manual 才显示立即发送；blocked 绝不发送。 */
 export interface WorkbenchDeliverPendingEvent {
@@ -1659,6 +1674,8 @@ export interface IpcEventContracts {
   /** 待投递条数变化（T10.6'）。 */
   "workbench:role-notice": { payload: WorkbenchRoleNoticeEvent };
   "workbench:deliver-pending": { payload: WorkbenchDeliverPendingEvent };
+  "workbench:child-window": { payload: WorkbenchChildWindowEvent };
+  "workbench:inbox-notice": { payload: WorkbenchInboxNoticeEvent };
 }
 
 export type InvokeChannel = keyof IpcInvokeContracts;
@@ -1781,6 +1798,8 @@ export const EVENT_CHANNELS = [
   "workbench:session-claimed",
   "workbench:role-notice",
   "workbench:deliver-pending",
+  "workbench:child-window",
+  "workbench:inbox-notice",
 ] as const satisfies readonly EventChannel[];
 
 type AssertNever<T extends never> = T;

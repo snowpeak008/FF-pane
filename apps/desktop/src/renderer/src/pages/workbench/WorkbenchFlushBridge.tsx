@@ -5,9 +5,21 @@
 import { type ReactElement, useEffect } from "react";
 import { invokeQuery } from "../../ipc/query";
 import { useSubscription } from "../../ipc/useSubscription";
-import { flushWorkbenchLayouts } from "../../stores/workbench";
+import { flushWorkbenchLayouts, useWorkbenchStore } from "../../stores/workbench";
+import { rememberLiveTerminal } from "./live-terminals";
 
 export function WorkbenchFlushBridge(): ReactElement | null {
+  useSubscription("workbench:child-window", (payload) => {
+    if (payload.window.terminalId !== undefined) {
+      rememberLiveTerminal(payload.window.id, payload.window.terminalId);
+    }
+    useWorkbenchStore.getState().acceptOpenedWindow(payload);
+  });
+
+  useSubscription("workbench:inbox-notice", (payload) => {
+    useWorkbenchStore.getState().applyInboxNotice(payload);
+  });
+
   useSubscription("workbench:flush-request", (payload) => {
     void flushWorkbenchLayouts().finally(() => {
       void invokeQuery("workbench:flush-ack", { requestId: payload.requestId });

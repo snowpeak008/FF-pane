@@ -373,7 +373,15 @@
       "cancel": "取消",
       "blocked": "正在等待权限确认，暂不发送",
       "busy": "本回合还没结束，暂不发送",
-      "noNode": "没有可用的 node.exe，收不到回合结束信号。有待投递内容时请点立即发送。"
+      "noNode": "没有可用的 node.exe，收不到回合结束信号。有待投递内容时请点立即发送。",
+      "codexManualHint": "若画面上有确认框请勿点击"
+    },
+    "inbox": {
+      "unread": "{{count}} 未读",
+      "reportDone": "已完成",
+      "reportBlocked": "受阻",
+      "reportFailed": "失败",
+      "reportProgress": "进行中"
     },
     "empty": {
       "noProject": "还没有选中项目。到项目列表新建或选一个，再回来开终端。",

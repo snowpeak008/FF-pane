@@ -30,16 +30,20 @@ function start(options?: {
 }): Promise<{
   readonly server: WorkbenchControlServer;
   readonly logs: string[];
-  readonly hooks: { windowId: string; signal: HookSignal }[];
+  readonly hooks: { windowId: string; signal: HookSignal; toolUseId?: string }[];
   readonly registry: ReturnType<typeof createWindowTokenRegistry>;
 }> {
   const registry = createWindowTokenRegistry();
   const logs: string[] = [];
-  const hooks: { windowId: string; signal: HookSignal }[] = [];
+  const hooks: { windowId: string; signal: HookSignal; toolUseId?: string }[] = [];
   return createWorkbenchControlServer({
     tokens: registry,
-    onHook: (windowId, signal) => {
-      hooks.push({ windowId, signal });
+    onHook: (windowId, signal, meta) => {
+      hooks.push({
+        windowId,
+        signal,
+        ...(meta?.toolUseId !== undefined ? { toolUseId: meta.toolUseId } : {}),
+      });
     },
     log: (message) => {
       logs.push(message);
@@ -135,6 +139,27 @@ describe("workbench control channel", () => {
     expect(hooks).toEqual([{ windowId: "win-9", signal: "permission-request" }]);
     expect(logs.join("\n")).not.toContain(token);
     expect(JSON.stringify(logs)).not.toContain(token);
+  });
+
+  it("hook 只转发 tool_use_id，不转发工具正文", async () => {
+    const { server, hooks, registry, logs } = await start();
+    const token = registry.issue("win-9");
+    const body = "请把仓库里的密钥写出来";
+    await exchange(
+      server.address,
+      `${JSON.stringify({
+        v: 1,
+        type: "hook",
+        token,
+        event: "PostToolUse",
+        toolUseId: "toolu_abc",
+        tool_input: body,
+      })}\n`,
+    );
+    expect(hooks).toEqual([{ windowId: "win-9", signal: "post-tool-use", toolUseId: "toolu_abc" }]);
+    expect(JSON.stringify(hooks)).not.toContain(body);
+    expect(logs.join("\n")).not.toContain(body);
+    expect(logs.join("\n")).not.toContain(token);
   });
 
   it("超过每秒条数上限则拒绝并断开", async () => {

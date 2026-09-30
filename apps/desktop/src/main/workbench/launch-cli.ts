@@ -54,6 +54,7 @@ import {
   resolveWorkbenchHookScriptPath,
 } from "./hook-launch";
 import type { IdleDeliverQueue } from "./idle-deliver";
+import { buildWorkbenchMcpSpec, WORKBENCH_MCP_SERVER_NAME } from "./mcp-server-spec";
 import {
   type WorkbenchMcpTempFile,
   WorkbenchMcpTempRegistry,
@@ -177,6 +178,8 @@ export interface LaunchCliWindowDeps {
   readonly controlPipe?: string;
   /** 启动成功后登记空闲投递会话（无 initialPrompt 仍保持未知，直到 hook）。 */
   readonly idleQueue?: IdleDeliverQueue;
+  /** 启动成功后记下该 CLI 最近使用的 Profile，供 ffpane_open_window 缺省选用。 */
+  readonly onProfileUsed?: (profileId: string, runtime: "claude-code" | "codex") => void;
   /** 观察型 hook 脚本。缺省按打包态选 resources 或 moduleDir 下的 workbench-hook.mjs。 */
   readonly hookScriptPath?: string;
   readonly isPackaged?: boolean;
@@ -315,7 +318,10 @@ export async function launchCliWindow(
     connectionMode,
   });
 
-  const mcpServers = await resolveKnowledgeServers(deps, input.projectRoot);
+  const mcpServers: Record<string, McpStdioServerSpec> = {
+    ...(await resolveKnowledgeServers(deps, input.projectRoot)),
+    [WORKBENCH_MCP_SERVER_NAME]: buildWorkbenchMcpSpec(deps.moduleDir),
+  };
   const requestedPermission: WorkbenchPermissionLevel = input.permission ?? "edit";
   const launchAuth = deps.authRegistry?.resolveLaunch(input.windowId, requestedPermission) ?? {
     effective: requestedPermission,
@@ -544,6 +550,7 @@ export async function launchCliWindow(
       .catch(() => undefined);
   }
 
+  deps.onProfileUsed?.(profile.id, runtime);
   return {
     terminal,
     kind,

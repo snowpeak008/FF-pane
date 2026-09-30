@@ -20,6 +20,8 @@ export default defineConfig({
           "config-mcp": resolve(__dirname, "src/mcp/config-server.ts"),
           // T10.6' 观察型 hook：普通 node 直接执行的 .mjs，不进 asar。
           "workbench-hook": resolve(__dirname, "src/mcp/workbench-hook.ts"),
+          // T10.7a 工作台 MCP sidecar：与知识库 sidecar 相同，由 CLI 以 ELECTRON_RUN_AS_NODE 拉起。
+          "workbench-mcp": resolve(__dirname, "src/mcp/workbench-server.ts"),
         },
         output: {
           entryFileNames: (chunk) =>

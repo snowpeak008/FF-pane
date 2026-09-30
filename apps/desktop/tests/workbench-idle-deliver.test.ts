@@ -229,6 +229,90 @@ describe("createIdleDeliverQueue", () => {
     expect(h.writes).toEqual([]);
   });
 
+  it("立即发送一次只写队首", () => {
+    const h = harness();
+    h.queue.attach("t1", { initialPrompt: true });
+    h.queue.enqueue({ terminalId: "t1", text: "one" });
+    h.queue.enqueue({ terminalId: "t1", text: "two" });
+    expect(h.writes).toEqual([]);
+    expect(h.queue.deliverNow("t1")).toEqual({ status: "delivered", count: 1 });
+    expect(h.writes).toEqual(["one", "\r"]);
+    expect(h.queue.pendingCount("t1")).toBe(1);
+    expect(h.queue.phaseOf("t1")).toBe("busy");
+  });
+
+  it("两次权限请求只结束一次时，Stop 和立即发送都不写入", () => {
+    const h = harness();
+    h.queue.attach("t1");
+    h.queue.noteHook("t1", "stop");
+    h.queue.noteHook("t1", "permission-request", { toolUseId: "toolu_a" });
+    h.queue.noteHook("t1", "permission-request", { toolUseId: "toolu_b" });
+    h.queue.enqueue({ terminalId: "t1", text: "hello" });
+    h.queue.noteHook("t1", "post-tool-use", { toolUseId: "toolu_a" });
+    expect(h.queue.phaseOf("t1")).toBe("blocked");
+    h.queue.noteHook("t1", "stop");
+    expect(h.queue.phaseOf("t1")).toBe("blocked");
+    expect(h.writes).toEqual([]);
+    expect(h.queue.deliverNow("t1")).toEqual({ status: "refused", reason: "blocked" });
+    expect(h.writes).toEqual([]);
+    h.queue.noteHook("t1", "post-tool-use", { toolUseId: "toolu_b" });
+    expect(h.queue.phaseOf("t1")).toBe("busy");
+    expect(h.writes).toEqual([]);
+    h.queue.noteHook("t1", "stop");
+    expect(h.writes).toEqual(["hello", "\r"]);
+  });
+
+  it("无关 PostToolUse 不解锁，伪造 Stop 也不解锁", () => {
+    const h = harness();
+    h.queue.attach("t1");
+    h.queue.noteHook("t1", "permission-request", { toolUseId: "toolu_a" });
+    h.queue.enqueue({ terminalId: "t1", text: "hello" });
+    h.queue.noteHook("t1", "post-tool-use", { toolUseId: "toolu_other" });
+    h.queue.noteHook("t1", "post-tool-use");
+    expect(h.queue.phaseOf("t1")).toBe("blocked");
+    h.queue.noteHook("t1", "stop");
+    expect(h.queue.phaseOf("t1")).toBe("blocked");
+    expect(h.writes).toEqual([]);
+    expect(h.queue.deliverNow("t1")).toEqual({ status: "refused", reason: "blocked" });
+  });
+
+  it("没有 id 的权限请求只有用户新提交或窗口重启才清零", () => {
+    const h = harness();
+    h.queue.attach("t1");
+    h.queue.noteHook("t1", "permission-request");
+    h.queue.noteHook("t1", "permission-request");
+    h.queue.enqueue({ terminalId: "t1", text: "hello" });
+    h.queue.noteHook("t1", "post-tool-use", { toolUseId: "toolu_unrelated" });
+    h.queue.noteHook("t1", "stop");
+    expect(h.queue.phaseOf("t1")).toBe("blocked");
+    expect(h.writes).toEqual([]);
+    h.queue.noteHook("t1", "user-prompt-submit");
+    expect(h.queue.phaseOf("t1")).toBe("busy");
+    expect(h.writes).toEqual([]);
+    h.queue.noteHook("t1", "stop");
+    expect(h.writes).toEqual(["hello", "\r"]);
+
+    h.queue.noteHook("t1", "permission-request");
+    h.queue.enqueue({ terminalId: "t1", text: "again" });
+    h.queue.drop("t1");
+    h.queue.attach("t1");
+    h.queue.noteHook("t1", "stop");
+    h.advance(2_000);
+    h.queue.enqueue({ terminalId: "t1", text: "after" });
+    expect(h.writes).toEqual(["hello", "\r", "after", "\r"]);
+  });
+
+  it("同一窗口未投递的收件箱提醒合并成一条", () => {
+    const h = harness();
+    h.queue.attach("t1", { initialPrompt: true });
+    const text = (count: number): string => (count <= 1 ? "first" : `你有 ${count} 条新消息`);
+    h.queue.enqueueInbox("t1", text);
+    h.queue.enqueueInbox("t1", text);
+    expect(h.queue.pendingCount("t1")).toBe(1);
+    h.queue.deliverNow("t1");
+    expect(h.writes[0]).toBe("你有 2 条新消息");
+  });
+
   it("源码没有超时强写路径", () => {
     const source = readFileSync(
       join(dirname(fileURLToPath(import.meta.url)), "../src/main/workbench/idle-deliver.ts"),

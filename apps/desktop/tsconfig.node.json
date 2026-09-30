@@ -11,6 +11,7 @@
     "src/mcp",
     "src/preload",
     "src/shared-ipc",
+    "src/shared",
     "tests",
     "electron.vite.config.ts",
     "vitest.config.ts"

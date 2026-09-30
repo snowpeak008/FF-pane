@@ -1,0 +1,583 @@
+/**
+ * 工作台 MCP 工具执行（T10.7a）。
+ * 主进程用 resolveCaller 认出窗口后进入这里。
+ * 授权只走 authorize / canSetRole / 本进程管理者授予，sidecar 不参与。
+ */
+
+import { randomUUID } from "node:crypto";
+import {
+  authorize,
+  canSetRole,
+  isDescendantOf,
+  type WorkbenchAuthNode,
+  walkAncestors,
+} from "@ff-pane/core";
+import {
+  isWorkbenchRole,
+  type WorkbenchPermissionLevel,
+  type WorkbenchRole,
+} from "@ff-pane/shared";
+import { resolveBriefPath, writeBriefFile } from "./brief-files";
+import type { OpenChildArgs, OpenChildSuccess } from "./open-child";
+import { openChildWindow } from "./open-child";
+import {
+  buildCoalescedReminder,
+  buildNewMessageReminder,
+  isReportStatus,
+  type ReportStatus,
+  sanitizeThreadText,
+} from "./remind";
+import type { SetWindowRoleResult } from "./set-role";
+import {
+  appendThreadRecord,
+  assertProjectFiles,
+  latestReportStatus,
+  readThreadIndex,
+  type ThreadRecord,
+  teamAnchorId,
+  teamFileSlug,
+} from "./thread-store";
+
+export const MESSAGE_MAX_BYTES = 8 * 1024;
+export const TOOL_CALLS_PER_SECOND = 30;
+const INBOX_DEFAULT_LIMIT = 20;
+const INBOX_MAX_LIMIT = 50;
+
+export interface ToolTextResult {
+  readonly text: string;
+  readonly isError?: boolean;
+}
+
+export interface ToolWindowView {
+  readonly id: string;
+  readonly title: string;
+  readonly projectId: string;
+  readonly projectName: string;
+  readonly projectRoot: string;
+  readonly role: WorkbenchRole;
+  readonly permission: WorkbenchPermissionLevel;
+  readonly running: boolean;
+  readonly parentWindowId?: string;
+  readonly parentTitle?: string;
+}
+
+export interface WorkbenchToolDeps {
+  readonly now: () => number;
+  readonly snapshot: () => Readonly<Record<string, WorkbenchAuthNode>>;
+  readonly isManagerGranted: (windowId: string) => boolean;
+  readonly describe: (windowId: string) => Promise<ToolWindowView | undefined>;
+  readonly setRole: (
+    callerId: string,
+    targetId: string,
+    role: WorkbenchRole,
+  ) => Promise<SetWindowRoleResult>;
+  readonly openChild: (
+    callerId: string,
+    args: OpenChildArgs,
+  ) => Promise<OpenChildSuccess | { readonly ok: false; readonly error: string }>;
+  readonly remind: (windowId: string, textForCount: (count: number) => string) => void;
+  readonly publishInbox: (input: {
+    readonly windowId: string;
+    readonly unread?: number;
+    readonly lastReportStatus?: ReportStatus;
+  }) => void;
+  readonly getCursor: (windowId: string) => Promise<string | undefined>;
+  readonly setCursor: (windowId: string, lastReadId: string) => Promise<void>;
+}
+
+const buckets = new Map<string, { t: number; n: number }>();
+
+export function allowToolCall(windowId: string, now: number): boolean {
+  const bucket = buckets.get(windowId);
+  if (bucket === undefined || now - bucket.t >= 1000) {
+    buckets.set(windowId, { t: now, n: 1 });
+    return true;
+  }
+  bucket.n += 1;
+  return bucket.n <= TOOL_CALLS_PER_SECOND;
+}
+
+export function resetToolCallBuckets(): void {
+  buckets.clear();
+}
+
+function fail(text: string): ToolTextResult {
+  return { text, isError: true };
+}
+
+function ok(value: unknown): ToolTextResult {
+  return { text: JSON.stringify(value) };
+}
+
+function tooLong(): ToolTextResult {
+  return fail("正文超过 8KB。请改用 ffpane_write_brief 写说明，消息里只放路径。");
+}
+
+export function visibleWindowIds(
+  callerId: string,
+  tree: Readonly<Record<string, WorkbenchAuthNode>>,
+): readonly string[] {
+  const ids = new Set<string>([callerId]);
+  const walk = walkAncestors(callerId, tree);
+  if (!walk.cycle && !walk.truncated) {
+    for (const id of walk.ids) {
+      ids.add(id);
+    }
+  }
+  for (const id of Object.keys(tree)) {
+    if (isDescendantOf(callerId, id, tree)) {
+      ids.add(id);
+    }
+  }
+  return [...ids];
+}
+
+function inboxAfter(
+  records: readonly ThreadRecord[],
+  windowId: string,
+  lastReadId: string | undefined,
+): readonly ThreadRecord[] {
+  const mine = records.filter((record) => record.to.windowId === windowId);
+  if (lastReadId === undefined) {
+    return mine;
+  }
+  const index = mine.findIndex((record) => record.id === lastReadId);
+  if (index < 0) {
+    return mine;
+  }
+  return mine.slice(index + 1);
+}
+
+export async function executeWorkbenchTool(
+  callerId: string,
+  name: string,
+  args: Readonly<Record<string, unknown>>,
+  deps: WorkbenchToolDeps,
+): Promise<ToolTextResult> {
+  if (!allowToolCall(callerId, deps.now())) {
+    return fail("调用过于频繁（每秒最多 30 次），请稍后再试。");
+  }
+  const caller = await deps.describe(callerId);
+  if (caller === undefined) {
+    return fail("找不到调用窗口。");
+  }
+  const tree = deps.snapshot();
+  switch (name) {
+    case "ffpane_whoami":
+      return ok({
+        windowId: caller.id,
+        title: caller.title,
+        role: caller.role,
+        permission: caller.permission,
+        parent:
+          caller.parentWindowId !== undefined
+            ? {
+                windowId: caller.parentWindowId,
+                title: caller.parentTitle ?? caller.parentWindowId,
+              }
+            : null,
+        projectName: caller.projectName,
+        projectRoot: caller.projectRoot,
+      });
+    case "ffpane_list_windows":
+      return listWindows(caller, tree, deps);
+    case "ffpane_set_role":
+      return setRole(callerId, args, tree, deps);
+    case "ffpane_write_brief":
+      return writeBrief(caller, args);
+    case "ffpane_open_window":
+      return openWindow(callerId, args, deps);
+    case "ffpane_send_message":
+      return sendMessage(caller, args, tree, deps);
+    case "ffpane_report":
+      return report(caller, args, tree, deps);
+    case "ffpane_read_inbox":
+      return readInbox(caller, args, deps);
+    default:
+      return fail(`未知工具：${name}`);
+  }
+}
+
+async function listWindows(
+  caller: ToolWindowView,
+  tree: Readonly<Record<string, WorkbenchAuthNode>>,
+  deps: WorkbenchToolDeps,
+): Promise<ToolTextResult> {
+  const records = await readThreadIndex(caller.projectRoot);
+  const windows = [];
+  for (const id of visibleWindowIds(caller.id, tree)) {
+    const view = id === caller.id ? caller : await deps.describe(id);
+    if (view === undefined) {
+      continue;
+    }
+    const status = latestReportStatus(records, id);
+    windows.push({
+      id: view.id,
+      title: view.title,
+      role: view.role,
+      permission: view.permission,
+      running: view.running,
+      ...(status !== undefined ? { lastReportStatus: status } : {}),
+      ...(view.parentWindowId !== undefined ? { parentWindowId: view.parentWindowId } : {}),
+    });
+  }
+  return ok({ windows });
+}
+
+async function setRole(
+  callerId: string,
+  args: Readonly<Record<string, unknown>>,
+  tree: Readonly<Record<string, WorkbenchAuthNode>>,
+  deps: WorkbenchToolDeps,
+): Promise<ToolTextResult> {
+  const windowId = args["windowId"];
+  const role = args["role"];
+  if (typeof windowId !== "string" || windowId.trim() === "" || !isWorkbenchRole(role)) {
+    return fail("ffpane_set_role 需要 windowId 和合法 role。");
+  }
+  const target = tree[windowId];
+  const allowed = canSetRole(
+    { kind: "window", windowId: callerId },
+    {
+      id: windowId,
+      ...(target?.openedBy !== undefined ? { openedBy: target.openedBy } : {}),
+      ...(target?.parentWindowId !== undefined ? { parentWindowId: target.parentWindowId } : {}),
+    },
+    role,
+    tree,
+  );
+  if (!allowed) {
+    return fail("不能设定这个窗口的角色。");
+  }
+  const result = await deps.setRole(callerId, windowId, role);
+  if (!result.ok) {
+    return fail(result.reason === "forbidden" ? "不能设定这个窗口的角色。" : "设定角色失败。");
+  }
+  return ok({ ok: true, windowId, role: result.role });
+}
+
+async function writeBrief(
+  caller: ToolWindowView,
+  args: Readonly<Record<string, unknown>>,
+): Promise<ToolTextResult> {
+  const name = args["name"];
+  const content = args["content"];
+  if (typeof name !== "string" || typeof content !== "string") {
+    return fail("ffpane_write_brief 需要 name 和 content。");
+  }
+  const written = await writeBriefFile({
+    projectRoot: caller.projectRoot,
+    name,
+    content,
+  });
+  if (!written.ok) {
+    return fail(written.error);
+  }
+  return ok({ relativePath: written.relativePath, absolutePath: written.absolutePath });
+}
+
+async function openWindow(
+  callerId: string,
+  args: Readonly<Record<string, unknown>>,
+  deps: WorkbenchToolDeps,
+): Promise<ToolTextResult> {
+  const cli = args["cli"];
+  const role = args["role"];
+  const permission = args["permission"];
+  const title = args["title"];
+  if (cli !== "claude" && cli !== "codex") {
+    return fail("cli 只能是 claude 或 codex。");
+  }
+  if (!isWorkbenchRole(role) || typeof permission !== "string" || typeof title !== "string") {
+    return fail("ffpane_open_window 需要 cli、role、permission 和 title。");
+  }
+  if (
+    permission !== "read-only" &&
+    permission !== "edit" &&
+    permission !== "edit-exec" &&
+    permission !== "yolo"
+  ) {
+    return fail("权限无效。");
+  }
+  const opened = await deps.openChild(callerId, {
+    cli,
+    role,
+    permission,
+    title,
+    ...(typeof args["profileId"] === "string" ? { profileId: args["profileId"] } : {}),
+    ...(typeof args["briefPath"] === "string" ? { briefPath: args["briefPath"] } : {}),
+    ...(typeof args["message"] === "string" ? { message: args["message"] } : {}),
+  });
+  if (!opened.ok) {
+    return fail(opened.error);
+  }
+  return ok({
+    windowId: opened.windowId,
+    title: opened.title,
+    permission: opened.permission,
+    capped: opened.capped,
+    ...(opened.note !== undefined ? { note: opened.note } : {}),
+  });
+}
+
+async function sendMessage(
+  caller: ToolWindowView,
+  args: Readonly<Record<string, unknown>>,
+  tree: Readonly<Record<string, WorkbenchAuthNode>>,
+  deps: WorkbenchToolDeps,
+): Promise<ToolTextResult> {
+  const targetId = args["windowId"];
+  if (typeof targetId !== "string" || targetId.trim() === "") {
+    return fail("ffpane_send_message 需要 windowId。");
+  }
+  const decision = authorize({
+    actor: { kind: "window", windowId: caller.id },
+    action: "send-message",
+    targetWindowId: targetId,
+    tree,
+  });
+  if (!decision.ok) {
+    return fail("只能给自己的后代发消息。");
+  }
+  const text = typeof args["text"] === "string" ? args["text"] : "";
+  const briefRaw = typeof args["briefPath"] === "string" ? args["briefPath"] : undefined;
+  if (text.trim() === "" && (briefRaw === undefined || briefRaw.trim() === "")) {
+    return fail("消息需要 text 或 briefPath。");
+  }
+  if (Buffer.byteLength(text, "utf8") > MESSAGE_MAX_BYTES) {
+    return tooLong();
+  }
+  const brief = await optionalBrief(caller.projectRoot, briefRaw);
+  if (!brief.ok) {
+    return fail(brief.error);
+  }
+  const target = await deps.describe(targetId);
+  if (target === undefined) {
+    return fail("找不到目标窗口。");
+  }
+  const record = await persist(
+    caller,
+    target,
+    {
+      kind: "message",
+      text,
+      ...(brief.path !== undefined ? { briefPath: brief.path } : {}),
+    },
+    tree,
+    deps,
+  );
+  remindTarget(target, caller, "message", undefined, deps);
+  await publishUnread(target, deps);
+  return ok({ id: record.id, threadFile: record.threadFile });
+}
+
+async function report(
+  caller: ToolWindowView,
+  args: Readonly<Record<string, unknown>>,
+  tree: Readonly<Record<string, WorkbenchAuthNode>>,
+  deps: WorkbenchToolDeps,
+): Promise<ToolTextResult> {
+  const status = args["status"];
+  if (!isReportStatus(status)) {
+    return fail("status 只能是 done、blocked、failed 或 progress。");
+  }
+  const summary = args["summary"];
+  if (typeof summary !== "string" || summary.trim() === "") {
+    return fail("ffpane_report 需要 summary。");
+  }
+  if (Buffer.byteLength(summary, "utf8") > MESSAGE_MAX_BYTES) {
+    return tooLong();
+  }
+  const node = tree[caller.id];
+  const explicit = args["windowId"];
+  const targetId =
+    typeof explicit === "string" && explicit.trim() !== "" ? explicit : node?.parentWindowId;
+  if (targetId === undefined || targetId.trim() === "") {
+    return fail("没有上级可以汇报。");
+  }
+  const decision = authorize({
+    actor: { kind: "window", windowId: caller.id },
+    action: "report",
+    targetWindowId: targetId,
+    tree,
+  });
+  if (!decision.ok) {
+    return fail("只能向上级链汇报。");
+  }
+  const filesRaw = args["files"];
+  let files: readonly string[] | undefined;
+  if (filesRaw !== undefined) {
+    if (!Array.isArray(filesRaw) || filesRaw.some((item) => typeof item !== "string")) {
+      return fail("files 必须是字符串数组。");
+    }
+    const checked = await assertProjectFiles(caller.projectRoot, filesRaw);
+    if (!checked.ok) {
+      return fail(checked.error);
+    }
+    files = checked.files;
+  }
+  const briefRaw = typeof args["briefPath"] === "string" ? args["briefPath"] : undefined;
+  const brief = await optionalBrief(caller.projectRoot, briefRaw);
+  if (!brief.ok) {
+    return fail(brief.error);
+  }
+  const target = await deps.describe(targetId);
+  if (target === undefined) {
+    return fail("找不到上级窗口。");
+  }
+  const record = await persist(
+    caller,
+    target,
+    {
+      kind: "report",
+      text: summary,
+      status,
+      ...(files !== undefined ? { files } : {}),
+      ...(brief.path !== undefined ? { briefPath: brief.path } : {}),
+    },
+    tree,
+    deps,
+  );
+  remindTarget(target, caller, "report", status, deps);
+  await publishUnread(target, deps);
+  deps.publishInbox({ windowId: caller.id, lastReportStatus: status });
+  return ok({ id: record.id, threadFile: record.threadFile, status });
+}
+
+async function readInbox(
+  caller: ToolWindowView,
+  args: Readonly<Record<string, unknown>>,
+  deps: WorkbenchToolDeps,
+): Promise<ToolTextResult> {
+  const mode = args["mode"] === undefined ? "unread" : args["mode"];
+  if (mode !== "unread" && mode !== "all") {
+    return fail("mode 只能是 unread 或 all。");
+  }
+  const requested = args["limit"];
+  const limit =
+    typeof requested === "number" && Number.isFinite(requested)
+      ? Math.max(1, Math.min(INBOX_MAX_LIMIT, Math.floor(requested)))
+      : INBOX_DEFAULT_LIMIT;
+  const records = await readThreadIndex(caller.projectRoot);
+  const mine = records.filter((record) => record.to.windowId === caller.id);
+  const cursor = await deps.getCursor(caller.id);
+  const slice =
+    mode === "all"
+      ? mine.slice(Math.max(0, mine.length - limit))
+      : inboxAfter(records, caller.id, cursor).slice(0, limit);
+  if (mode === "all") {
+    const newest = mine.at(-1)?.id;
+    if (newest !== undefined) {
+      await deps.setCursor(caller.id, newest);
+    }
+  } else if (slice.length > 0) {
+    const last = slice.at(-1)?.id;
+    if (last !== undefined) {
+      await deps.setCursor(caller.id, last);
+    }
+  }
+  const nextCursor =
+    mode === "all" ? mine.at(-1)?.id : slice.length > 0 ? slice.at(-1)?.id : cursor;
+  const unread = inboxAfter(records, caller.id, nextCursor).length;
+  deps.publishInbox({ windowId: caller.id, unread });
+  return ok({
+    messages: slice.map((record) => ({
+      id: record.id,
+      ts: record.ts,
+      from: record.from,
+      kind: record.kind,
+      ...(record.status !== undefined ? { status: record.status } : {}),
+      text: record.text,
+      ...(record.files !== undefined ? { files: record.files } : {}),
+      ...(record.briefPath !== undefined ? { briefPath: record.briefPath } : {}),
+    })),
+    unreadRemaining: unread,
+  });
+}
+
+async function optionalBrief(
+  projectRoot: string,
+  briefPath: string | undefined,
+): Promise<
+  { readonly ok: true; readonly path?: string } | { readonly ok: false; readonly error: string }
+> {
+  if (briefPath === undefined || briefPath.trim() === "") {
+    return { ok: true };
+  }
+  const resolved = await resolveBriefPath(projectRoot, briefPath);
+  if (!resolved.ok) {
+    return resolved;
+  }
+  return { ok: true, path: resolved.relativePath };
+}
+
+function displayTitle(title: string): string {
+  const cleaned = sanitizeThreadText(title).trim();
+  return cleaned.length > 0 ? cleaned : "窗口";
+}
+
+async function persist(
+  from: ToolWindowView,
+  to: ToolWindowView,
+  body: {
+    readonly kind: "message" | "report";
+    readonly text: string;
+    readonly status?: ReportStatus;
+    readonly files?: readonly string[];
+    readonly briefPath?: string;
+  },
+  tree: Readonly<Record<string, WorkbenchAuthNode>>,
+  deps: WorkbenchToolDeps,
+): Promise<ThreadRecord> {
+  const anchor = teamAnchorId(from.id, to.id, tree);
+  const anchorView =
+    anchor === from.id ? from : anchor === to.id ? to : await deps.describe(anchor);
+  const date = new Date(deps.now());
+  const day = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  const record: ThreadRecord = {
+    v: 1,
+    id: `m-${deps.now().toString(36)}-${randomUUID().slice(0, 8)}`,
+    ts: date.toISOString(),
+    projectId: from.projectId,
+    from: { windowId: from.id, title: displayTitle(from.title), role: from.role },
+    to: { windowId: to.id, title: displayTitle(to.title), role: to.role },
+    kind: body.kind,
+    ...(body.status !== undefined ? { status: body.status } : {}),
+    text: body.text,
+    ...(body.files !== undefined ? { files: body.files } : {}),
+    ...(body.briefPath !== undefined ? { briefPath: body.briefPath } : {}),
+    threadFile: `${day}-${teamFileSlug(anchorView?.title ?? "team", anchor)}.md`,
+  };
+  await appendThreadRecord(from.projectRoot, record, date);
+  return record;
+}
+
+function remindTarget(
+  target: ToolWindowView,
+  from: ToolWindowView,
+  kind: "message" | "report",
+  status: ReportStatus | undefined,
+  deps: WorkbenchToolDeps,
+): void {
+  deps.remind(target.id, (count) =>
+    count <= 1
+      ? buildNewMessageReminder({
+          title: from.title,
+          role: from.role,
+          kind,
+          ...(status !== undefined ? { status } : {}),
+        })
+      : buildCoalescedReminder(count),
+  );
+}
+
+async function publishUnread(target: ToolWindowView, deps: WorkbenchToolDeps): Promise<void> {
+  const records = await readThreadIndex(target.projectRoot);
+  const cursor = await deps.getCursor(target.id);
+  deps.publishInbox({
+    windowId: target.id,
+    unread: inboxAfter(records, target.id, cursor).length,
+  });
+}
+
+export { openChildWindow };

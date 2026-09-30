@@ -11,7 +11,10 @@
  *
  * 请求：
  * {"v":1,"type":"hook","token":"...","event":"Stop"|"PermissionRequest"|"UserPromptSubmit"|"SessionStart"|"Notification","hookEvent"?:string}
- * {"v":1,"type":"<T10.7 扩展>","token":"..."}
+ * {"v":1,"type":"tool","token":"...","name":"ffpane_whoami","arguments":{}}
+ *
+ * 限流仍是每条连接 30 条/秒。hook 与工具调用各自新建连接，这个上限挡不住跨连接的突发。
+ * 工具调用另有按窗口每秒 30 次的计数（见 mcp-tools）。单条上限提到 1MB，以便 256KB 的 brief 能通过。
  *
  * 响应：{"v":1,"ok":true} 或 {"v":1,"ok":false,"error":"unauthorized"|"oversize"|"rate"|"malformed"|"unsupported"}
  */
@@ -26,6 +29,8 @@ import type { HookSignal } from "./idle-deliver";
 
 export const WB_CONTROL_PROTOCOL_VERSION = 1;
 export const DEFAULT_CONTROL_MAX_REQUEST_BYTES = 16 * 1024;
+/** 工作台工具通道：256KB brief + JSON 转义余量。 */
+export const WORKBENCH_TOOL_MAX_REQUEST_BYTES = 1024 * 1024;
 export const DEFAULT_CONTROL_MAX_PER_SECOND = 30;
 
 export { FF_PANE_WB_PIPE_ENV };
@@ -43,7 +48,7 @@ export interface WorkbenchControlServerOptions {
   readonly onHook: (
     windowId: string,
     signal: HookSignal,
-    meta?: { readonly hookEvent?: string },
+    meta?: { readonly hookEvent?: string; readonly toolUseId?: string },
   ) => void;
   /**
    * T10.7：hook 以外的请求类型。未提供或返回 unsupported 时拒绝该条，不断开
@@ -53,7 +58,11 @@ export interface WorkbenchControlServerOptions {
     context: WorkbenchControlRequestContext,
   ) =>
     | { readonly ok: true; readonly result?: unknown }
-    | { readonly ok: false; readonly error: string };
+    | { readonly ok: false; readonly error: string }
+    | Promise<
+        | { readonly ok: true; readonly result?: unknown }
+        | { readonly ok: false; readonly error: string }
+      >;
   /** 只接收固定短句。实现不得把请求正文或令牌传进来。 */
   readonly log?: (message: string) => void;
   readonly maxRequestBytes?: number;
@@ -63,6 +72,13 @@ export interface WorkbenchControlServerOptions {
 export interface WorkbenchControlServer {
   readonly address: string;
   close(): Promise<void>;
+}
+
+const TOOL_USE_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
+
+/** 只接受短 id。其它字段（工具参数、正文）不读取。 */
+function readToolUseId(value: unknown): string | undefined {
+  return typeof value === "string" && TOOL_USE_ID.test(value) ? value : undefined;
 }
 
 export function mapHookEvent(event: string, hookEvent?: string): HookSignal | "ignore" {
@@ -77,6 +93,12 @@ export function mapHookEvent(event: string, hookEvent?: string): HookSignal | "i
   }
   if (event === "SessionStart" || event === "session-start") {
     return "session-start";
+  }
+  if (event === "PostToolUse" || event === "post-tool-use") {
+    return "post-tool-use";
+  }
+  if (event === "PostToolUseFailure" || event === "post-tool-use-failure") {
+    return "post-tool-use-failure";
   }
   if (event === "Notification") {
     const kind = (hookEvent ?? "").toLowerCase();
@@ -206,9 +228,17 @@ export function createWorkbenchControlServer(
       if (type === "hook") {
         const event = typeof body["event"] === "string" ? body["event"] : "";
         const hookEvent = typeof body["hookEvent"] === "string" ? body["hookEvent"] : undefined;
+        const toolUseId = readToolUseId(body["toolUseId"]);
         const signal = mapHookEvent(event, hookEvent);
         if (signal !== "ignore") {
-          options.onHook(windowId, signal, hookEvent !== undefined ? { hookEvent } : undefined);
+          const meta =
+            hookEvent !== undefined || toolUseId !== undefined
+              ? {
+                  ...(hookEvent !== undefined ? { hookEvent } : {}),
+                  ...(toolUseId !== undefined ? { toolUseId } : {}),
+                }
+              : undefined;
+          options.onHook(windowId, signal, meta);
         }
         log("accepted");
         if (!socket.destroyed) {
@@ -218,10 +248,33 @@ export function createWorkbenchControlServer(
       }
       if (options.onRequest !== undefined) {
         const decided = options.onRequest({ windowId, type, body });
-        if (decided.ok) {
+        if (decided instanceof Promise) {
+          void decided
+            .then((resolved) => {
+              writeDecision(resolved);
+            })
+            .catch(() => {
+              writeDecision({ ok: false, error: "unsupported" });
+            });
+          return;
+        }
+        writeDecision(decided);
+        return;
+      }
+      log("unsupported");
+      if (!socket.destroyed) {
+        socket.write(responseLine(false, "unsupported"));
+      }
+
+      function writeDecision(
+        resolved:
+          | { readonly ok: true; readonly result?: unknown }
+          | { readonly ok: false; readonly error: string },
+      ): void {
+        if (resolved.ok) {
           log("accepted");
           if (!socket.destroyed) {
-            socket.write(responseLine(true, undefined, decided.result));
+            socket.write(responseLine(true, undefined, resolved.result));
           }
           return;
         }
@@ -229,11 +282,6 @@ export function createWorkbenchControlServer(
         if (!socket.destroyed) {
           socket.write(responseLine(false, "unsupported"));
         }
-        return;
-      }
-      log("unsupported");
-      if (!socket.destroyed) {
-        socket.write(responseLine(false, "unsupported"));
       }
     };
   });

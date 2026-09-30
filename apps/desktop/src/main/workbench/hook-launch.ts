@@ -16,6 +16,8 @@ export const WORKBENCH_HOOK_SCRIPT = "workbench-hook.mjs";
 
 export const WORKBENCH_HOOK_EVENTS = [
   "PermissionRequest",
+  "PostToolUse",
+  "PostToolUseFailure",
   "Stop",
   "UserPromptSubmit",
   "SessionStart",

@@ -373,7 +373,15 @@
       "cancel": "Cancel",
       "blocked": "Waiting on a permission prompt — not sending",
       "busy": "This turn has not finished — not sending",
-      "noNode": "No node.exe is available, so turn-complete signals cannot arrive. Use Send now for anything waiting."
+      "noNode": "No node.exe is available, so turn-complete signals cannot arrive. Use Send now for anything waiting.",
+      "codexManualHint": "If a confirmation dialog is on screen, do not click it."
+    },
+    "inbox": {
+      "unread": "{{count}} unread",
+      "reportDone": "Done",
+      "reportBlocked": "Blocked",
+      "reportFailed": "Failed",
+      "reportProgress": "In progress"
     },
     "empty": {
       "noProject": "No project selected. Create or pick one on the projects page, then open a terminal.",

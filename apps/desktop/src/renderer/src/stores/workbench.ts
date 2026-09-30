@@ -27,7 +27,12 @@ import {
   splitLeaf,
   updateSplitSizesByKey,
 } from "../../../shared/workbench/pane-tree";
+import { placeOpenedWindow } from "../../../shared/workbench/place-child";
 import { planTerminalReconcile } from "../../../shared/workbench/reconcile-terminals";
+import type {
+  WorkbenchChildWindowEvent,
+  WorkbenchInboxNoticeEvent,
+} from "../../../shared-ipc/contracts";
 import { invokeQuery } from "../ipc/query";
 import { forgetLiveTerminals, rememberLiveTerminal } from "../pages/workbench/live-terminals";
 
@@ -53,6 +58,16 @@ export interface WorkbenchStoreState {
   readonly hydrated: boolean;
   /** cwd 不存在而回退到项目根的窗口 id（展示一次提示后可清除）。 */
   readonly cwdFallbackWindowIds: ReadonlySet<string>;
+  /** 未读数与最近汇报状态。只活在本会话，不写入项目布局。 */
+  readonly inboxByWindow: Readonly<
+    Record<
+      string,
+      {
+        readonly unread: number;
+        readonly lastReportStatus?: "done" | "blocked" | "failed" | "progress";
+      }
+    >
+  >;
 }
 
 export interface WorkbenchStoreActions {
@@ -146,6 +161,9 @@ export interface WorkbenchStoreActions {
   readonly clearCwdFallback: (windowId: string) => void;
   /** 项目移除后清除幽灵布局（不再占上限额度）。 */
   readonly dropProject: (projectId: ProjectId) => void;
+  /** 主进程已经启动的子窗口：先记住 PTY，再放进当前布局。 */
+  readonly acceptOpenedWindow: (event: WorkbenchChildWindowEvent) => void;
+  readonly applyInboxNotice: (event: WorkbenchInboxNoticeEvent) => void;
 }
 
 export type WorkbenchStore = WorkbenchStoreState & WorkbenchStoreActions;
@@ -302,6 +320,7 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
   layoutsByProject: {},
   hydrated: false,
   cwdFallbackWindowIds: new Set(),
+  inboxByWindow: {},
 
   async hydrate() {
     if (get().hydrated) {
@@ -828,6 +847,37 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
     void _dropped;
     set({ layoutsByProject: rest });
   },
+
+  acceptOpenedWindow(event) {
+    const current = get().layoutsByProject[event.projectId] ?? emptyLayout(event.projectId);
+    if (current.windows[event.window.id] !== undefined) {
+      return;
+    }
+    const next = placeOpenedWindow(
+      current,
+      event.managerWindowId,
+      event.window,
+      `tab-${crypto.randomUUID().slice(0, 12)}`,
+    );
+    set({
+      layoutsByProject: { ...get().layoutsByProject, [event.projectId]: next },
+    });
+    schedulePersist(event.projectId);
+  },
+
+  applyInboxNotice(event) {
+    const prev = get().inboxByWindow[event.windowId] ?? { unread: 0 };
+    const lastReportStatus = event.lastReportStatus ?? prev.lastReportStatus;
+    set({
+      inboxByWindow: {
+        ...get().inboxByWindow,
+        [event.windowId]: {
+          unread: event.unread ?? prev.unread,
+          ...(lastReportStatus !== undefined ? { lastReportStatus } : {}),
+        },
+      },
+    });
+  },
 }));
 
 /** 测试用：重置 store 与脏标记。 */
@@ -841,5 +891,6 @@ export function resetWorkbenchStoreForTests(): void {
     layoutsByProject: {},
     hydrated: false,
     cwdFallbackWindowIds: new Set(),
+    inboxByWindow: {},
   });
 }

@@ -10,6 +10,11 @@
  * - 启动后还没收到过回合结束：状态未知，不自动投递，界面给出“立即发送 / 取消”。
  * - PermissionRequest 等待中绝不投递（含用户点“立即发送”）。
  * - 正文不含换行；正文与回车分两次 write。写出回车后记为忙，下一条要等下一次回合结束。
+ * - 手动“立即发送”一次只发队首。其余继续等下一次回合结束或用户再次点击。
+ * - PermissionRequest 使未决权限计数 +1。计数 > 0 时 Stop 与“立即发送”都不写入。
+ *   只有带上同一 tool_use_id 的 PostToolUse / PostToolUseFailure 才能 −1。
+ *   对不上的工具结束信号不减计数。没有 id 的请求无法配对，只有 UserPromptSubmit
+ *   或窗口重启（丢掉该终端会话）才把计数清零。减到 0 后记为 busy，还要再等一次 Stop 才投递。
  */
 
 export const DEFAULT_OUTPUT_QUIET_MS = 1500;
@@ -19,7 +24,13 @@ export const DEFAULT_IDLE_POLL_MS = 200;
 export type DeliverPhase = "unknown" | "idle" | "busy" | "blocked";
 
 /** 主进程已归一化的 hook 信号。 */
-export type HookSignal = "stop" | "permission-request" | "user-prompt-submit" | "session-start";
+export type HookSignal =
+  | "stop"
+  | "permission-request"
+  | "user-prompt-submit"
+  | "session-start"
+  | "post-tool-use"
+  | "post-tool-use-failure";
 
 export type IdleDeliverHold = "auto" | "manual" | "blocked" | "busy";
 
@@ -60,6 +71,8 @@ export interface IdleDeliverEnqueue {
   /** 调用方标记（窗口 id），随延后结果原样带回。 */
   readonly tag?: string;
   readonly quietMs?: number;
+  /** 收件箱提醒。同一终端未投递的提醒合并成一条。 */
+  readonly inboxCount?: number;
 }
 
 export type IdleDeliverEnqueueResult =
@@ -77,13 +90,23 @@ export interface IdleDeliverAttachOptions {
   readonly windowId?: string;
 }
 
+/** hook 上报里只带配对用的 id，不带工具正文。 */
+export interface HookNoteMeta {
+  readonly toolUseId?: string;
+}
+
 export interface IdleDeliverQueue {
   attach(terminalId: string, options?: IdleDeliverAttachOptions): void;
-  noteHook(terminalId: string, signal: HookSignal): void;
+  noteHook(terminalId: string, signal: HookSignal, meta?: HookNoteMeta): void;
   noteInput(terminalId: string, atMs?: number): void;
   /** 本窗口向 PTY 提交了回车。不刷新 lastInputAt（由 noteInput 负责）。 */
   noteSubmit(terminalId: string): void;
   enqueue(input: IdleDeliverEnqueue): IdleDeliverEnqueueResult;
+  /** 新消息提醒。队列里已有未投递提醒时，用 textForCount(新条数) 替换那一条。 */
+  enqueueInbox(
+    terminalId: string,
+    textForCount: (count: number) => string,
+  ): IdleDeliverEnqueueResult;
   /** 仅未知状态（或已经是回合结束）允许用户立即发送。阻塞 / 忙时拒绝。 */
   deliverNow(terminalId: string): ManualDeliverResult;
   cancel(terminalId: string): void;
@@ -98,14 +121,30 @@ interface QueuedItem {
   readonly text: string;
   readonly quietMs: number;
   readonly tag?: string;
+  readonly inboxCount?: number;
 }
 
 interface Session {
   phase: DeliverPhase;
+  /** 能配对的未决权限（tool_use_id）。 */
+  pendingPermissionIds: Set<string>;
+  /** 没有 id、无法配对的未决权限。只由用户新提交或窗口重启清零。 */
+  unpairedPermissions: number;
   initialPromptPending: boolean;
   lastInputAt: number;
   windowId?: string;
   queue: QueuedItem[];
+}
+
+const TOOL_USE_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
+
+function cleanToolUseId(value: string | undefined): string | undefined {
+  const trimmed = value?.trim() ?? "";
+  return TOOL_USE_ID.test(trimmed) ? trimmed : undefined;
+}
+
+function permissionOutstanding(session: Session): number {
+  return session.pendingPermissionIds.size + session.unpairedPermissions;
 }
 
 function isSingleLine(text: string): boolean {
@@ -152,6 +191,8 @@ export function createIdleDeliverQueue(deps: IdleDeliverDeps): IdleDeliverQueue 
     }
     const created: Session = {
       phase: "unknown",
+      pendingPermissionIds: new Set(),
+      unpairedPermissions: 0,
       initialPromptPending: false,
       lastInputAt: 0,
       queue: [],
@@ -216,7 +257,7 @@ export function createIdleDeliverQueue(deps: IdleDeliverDeps): IdleDeliverQueue 
   };
 
   const canAuto = (terminalId: string, session: Session, quietMs: number): boolean => {
-    if (session.phase !== "idle") {
+    if (session.phase !== "idle" || permissionOutstanding(session) > 0) {
       return false;
     }
     if (session.lastInputAt !== 0 && deps.now() - session.lastInputAt < inputQuietMs) {
@@ -298,20 +339,39 @@ export function createIdleDeliverQueue(deps: IdleDeliverDeps): IdleDeliverQueue 
         session.initialPromptPending = true;
       }
     },
-    noteHook(terminalId, signal) {
+    noteHook(terminalId, signal, meta) {
       const session = ensure(terminalId);
+      const toolUseId = cleanToolUseId(meta?.toolUseId);
       if (signal === "permission-request") {
+        if (toolUseId !== undefined) {
+          session.pendingPermissionIds.add(toolUseId);
+        } else {
+          session.unpairedPermissions += 1;
+        }
         session.phase = "blocked";
+      } else if (signal === "post-tool-use" || signal === "post-tool-use-failure") {
+        if (toolUseId !== undefined) {
+          session.pendingPermissionIds.delete(toolUseId);
+        }
+        session.phase = permissionOutstanding(session) > 0 ? "blocked" : "busy";
       } else if (signal === "user-prompt-submit") {
+        session.pendingPermissionIds.clear();
+        session.unpairedPermissions = 0;
         session.initialPromptPending = false;
         session.phase = "busy";
       } else if (signal === "stop") {
+        if (permissionOutstanding(session) > 0) {
+          session.phase = "blocked";
+          notifyPending(terminalId);
+          return;
+        }
         session.initialPromptPending = false;
         session.phase = "idle";
       } else if (
         signal === "session-start" &&
         session.phase === "unknown" &&
-        !session.initialPromptPending
+        !session.initialPromptPending &&
+        permissionOutstanding(session) === 0
       ) {
         session.phase = "idle";
       }
@@ -350,6 +410,7 @@ export function createIdleDeliverQueue(deps: IdleDeliverDeps): IdleDeliverQueue 
         text: input.text,
         quietMs: input.quietMs ?? outputQuietDefault,
         ...(input.tag !== undefined ? { tag: input.tag } : {}),
+        ...(input.inboxCount !== undefined ? { inboxCount: input.inboxCount } : {}),
       };
       session.queue.push(item);
       if (session.queue.length > 1) {
@@ -360,12 +421,37 @@ export function createIdleDeliverQueue(deps: IdleDeliverDeps): IdleDeliverQueue 
       const pumped = pump(input.terminalId, false);
       return pumped ?? { status: "queued", mode: holdMode(session.phase) };
     },
+    enqueueInbox(terminalId, textForCount) {
+      if (!deps.isAlive(terminalId)) {
+        return { status: "dropped", reason: "exited" };
+      }
+      const session = ensure(terminalId);
+      const index = session.queue.findIndex((item) => item.inboxCount !== undefined);
+      const nextCount = index >= 0 ? (session.queue[index]?.inboxCount ?? 1) + 1 : 1;
+      const text = textForCount(nextCount);
+      if (!isSingleLine(text)) {
+        return { status: "dropped", reason: "invalid" };
+      }
+      if (index >= 0) {
+        const prev = session.queue[index];
+        if (prev === undefined) {
+          return { status: "dropped", reason: "invalid" };
+        }
+        session.queue[index] = { ...prev, text, inboxCount: nextCount };
+        notifyPending(terminalId);
+        return { status: "queued", mode: holdMode(session.phase) };
+      }
+      return this.enqueue({ terminalId, text, inboxCount: nextCount });
+    },
     deliverNow(terminalId) {
       const session = sessions.get(terminalId);
       if (session === undefined || session.queue.length === 0) {
         return { status: "refused", reason: "empty" };
       }
-      if (session.phase === "blocked") {
+      if (permissionOutstanding(session) > 0 || session.phase === "blocked") {
+        if (permissionOutstanding(session) > 0) {
+          session.phase = "blocked";
+        }
         return { status: "refused", reason: "blocked" };
       }
       if (session.phase === "busy") {
@@ -375,15 +461,11 @@ export function createIdleDeliverQueue(deps: IdleDeliverDeps): IdleDeliverQueue 
         finishDropped(terminalId, "exited", true);
         return { status: "refused", reason: "dead" };
       }
-      let count = 0;
-      while (session.queue.length > 0) {
-        const wrote = deliverHead(terminalId, true);
-        if (!wrote) {
-          break;
-        }
-        count += 1;
+      const wrote = deliverHead(terminalId, true);
+      if (!wrote) {
+        return { status: "refused", reason: "dead" };
       }
-      return { status: "delivered", count };
+      return { status: "delivered", count: 1 };
     },
     cancel(terminalId) {
       finishDropped(terminalId, "cancelled", true);

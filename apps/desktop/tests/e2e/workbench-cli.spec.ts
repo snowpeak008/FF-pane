@@ -735,6 +735,16 @@ test("T10.6：worker 说明书注入，运行中改管理者，设置覆盖进�
     await expect(pane.getByTestId("workbench-deliver-now")).toHaveCount(0);
     await page.waitForTimeout(2_000);
     expect(await readReplayForWindow(page, windowId)).not.toContain("planner.md");
+    writeFileSync(join(projectDir, "ffpane-hook-trigger"), "PostToolUse", "utf8");
+    await expect
+      .poll(async () => readReplayForWindow(page, windowId), { timeout: 20_000 })
+      .toContain("FAKE_CLAUDE_HOOK_EXIT=PostToolUse:0");
+    await expect(pane.getByTestId("workbench-deliver-blocked")).toBeVisible();
+    expect(await readReplayForWindow(page, windowId)).not.toContain("planner.md");
+    writeFileSync(join(projectDir, "ffpane-hook-trigger"), "UserPromptSubmit", "utf8");
+    await expect
+      .poll(async () => readReplayForWindow(page, windowId), { timeout: 20_000 })
+      .toContain("FAKE_CLAUDE_HOOK_EXIT=UserPromptSubmit:0");
     writeFileSync(join(projectDir, "ffpane-hook-trigger"), "Stop", "utf8");
     await expect
       .poll(async () => readReplayForWindow(page, windowId), { timeout: 20_000 })

@@ -10,11 +10,13 @@ import {
   isWorkbenchPermissionLevel,
   isWorkbenchRole,
   isWorkbenchRoleManualId,
+  type ProjectId,
   type Provider,
 } from "@ff-pane/shared";
 import {
   createConfigStore,
   createProfileStore,
+  createProjectRegistry,
   createProjectSettingsStore,
   createProviderStore,
   createWorkbenchLayoutStore,
@@ -31,11 +33,18 @@ import { WORKBENCH_WINDOW_LIMIT_ERROR_PREFIX } from "../terminal/handlers";
 import type { PtyManager } from "../terminal/manager";
 import { createWorkbenchAuthRegistry, type WorkbenchAuthRegistry } from "./auth-registry";
 import { CodexSessionClaimer } from "./codex-claim";
-import { createWorkbenchControlServer } from "./control-channel";
+import {
+  createWorkbenchControlServer,
+  WORKBENCH_TOOL_MAX_REQUEST_BYTES,
+  type WorkbenchControlRequestContext,
+} from "./control-channel";
 import { releaseWindowHooks } from "./hook-launch";
 import { createIdleDeliverQueue, type IdleDeliverQueue } from "./idle-deliver";
+import { createInboxCursorStore, inboxCursorPath } from "./inbox-cursor";
 import { assertLaunchCliIpcSafe, launchCliWindow, WorkbenchMcpTempRegistry } from "./launch-cli";
 import { cleanupStaleWorkbenchMcpDirs } from "./mcp-temp";
+import { executeWorkbenchTool } from "./mcp-tools";
+import { openChildWindow } from "./open-child";
 import {
   composeWindowRolePrompt,
   listRoleManuals,
@@ -191,17 +200,107 @@ export async function createWorkbenchCliLayer(
     },
   });
 
+  let onTool: (
+    context: WorkbenchControlRequestContext,
+  ) =>
+    | { readonly ok: true; readonly result?: unknown }
+    | { readonly ok: false; readonly error: string }
+    | Promise<
+        | { readonly ok: true; readonly result?: unknown }
+        | { readonly ok: false; readonly error: string }
+      > = () => ({ ok: false, error: "unsupported" });
   const control = await createWorkbenchControlServer({
     tokens: tokenRegistry,
-    onHook: (windowId, signal) => {
+    maxRequestBytes: WORKBENCH_TOOL_MAX_REQUEST_BYTES,
+    onRequest: (context) => onTool(context),
+    onHook: (windowId, signal, meta) => {
       const terminalId = findLiveTerminalId(windowId);
       if (terminalId === undefined) {
         return;
       }
-      idleQueue.noteHook(terminalId, signal);
+      idleQueue.noteHook(
+        terminalId,
+        signal,
+        meta?.toolUseId !== undefined ? { toolUseId: meta.toolUseId } : undefined,
+      );
     },
     log: (message) => {
       console.error(`[wb-control] ${message}`);
+    },
+  });
+
+  const lastProfileByRuntime = new Map<string, string>();
+  const projects = createProjectRegistry(layout.projectsFile);
+  const cursors = createInboxCursorStore(inboxCursorPath(layout.rootDir));
+  const launchDeps = () => ({
+    manager: options.manager,
+    getProfile: (id: string) => profiles.getProfile(id as never),
+    getProvider: async (id: string) => {
+      const provider = await providers.getProvider(id as never);
+      return provider as Provider | undefined;
+    },
+    revealSecret: async (ref: string) => {
+      try {
+        return await secrets.revealSecret(ref as never);
+      } catch {
+        return undefined;
+      }
+    },
+    getMaxWorkbenchWindows: getMax,
+    isKnowledgeToolEnabled: async (projectRoot: string) => {
+      try {
+        const projectLayout = resolveProjectLayout(projectRoot);
+        const settings = await createProjectSettingsStore(projectLayout.projectFile).readSettings();
+        return settings.knowledgeToolEnabled === true;
+      } catch {
+        return false;
+      }
+    },
+    getKnowledgeToolSettings: async () => {
+      const globalConfig = await config.readConfig();
+      return globalConfig.knowledgeTool;
+    },
+    indexDbFile: resolveGlobalLayout(resolveGlobalRoot()).indexDbFile,
+    moduleDir: join(mainModuleDir()),
+    mcpRegistry,
+    tokenRegistry,
+    authRegistry,
+    loadRoleInjection: async ({
+      windowId,
+      role,
+      runtime,
+    }: {
+      readonly windowId: string;
+      readonly role: import("@ff-pane/shared").WorkbenchRole;
+      readonly runtime: "claude-code" | "codex";
+    }) => {
+      const text = await composeWindowRolePrompt(resourcesDir, overridesDir, role);
+      if (runtime === "claude-code") {
+        const filePath = writeClaudeRolePromptFile(windowId, text);
+        rolePromptTemps.track(windowId, filePath);
+        return { claudePromptFile: filePath };
+      }
+      return { developerInstructions: text };
+    },
+    clampMax: clampMaxWorkbenchWindows,
+    limitErrorPrefix: WORKBENCH_WINDOW_LIMIT_ERROR_PREFIX,
+    codexClaimer,
+    controlPipe: control.address,
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    idleQueue,
+    onProfileUsed: (profileId: string, runtime: "claude-code" | "codex") => {
+      lastProfileByRuntime.set(runtime, profileId);
+    },
+    onCodexSessionClaimed: (windowId: string, nativeSessionId: string) => {
+      const window = options.getWindow();
+      if (window === null || window.isDestroyed()) {
+        return;
+      }
+      publishEvent(window.webContents, "workbench:session-claimed", {
+        windowId,
+        nativeSessionId,
+      });
     },
   });
 
@@ -229,68 +328,7 @@ export async function createWorkbenchCliLayer(
           ...(permission !== undefined ? { permission } : {}),
           ...(isWorkbenchRole(request.role) ? { role: request.role } : {}),
         },
-        {
-          manager: options.manager,
-          getProfile: (id) => profiles.getProfile(id as never),
-          getProvider: async (id) => {
-            const provider = await providers.getProvider(id as never);
-            return provider as Provider | undefined;
-          },
-          revealSecret: async (ref) => {
-            try {
-              return await secrets.revealSecret(ref as never);
-            } catch {
-              return undefined;
-            }
-          },
-          getMaxWorkbenchWindows: getMax,
-          isKnowledgeToolEnabled: async (projectRoot) => {
-            try {
-              const projectLayout = resolveProjectLayout(projectRoot);
-              const settings = await createProjectSettingsStore(
-                projectLayout.projectFile,
-              ).readSettings();
-              return settings.knowledgeToolEnabled === true;
-            } catch {
-              return false;
-            }
-          },
-          getKnowledgeToolSettings: async () => {
-            const globalConfig = await config.readConfig();
-            return globalConfig.knowledgeTool;
-          },
-          indexDbFile: resolveGlobalLayout(resolveGlobalRoot()).indexDbFile,
-          moduleDir: join(mainModuleDir()),
-          mcpRegistry,
-          tokenRegistry,
-          authRegistry,
-          loadRoleInjection: async ({ windowId, role, runtime }) => {
-            const text = await composeWindowRolePrompt(resourcesDir, overridesDir, role);
-            if (runtime === "claude-code") {
-              const filePath = writeClaudeRolePromptFile(windowId, text);
-              rolePromptTemps.track(windowId, filePath);
-              return { claudePromptFile: filePath };
-            }
-            return { developerInstructions: text };
-          },
-          clampMax: clampMaxWorkbenchWindows,
-          limitErrorPrefix: WORKBENCH_WINDOW_LIMIT_ERROR_PREFIX,
-          codexClaimer,
-          controlPipe: control.address,
-          isPackaged: app.isPackaged,
-          resourcesPath: process.resourcesPath,
-          idleQueue,
-          onCodexSessionClaimed: (windowId, nativeSessionId) => {
-            const window = options.getWindow();
-            if (window === null || window.isDestroyed()) {
-              return;
-            }
-            publishEvent(window.webContents, "workbench:session-claimed", {
-              windowId,
-              nativeSessionId,
-            });
-          },
-        },
+        launchDeps(),
       );
       return {
         terminal: result.terminal,
@@ -365,6 +403,154 @@ export async function createWorkbenchCliLayer(
       const manual = manuals.find((item) => item.id === request.id);
       return { ok: true as const, content: manual?.defaultContent ?? "" };
     },
+  };
+
+  onTool = async (context) => {
+    if (context.type !== "tool") {
+      return { ok: false, error: "unsupported" };
+    }
+    const name = typeof context.body["name"] === "string" ? context.body["name"] : "";
+    const rawArgs = context.body["arguments"];
+    const args =
+      rawArgs !== null && typeof rawArgs === "object" && !Array.isArray(rawArgs)
+        ? (rawArgs as Record<string, unknown>)
+        : {};
+    const result = await executeWorkbenchTool(context.windowId, name, args, {
+      now: () => Date.now(),
+      snapshot: () => authRegistry.snapshot(),
+      isManagerGranted: (windowId) => authRegistry.isManagerGranted(windowId),
+      describe: async (windowId) => {
+        const layoutsAll = await layouts.readAll();
+        let found: import("@ff-pane/shared").WorkbenchWindow | undefined;
+        let projectName = "";
+        let projectRoot = "";
+        for (const layoutEntry of Object.values(layoutsAll)) {
+          const window = layoutEntry.windows[windowId];
+          if (window !== undefined) {
+            found = window;
+            projectRoot = window.cwd;
+            break;
+          }
+        }
+        if (found === undefined) {
+          return undefined;
+        }
+        const listed = await projects.listProjects();
+        const project = listed.find((item) => item.id === found?.projectId);
+        if (project !== undefined) {
+          projectName = project.name;
+          projectRoot = project.rootPath;
+        }
+        const node = authRegistry.get(windowId);
+        const parentId = node?.parentWindowId ?? found.parentWindowId;
+        let parentTitle: string | undefined;
+        if (parentId !== undefined) {
+          for (const layoutEntry of Object.values(layoutsAll)) {
+            const parent = layoutEntry.windows[parentId];
+            if (parent !== undefined) {
+              parentTitle = parent.title;
+              break;
+            }
+          }
+        }
+        return {
+          id: found.id,
+          title: found.title,
+          projectId: found.projectId,
+          projectName: projectName || found.projectId,
+          projectRoot,
+          role: node?.role ?? found.role ?? "none",
+          permission: node?.permission ?? found.permission ?? "edit",
+          running: findLiveTerminalId(windowId) !== undefined,
+          ...(parentId !== undefined && parentId.trim() !== "" ? { parentWindowId: parentId } : {}),
+          ...(parentTitle !== undefined ? { parentTitle } : {}),
+        };
+      },
+      setRole: (callerId, targetId, role) =>
+        setWindowRole({ kind: "window", windowId: callerId }, targetId, role, {
+          authRegistry,
+          readLayouts: () => layouts.readAll(),
+          saveLayout: (next) => layouts.saveProject(next),
+          findLiveTerminalId,
+          idleQueue,
+          manualPath: (manualRole) =>
+            resolveRoleSwitchManualPath(resourcesDir, overridesDir, manualRole),
+        }),
+      openChild: (callerId, childArgs) =>
+        openChildWindow(callerId, childArgs, {
+          authRegistry,
+          readLayouts: () => layouts.readAll(),
+          saveLayout: (next) => layouts.saveProject(next),
+          launch: (input) => launchCliWindow(input, launchDeps()),
+          resolveProfileId: async (cli, profileId) => {
+            const runtime = cli === "claude" ? "claude-code" : "codex";
+            const all = await profiles.listProfiles();
+            if (profileId !== undefined && profileId.trim() !== "") {
+              const found = all.find((item) => item.id === profileId && item.runtime === runtime);
+              return found !== undefined
+                ? { ok: true, profileId: found.id }
+                : { ok: false, error: "找不到该 CLI 的启动配置。" };
+            }
+            const recent = lastProfileByRuntime.get(runtime);
+            if (recent !== undefined && all.some((item) => item.id === recent)) {
+              return { ok: true, profileId: recent };
+            }
+            const fallback = all.find((item) => item.runtime === runtime);
+            return fallback !== undefined
+              ? { ok: true, profileId: fallback.id }
+              : { ok: false, error: "还没有适用于该 CLI 的启动配置。" };
+          },
+          describeCaller: async (windowId) => {
+            const layoutsAll = await layouts.readAll();
+            for (const layoutEntry of Object.values(layoutsAll)) {
+              const window = layoutEntry.windows[windowId];
+              if (window === undefined) {
+                continue;
+              }
+              const listed = await projects.listProjects();
+              const project = listed.find((item) => item.id === window.projectId);
+              const node = authRegistry.get(windowId);
+              return {
+                title: window.title,
+                projectId: window.projectId,
+                projectRoot: project?.rootPath ?? window.cwd,
+                permission: node?.permission ?? window.permission ?? "edit",
+              };
+            }
+            return undefined;
+          },
+          aliveCount: () => options.manager.aliveCount(),
+          maxWindows: async () => clampMaxWorkbenchWindows(await getMax()),
+          publish: ({ projectId, window, managerWindowId }) => {
+            const browser = options.getWindow();
+            if (browser === null || browser.isDestroyed()) {
+              return;
+            }
+            publishEvent(browser.webContents, "workbench:child-window", {
+              projectId: projectId as ProjectId,
+              window,
+              managerWindowId,
+            });
+          },
+        }),
+      remind: (windowId, textForCount) => {
+        const terminalId = findLiveTerminalId(windowId);
+        if (terminalId === undefined) {
+          return;
+        }
+        idleQueue.enqueueInbox(terminalId, textForCount);
+      },
+      publishInbox: (notice) => {
+        const browser = options.getWindow();
+        if (browser === null || browser.isDestroyed()) {
+          return;
+        }
+        publishEvent(browser.webContents, "workbench:inbox-notice", notice);
+      },
+      getCursor: (windowId) => cursors.get(windowId),
+      setCursor: (windowId, lastReadId) => cursors.set(windowId, lastReadId),
+    });
+    return { ok: true, result };
   };
 
   return {
