@@ -235,6 +235,44 @@ export interface WorkbenchFlushAckRequest {
   readonly requestId: string;
 }
 
+/**
+ * workbench:launch-cli 请求（T10.4）。
+ * 仅高层参数；禁止 args/env/shell/executable 等（主进程组装）。
+ */
+export interface LaunchCliWindowRequest {
+  readonly windowId: string;
+  readonly projectId: ProjectId;
+  readonly projectRoot: string;
+  readonly profileId: string;
+  readonly cols: number;
+  readonly rows: number;
+  readonly cwd?: string;
+  readonly initialPrompt?: string;
+  /** true = 续接上次会话。 */
+  readonly resume?: boolean;
+  /** 续接用原生会话 id（Claude 必填才算精确续接；Codex 可缺省降级 --last）。 */
+  readonly nativeSessionId?: string;
+}
+
+/** workbench:launch-cli 响应（不含密钥）。 */
+export interface LaunchCliWindowResponse {
+  readonly terminal: TerminalInfo;
+  readonly kind: "claude" | "codex";
+  readonly nativeSessionId?: string;
+  /** Codex 新开：后台认领 session id 中。 */
+  readonly claimingSession?: boolean;
+  /** Codex 续接且无 id：已打开 CLI resume 选择器。 */
+  readonly resumePicker?: boolean;
+  readonly profileName: string;
+  readonly model?: string;
+}
+
+/** workbench:session-claimed 事件（Codex 认领到原生会话 id）。 */
+export interface WorkbenchSessionClaimedEvent {
+  readonly windowId: string;
+  readonly nativeSessionId: string;
+}
+
 export interface TerminalOutputEvent {
   readonly id: string;
   readonly data: string;
@@ -1262,6 +1300,11 @@ export interface IpcInvokeContracts {
     request: WorkbenchFlushAckRequest;
     response: { readonly ok: true };
   };
+  /** 在工作台窗口内启动 Claude Code / Codex（T10.4）。 */
+  "workbench:launch-cli": {
+    request: LaunchCliWindowRequest;
+    response: LaunchCliWindowResponse;
+  };
   /** 列出工作台已登记的全部项目（注册表原样，只读 projects.json，不碰任何项目目录）。 */
   "projects:list": { request: undefined; response: readonly ProjectRegistryEntry[] };
   /**
@@ -1511,6 +1554,8 @@ export interface IpcEventContracts {
   "terminal:exit": { payload: TerminalExitEvent };
   /** 请渲染端立刻 flush 工作台布局防抖（T10.2' 退出前）。 */
   "workbench:flush-request": { payload: WorkbenchFlushRequestEvent };
+  /** Codex 窗口认领到原生会话 id（T10.4'）。 */
+  "workbench:session-claimed": { payload: WorkbenchSessionClaimedEvent };
 }
 
 export type InvokeChannel = keyof IpcInvokeContracts;
@@ -1545,6 +1590,7 @@ export const INVOKE_CHANNELS = [
   "workbench:save-layout",
   "workbench:remove-layout",
   "workbench:flush-ack",
+  "workbench:launch-cli",
   "projects:list",
   "projects:summary",
   "projects:create",
@@ -1623,6 +1669,7 @@ export const EVENT_CHANNELS = [
   "terminal:output",
   "terminal:exit",
   "workbench:flush-request",
+  "workbench:session-claimed",
 ] as const satisfies readonly EventChannel[];
 
 type AssertNever<T extends never> = T;

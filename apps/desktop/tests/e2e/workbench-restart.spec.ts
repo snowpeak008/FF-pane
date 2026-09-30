@@ -33,6 +33,13 @@ async function selectProject(page: LaunchedApp["page"], name: string): Promise<v
   await page.getByRole("button", { name: new RegExp(`^${name}`) }).click();
 }
 
+/** T10.4：新建/分屏入口弹出类型对话框；确认默认 PowerShell。 */
+async function confirmShellInNewWindowDialog(page: LaunchedApp["page"]): Promise<void> {
+  await expect(page.getByTestId("workbench-new-window-dialog")).toBeVisible();
+  await page.getByTestId("workbench-new-kind-shell").click();
+  await page.getByTestId("workbench-new-confirm").click();
+}
+
 async function readReplayForWindow(page: LaunchedApp["page"], windowId: string): Promise<string> {
   return page.evaluate(async (wid) => {
     const host = document.querySelector(`[data-window-id="${wid}"]`);
@@ -93,6 +100,7 @@ test("restart restores layout tabs/split/titles and shell stays usable", async (
     await selectProject(page, "Restart Layout Proj");
     await gotoRoute(page, "/workbench");
     await page.getByTestId("workbench-new-tab").click();
+    await confirmShellInNewWindowDialog(page);
     await expect(page.getByTestId("workbench-window")).toHaveCount(1, { timeout: 15_000 });
     const windowA = await requireWindowId(page, 0);
     await expect
@@ -100,6 +108,7 @@ test("restart restores layout tabs/split/titles and shell stays usable", async (
       .toMatch(/\S/);
 
     await page.getByRole("button", { name: "Split right" }).first().click();
+    await confirmShellInNewWindowDialog(page);
     await expect(page.getByTestId("workbench-window")).toHaveCount(2, { timeout: 15_000 });
     const windowB = await requireWindowId(page, 1);
 
@@ -179,6 +188,7 @@ test("reload reattaches PTY without respawn", async () => {
     await selectProject(page, "Reload Reconcile Proj");
     await gotoRoute(page, "/workbench");
     await page.getByTestId("workbench-new-tab").click();
+    await confirmShellInNewWindowDialog(page);
     await expect(page.getByTestId("workbench-window")).toHaveCount(1, { timeout: 15_000 });
     const windowId = await requireWindowId(page, 0);
     await expect

@@ -304,8 +304,28 @@
     "terminal": {
       "exited": "Exited (code {{code}})",
       "restart": "Restart",
+      "resume": "Resume last session",
+      "resumePickerHint": "No bound session id — Codex resume picker is open; choose a session in the terminal.",
+      "restartFresh": "Start fresh",
+      "convertToShell": "Convert to PowerShell",
       "copy": "Copy",
-      "paste": "Paste"
+      "paste": "Paste",
+      "promptTooLong": "Initial prompt is too long (max {{max}} characters). Longer text will use workbench briefs later."
+    },
+    "newWindow": {
+      "title": "New window",
+      "kind": "Window type",
+      "kindShell": "PowerShell",
+      "kindClaude": "Claude Code",
+      "kindCodex": "Codex",
+      "profile": "Launch profile",
+      "initialPrompt": "Initial prompt (optional)",
+      "initialPromptPlaceholder": "First message sent to the AI after launch",
+      "cliMissing": "{{cli}} was not found. Install it and make sure it is on PATH.",
+      "noProfile": "No launch profile for this CLI yet. Create one in Settings.",
+      "goSettings": "Go to Settings",
+      "cancel": "Cancel",
+      "confirm": "Open"
     },
     "empty": {
       "noProject": "No project selected. Create or pick one on the projects page, then open a terminal.",
@@ -320,10 +340,16 @@
       "closeConfirmBody": "This tab still has running terminals. Closing it will terminate those processes."
     },
     "window": {
+      "kind": {
+        "shell": "Shell",
+        "claude": "Claude",
+        "codex": "Codex"
+      },
       "status": {
         "running": "Running",
         "exited": "Exited",
-        "starting": "Starting"
+        "starting": "Starting",
+        "stopped": "Stopped"
       },
       "splitRight": "Split right",
       "splitDown": "Split down",

@@ -18,6 +18,7 @@ import { invokeQuery, queryData } from "../../ipc/query";
 import { useInvokeQuery } from "../../ipc/useInvokeQuery";
 import { PageHeader } from "../../layout/PageHeader";
 import { useWorkbenchStore } from "../../stores/workbench";
+import { NewWindowDialog, type NewWindowDialogResult } from "./NewWindowDialog";
 import { SplitLayout } from "./SplitLayout";
 import { TabBar } from "./TabBar";
 
@@ -51,6 +52,16 @@ export function WorkbenchPage(): ReactElement {
   const maxWindows = queryData(configState)?.maxWorkbenchWindows ?? 12;
 
   const [confirmCloseTabId, setConfirmCloseTabId] = useState<string | null>(null);
+  const [newWindowOpen, setNewWindowOpen] = useState(false);
+  const [pendingCreate, setPendingCreate] = useState<
+    | { readonly mode: "tab" }
+    | {
+        readonly mode: "split";
+        readonly direction: "horizontal" | "vertical";
+        readonly targetWindowId: string;
+      }
+    | null
+  >(null);
 
   useEffect(() => {
     void hydrate();
@@ -97,12 +108,40 @@ export function WorkbenchPage(): ReactElement {
       if (!(await ensureCapacity())) {
         return;
       }
-      createTabWithWindow({
+      setPendingCreate({ mode: "tab" });
+      setNewWindowOpen(true);
+    })();
+  }, [ensureCapacity, entry]);
+
+  const applyNewWindow = useCallback(
+    (result: NewWindowDialogResult) => {
+      if (entry === null) {
+        return;
+      }
+      const pending = pendingCreate;
+      setPendingCreate(null);
+      if (pending === null || pending.mode === "tab") {
+        createTabWithWindow({
+          projectId: entry.id,
+          projectRoot: entry.rootPath,
+          kind: result.kind,
+          ...(result.profileId !== undefined ? { profileId: result.profileId } : {}),
+          ...(result.initialPrompt !== undefined ? { initialPrompt: result.initialPrompt } : {}),
+        });
+        return;
+      }
+      splitWindow({
         projectId: entry.id,
         projectRoot: entry.rootPath,
+        targetWindowId: pending.targetWindowId,
+        direction: pending.direction,
+        kind: result.kind,
+        ...(result.profileId !== undefined ? { profileId: result.profileId } : {}),
+        ...(result.initialPrompt !== undefined ? { initialPrompt: result.initialPrompt } : {}),
       });
-    })();
-  }, [createTabWithWindow, ensureCapacity, entry]);
+    },
+    [createTabWithWindow, entry, pendingCreate, splitWindow],
+  );
 
   const handleSplit = useCallback(
     (direction: "horizontal" | "vertical") => {
@@ -117,18 +156,15 @@ export function WorkbenchPage(): ReactElement {
           projectLayout.focusedWindowId ??
           (activeTab !== null ? collectWindowIds(activeTab.root)[0] : undefined);
         if (target === undefined) {
-          handleNewTab();
+          setPendingCreate({ mode: "tab" });
+          setNewWindowOpen(true);
           return;
         }
-        splitWindow({
-          projectId: entry.id,
-          projectRoot: entry.rootPath,
-          targetWindowId: target,
-          direction,
-        });
+        setPendingCreate({ mode: "split", direction, targetWindowId: target });
+        setNewWindowOpen(true);
       })();
     },
-    [activeTab, ensureCapacity, entry, handleNewTab, projectLayout, splitWindow],
+    [activeTab, ensureCapacity, entry, projectLayout],
   );
 
   const requestCloseTab = useCallback(
@@ -250,12 +286,12 @@ export function WorkbenchPage(): ReactElement {
                   if (!(await ensureCapacity())) {
                     return;
                   }
-                  splitWindow({
-                    projectId: entry.id,
-                    projectRoot: entry.rootPath,
-                    targetWindowId: windowId,
+                  setPendingCreate({
+                    mode: "split",
                     direction: "horizontal",
+                    targetWindowId: windowId,
                   });
+                  setNewWindowOpen(true);
                 })();
               }}
               onSplitDown={(windowId) => {
@@ -263,12 +299,12 @@ export function WorkbenchPage(): ReactElement {
                   if (!(await ensureCapacity())) {
                     return;
                   }
-                  splitWindow({
-                    projectId: entry.id,
-                    projectRoot: entry.rootPath,
-                    targetWindowId: windowId,
+                  setPendingCreate({
+                    mode: "split",
                     direction: "vertical",
+                    targetWindowId: windowId,
                   });
+                  setNewWindowOpen(true);
                 })();
               }}
               onToggleMaximize={(windowId) => toggleMaximize(entry.id, windowId)}
@@ -301,6 +337,16 @@ export function WorkbenchPage(): ReactElement {
           }
           setConfirmCloseTabId(null);
         }}
+      />
+      <NewWindowDialog
+        open={newWindowOpen}
+        onOpenChange={(open) => {
+          setNewWindowOpen(open);
+          if (!open) {
+            setPendingCreate(null);
+          }
+        }}
+        onConfirm={applyNewWindow}
       />
     </>
   );

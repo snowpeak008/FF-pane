@@ -12,6 +12,11 @@ import { startSmokeMode } from "./smoke";
 import { runSqliteCheck } from "./sqlite-check";
 import { createTerminalLayer, runPtyCheck, type TerminalLayer } from "./terminal";
 import { loadWindowState, trackWindowState } from "./window-state";
+import {
+  createWorkbenchCliLayer,
+  releaseMcpForTerminalMetadata,
+  type WorkbenchCliLayer,
+} from "./workbench";
 import { createLayoutFlushBridge } from "./workbench-flush";
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
@@ -23,6 +28,8 @@ const devRendererUrl = process.env["ELECTRON_RENDERER_URL"];
 let mainWindow: BrowserWindow | null = null;
 /** 终端层（T10.1）；退出时杀掉全部 PTY。 */
 let terminalLayer: TerminalLayer | null = null;
+/** 工作台 CLI 启动层（T10.4）；退出时清临时 MCP。 */
+let workbenchCliLayer: WorkbenchCliLayer | null = null;
 
 function createMainWindow(options: { readonly hidden: boolean }): BrowserWindow {
   const state = loadWindowState();
@@ -209,6 +216,12 @@ async function bootstrap(): Promise<void> {
     const configStore = createConfigStore(resolveGlobalLayout(resolveGlobalRoot()).configFile);
     terminalLayer = createTerminalLayer(() => mainWindow, {
       getMaxWorkbenchWindows: async () => (await configStore.readConfig()).maxWorkbenchWindows,
+      onTerminalExit: (metadata) => {
+        const layer = workbenchCliLayer;
+        if (layer !== null) {
+          releaseMcpForTerminalMetadata(layer.mcpRegistry, metadata, layer.codexClaimer);
+        }
+      },
     });
     projectPtyCleanup.killProject = (projectId) => {
       terminalLayer?.manager.killWhere(
@@ -216,8 +229,21 @@ async function bootstrap(): Promise<void> {
       );
     };
     registerInvokeHandlers(ipcMain, terminalLayer.handlers);
+
+    workbenchCliLayer = await createWorkbenchCliLayer({
+      manager: terminalLayer.manager,
+      getWindow: () => mainWindow,
+      getMaxWorkbenchWindows: async () => (await configStore.readConfig()).maxWorkbenchWindows,
+    });
+    registerInvokeHandlers(ipcMain, workbenchCliLayer.handlers);
+
     app.on("will-quit", () => {
       const layer = terminalLayer;
+      const cliLayer = workbenchCliLayer;
+      if (cliLayer !== null) {
+        void cliLayer.dispose();
+        workbenchCliLayer = null;
+      }
       if (layer === null) {
         return;
       }

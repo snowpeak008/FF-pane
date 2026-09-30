@@ -30,8 +30,36 @@ export function clampMaxWorkbenchWindows(value: unknown): number {
   return Math.min(MAX_MAX_WORKBENCH_WINDOWS, Math.max(MIN_MAX_WORKBENCH_WINDOWS, floored));
 }
 
-/** 窗口内容种类；T10.4 起增加 claude / codex。 */
-export type WorkbenchWindowKind = "shell";
+/** 窗口内容种类；T10.4 起含 Claude Code / Codex。 */
+export const WORKBENCH_WINDOW_KINDS = ["shell", "claude", "codex"] as const;
+
+/** 窗口内容种类。 */
+export type WorkbenchWindowKind = (typeof WORKBENCH_WINDOW_KINDS)[number];
+
+/** kind 运行时守卫。 */
+export function isWorkbenchWindowKind(value: unknown): value is WorkbenchWindowKind {
+  return typeof value === "string" && (WORKBENCH_WINDOW_KINDS as readonly string[]).includes(value);
+}
+
+/** AI 窗口 kind ↔ Profile runtime。 */
+export function workbenchKindToRuntime(
+  kind: Exclude<WorkbenchWindowKind, "shell">,
+): "claude-code" | "codex" {
+  return kind === "claude" ? "claude-code" : "codex";
+}
+
+/** Profile runtime → AI 窗口 kind；非 AI runtime 返回 undefined。 */
+export function runtimeToWorkbenchKind(
+  runtime: string,
+): Exclude<WorkbenchWindowKind, "shell"> | undefined {
+  if (runtime === "claude-code") {
+    return "claude";
+  }
+  if (runtime === "codex") {
+    return "codex";
+  }
+  return undefined;
+}
 
 /**
  * 工作台窗口（布局元数据）。terminalId 是运行期字段，持久化时剥离。
@@ -45,6 +73,13 @@ export interface WorkbenchWindow {
   /** 绑定的 PTY id；未启动或已杀为空。 */
   readonly terminalId?: string;
   readonly createdAt: number;
+  /** AI 窗口：启动所用 AgentProfile id。 */
+  readonly profileId?: string;
+  /**
+   * AI 窗口：CLI 原生会话 id。
+   * Claude = `--session-id` / `--resume` 的 UUID；Codex = `codex resume <id>`（可缺省，续接降级 `--last`）。
+   */
+  readonly nativeSessionId?: string;
   /** 预留：角色（管理者 / 规划 / 执行 / 检查 / 普通）。 */
   readonly role?: string;
   /** 预留：权限等级标识。 */

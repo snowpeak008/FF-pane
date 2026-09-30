@@ -27,6 +27,24 @@ export interface TerminalViewProps {
   readonly onTerminalIdChange?: (terminalId: string | undefined) => void;
   readonly onExitCodeChange?: (exitCode: number | undefined) => void;
   readonly onCwdFallback?: () => void;
+  /** AI 窗口：不自动 spawn shell，改走 workbench:launch-cli。 */
+  readonly cliLaunch?: {
+    readonly profileId: string;
+    readonly projectRoot: string;
+    readonly nativeSessionId?: string;
+    readonly initialPrompt?: string;
+    readonly resume?: boolean;
+    /** false = 应用恢复的已停止窗口，不自动启动。 */
+    readonly autoStart: boolean;
+  };
+  /** AI 窗口退出后的额外操作按钮。 */
+  readonly onResume?: () => void;
+  readonly onRestartFresh?: () => void;
+  readonly onConvertToShell?: () => void;
+  /** 启动成功后回写原生会话 id。 */
+  readonly onNativeSessionId?: (nativeSessionId: string | undefined) => void;
+  /** 外部触发启动（续接 / 重新开始）。 */
+  readonly launchNonce?: number;
 }
 
 interface ThemeColors {
@@ -77,6 +95,12 @@ export function TerminalView({
   onTerminalIdChange,
   onExitCodeChange,
   onCwdFallback,
+  cliLaunch,
+  onResume,
+  onRestartFresh,
+  onConvertToShell,
+  onNativeSessionId,
+  launchNonce = 0,
 }: TerminalViewProps): ReactElement {
   const { t } = useTranslation();
   const { resolvedTheme } = useTheme();
@@ -88,6 +112,10 @@ export function TerminalView({
   const [exitCode, setExitCode] = useState<number | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const [menu, setMenu] = useState<{ readonly x: number; readonly y: number } | null>(null);
+  const [stopped, setStopped] = useState(
+    () => cliLaunch !== undefined && cliLaunch.autoStart === false,
+  );
+  const [resumePickerHint, setResumePickerHint] = useState(false);
 
   const onTerminalIdChangeRef = useRef(onTerminalIdChange);
   onTerminalIdChangeRef.current = onTerminalIdChange;
@@ -95,6 +123,14 @@ export function TerminalView({
   onExitCodeChangeRef.current = onExitCodeChange;
   const onCwdFallbackRef = useRef(onCwdFallback);
   onCwdFallbackRef.current = onCwdFallback;
+  const cliLaunchRef = useRef(cliLaunch);
+  cliLaunchRef.current = cliLaunch;
+  const nativeSessionIdRef = useRef<string | undefined>(cliLaunch?.nativeSessionId);
+  if (cliLaunch?.nativeSessionId !== undefined) {
+    nativeSessionIdRef.current = cliLaunch.nativeSessionId;
+  }
+  const onNativeSessionIdRef = useRef(onNativeSessionId);
+  onNativeSessionIdRef.current = onNativeSessionId;
 
   const writeToPty = useCallback((data: string) => {
     const current = infoRef.current;
@@ -145,6 +181,36 @@ export function TerminalView({
     [projectId, windowId],
   );
 
+  const launchCli = useCallback(
+    async (cols: number, rows: number, override?: Partial<NonNullable<typeof cliLaunch>>) => {
+      const launch = { ...cliLaunchRef.current, ...override };
+      if (
+        launch.profileId === undefined ||
+        launch.projectRoot === undefined ||
+        launch.projectRoot.trim() === ""
+      ) {
+        return { status: "error" as const, error: { message: "missing cli launch config" } };
+      }
+      const resuming = launch.resume === true;
+      const sessionId = resuming
+        ? (override?.nativeSessionId ?? launch.nativeSessionId ?? nativeSessionIdRef.current)
+        : undefined;
+      return invokeQuery("workbench:launch-cli", {
+        windowId,
+        projectId: projectId as never,
+        projectRoot: launch.projectRoot,
+        profileId: launch.profileId,
+        cols,
+        rows,
+        ...(cwd !== undefined ? { cwd } : {}),
+        ...(launch.initialPrompt !== undefined ? { initialPrompt: launch.initialPrompt } : {}),
+        ...(resuming ? { resume: true } : {}),
+        ...(sessionId !== undefined ? { nativeSessionId: sessionId } : {}),
+      });
+    },
+    [cwd, projectId, windowId],
+  );
+
   const spawnTerminal = useCallback(async () => {
     const host = hostRef.current;
     const term = termRef.current;
@@ -154,6 +220,7 @@ export function TerminalView({
     }
     setError(undefined);
     setExitCode(undefined);
+    setStopped(false);
     onExitCodeChangeRef.current?.(undefined);
     fit.fit();
     const cols = Math.max(term.cols, 2);
@@ -164,6 +231,30 @@ export function TerminalView({
       if (await attachExisting(existingId, cols, rows)) {
         return;
       }
+    }
+
+    if (cliLaunchRef.current !== undefined) {
+      const settled = await launchCli(cols, rows);
+      if (settled.status === "error") {
+        setError(settled.error.message);
+        setStopped(true);
+        onTerminalIdChangeRef.current?.(undefined);
+        return;
+      }
+      rememberLiveTerminal(windowId, settled.data.terminal.id);
+      infoRef.current = settled.data.terminal;
+      setInfo(settled.data.terminal);
+      onTerminalIdChangeRef.current?.(settled.data.terminal.id);
+      if (settled.data.nativeSessionId !== undefined) {
+        nativeSessionIdRef.current = settled.data.nativeSessionId;
+      }
+      onNativeSessionIdRef.current?.(settled.data.nativeSessionId);
+      setResumePickerHint(settled.data.resumePicker === true);
+      const replay = await invokeQuery("terminal:get-replay", { id: settled.data.terminal.id });
+      if (replay.status === "success" && replay.data.data.length > 0) {
+        term.write(replay.data.data);
+      }
+      return;
     }
 
     let settled = await createWithCwd(cwd, cols, rows);
@@ -186,7 +277,7 @@ export function TerminalView({
     if (replay.status === "success" && replay.data.data.length > 0) {
       term.write(replay.data.data);
     }
-  }, [attachExisting, createWithCwd, cwd, fallbackCwd, windowId]);
+  }, [attachExisting, createWithCwd, cwd, fallbackCwd, launchCli, windowId]);
 
   const restart = useCallback(async () => {
     const previous = infoRef.current;
@@ -200,6 +291,75 @@ export function TerminalView({
     termRef.current?.reset();
     await spawnTerminal();
   }, [spawnTerminal, windowId]);
+
+  const relaunchWith = useCallback(
+    async (override: Partial<NonNullable<typeof cliLaunch>>) => {
+      const host = hostRef.current;
+      const term = termRef.current;
+      const fit = fitRef.current;
+      if (host === null || term === null || fit === null) {
+        return;
+      }
+      const previous = infoRef.current;
+      if (previous !== null) {
+        forgetLiveTerminal(windowId);
+        await invokeQuery("terminal:kill", { id: previous.id });
+      }
+      infoRef.current = null;
+      setInfo(null);
+      setError(undefined);
+      setExitCode(undefined);
+      setStopped(false);
+      setResumePickerHint(false);
+      onExitCodeChangeRef.current?.(undefined);
+      onTerminalIdChangeRef.current?.(undefined);
+      term.reset();
+      fit.fit();
+      const cols = Math.max(term.cols, 2);
+      const rows = Math.max(term.rows, 2);
+      const settled = await launchCli(cols, rows, override);
+      if (settled.status === "error") {
+        setError(settled.error.message);
+        setStopped(true);
+        return;
+      }
+      rememberLiveTerminal(windowId, settled.data.terminal.id);
+      infoRef.current = settled.data.terminal;
+      setInfo(settled.data.terminal);
+      onTerminalIdChangeRef.current?.(settled.data.terminal.id);
+      if (settled.data.nativeSessionId !== undefined) {
+        nativeSessionIdRef.current = settled.data.nativeSessionId;
+        onNativeSessionIdRef.current?.(settled.data.nativeSessionId);
+      }
+      setResumePickerHint(settled.data.resumePicker === true);
+      const replay = await invokeQuery("terminal:get-replay", { id: settled.data.terminal.id });
+      if (replay.status === "success" && replay.data.data.length > 0) {
+        term.write(replay.data.data);
+      }
+    },
+    [launchCli, windowId],
+  );
+
+  // 外部 nonce：父级驱动的再拉起（若仍使用）
+  const lastNonceRef = useRef(0);
+  useEffect(() => {
+    if (launchNonce === 0 || launchNonce === lastNonceRef.current) {
+      return;
+    }
+    lastNonceRef.current = launchNonce;
+    const resume = cliLaunchRef.current?.resume === true;
+    if (resume) {
+      void relaunchWith({
+        resume: true,
+        ...(nativeSessionIdRef.current !== undefined
+          ? { nativeSessionId: nativeSessionIdRef.current }
+          : {}),
+      });
+    } else {
+      nativeSessionIdRef.current = undefined;
+      void relaunchWith({ resume: false });
+    }
+  }, [launchNonce, relaunchWith]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -278,7 +438,13 @@ export function TerminalView({
     };
     host.addEventListener("contextmenu", onContextMenu);
 
-    void spawnTerminal();
+    const shouldAutoStart =
+      cliLaunchRef.current === undefined || cliLaunchRef.current.autoStart !== false;
+    if (shouldAutoStart || peekLiveTerminal(windowId) !== undefined) {
+      void spawnTerminal();
+    } else {
+      setStopped(true);
+    }
 
     return () => {
       host.removeEventListener("contextmenu", onContextMenu);
@@ -287,7 +453,7 @@ export function TerminalView({
       termRef.current = null;
       fitRef.current = null;
     };
-  }, [spawnTerminal, writeToPty]);
+  }, [spawnTerminal, writeToPty, windowId]);
 
   useEffect(() => {
     const term = termRef.current;
@@ -334,7 +500,16 @@ export function TerminalView({
     infoRef.current = { ...current, exited: true, exitCode: payload.exitCode };
     setInfo(infoRef.current);
     setExitCode(payload.exitCode);
+    setStopped(cliLaunchRef.current !== undefined);
     onExitCodeChangeRef.current?.(payload.exitCode);
+  });
+
+  useSubscription("workbench:session-claimed", (payload) => {
+    if (payload.windowId !== windowId) {
+      return;
+    }
+    nativeSessionIdRef.current = payload.nativeSessionId;
+    onNativeSessionIdRef.current?.(payload.nativeSessionId);
   });
 
   const copySelection = (): void => {
@@ -354,6 +529,8 @@ export function TerminalView({
     setMenu(null);
   };
 
+  const showCliActions = cliLaunch !== undefined && (stopped || exitCode !== undefined);
+
   return (
     <div className={cn("relative flex min-h-0 flex-1 flex-col bg-surface-sunken", className)}>
       <div ref={hostRef} className="min-h-0 flex-1 p-1" data-testid="terminal-host" />
@@ -365,7 +542,62 @@ export function TerminalView({
           </Button>
         </div>
       ) : null}
-      {exitCode !== undefined ? (
+      {resumePickerHint && !showCliActions ? (
+        <div
+          className="absolute inset-x-0 bottom-0 z-10 border-t border-border bg-surface px-3 py-2 text-xs text-fg-muted"
+          data-testid="terminal-resume-picker-hint"
+        >
+          {t("workbench.terminal.resumePickerHint")}
+        </div>
+      ) : null}
+      {showCliActions ? (
+        <div
+          className="absolute inset-x-0 bottom-0 z-10 flex flex-wrap items-center gap-2 border-t border-border bg-surface px-3 py-2 text-xs text-fg-muted"
+          data-testid="terminal-cli-stopped"
+        >
+          {exitCode !== undefined ? (
+            <span className="font-mono">{t("workbench.terminal.exited", { code: exitCode })}</span>
+          ) : (
+            <span>{t("workbench.window.status.stopped")}</span>
+          )}
+          <Button
+            size="sm"
+            variant="secondary"
+            data-testid="cli-resume"
+            onClick={() => {
+              onResume?.();
+              void relaunchWith({
+                resume: true,
+                ...(nativeSessionIdRef.current !== undefined
+                  ? { nativeSessionId: nativeSessionIdRef.current }
+                  : {}),
+              });
+            }}
+          >
+            {t("workbench.terminal.resume")}
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            data-testid="cli-restart-fresh"
+            onClick={() => {
+              nativeSessionIdRef.current = undefined;
+              onRestartFresh?.();
+              void relaunchWith({ resume: false });
+            }}
+          >
+            {t("workbench.terminal.restartFresh")}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            data-testid="cli-convert-shell"
+            onClick={() => onConvertToShell?.()}
+          >
+            {t("workbench.terminal.convertToShell")}
+          </Button>
+        </div>
+      ) : exitCode !== undefined ? (
         <div
           className="absolute inset-x-0 bottom-0 flex items-center gap-2 border-t border-border bg-surface px-3 py-2 text-xs text-fg-muted"
           data-testid="terminal-exited"

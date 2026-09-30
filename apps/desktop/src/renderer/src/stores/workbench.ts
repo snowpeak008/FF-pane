@@ -55,15 +55,37 @@ export interface WorkbenchStoreActions {
     readonly projectId: ProjectId;
     readonly projectRoot: string;
     readonly title?: string;
-  }) => { readonly ok: true; readonly windowId: string };
+    readonly kind?: WorkbenchWindow["kind"];
+    readonly profileId?: string;
+    readonly initialPrompt?: string;
+  }) => { readonly ok: true; readonly windowId: string; readonly autoLaunch: boolean };
   readonly splitWindow: (input: {
     readonly projectId: ProjectId;
     readonly projectRoot: string;
     readonly targetWindowId: string;
     readonly direction: PaneSplitDirection;
+    readonly kind?: WorkbenchWindow["kind"];
+    readonly profileId?: string;
+    readonly initialPrompt?: string;
   }) =>
-    | { readonly ok: true; readonly windowId: string }
+    | { readonly ok: true; readonly windowId: string; readonly autoLaunch: boolean }
     | { readonly ok: false; readonly reason: "missing" };
+  readonly patchWindow: (
+    projectId: ProjectId,
+    windowId: string,
+    patch: Partial<{
+      nativeSessionId: string | null;
+      profileId: string;
+      kind: WorkbenchWindow["kind"];
+      title: string;
+      terminalId: string | undefined;
+    }>,
+  ) => void;
+  /** 本会话内新建的窗口（应用重启后清空）——用于 AI 窗口是否自动启动。 */
+  readonly wasCreatedThisSession: (windowId: string) => boolean;
+  /** 取出并清除新建时暂存的初始指令。 */
+  readonly takeInitialPrompt: (windowId: string) => string | undefined;
+  readonly convertWindowToShell: (projectId: ProjectId, windowId: string) => void;
   readonly closeWindow: (projectId: ProjectId, windowId: string) => Promise<void>;
   readonly closeTab: (projectId: ProjectId, tabId: string) => Promise<void>;
   readonly renameTab: (projectId: ProjectId, tabId: string, title: string) => void;
@@ -159,9 +181,19 @@ function nextShellTitle(layout: ProjectWorkbenchLayout): string {
   return `Shell ${n}`;
 }
 
+function nextCliTitle(kind: "claude" | "codex", layout: ProjectWorkbenchLayout): string {
+  const n = Object.values(layout.windows).filter((window) => window.kind === kind).length + 1;
+  return kind === "claude" ? `Claude ${n}` : `Codex ${n}`;
+}
+
 function nextTabTitle(layout: ProjectWorkbenchLayout): string {
   return `Tab ${layout.tabs.length + 1}`;
 }
+
+/** 本渲染会话内新建的窗口 id（不持久化）。 */
+const sessionCreatedWindows = new Set<string>();
+/** 新建 AI 窗口时暂存的初始指令（启动后清除）。 */
+const pendingInitialPrompts = new Map<string, string>();
 
 async function reconcileWithLiveTerminals(
   layouts: Readonly<Record<string, ProjectWorkbenchLayout>>,
@@ -263,17 +295,25 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
     return total;
   },
 
-  createTabWithWindow({ projectId, projectRoot, title }) {
+  createTabWithWindow({ projectId, projectRoot, title, kind = "shell", profileId, initialPrompt }) {
     const windowId = newId("win");
     const tabId = newId("tab");
+    sessionCreatedWindows.add(windowId);
+    if (initialPrompt !== undefined && initialPrompt.trim() !== "") {
+      pendingInitialPrompts.set(windowId, initialPrompt.trim());
+    }
     patchProject(set, get, projectId, (layout) => {
+      const resolvedKind = kind;
       const window: WorkbenchWindow = {
         id: windowId,
         projectId,
-        title: title ?? nextShellTitle(layout),
-        kind: "shell",
+        title:
+          title ??
+          (resolvedKind === "shell" ? nextShellTitle(layout) : nextCliTitle(resolvedKind, layout)),
+        kind: resolvedKind,
         cwd: projectRoot,
         createdAt: Date.now(),
+        ...(profileId !== undefined ? { profileId } : {}),
       };
       const tab: WorkbenchTab = {
         id: tabId,
@@ -289,16 +329,28 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
         maximizedWindowId: null,
       };
     });
-    return { ok: true, windowId };
+    return { ok: true, windowId, autoLaunch: true };
   },
 
-  splitWindow({ projectId, projectRoot, targetWindowId, direction }) {
+  splitWindow({
+    projectId,
+    projectRoot,
+    targetWindowId,
+    direction,
+    kind = "shell",
+    profileId,
+    initialPrompt,
+  }) {
     const layout = get().getProjectLayout(projectId);
     const activeTab = layout.tabs.find((tab) => tab.id === layout.activeTabId);
     if (activeTab === undefined || !collectWindowIds(activeTab.root).includes(targetWindowId)) {
       return { ok: false, reason: "missing" };
     }
     const windowId = newId("win");
+    sessionCreatedWindows.add(windowId);
+    if (initialPrompt !== undefined && initialPrompt.trim() !== "") {
+      pendingInitialPrompts.set(windowId, initialPrompt.trim());
+    }
     patchProject(set, get, projectId, (current) => {
       const tab = current.tabs.find((item) => item.id === current.activeTabId);
       if (tab === undefined) {
@@ -307,10 +359,11 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
       const window: WorkbenchWindow = {
         id: windowId,
         projectId,
-        title: nextShellTitle(current),
-        kind: "shell",
+        title: kind === "shell" ? nextShellTitle(current) : nextCliTitle(kind, current),
+        kind,
         cwd: projectRoot,
         createdAt: Date.now(),
+        ...(profileId !== undefined ? { profileId } : {}),
       };
       const nextRoot = splitLeaf(tab.root, targetWindowId, windowId, direction);
       return {
@@ -321,7 +374,78 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
         tabs: current.tabs.map((item) => (item.id === tab.id ? { ...item, root: nextRoot } : item)),
       };
     });
-    return { ok: true, windowId };
+    return { ok: true, windowId, autoLaunch: true };
+  },
+
+  wasCreatedThisSession(windowId) {
+    return sessionCreatedWindows.has(windowId);
+  },
+
+  takeInitialPrompt(windowId) {
+    const prompt = pendingInitialPrompts.get(windowId);
+    pendingInitialPrompts.delete(windowId);
+    return prompt;
+  },
+
+  patchWindow(projectId, windowId, patch) {
+    patchProject(set, get, projectId, (current) => {
+      const window = current.windows[windowId];
+      if (window === undefined) {
+        return current;
+      }
+      const next: WorkbenchWindow = { ...window };
+      if (patch.title !== undefined) {
+        Object.assign(next, { title: patch.title });
+      }
+      if (patch.kind !== undefined) {
+        Object.assign(next, { kind: patch.kind });
+      }
+      if (patch.profileId !== undefined) {
+        Object.assign(next, { profileId: patch.profileId });
+      }
+      if (patch.terminalId !== undefined) {
+        Object.assign(next, { terminalId: patch.terminalId });
+      }
+      if (patch.nativeSessionId === null) {
+        const { nativeSessionId: _removed, ...rest } = next;
+        void _removed;
+        return {
+          ...current,
+          windows: { ...current.windows, [windowId]: rest },
+        };
+      }
+      if (patch.nativeSessionId !== undefined) {
+        Object.assign(next, { nativeSessionId: patch.nativeSessionId });
+      }
+      return {
+        ...current,
+        windows: { ...current.windows, [windowId]: next },
+      };
+    });
+  },
+
+  convertWindowToShell(projectId, windowId) {
+    patchProject(set, get, projectId, (current) => {
+      const window = current.windows[windowId];
+      if (window === undefined) {
+        return current;
+      }
+      const { profileId: _p, nativeSessionId: _n, ...rest } = window;
+      void _p;
+      void _n;
+      return {
+        ...current,
+        windows: {
+          ...current.windows,
+          [windowId]: {
+            ...rest,
+            kind: "shell",
+            title: nextShellTitle(current),
+          },
+        },
+      };
+    });
+    sessionCreatedWindows.add(windowId);
   },
 
   async closeWindow(projectId, windowId) {

@@ -51,6 +51,13 @@ async function selectProject(page: LaunchedApp["page"], name: string): Promise<v
   await page.getByRole("button", { name: new RegExp(`^${name}`) }).click();
 }
 
+/** T10.4：新建/分屏入口弹出类型对话框；确认默认 PowerShell。 */
+async function confirmShellInNewWindowDialog(page: LaunchedApp["page"]): Promise<void> {
+  await expect(page.getByTestId("workbench-new-window-dialog")).toBeVisible();
+  await page.getByTestId("workbench-new-kind-shell").click();
+  await page.getByTestId("workbench-new-confirm").click();
+}
+
 async function readReplayForWindow(page: LaunchedApp["page"], windowId: string): Promise<string> {
   return page.evaluate(async (wid) => {
     const host = document.querySelector(`[data-window-id="${wid}"]`);
@@ -99,6 +106,7 @@ test("multi-project split panes keep output across switches", async () => {
   await gotoRoute(page, "/workbench");
   await expect(page.getByRole("heading", { name: "Workbench" })).toBeVisible();
   await page.getByTestId("workbench-new-tab").click();
+  await confirmShellInNewWindowDialog(page);
   await expect(page.getByTestId("workbench-window")).toHaveCount(1, { timeout: 15_000 });
   await expect(page.getByTestId("terminal-id")).toBeVisible({ timeout: 15_000 });
   const windowA1 = await requireWindowId(page, 0);
@@ -112,6 +120,7 @@ test("multi-project split panes keep output across switches", async () => {
     .toContain("MARKER_A1");
 
   await page.getByRole("button", { name: "Split right" }).first().click();
+  await confirmShellInNewWindowDialog(page);
   await expect(page.getByTestId("workbench-window")).toHaveCount(2, { timeout: 15_000 });
   const windowA2 = await requireWindowId(page, 1);
   await expect
@@ -125,6 +134,7 @@ test("multi-project split panes keep output across switches", async () => {
   await selectProject(page, "WB Project B");
   await gotoRoute(page, "/workbench");
   await page.getByTestId("workbench-new-tab").click();
+  await confirmShellInNewWindowDialog(page);
   await expect(page.getByTestId("workbench-window")).toHaveCount(1, { timeout: 15_000 });
   const windowB1 = await requireWindowId(page, 0);
   await expect
@@ -136,6 +146,7 @@ test("multi-project split panes keep output across switches", async () => {
     .toContain("MARKER_B1");
 
   await page.getByRole("button", { name: "Split right" }).first().click();
+  await confirmShellInNewWindowDialog(page);
   await expect(page.getByTestId("workbench-window")).toHaveCount(2, { timeout: 15_000 });
   const windowB2 = await requireWindowId(page, 1);
   await expect
@@ -163,24 +174,27 @@ test("multi-project split panes keep output across switches", async () => {
     .click();
   await expect(page.getByTestId("workbench-window")).toHaveCount(1, { timeout: 10_000 });
 
-  const layoutCount = await page.evaluate(async () => {
+  // 仍有多项目合计 ≥2 个窗口；把上限压到 1，必触发拒绝（避免 get-layouts 落盘延迟导致计数漂移）
+  await page.evaluate(async () => {
     // biome-ignore lint/suspicious/noExplicitAny: E2E
-    const layouts = await (window as any).ffpane.invoke("workbench:get-layouts");
-    let n = 0;
-    for (const layout of Object.values(layouts as Record<string, { windows: object }>)) {
-      n += Object.keys(layout.windows).length;
-    }
-    return n;
+    await (window as any).ffpane.invoke("config:update", { maxWorkbenchWindows: 1 });
   });
-  await page.evaluate(async (max) => {
-    // biome-ignore lint/suspicious/noExplicitAny: E2E
-    await (window as any).ffpane.invoke("config:update", { maxWorkbenchWindows: max });
-  }, layoutCount);
+  await expect
+    .poll(async () => {
+      return page.evaluate(async () => {
+        // biome-ignore lint/suspicious/noExplicitAny: E2E
+        const settled = await (window as any).ffpane.invoke("config:get");
+        const data = settled?.data ?? settled;
+        return typeof data?.maxWorkbenchWindows === "number" ? data.maxWorkbenchWindows : -1;
+      });
+    })
+    .toBe(1);
 
   await page.getByTestId("workbench-new-tab").click();
   await expect(page.getByText(/concurrent window limit|同时运行窗口上限/i)).toBeVisible({
-    timeout: 10_000,
+    timeout: 5_000,
   });
+  await expect(page.getByTestId("workbench-new-window-dialog")).toHaveCount(0);
 });
 
 test("workbench terminal survives page switch (T10.1 compat)", async () => {
@@ -194,6 +208,7 @@ test("workbench terminal survives page switch (T10.1 compat)", async () => {
   });
   if ((await page.getByTestId("workbench-window").count()) === 0) {
     await page.getByTestId("workbench-new-tab").click();
+    await confirmShellInNewWindowDialog(page);
   }
   await expect(page.getByTestId("terminal-host").first()).toBeVisible({ timeout: 15_000 });
   await expect(page.getByTestId("terminal-id").first()).toBeVisible({ timeout: 15_000 });

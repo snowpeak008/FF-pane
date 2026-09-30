@@ -4,7 +4,12 @@
 
 export interface PtyFactoryOptions {
   readonly file: string;
-  readonly args: readonly string[];
+  /**
+   * argv 数组，或 Windows 预转义 CommandLine 字符串。
+   * .cmd 垫片须传 string：@lydell/node-pty 无 windowsVerbatimArguments，
+   * 与 child_process + resolveSpawnTarget 的垫片形态对齐。
+   */
+  readonly args: readonly string[] | string;
   readonly cwd: string;
   readonly env: Record<string, string>;
   readonly cols: number;
@@ -28,11 +33,28 @@ export interface PtyHandle {
 
 export type PtyFactory = (options: PtyFactoryOptions) => PtyHandle;
 
-/** 创建选项：metadata 留给后续角色/CLI/令牌扩展，本单不解释。 */
+/**
+ * 创建选项。
+ * - shell：白名单裸名（PowerShell / cmd），供 renderer IPC。
+ * - executable：主进程内部 CLI 启动名（经 resolveSpawnTarget；工作台勿用，改走 direct）。
+ * - direct：已解析的 file+argv（绕开 .cmd / cmd.exe），与 executable 互斥，direct 优先。
+ * args / env 仅主进程内部可用；IPC 层拒绝。
+ */
 export interface CreateTerminalOptions {
   readonly id?: string;
   readonly cwd: string;
   readonly shell?: string;
+  /** 主进程内部：命令名，经 resolveSpawnTarget（可能走 cmd 垫片）。 */
+  readonly executable?: string;
+  /**
+   * 主进程内部：已解析的直接启动目标（参数数组）。
+   * 工作台 Claude/Codex 必须用此路径，禁止 cmd CommandLine。
+   */
+  readonly direct?: {
+    readonly file: string;
+    readonly args?: readonly string[];
+    readonly label?: string;
+  };
   readonly args?: readonly string[];
   readonly env?: Readonly<Record<string, string | undefined>>;
   readonly cols: number;
@@ -63,6 +85,7 @@ export interface TerminalOutputBatch {
 export interface TerminalExitNotice {
   readonly id: string;
   readonly exitCode: number;
+  readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
 export interface PtyManagerListeners {

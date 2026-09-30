@@ -7,13 +7,17 @@ import type { PtyFactory, PtyFactoryOptions, PtyHandle } from "./types";
 
 export function createNodePtyFactory(): PtyFactory {
   return (options: PtyFactoryOptions): PtyHandle => {
-    const pty = spawn(options.file, [...options.args], {
-      name: options.name,
-      cols: options.cols,
-      rows: options.rows,
-      cwd: options.cwd,
-      env: options.env,
-    });
+    const pty = spawn(
+      options.file,
+      typeof options.args === "string" ? options.args : [...options.args],
+      {
+        name: options.name,
+        cols: options.cols,
+        rows: options.rows,
+        cwd: options.cwd,
+        env: options.env,
+      },
+    );
     return {
       get pid(): number {
         return pty.pid;

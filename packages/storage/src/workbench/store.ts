@@ -11,10 +11,15 @@ import type {
   WorkbenchWindow,
   WorkbenchWindowKind,
 } from "@ff-pane/shared";
+import { isWorkbenchWindowKind } from "@ff-pane/shared";
 import { readJson, writeJsonAtomic } from "../fs/index.js";
 import { WorkbenchLayoutsFileInvalidError } from "./errors.js";
 
-export const WORKBENCH_LAYOUTS_FILE_VERSION = 1;
+/** 当前布局文件 schema 版本（T10.4：claude/codex + profileId/nativeSessionId）。 */
+export const WORKBENCH_LAYOUTS_FILE_VERSION = 2;
+
+/** 可读取的旧版（读入后按 v2 写出）。 */
+export const WORKBENCH_LAYOUTS_FILE_VERSION_LEGACY = 1;
 
 export interface WorkbenchLayoutsFile {
   readonly version: typeof WORKBENCH_LAYOUTS_FILE_VERSION;
@@ -77,7 +82,7 @@ function parseWindow(value: unknown, projectId: ProjectId): WorkbenchWindow | nu
   if (typeof raw["title"] !== "string") {
     return null;
   }
-  if (raw["kind"] !== "shell") {
+  if (!isWorkbenchWindowKind(raw["kind"])) {
     return null;
   }
   if (typeof raw["cwd"] !== "string" || raw["cwd"].trim() === "") {
@@ -86,13 +91,26 @@ function parseWindow(value: unknown, projectId: ProjectId): WorkbenchWindow | nu
   if (typeof raw["createdAt"] !== "number" || !Number.isFinite(raw["createdAt"])) {
     return null;
   }
+  const kind = raw["kind"] as WorkbenchWindowKind;
+  if (
+    (kind === "claude" || kind === "codex") &&
+    (typeof raw["profileId"] !== "string" || raw["profileId"].trim() === "")
+  ) {
+    return null;
+  }
   const window: WorkbenchWindow = {
     id: raw["id"],
     projectId: typeof raw["projectId"] === "string" ? (raw["projectId"] as ProjectId) : projectId,
     title: raw["title"],
-    kind: raw["kind"] as WorkbenchWindowKind,
+    kind,
     cwd: raw["cwd"],
     createdAt: raw["createdAt"],
+    ...(typeof raw["profileId"] === "string" && raw["profileId"].trim() !== ""
+      ? { profileId: raw["profileId"] }
+      : {}),
+    ...(typeof raw["nativeSessionId"] === "string" && raw["nativeSessionId"].trim() !== ""
+      ? { nativeSessionId: raw["nativeSessionId"] }
+      : {}),
     ...(typeof raw["role"] === "string" ? { role: raw["role"] } : {}),
     ...(typeof raw["permission"] === "string" ? { permission: raw["permission"] } : {}),
     ...(typeof raw["parentWindowId"] === "string" ? { parentWindowId: raw["parentWindowId"] } : {}),
@@ -206,7 +224,10 @@ async function loadFile(
     return {};
   }
   const file = raw as { readonly version?: unknown; readonly layouts?: unknown };
-  if (file.version !== WORKBENCH_LAYOUTS_FILE_VERSION) {
+  if (
+    file.version !== WORKBENCH_LAYOUTS_FILE_VERSION &&
+    file.version !== WORKBENCH_LAYOUTS_FILE_VERSION_LEGACY
+  ) {
     console.warn(
       `[workbench-layouts] unsupported version ${String(file.version)}, fallback empty: ${filePath}`,
     );
@@ -282,7 +303,10 @@ export function parseWorkbenchLayoutsFileStrict(
     throw new WorkbenchLayoutsFileInvalidError(filePath, "顶层必须是对象");
   }
   const file = raw as { readonly version?: unknown; readonly layouts?: unknown };
-  if (file.version !== WORKBENCH_LAYOUTS_FILE_VERSION) {
+  if (
+    file.version !== WORKBENCH_LAYOUTS_FILE_VERSION &&
+    file.version !== WORKBENCH_LAYOUTS_FILE_VERSION_LEGACY
+  ) {
     throw new WorkbenchLayoutsFileInvalidError(
       filePath,
       `不支持的 version：${String(file.version)}`,

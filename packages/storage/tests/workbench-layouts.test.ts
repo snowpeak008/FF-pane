@@ -81,6 +81,69 @@ describe("workbench layout store", () => {
     ).toEqual({});
   });
 
+  it("读取 v1 shell 布局并写出为 v2；接受 claude/codex 字段", async () => {
+    tempRoot = await mkdtemp(join(tmpdir(), "ffpane-wb-layout-"));
+    const file = join(tempRoot, "workbench-layouts.json");
+    await writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        layouts: {
+          "proj-a": {
+            projectId: "proj-a",
+            tabs: [{ id: "tab-1", title: "Tab 1", root: { type: "leaf", windowId: "win-1" } }],
+            activeTabId: "tab-1",
+            windows: {
+              "win-1": {
+                id: "win-1",
+                projectId: "proj-a",
+                title: "Shell 1",
+                kind: "shell",
+                cwd: "C:\\proj",
+                createdAt: 1,
+              },
+            },
+            maximizedWindowId: null,
+            focusedWindowId: "win-1",
+          },
+        },
+      }),
+      "utf8",
+    );
+    const store = createWorkbenchLayoutStore(file);
+    const all = await store.readAll();
+    expect(all["proj-a"]?.windows["win-1"]?.kind).toBe("shell");
+
+    await store.saveProject({
+      projectId: "proj-a" as ProjectWorkbenchLayout["projectId"],
+      tabs: [{ id: "tab-1", title: "Tab 1", root: { type: "leaf", windowId: "win-2" } }],
+      activeTabId: "tab-1",
+      windows: {
+        "win-2": {
+          id: "win-2",
+          projectId: "proj-a" as ProjectWorkbenchLayout["projectId"],
+          title: "Claude 1",
+          kind: "claude",
+          cwd: "C:\\proj",
+          createdAt: 2,
+          profileId: "prof-1",
+          nativeSessionId: "11111111-1111-4111-8111-111111111111",
+        },
+      },
+      maximizedWindowId: null,
+      focusedWindowId: "win-2",
+    });
+    const raw = JSON.parse(await (await import("node:fs/promises")).readFile(file, "utf8")) as {
+      version: number;
+      layouts: Record<string, ProjectWorkbenchLayout>;
+    };
+    expect(raw.version).toBe(WORKBENCH_LAYOUTS_FILE_VERSION);
+    expect(raw.layouts["proj-a"]?.windows["win-2"]?.profileId).toBe("prof-1");
+    expect(raw.layouts["proj-a"]?.windows["win-2"]?.nativeSessionId).toBe(
+      "11111111-1111-4111-8111-111111111111",
+    );
+  });
+
   it("removeProject 删条目", async () => {
     tempRoot = await mkdtemp(join(tmpdir(), "ffpane-wb-layout-"));
     const file = join(tempRoot, "workbench-layouts.json");

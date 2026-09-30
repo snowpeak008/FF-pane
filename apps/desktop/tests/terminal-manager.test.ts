@@ -24,7 +24,7 @@ import type {
 
 interface FakePty extends PtyHandle {
   readonly file: string;
-  readonly args: readonly string[];
+  readonly args: readonly string[] | string;
   readonly cwd: string;
   emitData(data: string): void;
   emitExit(exitCode: number): void;

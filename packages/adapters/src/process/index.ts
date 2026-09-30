@@ -23,6 +23,11 @@ export {
   killProcessTree,
   TASKKILL_PROCESS_NOT_FOUND_EXIT_CODE,
 } from "./kill-tree.js";
+export {
+  type DirectCliTarget,
+  parseNpmCmdShim,
+  resolveDirectCliTarget,
+} from "./npm-shim.js";
 export { EXIT_SETTLE_GRACE_MS, KILL_CONFIRM_TIMEOUT_MS, spawnAgentProcess } from "./spawn.js";
 export { ByteChunkQueue, DEFAULT_STREAM_HIGH_WATER_MARK } from "./stream.js";
 export type {
@@ -35,6 +40,7 @@ export type {
 export {
   buildCmdShimCommandLine,
   findExecutableOnWindowsPath,
+  getEnvCaseInsensitive,
   resolveSpawnTarget,
   type SpawnTarget,
 } from "./windows-command.js";

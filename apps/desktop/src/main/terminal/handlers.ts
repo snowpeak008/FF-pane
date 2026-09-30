@@ -14,6 +14,8 @@ import { assertTerminalCreateIpcSafe, defaultTerminalCwd } from "./shell";
 export interface TerminalLayerOptions {
   /** 读取同时窗口上限；缺省回退出厂默认。 */
   readonly getMaxWorkbenchWindows?: () => number | Promise<number>;
+  /** PTY 退出时回调（含自然退出与 kill）；用于清理窗口级临时文件。 */
+  readonly onTerminalExit?: (metadata: Readonly<Record<string, unknown>> | undefined) => void;
 }
 
 export interface TerminalLayer {
@@ -56,6 +58,7 @@ export function createTerminalLayer(
         publishEvent(window.webContents, "terminal:output", batch);
       },
       onExit: (notice) => {
+        options.onTerminalExit?.(notice.metadata);
         const window = getWindow();
         if (window === null || window.isDestroyed()) {
           return;

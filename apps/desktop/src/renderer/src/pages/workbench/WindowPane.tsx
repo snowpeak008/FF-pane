@@ -1,15 +1,17 @@
 /**
- * 工作台窗口壳：标题栏 + 状态 + 操作 + TerminalView（T10.2）。
- * 非活动标签 / 非当前项目不挂载本组件（由父级决定），以卸载 xterm。
+ * 工作台窗口壳：标题栏 + 状态 + 操作 + TerminalView（T10.2 / T10.4）。
  */
 
 import type { WorkbenchWindow } from "@ff-pane/shared";
-import { Columns2, Maximize2, Minimize2, Rows2, X } from "lucide-react";
-import { type ReactElement, useState } from "react";
+import { Bot, Columns2, Maximize2, Minimize2, Rows2, SquareTerminal, X } from "lucide-react";
+import { type ReactElement, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../components/ui/Button";
 import { Tooltip } from "../../components/ui/Tooltip";
+import { queryData } from "../../ipc/query";
+import { useInvokeQuery } from "../../ipc/useInvokeQuery";
 import { cn } from "../../lib/cn";
+import { useWorkbenchStore } from "../../stores/workbench";
 import { TerminalView } from "./TerminalView";
 
 export interface WindowPaneProps {
@@ -45,10 +47,32 @@ export function WindowPane({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(window.title);
   const [exitCode, setExitCode] = useState<number | undefined>(undefined);
+  const [resumeNext, setResumeNext] = useState(false);
+  const patchWindow = useWorkbenchStore((s) => s.patchWindow);
+  const convertWindowToShell = useWorkbenchStore((s) => s.convertWindowToShell);
+  const wasCreatedThisSession = useWorkbenchStore((s) => s.wasCreatedThisSession);
+  const takeInitialPrompt = useWorkbenchStore((s) => s.takeInitialPrompt);
+
+  const { state: profilesState } = useInvokeQuery("profiles:list");
+  const profiles = queryData(profilesState) ?? [];
+  const profile = useMemo(
+    () => profiles.find((item) => item.id === window.profileId),
+    [profiles, window.profileId],
+  );
+
+  const isCli = window.kind === "claude" || window.kind === "codex";
   const running = exitCode === undefined && window.terminalId !== undefined;
+  const autoStart = wasCreatedThisSession(window.id);
+  const initialPrompt = useMemo(() => takeInitialPrompt(window.id), [takeInitialPrompt, window.id]);
+
+  const kindLabel =
+    window.kind === "claude"
+      ? t("workbench.window.kind.claude")
+      : window.kind === "codex"
+        ? t("workbench.window.kind.codex")
+        : t("workbench.window.kind.shell");
 
   return (
-    // 整窗点击聚焦：非按钮语义，故意用容器监听
     // biome-ignore lint/a11y/noStaticElementInteractions: pane focus-on-click
     <section
       className={cn(
@@ -57,9 +81,14 @@ export function WindowPane({
       )}
       data-testid="workbench-window"
       data-window-id={window.id}
+      data-window-kind={window.kind}
       onMouseDown={onFocus}
     >
       <div className="flex h-7 shrink-0 items-center gap-1 border-b border-border bg-surface-sunken px-1">
+        <span className="flex shrink-0 items-center gap-1 px-1 text-fg-muted" title={kindLabel}>
+          {isCli ? <Bot aria-hidden size={12} /> : <SquareTerminal aria-hidden size={12} />}
+          <span className="text-2xs font-medium">{kindLabel}</span>
+        </span>
         {editing ? (
           <input
             className="min-w-0 flex-1 rounded-sm border border-border-strong bg-surface px-1 text-xs text-fg"
@@ -93,9 +122,14 @@ export function WindowPane({
             }}
           >
             {window.title}
+            {isCli && profile !== undefined ? (
+              <span className="ml-1 font-normal text-fg-muted">
+                · {profile.name}
+                {profile.model !== undefined ? ` · ${profile.model}` : ""}
+              </span>
+            ) : null}
           </button>
         )}
-        {/* 预留：role / permission / parent 标识位（T10.5），本单不显示假数据 */}
         <span
           className={cn(
             "shrink-0 rounded-sm px-1 text-2xs",
@@ -111,7 +145,9 @@ export function WindowPane({
             ? t("workbench.window.status.exited")
             : running
               ? t("workbench.window.status.running")
-              : t("workbench.window.status.starting")}
+              : isCli && !autoStart && window.terminalId === undefined
+                ? t("workbench.window.status.stopped")
+                : t("workbench.window.status.starting")}
         </span>
         <Tooltip content={t("workbench.window.splitRight")}>
           <Button
@@ -161,6 +197,7 @@ export function WindowPane({
         </Tooltip>
       </div>
       <TerminalView
+        key={`${window.id}-${window.kind}`}
         windowId={window.id}
         projectId={window.projectId}
         cwd={window.cwd}
@@ -168,6 +205,35 @@ export function WindowPane({
         onTerminalIdChange={onTerminalIdChange}
         onExitCodeChange={setExitCode}
         onCwdFallback={onCwdFallback}
+        {...(isCli && window.profileId !== undefined
+          ? {
+              cliLaunch: {
+                profileId: window.profileId,
+                projectRoot,
+                autoStart: autoStart || resumeNext,
+                ...(window.nativeSessionId !== undefined
+                  ? { nativeSessionId: window.nativeSessionId }
+                  : {}),
+                ...(initialPrompt !== undefined ? { initialPrompt } : {}),
+                ...(resumeNext ? { resume: true } : {}),
+              },
+              onResume: () => {
+                setResumeNext(true);
+              },
+              onRestartFresh: () => {
+                setResumeNext(false);
+                patchWindow(window.projectId, window.id, { nativeSessionId: null });
+              },
+              onConvertToShell: () => {
+                convertWindowToShell(window.projectId, window.id);
+              },
+              onNativeSessionId: (nativeSessionId) => {
+                if (nativeSessionId !== undefined) {
+                  patchWindow(window.projectId, window.id, { nativeSessionId });
+                }
+              },
+            }
+          : {})}
       />
     </section>
   );

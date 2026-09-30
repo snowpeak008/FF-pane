@@ -304,8 +304,28 @@
     "terminal": {
       "exited": "已退出（退出码 {{code}}）",
       "restart": "重新启动",
+      "resume": "续接上次会话",
+      "resumePickerHint": "未绑定会话 id，已打开 Codex 选择器，请在终端中选择要续接的会话。",
+      "restartFresh": "重新开始",
+      "convertToShell": "转为 PowerShell",
       "copy": "复制",
-      "paste": "粘贴"
+      "paste": "粘贴",
+      "promptTooLong": "初始指令过长（上限 {{max}} 字符）。更长内容请后续用工作台 briefs。"
+    },
+    "newWindow": {
+      "title": "新建窗口",
+      "kind": "窗口类型",
+      "kindShell": "PowerShell",
+      "kindClaude": "Claude Code",
+      "kindCodex": "Codex",
+      "profile": "启动配置",
+      "initialPrompt": "初始指令（可选）",
+      "initialPromptPlaceholder": "启动后发给 AI 的第一句话",
+      "cliMissing": "未检测到 {{cli}}。请先安装并确保已在 PATH 中。",
+      "noProfile": "还没有适用于该 CLI 的启动配置。请先到设置页新建一条 Profile。",
+      "goSettings": "去设置",
+      "cancel": "取消",
+      "confirm": "打开"
     },
     "empty": {
       "noProject": "还没有选中项目。到项目列表新建或选一个，再回来开终端。",
@@ -320,10 +340,16 @@
       "closeConfirmBody": "该标签页内仍有运行中的终端，关闭将终止这些进程。"
     },
     "window": {
+      "kind": {
+        "shell": "Shell",
+        "claude": "Claude",
+        "codex": "Codex"
+      },
       "status": {
         "running": "运行中",
         "exited": "已退出",
-        "starting": "启动中"
+        "starting": "启动中",
+        "stopped": "已停止"
       },
       "splitRight": "向右分屏",
       "splitDown": "向下分屏",

@@ -10,9 +10,19 @@
 
 import { randomUUID } from "node:crypto";
 import process from "node:process";
-import { assignProcessToNewJob, killProcessTree, type ProcessJob } from "@ff-pane/adapters";
+import {
+  assignProcessToNewJob,
+  killProcessTree,
+  type ProcessJob,
+  resolveSpawnTarget,
+} from "@ff-pane/adapters";
 import { ByteRingBuffer } from "./ring-buffer";
-import { assertValidCwd, clampTerminalDimension, resolveAllowedShell } from "./shell";
+import {
+  assertValidCwd,
+  clampTerminalDimension,
+  resolveAllowedShell,
+  TerminalValidationError,
+} from "./shell";
 import type {
   CreateTerminalOptions,
   PtyFactory,
@@ -82,7 +92,6 @@ export class PtyManager {
   create(options: CreateTerminalOptions): TerminalRecord {
     this.assertAlive();
     const cwd = assertValidCwd(options.cwd);
-    const shell = resolveAllowedShell(options.shell);
     const cols = clampTerminalDimension(options.cols);
     const rows = clampTerminalDimension(options.rows);
     const id = options.id?.trim() || randomUUID();
@@ -91,9 +100,36 @@ export class PtyManager {
     }
 
     const env = mergeEnv(process.env, options.env);
+    const rawArgs = options.args === undefined ? [] : [...options.args];
+    let file: string;
+    let shellLabel: string;
+    let ptyArgs: readonly string[] | string;
+
+    if (options.direct !== undefined) {
+      file = options.direct.file;
+      const directArgs = options.direct.args ?? rawArgs;
+      ptyArgs = [...directArgs];
+      shellLabel = options.direct.label?.trim() || options.direct.file;
+    } else if (options.executable !== undefined && options.executable.trim() !== "") {
+      const target = resolveSpawnTarget(options.executable.trim(), rawArgs, env);
+      if (target === undefined) {
+        throw new TerminalValidationError(
+          `CLI executable not found on PATH: ${options.executable.trim()}`,
+        );
+      }
+      file = target.file;
+      shellLabel = target.resolvedCommand;
+      // node-pty 接受预转义 CommandLine 字符串（等价 child_process windowsVerbatimArguments）
+      ptyArgs = target.windowsVerbatimArguments ? target.args.join(" ") : [...target.args];
+    } else {
+      file = resolveAllowedShell(options.shell);
+      ptyArgs = rawArgs;
+      shellLabel = file;
+    }
+
     const handle = this.factory({
-      file: shell,
-      args: options.args === undefined ? [] : [...options.args],
+      file,
+      args: ptyArgs,
       cwd,
       env,
       cols,
@@ -107,7 +143,7 @@ export class PtyManager {
       id,
       handle,
       cwd,
-      shell,
+      shell: shellLabel,
       createdAt,
       buffer: new ByteRingBuffer(this.outputBufferBytes),
       metadata: options.metadata,
@@ -290,7 +326,11 @@ export class PtyManager {
     } catch {
       // ignore
     }
-    this.listeners.onExit?.({ id: session.id, exitCode });
+    this.listeners.onExit?.({
+      id: session.id,
+      exitCode,
+      ...(session.metadata !== undefined ? { metadata: session.metadata } : {}),
+    });
     if (options.remove) {
       this.sessions.delete(session.id);
     } else {

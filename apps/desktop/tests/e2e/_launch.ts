@@ -1,10 +1,11 @@
 /**
  * Electron E2E 启动 helper（T4.5）。
  *
- * 隔离原则：每个 spec 独占两个临时目录——
+ * 隔离原则：每个 spec 独占临时目录——
  * - FF_PANE_DATA_ROOT → 全局数据根（projects.json / providers.json 等，见 data.ts）；
- * - --user-data-dir  → Electron userData（window-state / secrets 密文）。
- * 两者都在临时区，冒烟绝不触碰真实用户目录。
+ * - --user-data-dir  → Electron userData（window-state / secrets 密文）；
+ * - CODEX_HOME / CLAUDE_CONFIG_DIR / GROK_HOME → 避免扫/写用户真实 ~/.codex、~/.claude、~/.grok。
+ * 全部落在临时区，冒烟绝不触碰真实用户 CLI 配置目录。
  *
  * 语言固定：首窗加载后写入 localStorage 的 UI 语言键并 reload，使 i18n 以 en-US 初始化，
  * 让选择器（按钮英文名）稳定，无需在生产代码里散布 data-testid。
@@ -15,7 +16,7 @@
  * 语言相关的结论时用它，否则断言只能弱化为「是一种受支持语言」。
  */
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,7 +39,13 @@ export interface LaunchedApp {
   readonly page: Page;
   /** 全局数据根临时目录（= FF_PANE_DATA_ROOT）。 */
   readonly dataRoot: string;
-  /** 释放实例并清理两个临时目录。 */
+  /** Codex 会话根临时目录（= CODEX_HOME）；可预置假 sessions。 */
+  readonly codexHome: string;
+  /** Claude 配置临时目录（= CLAUDE_CONFIG_DIR）。 */
+  readonly claudeConfigDir: string;
+  /** Grok 配置临时目录（= GROK_HOME）。 */
+  readonly grokHome: string;
+  /** 释放实例并清理临时目录。 */
   readonly cleanup: () => Promise<void>;
 }
 
@@ -66,6 +73,11 @@ export interface LaunchOptions {
   readonly dataRoot?: string;
   /** cleanup 时是否删除 dataRoot（复用场景传 false）。 */
   readonly retainDataRoot?: boolean;
+  /**
+   * 复用已有 CODEX_HOME（认领 E2E 可先预置 sessions 再启动）；
+   * 缺省则新建空临时目录。
+   */
+  readonly codexHome?: string;
 }
 
 /**
@@ -75,10 +87,19 @@ export interface LaunchOptions {
 export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedApp> {
   const dataRoot = options.dataRoot ?? mkdtempSync(join(tmpdir(), "ffpane-e2e-data-"));
   const userDataDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-udata-"));
+  const codexHome = options.codexHome ?? mkdtempSync(join(tmpdir(), "ffpane-e2e-codex-"));
+  const claudeConfigDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-claude-"));
+  const grokHome = mkdtempSync(join(tmpdir(), "ffpane-e2e-grok-"));
+  mkdirSync(join(codexHome, "sessions"), { recursive: true });
   const retainDataRoot = options.retainDataRoot === true;
+  const retainCodexHome = options.codexHome !== undefined;
 
   const env = stringEnv(process.env);
   env["FF_PANE_DATA_ROOT"] = dataRoot;
+  env["FF_PANE_E2E"] = "1";
+  env["CODEX_HOME"] = codexHome;
+  env["CLAUDE_CONFIG_DIR"] = claudeConfigDir;
+  env["GROK_HOME"] = grokHome;
   // 确保走生产 loadFile 路径而非 dev server（helper 面向构建产物）。
   delete env["ELECTRON_RENDERER_URL"];
   if (options.pathPrepend !== undefined) {
@@ -136,16 +157,43 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
         `[e2e] app.close() exceeded ${CLEANUP_CLOSE_BUDGET_MS} ms; force-killing electron process`,
       );
       app.process().kill();
-      // 给内核一点时间收走进程树，随后的目录删除才不撞句柄
       await new Promise((resolve) => setTimeout(resolve, 2_000));
+    } else {
+      // 优雅关闭后仍给内核一点时间释放目录句柄（Windows EPERM）
+      await new Promise((resolve) => setTimeout(resolve, 500));
     }
     if (!retainDataRoot) {
-      rmSync(dataRoot, { recursive: true, force: true, maxRetries: 3 });
+      try {
+        rmSync(dataRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 250 });
+      } catch (error) {
+        console.warn(`[e2e] cleanup dataRoot skipped: ${String(error)}`);
+      }
     }
-    rmSync(userDataDir, { recursive: true, force: true, maxRetries: 3 });
+    try {
+      rmSync(userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 250 });
+    } catch (error) {
+      console.warn(`[e2e] cleanup userDataDir skipped: ${String(error)}`);
+    }
+    if (!retainCodexHome) {
+      try {
+        rmSync(codexHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 250 });
+      } catch (error) {
+        console.warn(`[e2e] cleanup codexHome skipped: ${String(error)}`);
+      }
+    }
+    try {
+      rmSync(claudeConfigDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 250 });
+    } catch (error) {
+      console.warn(`[e2e] cleanup claudeConfigDir skipped: ${String(error)}`);
+    }
+    try {
+      rmSync(grokHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 250 });
+    } catch (error) {
+      console.warn(`[e2e] cleanup grokHome skipped: ${String(error)}`);
+    }
   };
 
-  return { app, page, dataRoot, cleanup };
+  return { app, page, dataRoot, codexHome, claudeConfigDir, grokHome, cleanup };
 }
 
 /** 经 HashRouter 直接导航到指定路由（如 "/projects"、"/settings"）。 */
