@@ -60,6 +60,7 @@ import type {
   TaskId,
   TaskSettledStatus,
   TranscriptEntry,
+  WorkbenchPermissionLevel,
 } from "@ff-pane/shared";
 
 /** 项目级请求基：一律携带项目根路径，主进程据此 resolveProjectLayout。 */
@@ -250,8 +251,10 @@ export interface LaunchCliWindowRequest {
   readonly initialPrompt?: string;
   /** true = 续接上次会话。 */
   readonly resume?: boolean;
-  /** 续接用原生会话 id（Claude 必填才算精确续接；Codex 可缺省降级 --last）。 */
+  /** 续接用原生会话 id（Claude 必填才算精确续接；Codex 可缺省打开选择器）。 */
   readonly nativeSessionId?: string;
+  /** T10.5：窗口权限等级。 */
+  readonly permission?: WorkbenchPermissionLevel;
 }
 
 /** workbench:launch-cli 响应（不含密钥）。 */
@@ -265,6 +268,10 @@ export interface LaunchCliWindowResponse {
   readonly resumePicker?: boolean;
   readonly profileName: string;
   readonly model?: string;
+  /** T10.5'：实际生效权限（可能被祖先封顶）。 */
+  readonly effectivePermission: WorkbenchPermissionLevel;
+  /** T10.5'：请求权限被祖先上限压低时为 true。 */
+  readonly permissionCapped: boolean;
 }
 
 /** workbench:session-claimed 事件（Codex 认领到原生会话 id）。 */

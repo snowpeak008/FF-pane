@@ -100,6 +100,10 @@ export function buildCodexMcpOverrides(
       );
       overrides[`${prefix}.env`] = `{ ${entries.join(", ")} }`;
     }
+    if (spec.envVars !== undefined && spec.envVars.length > 0) {
+      overrides[`${prefix}.env_vars`] =
+        `[${spec.envVars.map((name) => JSON.stringify(name)).join(", ")}]`;
+    }
   }
   return overrides;
 }

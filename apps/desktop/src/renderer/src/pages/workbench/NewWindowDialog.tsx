@@ -1,9 +1,13 @@
 /**
- * 工作台新建窗口对话框（T10.4）：PowerShell / Claude Code / Codex + 启动配置。
+ * 工作台新建窗口对话框（T10.4 / T10.5）：PowerShell / Claude / Codex + 权限。
  */
 
-import type { AgentProfile, WorkbenchWindowKind } from "@ff-pane/shared";
-import { runtimeToWorkbenchKind } from "@ff-pane/shared";
+import type { AgentProfile, WorkbenchPermissionLevel, WorkbenchWindowKind } from "@ff-pane/shared";
+import {
+  DEFAULT_WORKBENCH_WINDOW_PERMISSION,
+  runtimeToWorkbenchKind,
+  WORKBENCH_PERMISSION_LEVELS,
+} from "@ff-pane/shared";
 import { type ReactElement, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
@@ -27,6 +31,7 @@ export interface NewWindowDialogResult {
   readonly kind: NewWindowKindChoice;
   readonly profileId?: string;
   readonly initialPrompt?: string;
+  readonly permission?: WorkbenchPermissionLevel;
 }
 
 export interface NewWindowDialogProps {
@@ -59,11 +64,16 @@ export function NewWindowDialog({
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { state: profilesState } = useInvokeQuery("profiles:list");
+  const { state: configState } = useInvokeQuery("config:get");
   const profiles = queryData(profilesState) ?? [];
+  const defaultPermission =
+    queryData(configState)?.defaultWorkbenchPermission ?? DEFAULT_WORKBENCH_WINDOW_PERMISSION;
 
   const [kind, setKind] = useState<NewWindowKindChoice>("shell");
   const [profileId, setProfileId] = useState<string>("");
   const [initialPrompt, setInitialPrompt] = useState("");
+  const [permission, setPermission] = useState<WorkbenchPermissionLevel>(defaultPermission);
+  const [yoloConfirm, setYoloConfirm] = useState(false);
   const [cliMissing, setCliMissing] = useState(false);
   const [probing, setProbing] = useState(false);
 
@@ -74,6 +84,14 @@ export function NewWindowDialog({
     }
     return profiles.filter((profile) => runtimeToWorkbenchKind(profile.runtime) === kind);
   }, [aiRuntime, kind, profiles]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    setPermission(defaultPermission);
+    setYoloConfirm(false);
+  }, [defaultPermission, open]);
 
   useEffect(() => {
     if (!open || aiRuntime === undefined) {
@@ -113,7 +131,11 @@ export function NewWindowDialog({
 
   const canConfirm =
     kind === "shell" ||
-    (profileId !== "" && matchingProfiles.length > 0 && !cliMissing && !probing);
+    (profileId !== "" &&
+      matchingProfiles.length > 0 &&
+      !cliMissing &&
+      !probing &&
+      (permission !== "yolo" || yoloConfirm));
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -188,6 +210,45 @@ export function NewWindowDialog({
                       ))}
                     </select>
                   </Field>
+                  <fieldset className="flex flex-col gap-1.5">
+                    <legend className="text-xs font-medium text-fg-muted">
+                      {t("workbench.newWindow.permission")}
+                    </legend>
+                    <p className="text-2xs text-fg-muted">
+                      {t("workbench.permission.windowsNote")}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {WORKBENCH_PERMISSION_LEVELS.map((level) => (
+                        <Button
+                          key={level}
+                          type="button"
+                          size="sm"
+                          variant={permission === level ? "primary" : "secondary"}
+                          data-testid={`workbench-new-permission-${level}`}
+                          onClick={() => {
+                            setPermission(level);
+                            if (level !== "yolo") {
+                              setYoloConfirm(false);
+                            }
+                          }}
+                        >
+                          {t(`workbench.permission.level.${level}`)}
+                        </Button>
+                      ))}
+                    </div>
+                    {permission === "yolo" ? (
+                      <label className="flex items-start gap-2 text-sm text-danger-text">
+                        <input
+                          type="checkbox"
+                          className="mt-1"
+                          data-testid="workbench-new-yolo-confirm"
+                          checked={yoloConfirm}
+                          onChange={(event) => setYoloConfirm(event.target.checked)}
+                        />
+                        <span>{t("workbench.newWindow.yoloConfirm")}</span>
+                      </label>
+                    ) : null}
+                  </fieldset>
                   <Field
                     htmlFor="workbench-new-prompt"
                     label={t("workbench.newWindow.initialPrompt")}
@@ -222,11 +283,13 @@ export function NewWindowDialog({
               onConfirm({
                 kind,
                 ...(kind !== "shell" && profileId !== "" ? { profileId } : {}),
+                ...(kind !== "shell" ? { permission } : {}),
                 ...(initialPrompt.trim() !== "" ? { initialPrompt: initialPrompt.trim() } : {}),
               });
               onOpenChange(false);
               setInitialPrompt("");
               setKind("shell");
+              setYoloConfirm(false);
             }}
           >
             {t("workbench.newWindow.confirm")}

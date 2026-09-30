@@ -12,7 +12,9 @@
 import {
   clampMaxWorkbenchWindows,
   DEFAULT_GLOBAL_CONFIG,
+  DEFAULT_WORKBENCH_WINDOW_PERMISSION,
   type GlobalConfig,
+  isWorkbenchPermissionLevel,
 } from "@ff-pane/shared";
 import { readJson, writeJsonAtomic } from "../fs/index.js";
 import { ConfigFileInvalidError } from "./errors.js";
@@ -22,6 +24,9 @@ function normalizeConfig(config: GlobalConfig): GlobalConfig {
   return {
     ...config,
     maxWorkbenchWindows: clampMaxWorkbenchWindows(config.maxWorkbenchWindows),
+    defaultWorkbenchPermission: isWorkbenchPermissionLevel(config.defaultWorkbenchPermission)
+      ? config.defaultWorkbenchPermission
+      : DEFAULT_WORKBENCH_WINDOW_PERMISSION,
   };
 }
 

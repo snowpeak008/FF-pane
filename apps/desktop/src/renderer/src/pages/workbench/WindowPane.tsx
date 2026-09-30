@@ -1,8 +1,9 @@
 /**
- * 工作台窗口壳：标题栏 + 状态 + 操作 + TerminalView（T10.2 / T10.4）。
+ * 工作台窗口壳：标题栏 + 状态 + 操作 + TerminalView（T10.2 / T10.4 / T10.5）。
  */
 
-import type { WorkbenchWindow } from "@ff-pane/shared";
+import type { WorkbenchPermissionLevel, WorkbenchWindow } from "@ff-pane/shared";
+import { DEFAULT_WORKBENCH_WINDOW_PERMISSION, WORKBENCH_PERMISSION_LEVELS } from "@ff-pane/shared";
 import { Bot, Columns2, Maximize2, Minimize2, Rows2, SquareTerminal, X } from "lucide-react";
 import { type ReactElement, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -47,11 +48,14 @@ export function WindowPane({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(window.title);
   const [exitCode, setExitCode] = useState<number | undefined>(undefined);
+  const [permissionCappedHint, setPermissionCappedHint] = useState(false);
   const [resumeNext, setResumeNext] = useState(false);
   const patchWindow = useWorkbenchStore((s) => s.patchWindow);
+  const setWindowPermission = useWorkbenchStore((s) => s.setWindowPermission);
   const convertWindowToShell = useWorkbenchStore((s) => s.convertWindowToShell);
   const wasCreatedThisSession = useWorkbenchStore((s) => s.wasCreatedThisSession);
   const takeInitialPrompt = useWorkbenchStore((s) => s.takeInitialPrompt);
+  const getProjectLayout = useWorkbenchStore((s) => s.getProjectLayout);
 
   const { state: profilesState } = useInvokeQuery("profiles:list");
   const profiles = queryData(profilesState) ?? [];
@@ -61,9 +65,36 @@ export function WindowPane({
   );
 
   const isCli = window.kind === "claude" || window.kind === "codex";
+  const permission = window.permission ?? DEFAULT_WORKBENCH_WINDOW_PERMISSION;
+  const [editingPermission, setEditingPermission] = useState(false);
+  const [pendingPermission, setPendingPermission] = useState<WorkbenchPermissionLevel>(permission);
+  const [yoloConfirm, setYoloConfirm] = useState(false);
+  const [launchNonce, setLaunchNonce] = useState(0);
   const running = exitCode === undefined && window.terminalId !== undefined;
   const autoStart = wasCreatedThisSession(window.id);
   const initialPrompt = useMemo(() => takeInitialPrompt(window.id), [takeInitialPrompt, window.id]);
+
+  const openedByLabel = useMemo(() => {
+    if (!isCli) {
+      return undefined;
+    }
+    const openedBy = window.openedBy ?? "user";
+    if (openedBy === "user") {
+      return t("workbench.permission.openedByUser");
+    }
+    const parent = getProjectLayout(window.projectId).windows[openedBy.windowId];
+    const name = parent?.title ?? openedBy.windowId;
+    return t("workbench.permission.openedByWindow", { name });
+  }, [getProjectLayout, isCli, t, window.openedBy, window.projectId]);
+
+  const permissionBadgeClass =
+    permission === "yolo"
+      ? "bg-danger-surface text-danger-text ring-1 ring-danger-text/40"
+      : permission === "edit-exec"
+        ? "bg-warning-surface text-warning-text"
+        : permission === "edit"
+          ? "bg-primary/15 text-primary"
+          : "bg-surface-active text-fg-muted";
 
   const kindLabel =
     window.kind === "claude"
@@ -130,6 +161,48 @@ export function WindowPane({
             ) : null}
           </button>
         )}
+        {isCli ? (
+          <>
+            <button
+              type="button"
+              className={cn("shrink-0 rounded-sm px-1 text-2xs font-medium", permissionBadgeClass)}
+              data-testid="workbench-permission-badge"
+              data-permission={permission}
+              title={t("workbench.permission.badgeHint")}
+              onClick={() => {
+                setPendingPermission(permission);
+                setYoloConfirm(false);
+                setEditingPermission(true);
+              }}
+            >
+              {t(`workbench.permission.level.${permission}`)}
+            </button>
+            {openedByLabel !== undefined ? (
+              <span
+                className="max-w-[7rem] shrink-0 truncate text-2xs text-fg-muted"
+                data-testid="workbench-opened-by"
+                title={openedByLabel}
+              >
+                {openedByLabel}
+              </span>
+            ) : null}
+            {window.permissionNeedsDowngrade === true ? (
+              <span className="shrink-0 text-2xs text-warning-text">
+                {t("workbench.permission.needsRestart")}
+              </span>
+            ) : null}
+            {permissionCappedHint ? (
+              <span
+                className="shrink-0 text-2xs text-warning-text"
+                data-testid="workbench-permission-capped"
+              >
+                {t("workbench.permission.capped", {
+                  level: t(`workbench.permission.level.${permission}`),
+                })}
+              </span>
+            ) : null}
+          </>
+        ) : null}
         <span
           className={cn(
             "shrink-0 rounded-sm px-1 text-2xs",
@@ -196,6 +269,68 @@ export function WindowPane({
           </Button>
         </Tooltip>
       </div>
+      {editingPermission ? (
+        <div
+          className="flex flex-wrap items-center gap-2 border-b border-border bg-surface-sunken px-2 py-1.5"
+          data-testid="workbench-permission-editor"
+        >
+          <span className="text-2xs text-fg-muted">{t("workbench.permission.changeTitle")}</span>
+          <select
+            className="rounded-sm border border-border bg-surface px-1 py-0.5 text-2xs"
+            data-testid="workbench-permission-select"
+            value={pendingPermission}
+            onChange={(event) => {
+              const next = event.target.value as WorkbenchPermissionLevel;
+              setPendingPermission(next);
+              if (next !== "yolo") {
+                setYoloConfirm(false);
+              }
+            }}
+          >
+            {WORKBENCH_PERMISSION_LEVELS.map((level) => (
+              <option key={level} value={level}>
+                {t(`workbench.permission.level.${level}`)}
+              </option>
+            ))}
+          </select>
+          {pendingPermission === "yolo" ? (
+            <label className="flex items-center gap-1 text-2xs text-danger-text">
+              <input
+                type="checkbox"
+                data-testid="workbench-permission-yolo-confirm"
+                checked={yoloConfirm}
+                onChange={(event) => setYoloConfirm(event.target.checked)}
+              />
+              {t("workbench.newWindow.yoloConfirmShort")}
+            </label>
+          ) : null}
+          <span className="text-2xs text-fg-muted">{t("workbench.permission.restartHint")}</span>
+          <Button
+            type="button"
+            size="sm"
+            data-testid="workbench-permission-apply"
+            disabled={pendingPermission === "yolo" && !yoloConfirm}
+            onClick={() => {
+              setWindowPermission(window.projectId, window.id, pendingPermission);
+              setEditingPermission(false);
+              if (running) {
+                setResumeNext(true);
+                setLaunchNonce((n) => n + 1);
+              }
+            }}
+          >
+            {running ? t("workbench.permission.applyAndRestart") : t("workbench.permission.apply")}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={() => setEditingPermission(false)}
+          >
+            {t("workbench.newWindow.cancel")}
+          </Button>
+        </div>
+      ) : null}
       <TerminalView
         key={`${window.id}-${window.kind}`}
         windowId={window.id}
@@ -205,12 +340,14 @@ export function WindowPane({
         onTerminalIdChange={onTerminalIdChange}
         onExitCodeChange={setExitCode}
         onCwdFallback={onCwdFallback}
+        launchNonce={launchNonce}
         {...(isCli && window.profileId !== undefined
           ? {
               cliLaunch: {
                 profileId: window.profileId,
                 projectRoot,
                 autoStart: autoStart || resumeNext,
+                permission,
                 ...(window.nativeSessionId !== undefined
                   ? { nativeSessionId: window.nativeSessionId }
                   : {}),
@@ -219,10 +356,12 @@ export function WindowPane({
               },
               onResume: () => {
                 setResumeNext(true);
+                setLaunchNonce((n) => n + 1);
               },
               onRestartFresh: () => {
                 setResumeNext(false);
                 patchWindow(window.projectId, window.id, { nativeSessionId: null });
+                setLaunchNonce((n) => n + 1);
               },
               onConvertToShell: () => {
                 convertWindowToShell(window.projectId, window.id);
@@ -231,6 +370,10 @@ export function WindowPane({
                 if (nativeSessionId !== undefined) {
                   patchWindow(window.projectId, window.id, { nativeSessionId });
                 }
+              },
+              onPermissionCapped: (effective) => {
+                setWindowPermission(window.projectId, window.id, effective);
+                setPermissionCappedHint(true);
               },
             }
           : {})}

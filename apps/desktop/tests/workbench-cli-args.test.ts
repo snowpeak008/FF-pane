@@ -66,6 +66,22 @@ describe("buildInteractiveClaudeArgs", () => {
       }),
     ).toEqual(["--session-id", "11111111-1111-4111-8111-111111111111"]);
   });
+
+  it("read-only 权限：plan + disallowedTools；续接同样带上", () => {
+    const fresh = buildInteractiveClaudeArgs({
+      sessionId: "11111111-1111-4111-8111-111111111111",
+      permission: "read-only",
+    });
+    expect(fresh).toContain("--permission-mode");
+    expect(fresh).toContain("plan");
+    expect(fresh).toContain("--disallowedTools");
+    expect(fresh).toContain("Bash");
+    const resumed = buildInteractiveClaudeArgs({
+      resumeSessionId: "11111111-1111-4111-8111-111111111111",
+      permission: "yolo",
+    });
+    expect(resumed).toContain("--dangerously-skip-permissions");
+  });
 });
 
 describe("buildInteractiveCodexArgs", () => {
@@ -112,6 +128,32 @@ describe("buildInteractiveCodexArgs", () => {
         resume: true,
       }),
     ).toEqual(["resume", "-C", "D:\\repo"]);
+  });
+
+  it("权限：新开 -s/-a；续接改 -c sandbox_mode / approval_policy", () => {
+    expect(
+      buildInteractiveCodexArgs({
+        cwd: "D:\\repo",
+        permission: "edit",
+      }),
+    ).toEqual(["-C", "D:\\repo", "-s", "workspace-write", "-a", "on-request"]);
+    expect(
+      buildInteractiveCodexArgs({
+        cwd: "D:\\repo",
+        resume: true,
+        resumeSessionId: "abc",
+        permission: "edit-exec",
+      }),
+    ).toEqual([
+      "resume",
+      "abc",
+      "-C",
+      "D:\\repo",
+      "-c",
+      'sandbox_mode="workspace-write"',
+      "-c",
+      'approval_policy="never"',
+    ]);
   });
 });
 
@@ -174,5 +216,39 @@ describe("assertLaunchCliIpcSafe", () => {
         rows: 24,
       }),
     ).not.toThrow();
+  });
+
+  it("拒绝 renderer 伪造 parentWindowId / openedBy", () => {
+    expect(() => assertLaunchCliIpcSafe({ windowId: "w", parentWindowId: "manager" })).toThrow(
+      /parentWindowId/,
+    );
+    expect(() => assertLaunchCliIpcSafe({ windowId: "w", openedBy: "user" })).toThrow(/openedBy/);
+  });
+});
+
+describe("MCP temp token redline", () => {
+  it("临时 MCP 文件只含占位符，不含令牌明文", async () => {
+    const { injectTokenIntoMcpServers, FF_PANE_WINDOW_TOKEN_ENV } = await import("@ff-pane/core");
+    const token = "b".repeat(64);
+    const servers = injectTokenIntoMcpServers(
+      {
+        ffpane: {
+          command: "node",
+          args: ["server.js"],
+          env: { OTHER: "ok" },
+        },
+      },
+      token,
+      "claude-env-expand",
+    );
+    const file = writeWorkbenchClaudeMcpFile(servers);
+    try {
+      const text = readFileSync(file.path, "utf8");
+      expect(text).toContain(`\${${FF_PANE_WINDOW_TOKEN_ENV}}`);
+      expect(text).not.toContain(token);
+      expect(file.directory).toMatch(/ff-pane-wb-mcp-[0-9a-f]{16}-/i);
+    } finally {
+      await file.remove();
+    }
   });
 });

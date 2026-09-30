@@ -22,6 +22,7 @@ function writeFakeCli(dir: string, name: "claude" | "codex", envKey: string): vo
       "process.stdout.write(tag + '_ARGV_JSON=' + JSON.stringify(argv) + '\\n');",
       `const key = ${JSON.stringify(envKey)};`,
       "process.stdout.write(tag + '_ENV_' + key + '=' + (process.env[key] ? 'present' : 'absent') + '\\n');",
+      "process.stdout.write(tag + '_ENV_FF_PANE_WINDOW_TOKEN=' + (process.env.FF_PANE_WINDOW_TOKEN ? 'present' : 'absent') + '\\n');",
       "process.exit(0);",
       "",
     ].join("\n"),
@@ -105,13 +106,19 @@ async function confirmAiWindow(
   page: LaunchedApp["page"],
   kind: "claude" | "codex",
   initialPrompt?: string,
+  permission?: "read-only" | "edit" | "edit-exec" | "yolo",
 ): Promise<void> {
   await expect(page.getByTestId("workbench-new-window-dialog")).toBeVisible();
   await page.getByTestId(`workbench-new-kind-${kind}`).click();
   await expect(page.getByTestId("workbench-new-profile")).toBeVisible({ timeout: 10_000 });
+  if (permission !== undefined) {
+    await page.getByTestId(`workbench-new-permission-${permission}`).click();
+    if (permission === "yolo") {
+      await page.getByTestId("workbench-new-yolo-confirm").check();
+    }
+  }
   if (initialPrompt !== undefined) {
     await page.getByTestId("workbench-new-prompt").fill(initialPrompt);
-    // Playwright fill 对 textarea 保留换行；再兜底用 evaluate 钉死多行
     await page.getByTestId("workbench-new-prompt").evaluate((el, value) => {
       const node = el as HTMLTextAreaElement;
       const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
@@ -439,5 +446,120 @@ test("Codex 预置假 rollout 后认领成功，续接 argv 为 resume <id>", as
     rmSync(fakeBinDir, { recursive: true, force: true });
     rmSync(projectDir, { recursive: true, force: true });
     rmSync(codexHome, { recursive: true, force: true });
+  }
+});
+
+test("T10.5：只读 Claude 权限参数 + 令牌 env 存在 + 改 yolo 重启", async () => {
+  const fakeBinDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-wbperm-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-wbperm-proj-"));
+  seedFakeClaude(fakeBinDir);
+  seedFakeCodex(fakeBinDir);
+
+  const launched = await launchApp({ pathPrepend: fakeBinDir });
+  try {
+    const { app, page } = launched;
+    await createProject(app, page, projectDir, "E2E WB Perm");
+    await page.getByRole("button", { name: /^E2E WB Perm/ }).click();
+
+    await page.evaluate(async (dir: string) => {
+      const invoke = (channel: string, req?: unknown) =>
+        // biome-ignore lint/suspicious/noExplicitAny: E2E
+        (window as any).ffpane.invoke(channel, req);
+      const provider = await invoke("providers:create", {
+        draft: {
+          name: "Local Claude",
+          templateId: "local-login",
+          models: [{ id: "sonnet", label: "Sonnet", kind: "chat" }],
+          defaultModelId: "sonnet",
+          enabled: true,
+        },
+      });
+      await invoke("profiles:create", {
+        draft: {
+          name: "Claude Perm",
+          runtime: "claude-code",
+          providerId: provider.id,
+          defaultRole: "worker",
+          permissionPreset: {
+            readPaths: ["**"],
+            writePaths: ["**"],
+            shell: "allowed",
+            network: false,
+            dangerousOpsRequireApproval: true,
+          },
+          connectionMode: "local_cli",
+          model: "sonnet",
+        },
+      });
+      await invoke("projects:update-settings", {
+        projectRoot: dir,
+        patch: { knowledgeToolEnabled: true },
+      });
+    }, projectDir);
+
+    await gotoRoute(page, "/workbench");
+    await page.getByTestId("workbench-new-tab").click();
+    await confirmAiWindow(page, "claude", undefined, "read-only");
+
+    const windowId = await requireWindowId(page, 0);
+    await expect(page.getByTestId("workbench-permission-badge")).toHaveAttribute(
+      "data-permission",
+      "read-only",
+    );
+    await expect(page.getByTestId("workbench-opened-by")).toContainText(/you|你/i);
+
+    await expect
+      .poll(async () => readReplayForWindow(page, windowId), { timeout: 20_000 })
+      .toContain("FAKE_CLAUDE_ARGV_JSON=");
+    const text = await readReplayForWindow(page, windowId);
+    const argv = parseArgvJson(text, "FAKE_CLAUDE");
+    expect(argv).toContain("--permission-mode");
+    expect(argv).toContain("plan");
+    expect(argv).toContain("--disallowedTools");
+    expect(argv).toContain("Bash");
+    expect(text).toMatch(/FAKE_CLAUDE_ENV_FF_PANE_WINDOW_TOKEN=present/);
+    expect(JSON.stringify(argv)).not.toMatch(/[a-f0-9]{64}/i);
+
+    // 挂了知识库 MCP 时：临时 --mcp-config 不得含令牌明文（仅 ${FF_PANE_WINDOW_TOKEN}）
+    const mcpIdx = argv.indexOf("--mcp-config");
+    expect(mcpIdx).toBeGreaterThanOrEqual(0);
+    const mcpPath = argv[mcpIdx + 1];
+    expect(typeof mcpPath).toBe("string");
+    if (typeof mcpPath === "string") {
+      const { readFileSync } = await import("node:fs");
+      const mcpText = readFileSync(mcpPath, "utf8");
+      expect(mcpText).toContain("$" + "{FF_PANE_WINDOW_TOKEN}");
+      expect(mcpText).not.toMatch(/"FF_PANE_WINDOW_TOKEN"\s*:\s*"[a-f0-9]{64}"/i);
+    }
+
+    await expect(page.getByTestId("terminal-cli-stopped")).toBeVisible({ timeout: 15_000 });
+
+    await page.getByTestId("workbench-permission-badge").click();
+    await expect(page.getByTestId("workbench-permission-editor")).toBeVisible();
+    await page.getByTestId("workbench-permission-select").selectOption("yolo");
+    await page.getByTestId("workbench-permission-yolo-confirm").check();
+    await page.getByTestId("workbench-permission-apply").click();
+    await expect(page.getByTestId("workbench-permission-badge")).toHaveAttribute(
+      "data-permission",
+      "yolo",
+    );
+
+    await page.getByTestId("cli-restart-fresh").click({ force: true });
+    await expect
+      .poll(
+        async () => {
+          const replay = await readReplayForWindow(page, windowId);
+          return replay.includes("--dangerously-skip-permissions") ? replay : "";
+        },
+        { timeout: 20_000 },
+      )
+      .toContain("--dangerously-skip-permissions");
+    const after = parseArgvJson(await readReplayForWindow(page, windowId), "FAKE_CLAUDE");
+    expect(after).toContain("--dangerously-skip-permissions");
+    expect(after).not.toContain("plan");
+  } finally {
+    await launched.cleanup();
+    rmSync(fakeBinDir, { recursive: true, force: true });
+    rmSync(projectDir, { recursive: true, force: true });
   }
 });

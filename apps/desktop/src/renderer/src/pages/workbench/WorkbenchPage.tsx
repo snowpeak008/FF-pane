@@ -127,6 +127,7 @@ export function WorkbenchPage(): ReactElement {
           kind: result.kind,
           ...(result.profileId !== undefined ? { profileId: result.profileId } : {}),
           ...(result.initialPrompt !== undefined ? { initialPrompt: result.initialPrompt } : {}),
+          ...(result.permission !== undefined ? { permission: result.permission } : {}),
         });
         return;
       }
@@ -138,6 +139,7 @@ export function WorkbenchPage(): ReactElement {
         kind: result.kind,
         ...(result.profileId !== undefined ? { profileId: result.profileId } : {}),
         ...(result.initialPrompt !== undefined ? { initialPrompt: result.initialPrompt } : {}),
+        ...(result.permission !== undefined ? { permission: result.permission } : {}),
       });
     },
     [createTabWithWindow, entry, pendingCreate, splitWindow],

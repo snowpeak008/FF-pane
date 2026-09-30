@@ -8,9 +8,12 @@ import type {
   PaneSplitDirection,
   ProjectId,
   ProjectWorkbenchLayout,
+  WorkbenchOpenedBy,
+  WorkbenchPermissionLevel,
   WorkbenchTab,
   WorkbenchWindow,
 } from "@ff-pane/shared";
+import { DEFAULT_WORKBENCH_WINDOW_PERMISSION, WORKBENCH_PERMISSION_RANK } from "@ff-pane/shared";
 import { create } from "zustand";
 import {
   collectWindowIds,
@@ -58,6 +61,9 @@ export interface WorkbenchStoreActions {
     readonly kind?: WorkbenchWindow["kind"];
     readonly profileId?: string;
     readonly initialPrompt?: string;
+    readonly permission?: WorkbenchPermissionLevel;
+    readonly parentWindowId?: string;
+    readonly openedBy?: WorkbenchOpenedBy;
   }) => { readonly ok: true; readonly windowId: string; readonly autoLaunch: boolean };
   readonly splitWindow: (input: {
     readonly projectId: ProjectId;
@@ -67,6 +73,9 @@ export interface WorkbenchStoreActions {
     readonly kind?: WorkbenchWindow["kind"];
     readonly profileId?: string;
     readonly initialPrompt?: string;
+    readonly permission?: WorkbenchPermissionLevel;
+    readonly parentWindowId?: string;
+    readonly openedBy?: WorkbenchOpenedBy;
   }) =>
     | { readonly ok: true; readonly windowId: string; readonly autoLaunch: boolean }
     | { readonly ok: false; readonly reason: "missing" };
@@ -79,7 +88,16 @@ export interface WorkbenchStoreActions {
       kind: WorkbenchWindow["kind"];
       title: string;
       terminalId: string | undefined;
+      permission: WorkbenchPermissionLevel;
+      permissionNeedsDowngrade: boolean;
+      parentClosed: boolean;
     }>,
+  ) => void;
+  /** 用户调整权限：封顶后代并标记需重启。 */
+  readonly setWindowPermission: (
+    projectId: ProjectId,
+    windowId: string,
+    permission: WorkbenchPermissionLevel,
   ) => void;
   /** 本会话内新建的窗口（应用重启后清空）——用于 AI 窗口是否自动启动。 */
   readonly wasCreatedThisSession: (windowId: string) => boolean;
@@ -295,7 +313,17 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
     return total;
   },
 
-  createTabWithWindow({ projectId, projectRoot, title, kind = "shell", profileId, initialPrompt }) {
+  createTabWithWindow({
+    projectId,
+    projectRoot,
+    title,
+    kind = "shell",
+    profileId,
+    initialPrompt,
+    permission,
+    parentWindowId,
+    openedBy,
+  }) {
     const windowId = newId("win");
     const tabId = newId("tab");
     sessionCreatedWindows.add(windowId);
@@ -304,6 +332,7 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
     }
     patchProject(set, get, projectId, (layout) => {
       const resolvedKind = kind;
+      const isAi = resolvedKind === "claude" || resolvedKind === "codex";
       const window: WorkbenchWindow = {
         id: windowId,
         projectId,
@@ -314,6 +343,13 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
         cwd: projectRoot,
         createdAt: Date.now(),
         ...(profileId !== undefined ? { profileId } : {}),
+        ...(isAi
+          ? {
+              permission: permission ?? DEFAULT_WORKBENCH_WINDOW_PERMISSION,
+              openedBy: openedBy ?? "user",
+            }
+          : {}),
+        ...(parentWindowId !== undefined ? { parentWindowId } : {}),
       };
       const tab: WorkbenchTab = {
         id: tabId,
@@ -340,6 +376,9 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
     kind = "shell",
     profileId,
     initialPrompt,
+    permission,
+    parentWindowId,
+    openedBy,
   }) {
     const layout = get().getProjectLayout(projectId);
     const activeTab = layout.tabs.find((tab) => tab.id === layout.activeTabId);
@@ -356,6 +395,7 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
       if (tab === undefined) {
         return current;
       }
+      const isAi = kind === "claude" || kind === "codex";
       const window: WorkbenchWindow = {
         id: windowId,
         projectId,
@@ -364,6 +404,13 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
         cwd: projectRoot,
         createdAt: Date.now(),
         ...(profileId !== undefined ? { profileId } : {}),
+        ...(isAi
+          ? {
+              permission: permission ?? DEFAULT_WORKBENCH_WINDOW_PERMISSION,
+              openedBy: openedBy ?? "user",
+            }
+          : {}),
+        ...(parentWindowId !== undefined ? { parentWindowId } : {}),
       };
       const nextRoot = splitLeaf(tab.root, targetWindowId, windowId, direction);
       return {
@@ -417,10 +464,69 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
       if (patch.nativeSessionId !== undefined) {
         Object.assign(next, { nativeSessionId: patch.nativeSessionId });
       }
+      if (patch.permission !== undefined) {
+        Object.assign(next, { permission: patch.permission });
+      }
+      if (patch.permissionNeedsDowngrade !== undefined) {
+        Object.assign(next, { permissionNeedsDowngrade: patch.permissionNeedsDowngrade });
+      }
+      if (patch.parentClosed !== undefined) {
+        Object.assign(next, { parentClosed: patch.parentClosed });
+      }
       return {
         ...current,
         windows: { ...current.windows, [windowId]: next },
       };
+    });
+  },
+
+  setWindowPermission(projectId, windowId, permission) {
+    patchProject(set, get, projectId, (current) => {
+      const self = current.windows[windowId];
+      if (self === undefined || (self.kind !== "claude" && self.kind !== "codex")) {
+        return current;
+      }
+      const nextWindows: Record<string, WorkbenchWindow> = { ...current.windows };
+      nextWindows[windowId] = {
+        ...self,
+        permission,
+        permissionNeedsDowngrade: false,
+      };
+      const walkAncestors = (id: string): string[] => {
+        const out: string[] = [];
+        let cur = nextWindows[id];
+        const seen = new Set<string>();
+        while (cur?.parentWindowId) {
+          if (seen.has(cur.parentWindowId)) {
+            break;
+          }
+          seen.add(cur.parentWindowId);
+          out.push(cur.parentWindowId);
+          cur = nextWindows[cur.parentWindowId];
+        }
+        return out;
+      };
+      for (const [id, node] of Object.entries(current.windows)) {
+        if (id === windowId) {
+          continue;
+        }
+        if (!walkAncestors(id).includes(windowId)) {
+          continue;
+        }
+        if ((node.kind !== "claude" && node.kind !== "codex") || node.permission === undefined) {
+          continue;
+        }
+        if (WORKBENCH_PERMISSION_RANK[node.permission] <= WORKBENCH_PERMISSION_RANK[permission]) {
+          nextWindows[id] = { ...node, permissionNeedsDowngrade: false };
+          continue;
+        }
+        nextWindows[id] = {
+          ...node,
+          permission,
+          permissionNeedsDowngrade: true,
+        };
+      }
+      return { ...current, windows: nextWindows };
     });
   },
 
@@ -430,9 +536,23 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
       if (window === undefined) {
         return current;
       }
-      const { profileId: _p, nativeSessionId: _n, ...rest } = window;
+      const {
+        profileId: _p,
+        nativeSessionId: _n,
+        permission: _perm,
+        openedBy: _ob,
+        parentWindowId: _pw,
+        parentClosed: _pc,
+        permissionNeedsDowngrade: _pd,
+        ...rest
+      } = window;
       void _p;
       void _n;
+      void _perm;
+      void _ob;
+      void _pw;
+      void _pc;
+      void _pd;
       return {
         ...current,
         windows: {
@@ -456,8 +576,17 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
     }
     forgetLiveTerminals([windowId]);
     patchProject(set, get, projectId, (current) => {
-      const { [windowId]: _removed, ...restWindows } = current.windows;
-      void _removed;
+      const nextWindows: Record<string, WorkbenchWindow> = {};
+      for (const [id, node] of Object.entries(current.windows)) {
+        if (id === windowId) {
+          continue;
+        }
+        if (node.parentWindowId === windowId) {
+          nextWindows[id] = { ...node, parentClosed: true };
+        } else {
+          nextWindows[id] = node;
+        }
+      }
       const tabs: WorkbenchTab[] = [];
       for (const tab of current.tabs) {
         const nextRoot = removeLeaf(tab.root, windowId);
@@ -471,12 +600,12 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
         : (tabs[0]?.id ?? null);
       return {
         ...current,
-        windows: restWindows,
+        windows: nextWindows,
         tabs,
         activeTabId,
         focusedWindowId:
           current.focusedWindowId === windowId
-            ? (Object.keys(restWindows)[0] ?? null)
+            ? (Object.keys(nextWindows)[0] ?? null)
             : current.focusedWindowId,
         maximizedWindowId:
           current.maximizedWindowId === windowId ? null : current.maximizedWindowId,

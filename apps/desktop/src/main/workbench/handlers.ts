@@ -1,10 +1,15 @@
 /**
- * 工作台 CLI 启动 IPC（T10.4 / T10.4'）。
+ * 工作台 CLI 启动 IPC（T10.4 / T10.4' / T10.5'）。
  */
 
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { clampMaxWorkbenchWindows, type Provider } from "@ff-pane/shared";
+import { createWindowTokenRegistry, type WindowTokenRegistry } from "@ff-pane/core";
+import {
+  clampMaxWorkbenchWindows,
+  isWorkbenchPermissionLevel,
+  type Provider,
+} from "@ff-pane/shared";
 import {
   createConfigStore,
   createProfileStore,
@@ -21,6 +26,7 @@ import { resolveGlobalRoot } from "../data-root";
 import { createSafeStorageBackend, createSecretStore, resolveSecretsFile } from "../secrets";
 import { WORKBENCH_WINDOW_LIMIT_ERROR_PREFIX } from "../terminal/handlers";
 import type { PtyManager } from "../terminal/manager";
+import { createWorkbenchAuthRegistry, type WorkbenchAuthRegistry } from "./auth-registry";
 import { CodexSessionClaimer } from "./codex-claim";
 import { assertLaunchCliIpcSafe, launchCliWindow, WorkbenchMcpTempRegistry } from "./launch-cli";
 import { cleanupStaleWorkbenchMcpDirs } from "./mcp-temp";
@@ -29,6 +35,8 @@ export interface WorkbenchCliLayer {
   readonly handlers: Pick<InvokeHandlers, "workbench:launch-cli">;
   readonly mcpRegistry: WorkbenchMcpTempRegistry;
   readonly codexClaimer: CodexSessionClaimer;
+  readonly tokenRegistry: WindowTokenRegistry;
+  readonly authRegistry: WorkbenchAuthRegistry;
   readonly dispose: () => Promise<void>;
 }
 
@@ -36,6 +44,8 @@ export interface WorkbenchCliLayerOptions {
   readonly manager: PtyManager;
   readonly getWindow: () => BrowserWindow | null;
   readonly getMaxWorkbenchWindows?: () => number | Promise<number>;
+  /** 与 data 层共享的权威权限表；缺省则本层自建。 */
+  readonly authRegistry?: WorkbenchAuthRegistry;
 }
 
 function mainModuleDir(): string {
@@ -60,12 +70,18 @@ export async function createWorkbenchCliLayer(
   });
   const mcpRegistry = new WorkbenchMcpTempRegistry();
   const codexClaimer = new CodexSessionClaimer();
+  const tokenRegistry = createWindowTokenRegistry();
+  const authRegistry = options.authRegistry ?? createWorkbenchAuthRegistry();
   const getMax =
     options.getMaxWorkbenchWindows ?? (async () => (await config.readConfig()).maxWorkbenchWindows);
 
   const handlers: WorkbenchCliLayer["handlers"] = {
     "workbench:launch-cli": async (request) => {
       assertLaunchCliIpcSafe(request);
+      const permission =
+        request.permission !== undefined && isWorkbenchPermissionLevel(request.permission)
+          ? request.permission
+          : undefined;
       const result = await launchCliWindow(
         {
           windowId: request.windowId,
@@ -80,6 +96,7 @@ export async function createWorkbenchCliLayer(
           ...(request.nativeSessionId !== undefined
             ? { nativeSessionId: request.nativeSessionId }
             : {}),
+          ...(permission !== undefined ? { permission } : {}),
         },
         {
           manager: options.manager,
@@ -114,6 +131,8 @@ export async function createWorkbenchCliLayer(
           indexDbFile: resolveGlobalLayout(resolveGlobalRoot()).indexDbFile,
           moduleDir: join(mainModuleDir()),
           mcpRegistry,
+          tokenRegistry,
+          authRegistry,
           clampMax: clampMaxWorkbenchWindows,
           limitErrorPrefix: WORKBENCH_WINDOW_LIMIT_ERROR_PREFIX,
           codexClaimer,
@@ -139,6 +158,8 @@ export async function createWorkbenchCliLayer(
         ...(result.resumePicker === true ? { resumePicker: true } : {}),
         profileName: result.profileName,
         ...(result.model !== undefined ? { model: result.model } : {}),
+        effectivePermission: result.effectivePermission,
+        permissionCapped: result.permissionCapped,
       };
     },
   };
@@ -147,22 +168,28 @@ export async function createWorkbenchCliLayer(
     handlers,
     mcpRegistry,
     codexClaimer,
+    tokenRegistry,
+    authRegistry,
     dispose: async () => {
       codexClaimer.dispose();
+      tokenRegistry.clear();
+      authRegistry.clear();
       await mcpRegistry.releaseAll();
     },
   };
 }
 
-/** 根据 terminal metadata.windowId 释放 MCP 临时文件，并取消 Codex 认领。 */
+/** 根据 terminal metadata.windowId 释放 MCP 临时文件、吊销令牌，并取消 Codex 认领。 */
 export function releaseMcpForTerminalMetadata(
   registry: WorkbenchMcpTempRegistry,
   metadata: Readonly<Record<string, unknown>> | undefined,
   claimer?: CodexSessionClaimer,
+  tokenRegistry?: WindowTokenRegistry,
 ): void {
   const windowId = metadata?.["windowId"];
   if (typeof windowId === "string" && windowId.trim() !== "") {
     void registry.release(windowId);
     claimer?.cancel(windowId);
+    tokenRegistry?.revoke(windowId);
   }
 }

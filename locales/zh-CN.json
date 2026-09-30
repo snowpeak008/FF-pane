@@ -319,6 +319,9 @@
       "kindClaude": "Claude Code",
       "kindCodex": "Codex",
       "profile": "启动配置",
+      "permission": "权限等级",
+      "yoloConfirm": "我了解 yolo 会跳过全部 CLI 权限检查，存在改坏仓库与执行任意命令的风险，仍要继续。",
+      "yoloConfirmShort": "确认接受 yolo 风险",
       "initialPrompt": "初始指令（可选）",
       "initialPromptPlaceholder": "启动后发给 AI 的第一句话",
       "cliMissing": "未检测到 {{cli}}。请先安装并确保已在 PATH 中。",
@@ -326,6 +329,24 @@
       "goSettings": "去设置",
       "cancel": "取消",
       "confirm": "打开"
+    },
+    "permission": {
+      "level": {
+        "read-only": "只读",
+        "edit": "可改文件",
+        "edit-exec": "可改+跑命令",
+        "yolo": "YOLO"
+      },
+      "windowsNote": "Windows 上这是 CLI 规则 + 本软件裁决，不是操作系统级隔离。",
+      "openedByUser": "由你开启",
+      "openedByWindow": "由 {{name}} 开启",
+      "badgeHint": "点击可修改权限（需重启生效）",
+      "changeTitle": "权限",
+      "restartHint": "正在运行时需重启并续接后新参数才生效。",
+      "needsRestart": "需重启生效",
+      "capped": "已按父级上限封顶为 {{level}}",
+      "apply": "应用",
+      "applyAndRestart": "应用并重启续接"
     },
     "empty": {
       "noProject": "还没有选中项目。到项目列表新建或选一个，再回来开终端。",
@@ -598,6 +619,13 @@
       "option": "{{count}} 个",
       "loadError": "读取失败",
       "error": "保存窗口上限失败"
+    },
+    "workbenchPermission": {
+      "title": "工作台权限",
+      "label": "新窗口默认权限",
+      "hint": "界面新建 AI 窗口时的默认等级；窗口开的子窗口仍不超过父窗口。Windows 上非 OS 隔离。",
+      "loadError": "读取失败",
+      "error": "保存默认权限失败"
     },
     "profiles": {
       "title": "Agent Profile",

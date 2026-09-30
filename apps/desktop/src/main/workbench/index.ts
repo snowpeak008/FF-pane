@@ -1,5 +1,7 @@
-/** 工作台主进程模块（T10.4 CLI 启动）。 */
-
+export {
+  createWorkbenchAuthRegistry,
+  type WorkbenchAuthRegistry,
+} from "./auth-registry";
 export {
   assertSecretAbsent,
   buildInteractiveClaudeArgs,

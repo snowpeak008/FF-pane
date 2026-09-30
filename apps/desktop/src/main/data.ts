@@ -149,6 +149,8 @@ export type MainWindowGetter = () => BrowserWindow | null;
 export interface DataHandlersOptions {
   /** 项目从注册表移除后的清场（杀该项目 PTY 等）；可在终端层装配后注入。 */
   readonly onProjectRemoved?: (projectId: string) => void | Promise<void>;
+  /** T10.5'：与 CLI 启动层共享的权威权限表。 */
+  readonly authRegistry?: import("./workbench/auth-registry").WorkbenchAuthRegistry;
 }
 
 /**
@@ -462,9 +464,23 @@ export async function createDataHandlers(
 
     "config:update": (request) => config.updateConfig(request),
 
-    "workbench:get-layouts": () => workbenchLayouts.readAll(),
+    "workbench:get-layouts": async () => {
+      const all = await workbenchLayouts.readAll();
+      const authRegistry = options.authRegistry;
+      if (authRegistry === undefined) {
+        return all;
+      }
+      const next: Record<string, (typeof all)[string]> = {};
+      for (const [projectId, layout] of Object.entries(all)) {
+        next[projectId] = authRegistry.syncLayout(layout);
+      }
+      return next;
+    },
     "workbench:save-layout": async (request) => {
-      await workbenchLayouts.saveProject(request.layout);
+      const authRegistry = options.authRegistry;
+      const layout =
+        authRegistry !== undefined ? authRegistry.syncLayout(request.layout) : request.layout;
+      await workbenchLayouts.saveProject(layout);
       return { ok: true as const };
     },
     "workbench:remove-layout": async (request) => {

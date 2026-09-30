@@ -13,6 +13,7 @@ import {
   type McpStdioServerSpec,
 } from "@ff-pane/adapters";
 
+/** 可识别前缀；完整目录名另含随机 hex，避免固定短名可枚举。 */
 export const WORKBENCH_MCP_DIR_PREFIX = "ff-pane-wb-mcp-";
 
 /** 启动清扫：超过此时长的陈旧临时目录可删（默认 1 小时）。 */
@@ -24,12 +25,22 @@ export interface WorkbenchMcpTempFile {
   remove(): Promise<void>;
 }
 
+function randomDirPrefix(): string {
+  const bytes = new Uint8Array(8);
+  globalThis.crypto.getRandomValues(bytes);
+  let hex = "";
+  for (const byte of bytes) {
+    hex += byte.toString(16).padStart(2, "0");
+  }
+  return `${WORKBENCH_MCP_DIR_PREFIX}${hex}-`;
+}
+
 /** 写入 Claude `--mcp-config` 临时文件（内容与 headless 适配器同形）。 */
 export function writeWorkbenchClaudeMcpFile(
   servers: Readonly<Record<string, McpStdioServerSpec>>,
   options: { readonly dir?: string } = {},
 ): WorkbenchMcpTempFile {
-  const directory = mkdtempSync(join(options.dir ?? tmpdir(), WORKBENCH_MCP_DIR_PREFIX));
+  const directory = mkdtempSync(join(options.dir ?? tmpdir(), randomDirPrefix()));
   const path = join(directory, CLAUDE_MCP_FILE_NAME);
   writeFileSync(path, buildClaudeMcpConfig(servers), "utf8");
   let removed = false;

@@ -11,6 +11,7 @@ import { LanguageSection } from "./LanguageSection";
 import { ProfilesSection } from "./profiles/ProfilesSection";
 import { ProvidersSection } from "./providers/ProvidersSection";
 import { RolesSection } from "./roles/RolesSection";
+import { WorkbenchDefaultPermissionSection } from "./WorkbenchDefaultPermissionSection";
 import { WorkbenchLimitSection } from "./WorkbenchLimitSection";
 
 /**
@@ -33,6 +34,8 @@ export function SettingsPage(): ReactElement {
           <ContextWarnSection />
           <Separator />
           <WorkbenchLimitSection />
+          <Separator />
+          <WorkbenchDefaultPermissionSection />
           <Separator />
           <ProvidersSection />
           <Separator />

@@ -9,6 +9,10 @@ import { DEFAULT_CONTEXT_WARN_PERCENT } from "./context-window.js";
 import type { AiOutputLanguage } from "./language.js";
 import type { PermissionEnvelope } from "./permission.js";
 import { DEFAULT_MAX_WORKBENCH_WINDOWS } from "./workbench.js";
+import {
+  DEFAULT_WORKBENCH_WINDOW_PERMISSION,
+  type WorkbenchPermissionLevel,
+} from "./workbench-permission.js";
 
 /**
  * 设计文档 §8.3.5 路径二 —— Agent 只读知识库检索工具的 MCP 接入设置。
@@ -57,6 +61,11 @@ export interface GlobalConfig {
    * 出厂默认 DEFAULT_MAX_WORKBENCH_WINDOWS（12）。
    */
   readonly maxWorkbenchWindows: number;
+  /**
+   * T10.5 —— 界面新建 AI 窗口的默认权限等级。
+   * 出厂默认 DEFAULT_WORKBENCH_WINDOW_PERMISSION（edit）。
+   */
+  readonly defaultWorkbenchPermission: WorkbenchPermissionLevel;
 }
 
 /** AI 输出语言的出厂默认（产品中文优先）。 */
@@ -125,4 +134,5 @@ export const DEFAULT_GLOBAL_CONFIG: GlobalConfig = {
   defaultPermissionPreset: DEFAULT_PERMISSION_PRESET,
   contextWarnPercent: DEFAULT_CONTEXT_WARN_PERCENT,
   maxWorkbenchWindows: DEFAULT_MAX_WORKBENCH_WINDOWS,
+  defaultWorkbenchPermission: DEFAULT_WORKBENCH_WINDOW_PERMISSION,
 };

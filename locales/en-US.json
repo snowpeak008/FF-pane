@@ -319,6 +319,9 @@
       "kindClaude": "Claude Code",
       "kindCodex": "Codex",
       "profile": "Launch profile",
+      "permission": "Permission level",
+      "yoloConfirm": "I understand YOLO skips all CLI permission checks and may alter the repo or run arbitrary commands.",
+      "yoloConfirmShort": "Confirm YOLO risk",
       "initialPrompt": "Initial prompt (optional)",
       "initialPromptPlaceholder": "First message sent to the AI after launch",
       "cliMissing": "{{cli}} was not found. Install it and make sure it is on PATH.",
@@ -326,6 +329,24 @@
       "goSettings": "Go to Settings",
       "cancel": "Cancel",
       "confirm": "Open"
+    },
+    "permission": {
+      "level": {
+        "read-only": "Read-only",
+        "edit": "Edit files",
+        "edit-exec": "Edit + exec",
+        "yolo": "YOLO"
+      },
+      "windowsNote": "On Windows this is CLI policy plus in-app arbitration, not OS-level isolation.",
+      "openedByUser": "Opened by you",
+      "openedByWindow": "Opened by {{name}}",
+      "badgeHint": "Click to change permission (restart required)",
+      "changeTitle": "Permission",
+      "restartHint": "A running session must restart/resume for new CLI flags to apply.",
+      "needsRestart": "Restart required",
+      "capped": "Capped to {{level}} by parent ceiling",
+      "apply": "Apply",
+      "applyAndRestart": "Apply and restart"
     },
     "empty": {
       "noProject": "No project selected. Create or pick one on the projects page, then open a terminal.",
@@ -598,6 +619,13 @@
       "option": "{{count}}",
       "loadError": "Failed to load",
       "error": "Failed to save window limit"
+    },
+    "workbenchPermission": {
+      "title": "Workbench permissions",
+      "label": "Default permission for new windows",
+      "hint": "Default level when you create an AI window in the UI. Child windows opened by a window cannot exceed the parent. Not OS isolation on Windows.",
+      "loadError": "Failed to load",
+      "error": "Failed to save default permission"
     },
     "profiles": {
       "title": "Agent profiles",

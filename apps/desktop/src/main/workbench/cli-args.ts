@@ -1,8 +1,11 @@
 /**
- * 交互式 Claude Code / Codex 启动参数组装（T10.4）。
- * 纯函数：不含密钥；MCP 路径与 configOverrides 由调用方注入。
+ * 交互式 Claude Code / Codex 启动参数组装（T10.4 / T10.5）。
+ * 纯函数：不含密钥与窗口令牌；MCP 路径与 configOverrides 由调用方注入。
  * 与 headless 适配器（-p / exec --json）分离——工作台窗口跑交互 TUI。
  */
+
+import { resolvePermissionCliArgs } from "@ff-pane/core";
+import type { WorkbenchPermissionLevel } from "@ff-pane/shared";
 
 /** Claude Code 默认可执行文件名。 */
 export const CLAUDE_INTERACTIVE_COMMAND = "claude";
@@ -25,6 +28,8 @@ export interface BuildInteractiveClaudeArgsInput {
    */
   readonly strictMcp?: boolean;
   readonly initialPrompt?: string;
+  /** T10.5：权限等级 → CLI 参数。 */
+  readonly permission?: WorkbenchPermissionLevel;
 }
 
 /** 交互式 Codex 启动参数。 */
@@ -38,6 +43,8 @@ export interface BuildInteractiveCodexArgsInput {
   /** 是否续接（true 且无 id → `codex resume` 选择器）。 */
   readonly resume?: boolean;
   readonly initialPrompt?: string;
+  /** T10.5：权限等级 → CLI 参数（续接时同样重给）。 */
+  readonly permission?: WorkbenchPermissionLevel;
 }
 
 /**
@@ -50,6 +57,15 @@ export function buildInteractiveClaudeArgs(input: BuildInteractiveClaudeArgsInpu
     args.push("--resume", input.resumeSessionId.trim());
   } else if (input.sessionId !== undefined && input.sessionId.trim() !== "") {
     args.push("--session-id", input.sessionId.trim());
+  }
+  if (input.permission !== undefined) {
+    args.push(
+      ...resolvePermissionCliArgs({
+        cli: "claude-code",
+        level: input.permission,
+        resume: input.resumeSessionId !== undefined && input.resumeSessionId.trim() !== "",
+      }),
+    );
   }
   if (input.model !== undefined && input.model.trim() !== "") {
     args.push("--model", input.model.trim());
@@ -71,7 +87,7 @@ export function buildInteractiveClaudeArgs(input: BuildInteractiveClaudeArgsInpu
 
 /**
  * 组装交互式 `codex` / `codex resume` argv（不含可执行文件名）。
- * 默认进 TUI；续接走 `resume` 子命令。
+ * 默认进 TUI；续接走 `resume` 子命令；权限参数新开/续接均显式带上。
  */
 export function buildInteractiveCodexArgs(input: BuildInteractiveCodexArgsInput): string[] {
   const args: string[] = [];
@@ -81,9 +97,17 @@ export function buildInteractiveCodexArgs(input: BuildInteractiveCodexArgsInput)
     if (input.resumeSessionId !== undefined && input.resumeSessionId.trim() !== "") {
       args.push(input.resumeSessionId.trim());
     }
-    // 无 id：不加 --last，进入官方选择器，避免同 cwd 多窗口接错
   }
   args.push("-C", input.cwd);
+  if (input.permission !== undefined) {
+    args.push(
+      ...resolvePermissionCliArgs({
+        cli: "codex",
+        level: input.permission,
+        resume: resuming,
+      }),
+    );
+  }
   if (input.model !== undefined && input.model.trim() !== "") {
     args.push("-m", input.model.trim());
   }
@@ -104,6 +128,18 @@ export function assertSecretAbsent(secret: string | undefined, surfaces: readonl
   for (const surface of surfaces) {
     if (surface.includes(secret)) {
       throw new Error("密钥出现在命令行参数或临时文件中（违反 T10.4 红线）");
+    }
+  }
+}
+
+/** 断言窗口令牌不出现在 argv / 布局等表面。 */
+export function assertTokenAbsent(token: string | undefined, surfaces: readonly string[]): void {
+  if (token === undefined || token.length === 0) {
+    return;
+  }
+  for (const surface of surfaces) {
+    if (surface.includes(token)) {
+      throw new Error("窗口令牌出现在命令行参数或落盘内容中（违反 T10.5 红线）");
     }
   }
 }

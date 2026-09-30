@@ -1,0 +1,133 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > claude-code × edit × fresh 1`] = `
+[
+  "--permission-mode",
+  "acceptEdits",
+  "--disallowedTools",
+  "Bash",
+]
+`;
+
+exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > claude-code × edit × resume 1`] = `
+[
+  "--permission-mode",
+  "acceptEdits",
+  "--disallowedTools",
+  "Bash",
+]
+`;
+
+exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > claude-code × edit-exec × fresh 1`] = `
+[
+  "--permission-mode",
+  "acceptEdits",
+]
+`;
+
+exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > claude-code × edit-exec × resume 1`] = `
+[
+  "--permission-mode",
+  "acceptEdits",
+]
+`;
+
+exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > claude-code × read-only × fresh 1`] = `
+[
+  "--permission-mode",
+  "plan",
+  "--disallowedTools",
+  "Edit",
+  "Write",
+  "NotebookEdit",
+  "MultiEdit",
+  "Bash",
+]
+`;
+
+exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > claude-code × read-only × resume 1`] = `
+[
+  "--permission-mode",
+  "plan",
+  "--disallowedTools",
+  "Edit",
+  "Write",
+  "NotebookEdit",
+  "MultiEdit",
+  "Bash",
+]
+`;
+
+exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > claude-code × yolo × fresh 1`] = `
+[
+  "--dangerously-skip-permissions",
+]
+`;
+
+exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > claude-code × yolo × resume 1`] = `
+[
+  "--dangerously-skip-permissions",
+]
+`;
+
+exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > codex × edit × fresh 1`] = `
+[
+  "-s",
+  "workspace-write",
+  "-a",
+  "on-request",
+]
+`;
+
+exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > codex × edit × resume 1`] = `
+[
+  "-c",
+  "sandbox_mode="workspace-write"",
+  "-c",
+  "approval_policy="on-request"",
+]
+`;
+
+exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > codex × edit-exec × fresh 1`] = `
+[
+  "-s",
+  "workspace-write",
+  "-a",
+  "never",
+]
+`;
+
+exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > codex × edit-exec × resume 1`] = `
+[
+  "-c",
+  "sandbox_mode="workspace-write"",
+  "-c",
+  "approval_policy="never"",
+]
+`;
+
+exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > codex × read-only × fresh 1`] = `
+[
+  "-s",
+  "read-only",
+]
+`;
+
+exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > codex × read-only × resume 1`] = `
+[
+  "-c",
+  "sandbox_mode="read-only"",
+]
+`;
+
+exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > codex × yolo × fresh 1`] = `
+[
+  "--dangerously-bypass-approvals-and-sandbox",
+]
+`;
+
+exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > codex × yolo × resume 1`] = `
+[
+  "--dangerously-bypass-approvals-and-sandbox",
+]
+`;

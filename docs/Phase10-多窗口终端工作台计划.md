@@ -1,6 +1,6 @@
 # Phase 10 · 多窗口终端工作台 改造计划
 
-> 状态：v1.0（Tony 已确认，执行中；**T10.0 / T10.1 / T10.2 / T10.3 / T10.4 已验收通过**，见 `docs/验收记录/T10.0-验收.md` / `T10.1-验收.md` / `T10.2-验收.md` / `T10.3-验收.md` / `T10.4-验收.md`，tag `v0.10.0` / `v0.10.1` / `v0.10.2` / `v0.10.3` / `v0.10.4`）
+> 状态：v1.0（Tony 已确认，执行中；**T10.0 / T10.1 / T10.2 / T10.3 / T10.4 / T10.5 已验收通过**，见 `docs/验收记录/T10.0-验收.md` / `T10.1-验收.md` / `T10.2-验收.md` / `T10.3-验收.md` / `T10.4-验收.md` / `T10.5-验收.md`，tag `v0.10.0` / `v0.10.1` / `v0.10.2` / `v0.10.3` / `v0.10.4` / `v0.10.5`）
 > 编写：主控（只写计划、派活、验收）；执行与检查均由子 agent（Grok 4.7 High Fast）完成
 > 依据：本仓调研（FF-pane v0.9.2，最新任务 T9.11）、cc-pane 参考调研、终端/CLI 可行性调研
 
@@ -63,16 +63,20 @@
 
 ### 3.3 权限模型
 
-| 等级 | 含义 | Claude | Codex | Grok |
-|---|---|---|---|---|
-| 只读 | 看代码，不改不跑 | `--permission-mode plan` + 禁写工具 | `-s read-only` | `--permission-mode plan` + deny 写 |
-| 可改文件 | 能改项目内文件 | `acceptEdits` | `-s workspace-write` | `acceptEdits` |
-| 可改文件 + 跑命令 | 加命令执行 | `acceptEdits` + 允许 Bash | `workspace-write -a never` | `--allow` 命令 |
-| 完全放开（yolo） | 不受限 | `--dangerously-skip-permissions` | `--dangerously-bypass-approvals-and-sandbox` | `--always-approve` |
+| 等级 | 含义 | Claude Code（2.1.220） | Codex（0.159.2） |
+|---|---|---|---|
+| `read-only` | 看代码，不改不跑 | `--permission-mode plan` + `--disallowedTools Edit Write NotebookEdit MultiEdit Bash` | `-s read-only`（续接：`-c sandbox_mode="read-only"`） |
+| `edit` | 能改项目内文件 | `--permission-mode acceptEdits` + `--disallowedTools Bash` | `-s workspace-write -a on-request`（续接：`-c sandbox_mode=…` + `-c approval_policy="on-request"`） |
+| `edit-exec` | 可改文件 + 跑命令 | `--permission-mode acceptEdits`（不禁 Bash；交互下 Bash 仍由 CLI 询问） | `-s workspace-write -a never`（续接：`approval_policy="never"`） |
+| `yolo` | 完全放开 | `--dangerously-skip-permissions` | `--dangerously-bypass-approvals-and-sandbox` |
 
 - 沙盒模式 = 前三级；yolo = 第四级。
-- 规则：子窗口等级 ≤ 开启它的窗口；只有 Tony（界面）能设定管理者的等级；MCP 不给下级任何修改上级的工具；每次调用凭窗口令牌在主进程裁决。
-- **诚实说明**：Windows 上 CLI 的系统级沙箱不可靠，这里的限制靠「CLI 自带的工具/审批规则 + 本软件的 MCP 裁决」，不是操作系统级隔离。「只写不读」无法实现，不提供。
+- **诚实说明**：Windows 上这是「CLI 自带的工具/审批规则 + 本软件的 MCP 裁决」，**不是**操作系统级隔离。「只写不读」无法实现，不提供。
+- **Codex 局限**：`workspace-write` **无法单独禁止命令执行**；`edit` 与 `edit-exec` 的差异主要靠审批策略。0.159.2 已移除 `-a untrusted`（仅 `on-request` / `never`）。续接时沙箱/审批**不自动继承**，须每次重给。
+- **规则**：子窗口等级 ≤ 开启它的窗口；只有界面用户能任意设定顶层窗口等级；MCP 不给下级修改上级的工具；每次调用凭窗口身份令牌在主进程裁决（`authorize` / `canDelegate`）。
+- **窗口身份令牌**：每次启动/续接由主进程签发 ≥32 字节高熵令牌，仅存内存注册表，不落盘、不进布局、不进 renderer、**不进 argv**。经 `FF_PANE_WINDOW_TOKEN` 注入 CLI 进程环境；Claude 临时 `--mcp-config` 的 `env` **只写** `${FF_PANE_WINDOW_TOKEN}` 占位符（官方环境变量展开，真实值不落盘）；Codex 用 `mcp_servers.<name>.env_vars` 白名单从父进程转发（值不进 `-c`）。
+- **启动封顶**：主进程权威权限表；`workbench:launch-cli` 对有父级的窗口取 `min(请求, 祖先链上限)`；renderer 不得传 `parentWindowId`（父子关系仅主进程在 T10.7 建立）；布局读写时断环并封顶。
+- **父窗口关闭**：保留子窗口，标记 `parentClosed`；仍受开启时封顶约束。祖先降级后，超限后代标记 `permissionNeedsDowngrade`，下次启动/续接自动封顶（热改 CLI 参数不可能，界面提示重启）。
 
 ### 3.4 Provider 填表化
 
@@ -95,9 +99,9 @@
 | T10.2 | 工作台布局：新页面，分屏 + 标签页，多项目同时打开，切项目不关窗口，布局自动保存恢复 | ✅ 已验收（`docs/验收记录/T10.2-验收.md`，tag `v0.10.2`） |
 | T10.3 | Provider 填表化 + 模板 + 迁移 | ✅ 已验收（`docs/验收记录/T10.3-验收.md`，tag `v0.10.3`） |
 | T10.4 | 在窗口中启动 Claude / Codex / Grok：注入 Provider、角色说明、知识库 MCP；支持续接 | ✅ 已验收（`docs/验收记录/T10.4-验收.md`，tag `v0.10.4`；角色说明书注入延至 T10.6，见开发进度调研结论） |
-| T10.5 | 窗口身份令牌 + 权限等级 + 自上而下下放规则 | 每个窗口显示角色、权限、上级 |
+| T10.5 | 窗口身份令牌 + 权限等级 + 自上而下下放规则 | ✅ 已验收（`docs/验收记录/T10.5-验收.md`，tag `v0.10.5`；移交 T10.7 三条见 `docs/开发进度.md`） |
 | T10.6 | 内置角色说明书 + 「设为管理者」 | 对窗口说“你来当管理”即生效 |
-| T10.7 | 工作台 MCP：开窗口/派活/发消息/收件箱/回报/看输出/关窗口；消息落盘 `.md`；空闲提醒队列 | 管理者自动开窗口派活、收回报，记录可翻看 |
+| T10.7 | 工作台 MCP：开窗口/派活/发消息/收件箱/回报/看输出/关窗口；消息落盘 `.md`；空闲提醒队列 | 管理者自动开窗口派活、收回报，记录可翻看。开工前遵守 T10.5 移交：先登记父级再启动；冷启动先恢复父子再封顶；字面量 `${FF_PANE_WINDOW_TOKEN}` 必须报错 |
 | T10.8 | ~~Grok 的 MCP 接入~~ **挂起**（Tony 决定本阶段不做 Grok） | — |
 | T10.9 | 计划 / 任务看板 / 运行记录 改为隐藏面板，数据改接工作台，可由 MCP `open_panel` 呼出 | 说一声就能打开看板 |
 | T10.10 | 记忆 MCP（检索/新增），让窗口能主动用记忆 | AI 窗口能查项目记忆 |

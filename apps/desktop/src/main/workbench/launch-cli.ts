@@ -16,19 +16,27 @@ import {
   resolveDirectCliTarget,
 } from "@ff-pane/adapters";
 import {
+  FF_PANE_WINDOW_TOKEN_ENV,
+  injectTokenIntoMcpServers,
+  type WindowTokenRegistry,
+} from "@ff-pane/core";
+import {
   type AgentProfile,
   type ProjectId,
   resolveConnectionMode,
   resolveDispatchedReasoningEffort,
   runtimeToWorkbenchKind,
+  type WorkbenchPermissionLevel,
   workbenchKindToRuntime,
 } from "@ff-pane/shared";
 import { resolveRuntimeConfigOverrides, resolveRuntimeEnv } from "../session/env";
 import { createKnowledgeAuditPath, resolveKnowledgeMcpServer } from "../session/knowledge-tool";
 import type { PtyManager } from "../terminal/manager";
 import type { TerminalRecord } from "../terminal/types";
+import type { WorkbenchAuthRegistry } from "./auth-registry";
 import {
   assertSecretAbsent,
+  assertTokenAbsent,
   buildInteractiveClaudeArgs,
   buildInteractiveCodexArgs,
   CLAUDE_INTERACTIVE_COMMAND,
@@ -76,6 +84,8 @@ export interface LaunchCliWindowInput {
   readonly resume?: boolean;
   /** 渲染端已保存的原生会话 id（续接时传入）。 */
   readonly nativeSessionId?: string;
+  /** T10.5：窗口权限等级（缺省 edit）。 */
+  readonly permission?: WorkbenchPermissionLevel;
 }
 
 export interface LaunchCliWindowResult {
@@ -90,6 +100,10 @@ export interface LaunchCliWindowResult {
   readonly model?: string;
   readonly command: string;
   readonly args: readonly string[];
+  /** T10.5'：实际生效权限（可能被祖先封顶）。 */
+  readonly effectivePermission: WorkbenchPermissionLevel;
+  /** T10.5'：请求权限高于祖先上限时为 true。 */
+  readonly permissionCapped: boolean;
 }
 
 export interface LaunchCliWindowDeps {
@@ -128,14 +142,28 @@ export interface LaunchCliWindowDeps {
   readonly codexClaimer?: CodexSessionClaimer;
   readonly onCodexSessionClaimed?: (windowId: string, nativeSessionId: string) => void;
   readonly now?: () => number;
+  /** T10.5：窗口身份令牌注册表。 */
+  readonly tokenRegistry: WindowTokenRegistry;
+  /** T10.5'：权威权限树（封顶）；缺省则按请求权限启动。 */
+  readonly authRegistry?: WorkbenchAuthRegistry;
 }
 
 export { WorkbenchMcpTempRegistry };
 
-/** IPC：拒绝 renderer 传入 args/env/可执行路径等危险字段；校验 initialPrompt 长度。 */
+/** IPC：拒绝 renderer 传入 args/env/可执行路径/父级等危险字段；校验 initialPrompt 长度。 */
 export function assertLaunchCliIpcSafe(request: object): void {
   const raw = request as Record<string, unknown>;
-  for (const key of ["args", "env", "shell", "executable", "command", "file", "path"] as const) {
+  for (const key of [
+    "args",
+    "env",
+    "shell",
+    "executable",
+    "command",
+    "file",
+    "path",
+    "parentWindowId",
+    "openedBy",
+  ] as const) {
     if (raw[key] !== undefined) {
       throw new WorkbenchCliLaunchError(
         "ipc-rejected",
@@ -253,6 +281,17 @@ export async function launchCliWindow(
   });
 
   const mcpServers = await resolveKnowledgeServers(deps, input.projectRoot);
+  const requestedPermission: WorkbenchPermissionLevel = input.permission ?? "edit";
+  const launchAuth = deps.authRegistry?.resolveLaunch(input.windowId, requestedPermission) ?? {
+    effective: requestedPermission,
+    capped: false,
+    cycle: false,
+  };
+  const permission = launchAuth.cycle ? "read-only" : launchAuth.effective;
+  const permissionCapped =
+    launchAuth.capped || launchAuth.cycle || permission !== requestedPermission;
+  const windowToken = deps.tokenRegistry.issue(input.windowId);
+
   let mcpTemp: WorkbenchMcpTempFile | undefined;
   const cwd = (input.cwd?.trim() || input.projectRoot).trim();
 
@@ -262,8 +301,11 @@ export async function launchCliWindow(
   let resumePicker = false;
 
   if (runtime === "claude-code") {
+    let serversForMcp = mcpServers;
     if (Object.keys(mcpServers).length > 0) {
-      mcpTemp = writeWorkbenchClaudeMcpFile(mcpServers);
+      // 文件只写 ${FF_PANE_WINDOW_TOKEN}；真实值仅在 CLI 进程 env，由 Claude 展开后交给 MCP
+      serversForMcp = injectTokenIntoMcpServers(mcpServers, windowToken, "claude-env-expand");
+      mcpTemp = writeWorkbenchClaudeMcpFile(serversForMcp);
       deps.mcpRegistry.track(input.windowId, mcpTemp);
     }
     const resuming = input.resume === true && nativeSessionId !== undefined;
@@ -278,12 +320,17 @@ export async function launchCliWindow(
         : nativeSessionId !== undefined
           ? { sessionId: nativeSessionId }
           : {}),
+      permission,
       ...(mcpTemp !== undefined ? { mcpConfigPath: mcpTemp.path, strictMcp: true } : {}),
       ...(input.initialPrompt !== undefined ? { initialPrompt: input.initialPrompt } : {}),
     });
   } else {
+    let serversForMcp = mcpServers;
+    if (Object.keys(mcpServers).length > 0) {
+      serversForMcp = injectTokenIntoMcpServers(mcpServers, windowToken, "codex-forward");
+    }
     const mcpOverrides =
-      Object.keys(mcpServers).length > 0 ? buildCodexMcpOverrides(mcpServers) : {};
+      Object.keys(serversForMcp).length > 0 ? buildCodexMcpOverrides(serversForMcp) : {};
     const mergedOverrides = { ...configOverrides, ...mcpOverrides };
     const resuming = input.resume === true;
     if (resuming && nativeSessionId === undefined) {
@@ -292,6 +339,7 @@ export async function launchCliWindow(
     args = buildInteractiveCodexArgs({
       cwd,
       ...(model !== undefined ? { model } : {}),
+      permission,
       ...(Object.keys(mergedOverrides).length > 0 ? { configOverrides: mergedOverrides } : {}),
       ...(resuming ? { resume: true } : {}),
       ...(resuming && nativeSessionId !== undefined ? { resumeSessionId: nativeSessionId } : {}),
@@ -300,8 +348,12 @@ export async function launchCliWindow(
   }
 
   assertSecretAbsent(secret, args);
+  assertTokenAbsent(windowToken, args);
   if (mcpTemp !== undefined) {
-    assertSecretAbsent(secret, [readFileSync(mcpTemp.path, "utf8")]);
+    const mcpContents = readFileSync(mcpTemp.path, "utf8");
+    assertSecretAbsent(secret, [mcpContents]);
+    // Claude MCP 临时文件不得含令牌明文（仅 ${FF_PANE_WINDOW_TOKEN} 占位符）
+    assertTokenAbsent(windowToken, [mcpContents]);
   }
 
   const direct = resolveDirectCliTarget(command, args, process.env);
@@ -321,6 +373,7 @@ export async function launchCliWindow(
       stringEnv[key] = value;
     }
   }
+  stringEnv[FF_PANE_WINDOW_TOKEN_ENV] = windowToken;
 
   const startedAtMs = deps.now?.() ?? Date.now();
   let terminal: TerminalRecord;
@@ -344,10 +397,27 @@ export async function launchCliWindow(
       },
     });
   } catch (error) {
+    deps.tokenRegistry.revoke(input.windowId);
     if (mcpTemp !== undefined) {
       await deps.mcpRegistry.release(input.windowId);
     }
     throw error;
+  }
+
+  // 把本窗生效权限写回权威表（保留已有父级；顶层无父）
+  if (deps.authRegistry !== undefined) {
+    const prior = deps.authRegistry.get(input.windowId);
+    deps.authRegistry.upsert(
+      {
+        id: input.windowId,
+        permission,
+        openedBy: prior?.openedBy ?? "user",
+        ...(prior?.parentWindowId !== undefined ? { parentWindowId: prior.parentWindowId } : {}),
+        ...(prior?.parentClosed === true ? { parentClosed: true } : {}),
+        ...(permissionCapped ? { permissionNeedsDowngrade: true } : {}),
+      },
+      input.projectId,
+    );
   }
 
   if (runtime === "codex" && input.resume !== true && deps.codexClaimer !== undefined) {
@@ -376,6 +446,8 @@ export async function launchCliWindow(
     ...(model !== undefined ? { model } : {}),
     command: direct.resolvedCommand,
     args: [...direct.args],
+    effectivePermission: permission,
+    permissionCapped,
   };
 }
 

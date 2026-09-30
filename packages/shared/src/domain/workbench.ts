@@ -1,10 +1,11 @@
 /**
- * 工作台窗口与布局领域类型（T10.2）。
+ * 工作台窗口与布局领域类型（T10.2 / T10.5）。
  * 窗口 id 全局唯一，与 PTY terminalId 分离（重启终端时窗口 id 不变）。
- * role / permission / parentWindowId / openedBy 为本阶段类型预留，逻辑归后续工单。
+ * 身份令牌仅存主进程内存，不进本类型 / 布局文件。
  */
 
 import type { ProjectId } from "./common.js";
+import type { WorkbenchOpenedBy, WorkbenchPermissionLevel } from "./workbench-permission.js";
 
 /** 出厂默认：同时运行的工作台窗口上限。 */
 export const DEFAULT_MAX_WORKBENCH_WINDOWS = 12;
@@ -82,12 +83,22 @@ export interface WorkbenchWindow {
   readonly nativeSessionId?: string;
   /** 预留：角色（管理者 / 规划 / 执行 / 检查 / 普通）。 */
   readonly role?: string;
-  /** 预留：权限等级标识。 */
-  readonly permission?: string;
-  /** 预留：开启本窗口的上级窗口 id。 */
+  /** AI 窗口权限等级；shell 不设。 */
+  readonly permission?: WorkbenchPermissionLevel;
+  /**
+   * 父窗口已关闭时仍保留 parentWindowId 供展示与封顶追溯；
+   * true = 父级已不在布局树中，子窗口继续运行。
+   */
+  readonly parentClosed?: boolean;
+  /** 开启本窗口的上级窗口 id（自上而下下放）。 */
   readonly parentWindowId?: string;
-  /** 预留：开启者标识（界面 / 某管理者窗口）。 */
-  readonly openedBy?: string;
+  /** 开启者：界面用户或某窗口。 */
+  readonly openedBy?: WorkbenchOpenedBy;
+  /**
+   * 祖先降级后本窗口超过新上限：下次启动/续接须封顶；
+   * 正在运行的进程无法热改 CLI 参数。
+   */
+  readonly permissionNeedsDowngrade?: boolean;
 }
 
 /** 分屏方向：horizontal = 左右；vertical = 上下。 */

@@ -34,6 +34,7 @@ export interface TerminalViewProps {
     readonly nativeSessionId?: string;
     readonly initialPrompt?: string;
     readonly resume?: boolean;
+    readonly permission?: import("@ff-pane/shared").WorkbenchPermissionLevel;
     /** false = 应用恢复的已停止窗口，不自动启动。 */
     readonly autoStart: boolean;
   };
@@ -43,6 +44,10 @@ export interface TerminalViewProps {
   readonly onConvertToShell?: () => void;
   /** 启动成功后回写原生会话 id。 */
   readonly onNativeSessionId?: (nativeSessionId: string | undefined) => void;
+  /** T10.5'：启动时权限被祖先封顶。 */
+  readonly onPermissionCapped?: (
+    effective: import("@ff-pane/shared").WorkbenchPermissionLevel,
+  ) => void;
   /** 外部触发启动（续接 / 重新开始）。 */
   readonly launchNonce?: number;
 }
@@ -100,6 +105,7 @@ export function TerminalView({
   onRestartFresh,
   onConvertToShell,
   onNativeSessionId,
+  onPermissionCapped,
   launchNonce = 0,
 }: TerminalViewProps): ReactElement {
   const { t } = useTranslation();
@@ -131,6 +137,8 @@ export function TerminalView({
   }
   const onNativeSessionIdRef = useRef(onNativeSessionId);
   onNativeSessionIdRef.current = onNativeSessionId;
+  const onPermissionCappedRef = useRef(onPermissionCapped);
+  onPermissionCappedRef.current = onPermissionCapped;
 
   const writeToPty = useCallback((data: string) => {
     const current = infoRef.current;
@@ -206,6 +214,7 @@ export function TerminalView({
         ...(launch.initialPrompt !== undefined ? { initialPrompt: launch.initialPrompt } : {}),
         ...(resuming ? { resume: true } : {}),
         ...(sessionId !== undefined ? { nativeSessionId: sessionId } : {}),
+        ...(launch.permission !== undefined ? { permission: launch.permission } : {}),
       });
     },
     [cwd, projectId, windowId],
@@ -249,6 +258,9 @@ export function TerminalView({
         nativeSessionIdRef.current = settled.data.nativeSessionId;
       }
       onNativeSessionIdRef.current?.(settled.data.nativeSessionId);
+      if (settled.data.permissionCapped === true) {
+        onPermissionCappedRef.current?.(settled.data.effectivePermission);
+      }
       setResumePickerHint(settled.data.resumePicker === true);
       const replay = await invokeQuery("terminal:get-replay", { id: settled.data.terminal.id });
       if (replay.status === "success" && replay.data.data.length > 0) {
@@ -330,6 +342,9 @@ export function TerminalView({
       if (settled.data.nativeSessionId !== undefined) {
         nativeSessionIdRef.current = settled.data.nativeSessionId;
         onNativeSessionIdRef.current?.(settled.data.nativeSessionId);
+      }
+      if (settled.data.permissionCapped === true) {
+        onPermissionCappedRef.current?.(settled.data.effectivePermission);
       }
       setResumePickerHint(settled.data.resumePicker === true);
       const replay = await invokeQuery("terminal:get-replay", { id: settled.data.terminal.id });

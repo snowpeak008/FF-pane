@@ -13,6 +13,7 @@ import { runSqliteCheck } from "./sqlite-check";
 import { createTerminalLayer, runPtyCheck, type TerminalLayer } from "./terminal";
 import { loadWindowState, trackWindowState } from "./window-state";
 import {
+  createWorkbenchAuthRegistry,
   createWorkbenchCliLayer,
   releaseMcpForTerminalMetadata,
   type WorkbenchCliLayer,
@@ -144,11 +145,14 @@ async function bootstrap(): Promise<void> {
       // 终端层稍后注入
     },
   };
+  // T10.5'：权威权限表在数据层与 CLI 启动层之间共享
+  const workbenchAuthRegistry = createWorkbenchAuthRegistry();
   try {
     const dataHandlers = await createDataHandlers(() => mainWindow, {
       onProjectRemoved: (projectId) => {
         projectPtyCleanup.killProject(projectId);
       },
+      authRegistry: workbenchAuthRegistry,
     });
     registerInvokeHandlers(ipcMain, dataHandlers);
   } catch (thrown) {
@@ -219,7 +223,12 @@ async function bootstrap(): Promise<void> {
       onTerminalExit: (metadata) => {
         const layer = workbenchCliLayer;
         if (layer !== null) {
-          releaseMcpForTerminalMetadata(layer.mcpRegistry, metadata, layer.codexClaimer);
+          releaseMcpForTerminalMetadata(
+            layer.mcpRegistry,
+            metadata,
+            layer.codexClaimer,
+            layer.tokenRegistry,
+          );
         }
       },
     });
@@ -234,6 +243,7 @@ async function bootstrap(): Promise<void> {
       manager: terminalLayer.manager,
       getWindow: () => mainWindow,
       getMaxWorkbenchWindows: async () => (await configStore.readConfig()).maxWorkbenchWindows,
+      authRegistry: workbenchAuthRegistry,
     });
     registerInvokeHandlers(ipcMain, workbenchCliLayer.handlers);
 

@@ -60,8 +60,16 @@ export interface McpStdioServerSpec {
    * **不得放密钥**：各 Runtime 承载它的方式不同——codex 走 `-c` 命令行参数（在进程
    * 列表里肉眼可见）、claude 走临时 JSON 配置文件（落盘）。两者都与 §4.3「密钥只经
    * env 直接下发给 Agent 进程、不落盘不进命令行」相抵触。这里只该放路径一类的非机密项。
+   *
+   * 窗口身份令牌（T10.5）：Claude 可写进本字段（临时 MCP JSON）；Codex **禁止**把令牌值
+   * 放进本字段（会进 `-c`），应改用 {@link envVars} 白名单从父进程转发。
    */
   readonly env?: Readonly<Record<string, string>>;
+  /**
+   * Codex：`mcp_servers.<name>.env_vars`——仅变量名列表，从 CLI 父进程环境转发到 MCP。
+   * 令牌值留在父进程 env，不出现在 argv。
+   */
+  readonly envVars?: readonly string[];
   /**
    * 该服务端中要**预先放行**的工具名（不带 `mcp__<服务器>__` 前缀，适配器自行加）。
    *

@@ -1,6 +1,7 @@
 /**
- * 工作台布局持久化（T10.2）：~/.aiworkbench/workbench-layouts.json。
+ * 工作台布局持久化（T10.2 / T10.5）：~/.aiworkbench/workbench-layouts.json。
  * 只存标签页 / 分屏树 / 窗口元数据（剥离 terminalId）；损坏时回退空布局。
+ * 令牌永不写入。
  */
 
 import type {
@@ -11,15 +12,22 @@ import type {
   WorkbenchWindow,
   WorkbenchWindowKind,
 } from "@ff-pane/shared";
-import { isWorkbenchWindowKind } from "@ff-pane/shared";
+import {
+  isWorkbenchPermissionLevel,
+  isWorkbenchWindowKind,
+  parseWorkbenchOpenedBy,
+} from "@ff-pane/shared";
 import { readJson, writeJsonAtomic } from "../fs/index.js";
 import { WorkbenchLayoutsFileInvalidError } from "./errors.js";
 
-/** 当前布局文件 schema 版本（T10.4：claude/codex + profileId/nativeSessionId）。 */
-export const WORKBENCH_LAYOUTS_FILE_VERSION = 2;
+/** 当前布局文件 schema 版本（T10.5：permission / openedBy / parentClosed）。 */
+export const WORKBENCH_LAYOUTS_FILE_VERSION = 3;
 
-/** 可读取的旧版（读入后按 v2 写出）。 */
+/** 可读取的旧版（读入后按当前版本写出）。 */
 export const WORKBENCH_LAYOUTS_FILE_VERSION_LEGACY = 1;
+
+/** 亦可读取的中间版。 */
+export const WORKBENCH_LAYOUTS_FILE_VERSION_V2 = 2;
 
 export interface WorkbenchLayoutsFile {
   readonly version: typeof WORKBENCH_LAYOUTS_FILE_VERSION;
@@ -98,6 +106,10 @@ function parseWindow(value: unknown, projectId: ProjectId): WorkbenchWindow | nu
   ) {
     return null;
   }
+  const permissionRaw = raw["permission"];
+  const permission = isWorkbenchPermissionLevel(permissionRaw) ? permissionRaw : undefined;
+  const openedBy =
+    raw["openedBy"] !== undefined ? parseWorkbenchOpenedBy(raw["openedBy"]) : undefined;
   const window: WorkbenchWindow = {
     id: raw["id"],
     projectId: typeof raw["projectId"] === "string" ? (raw["projectId"] as ProjectId) : projectId,
@@ -112,9 +124,13 @@ function parseWindow(value: unknown, projectId: ProjectId): WorkbenchWindow | nu
       ? { nativeSessionId: raw["nativeSessionId"] }
       : {}),
     ...(typeof raw["role"] === "string" ? { role: raw["role"] } : {}),
-    ...(typeof raw["permission"] === "string" ? { permission: raw["permission"] } : {}),
-    ...(typeof raw["parentWindowId"] === "string" ? { parentWindowId: raw["parentWindowId"] } : {}),
-    ...(typeof raw["openedBy"] === "string" ? { openedBy: raw["openedBy"] } : {}),
+    ...(permission !== undefined ? { permission } : {}),
+    ...(typeof raw["parentWindowId"] === "string" && raw["parentWindowId"].trim() !== ""
+      ? { parentWindowId: raw["parentWindowId"] }
+      : {}),
+    ...(raw["parentClosed"] === true ? { parentClosed: true } : {}),
+    ...(openedBy !== undefined ? { openedBy } : {}),
+    ...(raw["permissionNeedsDowngrade"] === true ? { permissionNeedsDowngrade: true } : {}),
   };
   return window;
 }
@@ -226,6 +242,7 @@ async function loadFile(
   const file = raw as { readonly version?: unknown; readonly layouts?: unknown };
   if (
     file.version !== WORKBENCH_LAYOUTS_FILE_VERSION &&
+    file.version !== WORKBENCH_LAYOUTS_FILE_VERSION_V2 &&
     file.version !== WORKBENCH_LAYOUTS_FILE_VERSION_LEGACY
   ) {
     console.warn(
@@ -305,6 +322,7 @@ export function parseWorkbenchLayoutsFileStrict(
   const file = raw as { readonly version?: unknown; readonly layouts?: unknown };
   if (
     file.version !== WORKBENCH_LAYOUTS_FILE_VERSION &&
+    file.version !== WORKBENCH_LAYOUTS_FILE_VERSION_V2 &&
     file.version !== WORKBENCH_LAYOUTS_FILE_VERSION_LEGACY
   ) {
     throw new WorkbenchLayoutsFileInvalidError(
