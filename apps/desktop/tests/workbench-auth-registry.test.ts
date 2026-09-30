@@ -105,4 +105,27 @@ describe("createWorkbenchAuthRegistry", () => {
     expect(cleaned.windows["A"]?.parentWindowId).toBeUndefined();
     expect(cleaned.windows["B"]?.parentWindowId).toBeUndefined();
   });
+
+  it("首次同步采用布局角色，之后 setRole 不被陈旧布局覆盖", () => {
+    const registry = createWorkbenchAuthRegistry();
+    const window = {
+      id: "w",
+      projectId: "proj-1" as never,
+      title: "W",
+      kind: "claude" as const,
+      cwd: "D:\\x",
+      createdAt: 0,
+      profileId: "p",
+      permission: "edit" as const,
+      openedBy: "user" as const,
+      role: "worker" as const,
+    };
+    const first = registry.syncLayout(layoutWith({ w: window }));
+    expect(first.windows["w"]?.role).toBe("worker");
+    expect(registry.get("w")?.role).toBe("worker");
+    expect(registry.setRole("w", "manager")).toBe(true);
+    const again = registry.syncLayout(layoutWith({ w: window }));
+    expect(again.windows["w"]?.role).toBe("manager");
+    expect(registry.get("w")?.role).toBe("manager");
+  });
 });

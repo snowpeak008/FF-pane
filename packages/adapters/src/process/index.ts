@@ -27,6 +27,7 @@ export {
   type DirectCliTarget,
   parseNpmCmdShim,
   resolveDirectCliTarget,
+  resolveHookNodeExecutable,
 } from "./npm-shim.js";
 export { EXIT_SETTLE_GRACE_MS, KILL_CONFIRM_TIMEOUT_MS, spawnAgentProcess } from "./spawn.js";
 export { ByteChunkQueue, DEFAULT_STREAM_HIGH_WATER_MARK } from "./stream.js";

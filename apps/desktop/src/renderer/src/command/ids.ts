@@ -56,6 +56,7 @@ export const COMMAND_IDS = [
   "workbench-close-window",
   "workbench-close-tab",
   "workbench-maximize-window",
+  "workbench-set-manager",
 ] as const;
 
 export type CommandId = (typeof COMMAND_IDS)[number];

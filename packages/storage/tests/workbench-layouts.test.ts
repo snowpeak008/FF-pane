@@ -144,6 +144,55 @@ describe("workbench layout store", () => {
     );
   });
 
+  it("v3 无 role 或非法 role 仍能读出窗口", async () => {
+    tempRoot = await mkdtemp(join(tmpdir(), "ffpane-wb-layout-"));
+    const file = join(tempRoot, "workbench-layouts.json");
+    await writeFile(
+      file,
+      JSON.stringify({
+        version: 3,
+        layouts: {
+          "proj-a": {
+            projectId: "proj-a",
+            tabs: [{ id: "tab-1", title: "Tab 1", root: { type: "leaf", windowId: "win-1" } }],
+            activeTabId: "tab-1",
+            windows: {
+              "win-1": {
+                id: "win-1",
+                projectId: "proj-a",
+                title: "Claude",
+                kind: "claude",
+                cwd: "C:\\proj",
+                createdAt: 1,
+                profileId: "prof-1",
+                permission: "edit",
+                openedBy: "user",
+              },
+              "win-2": {
+                id: "win-2",
+                projectId: "proj-a",
+                title: "Bad role",
+                kind: "codex",
+                cwd: "C:\\proj",
+                createdAt: 2,
+                profileId: "prof-2",
+                role: "boss",
+              },
+            },
+            maximizedWindowId: null,
+            focusedWindowId: "win-1",
+          },
+        },
+      }),
+      "utf8",
+    );
+    const store = createWorkbenchLayoutStore(file);
+    const all = await store.readAll();
+    expect(all["proj-a"]?.windows["win-1"]?.role).toBeUndefined();
+    expect(all["proj-a"]?.windows["win-2"]?.kind).toBe("codex");
+    expect(all["proj-a"]?.windows["win-2"]?.role).toBeUndefined();
+  });
+
   it("removeProject 删条目", async () => {
     tempRoot = await mkdtemp(join(tmpdir(), "ffpane-wb-layout-"));
     const file = join(tempRoot, "workbench-layouts.json");

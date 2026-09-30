@@ -169,6 +169,10 @@
         "title": "工作台：最大化/还原窗口",
         "keywords": "workbench maximize restore 最大化 还原"
       },
+      "workbench-set-manager": {
+        "title": "将当前窗口设为管理者",
+        "keywords": "workbench set manager role 管理者 角色 当前窗口"
+      },
       "nav-toggle-sidebar": {
         "title": "收起/展开导航侧栏",
         "keywords": "sidebar collapse expand 侧栏 导航 收起 展开"
@@ -320,6 +324,8 @@
       "kindCodex": "Codex",
       "profile": "启动配置",
       "permission": "权限等级",
+      "role": "角色",
+      "roleHint": "普通窗口只有共同说明。管理者、规划、执行、检查会再注入对应说明书。",
       "yoloConfirm": "我了解 yolo 会跳过全部 CLI 权限检查，存在改坏仓库与执行任意命令的风险，仍要继续。",
       "yoloConfirmShort": "确认接受 yolo 风险",
       "initialPrompt": "初始指令（可选）",
@@ -347,6 +353,27 @@
       "capped": "已按父级上限封顶为 {{level}}",
       "apply": "应用",
       "applyAndRestart": "应用并重启续接"
+    },
+    "role": {
+      "level": {
+        "manager": "管理者",
+        "planner": "规划",
+        "worker": "执行",
+        "reviewer": "检查",
+        "none": "普通"
+      },
+      "badgeHint": "点击或右键，把这个窗口设为某个角色",
+      "notAi": "当前焦点不是 AI 窗口",
+      "rejected": "不能把这个窗口设成该角色",
+      "dropped": "窗口已退出，角色说明没写进去。下次启动会自动注入"
+    },
+    "deliver": {
+      "pending": "有 {{count}} 条待投递",
+      "send": "立即发送",
+      "cancel": "取消",
+      "blocked": "正在等待权限确认，暂不发送",
+      "busy": "本回合还没结束，暂不发送",
+      "noNode": "没有可用的 node.exe，收不到回合结束信号。有待投递内容时请点立即发送。"
     },
     "empty": {
       "noProject": "还没有选中项目。到项目列表新建或选一个，再回来开终端。",
@@ -626,6 +653,28 @@
       "hint": "界面新建 AI 窗口时的默认等级；窗口开的子窗口仍不超过父窗口。Windows 上非 OS 隔离。",
       "loadError": "读取失败",
       "error": "保存默认权限失败"
+    },
+    "workbenchRoles": {
+      "title": "工作台角色说明书",
+      "hint": "AI 窗口启动时注入。这里改的是覆盖副本，存在应用数据目录；恢复默认后重新使用内置说明。",
+      "pick": "说明书",
+      "save": "保存覆盖",
+      "reset": "恢复默认",
+      "saved": "已保存覆盖副本",
+      "resetDone": "已恢复默认说明书",
+      "loadError": "读取说明书失败",
+      "error": "保存说明书失败",
+      "manual": {
+        "base": "共同说明",
+        "manager": "管理者",
+        "planner": "规划",
+        "worker": "执行",
+        "reviewer": "检查"
+      },
+      "source": {
+        "default": "正在使用内置原文",
+        "override": "正在使用你的覆盖副本"
+      }
     },
     "profiles": {
       "title": "Agent Profile",

@@ -14,19 +14,24 @@ import {
   buildCodexMcpOverrides,
   type McpStdioServerSpec,
   resolveDirectCliTarget,
+  resolveHookNodeExecutable,
 } from "@ff-pane/adapters";
 import {
+  FF_PANE_WB_PIPE_ENV,
   FF_PANE_WINDOW_TOKEN_ENV,
   injectTokenIntoMcpServers,
   type WindowTokenRegistry,
 } from "@ff-pane/core";
 import {
   type AgentProfile,
+  DEFAULT_WORKBENCH_ROLE,
+  isWorkbenchRole,
   type ProjectId,
   resolveConnectionMode,
   resolveDispatchedReasoningEffort,
   runtimeToWorkbenchKind,
   type WorkbenchPermissionLevel,
+  type WorkbenchRole,
   workbenchKindToRuntime,
 } from "@ff-pane/shared";
 import { resolveRuntimeConfigOverrides, resolveRuntimeEnv } from "../session/env";
@@ -43,6 +48,12 @@ import {
   CODEX_INTERACTIVE_COMMAND,
 } from "./cli-args";
 import type { CodexSessionClaimer } from "./codex-claim";
+import {
+  prepareWindowHooks,
+  releaseWindowHooks,
+  resolveWorkbenchHookScriptPath,
+} from "./hook-launch";
+import type { IdleDeliverQueue } from "./idle-deliver";
 import {
   type WorkbenchMcpTempFile,
   WorkbenchMcpTempRegistry,
@@ -86,6 +97,8 @@ export interface LaunchCliWindowInput {
   readonly nativeSessionId?: string;
   /** T10.5：窗口权限等级（缺省 edit）。 */
   readonly permission?: WorkbenchPermissionLevel;
+  /** T10.6：窗口角色。登记表已有角色时以登记表为准。 */
+  readonly role?: WorkbenchRole;
 }
 
 export interface LaunchCliWindowResult {
@@ -104,6 +117,8 @@ export interface LaunchCliWindowResult {
   readonly effectivePermission: WorkbenchPermissionLevel;
   /** T10.5'：请求权限高于祖先上限时为 true。 */
   readonly permissionCapped: boolean;
+  /** 装上了 node 直启的回合信号时为 auto；否则投递一直要手动确认。 */
+  readonly turnSignal: "auto" | "manual";
 }
 
 export interface LaunchCliWindowDeps {
@@ -146,6 +161,26 @@ export interface LaunchCliWindowDeps {
   readonly tokenRegistry: WindowTokenRegistry;
   /** T10.5'：权威权限树（封顶）；缺省则按请求权限启动。 */
   readonly authRegistry?: WorkbenchAuthRegistry;
+  /**
+   * T10.6：按角色合成系统提示。
+   * Claude 返回临时文件路径；Codex 返回要追加的 developer_instructions 正文。
+   */
+  readonly loadRoleInjection?: (input: {
+    readonly windowId: string;
+    readonly role: WorkbenchRole;
+    readonly runtime: "claude-code" | "codex";
+  }) => Promise<{
+    readonly claudePromptFile?: string;
+    readonly developerInstructions?: string;
+  }>;
+  /** 控制通道管道名。写入 CLI 环境 FF_PANE_WB_PIPE，不进 argv。 */
+  readonly controlPipe?: string;
+  /** 启动成功后登记空闲投递会话（无 initialPrompt 仍保持未知，直到 hook）。 */
+  readonly idleQueue?: IdleDeliverQueue;
+  /** 观察型 hook 脚本。缺省按打包态选 resources 或 moduleDir 下的 workbench-hook.mjs。 */
+  readonly hookScriptPath?: string;
+  readonly isPackaged?: boolean;
+  readonly resourcesPath?: string;
 }
 
 export { WorkbenchMcpTempRegistry };
@@ -290,7 +325,46 @@ export async function launchCliWindow(
   const permission = launchAuth.cycle ? "read-only" : launchAuth.effective;
   const permissionCapped =
     launchAuth.capped || launchAuth.cycle || permission !== requestedPermission;
+  const registered = deps.authRegistry?.get(input.windowId);
+  const role: WorkbenchRole =
+    registered?.role ?? (isWorkbenchRole(input.role) ? input.role : DEFAULT_WORKBENCH_ROLE);
+  if (deps.authRegistry !== undefined && registered === undefined) {
+    deps.authRegistry.upsert(
+      {
+        id: input.windowId,
+        permission,
+        openedBy: "user",
+        role,
+      },
+      input.projectId,
+    );
+  }
+  const roleInjection =
+    deps.loadRoleInjection !== undefined
+      ? await deps.loadRoleInjection({ windowId: input.windowId, role, runtime })
+      : {};
   const windowToken = deps.tokenRegistry.issue(input.windowId);
+  const probed = resolveDirectCliTarget(command, [], process.env);
+  const nodePath = resolveHookNodeExecutable(process.env, probed);
+  const scriptPath =
+    deps.hookScriptPath ??
+    resolveWorkbenchHookScriptPath({
+      isPackaged: deps.isPackaged === true,
+      resourcesPath: deps.resourcesPath ?? "",
+      moduleDir: deps.moduleDir,
+    });
+  const hooks = prepareWindowHooks({
+    windowId: input.windowId,
+    nodePath,
+    scriptPath,
+  });
+  const releaseFailedLaunch = async (): Promise<void> => {
+    releaseWindowHooks(input.windowId);
+    deps.tokenRegistry.revoke(input.windowId);
+    if (mcpTemp !== undefined) {
+      await deps.mcpRegistry.release(input.windowId);
+    }
+  };
 
   let mcpTemp: WorkbenchMcpTempFile | undefined;
   const cwd = (input.cwd?.trim() || input.projectRoot).trim();
@@ -322,6 +396,10 @@ export async function launchCliWindow(
           : {}),
       permission,
       ...(mcpTemp !== undefined ? { mcpConfigPath: mcpTemp.path, strictMcp: true } : {}),
+      ...(roleInjection.claudePromptFile !== undefined
+        ? { appendSystemPromptFile: roleInjection.claudePromptFile }
+        : {}),
+      ...(hooks.settingsPath !== undefined ? { settingsFile: hooks.settingsPath } : {}),
       ...(input.initialPrompt !== undefined ? { initialPrompt: input.initialPrompt } : {}),
     });
   } else {
@@ -343,21 +421,45 @@ export async function launchCliWindow(
       ...(Object.keys(mergedOverrides).length > 0 ? { configOverrides: mergedOverrides } : {}),
       ...(resuming ? { resume: true } : {}),
       ...(resuming && nativeSessionId !== undefined ? { resumeSessionId: nativeSessionId } : {}),
+      ...(roleInjection.developerInstructions !== undefined
+        ? { developerInstructions: roleInjection.developerInstructions }
+        : {}),
+      ...(hooks.notifyArgv.length > 0 ? { notifyArgv: hooks.notifyArgv } : {}),
       ...(input.initialPrompt !== undefined ? { initialPrompt: input.initialPrompt } : {}),
     });
   }
 
-  assertSecretAbsent(secret, args);
-  assertTokenAbsent(windowToken, args);
-  if (mcpTemp !== undefined) {
-    const mcpContents = readFileSync(mcpTemp.path, "utf8");
-    assertSecretAbsent(secret, [mcpContents]);
-    // Claude MCP 临时文件不得含令牌明文（仅 ${FF_PANE_WINDOW_TOKEN} 占位符）
-    assertTokenAbsent(windowToken, [mcpContents]);
+  try {
+    assertSecretAbsent(secret, [
+      ...args,
+      roleInjection.developerInstructions ?? "",
+      roleInjection.claudePromptFile ?? "",
+    ]);
+    assertTokenAbsent(windowToken, args);
+    if (mcpTemp !== undefined) {
+      const mcpContents = readFileSync(mcpTemp.path, "utf8");
+      assertSecretAbsent(secret, [mcpContents]);
+      // Claude MCP 临时文件不得含令牌明文（仅 ${FF_PANE_WINDOW_TOKEN} 占位符）
+      assertTokenAbsent(windowToken, [mcpContents]);
+    }
+    if (roleInjection.claudePromptFile !== undefined) {
+      const promptBody = readFileSync(roleInjection.claudePromptFile, "utf8");
+      assertSecretAbsent(secret, [promptBody]);
+      assertTokenAbsent(windowToken, [promptBody]);
+    }
+    for (const hookFile of hooks.files) {
+      const hookBody = readFileSync(hookFile, "utf8");
+      assertSecretAbsent(secret, [hookBody]);
+      assertTokenAbsent(windowToken, [hookBody]);
+    }
+  } catch (error) {
+    await releaseFailedLaunch();
+    throw error;
   }
 
   const direct = resolveDirectCliTarget(command, args, process.env);
   if (direct === undefined) {
+    await releaseFailedLaunch();
     throw new WorkbenchCliLaunchError(
       process.platform === "win32" ? "cli-unresolvable" : "cli-missing",
       process.platform === "win32"
@@ -374,6 +476,9 @@ export async function launchCliWindow(
     }
   }
   stringEnv[FF_PANE_WINDOW_TOKEN_ENV] = windowToken;
+  if (deps.controlPipe !== undefined && deps.controlPipe.trim() !== "") {
+    stringEnv[FF_PANE_WB_PIPE_ENV] = deps.controlPipe;
+  }
 
   const startedAtMs = deps.now?.() ?? Date.now();
   let terminal: TerminalRecord;
@@ -397,10 +502,7 @@ export async function launchCliWindow(
       },
     });
   } catch (error) {
-    deps.tokenRegistry.revoke(input.windowId);
-    if (mcpTemp !== undefined) {
-      await deps.mcpRegistry.release(input.windowId);
-    }
+    await releaseFailedLaunch();
     throw error;
   }
 
@@ -415,10 +517,16 @@ export async function launchCliWindow(
         ...(prior?.parentWindowId !== undefined ? { parentWindowId: prior.parentWindowId } : {}),
         ...(prior?.parentClosed === true ? { parentClosed: true } : {}),
         ...(permissionCapped ? { permissionNeedsDowngrade: true } : {}),
+        role,
       },
       input.projectId,
     );
   }
+
+  deps.idleQueue?.attach(terminal.id, {
+    windowId: input.windowId,
+    initialPrompt: input.initialPrompt !== undefined && input.initialPrompt.trim() !== "",
+  });
 
   if (runtime === "codex" && input.resume !== true && deps.codexClaimer !== undefined) {
     claimingSession = true;
@@ -448,6 +556,7 @@ export async function launchCliWindow(
     args: [...direct.args],
     effectivePermission: permission,
     permissionCapped,
+    turnSignal: nodePath === undefined ? "manual" : "auto",
   };
 }
 

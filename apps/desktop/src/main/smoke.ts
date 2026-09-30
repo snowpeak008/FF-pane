@@ -1,9 +1,12 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { app, type BrowserWindow, ipcMain } from "electron";
 import type { SmokeReport } from "../shared-ipc/contracts";
 import { publishEvent, registerInvokeHandlers } from "../shared-ipc/server";
 import { runSecretsCheck } from "./secrets";
 import { runSqliteCheck } from "./sqlite-check";
 import { runPtyCheck } from "./terminal";
+import { resolveWorkbenchRoleResourcesDir } from "./workbench/role-resources";
 
 /**
  * 冒烟自测模式（pnpm smoke → electron . --smoke），本任务的客观验收手段：
@@ -135,15 +138,52 @@ async function finish(
   } else {
     console.error(ptyLine);
   }
+  const roleDir = resolveWorkbenchRoleResourcesDir({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    appPath: app.getAppPath(),
+  });
+  const roleBase = join(roleDir, "base.md");
+  const hookScript = app.isPackaged
+    ? join(process.resourcesPath, "workbench-hook.mjs")
+    : join(app.getAppPath(), "out", "main", "workbench-hook.mjs");
+  const hookText = existsSync(hookScript) ? readFileSync(hookScript, "utf8") : "";
+  const builderPath = join(app.getAppPath(), "electron-builder.yml");
+  const builderText =
+    !app.isPackaged && existsSync(builderPath) ? readFileSync(builderPath, "utf8") : "";
+  const hookOutsideAsar = app.isPackaged
+    ? existsSync(hookScript)
+    : builderText.includes("to: workbench-hook.mjs") &&
+      builderText.includes("!out/main/workbench-hook.mjs");
+  const hookPlainNode =
+    hookText.includes("agent-turn-complete") &&
+    !hookText.includes("electron") &&
+    !hookText.includes("cmd.exe");
+  const hookOk = existsSync(hookScript) && hookOutsideAsar && hookPlainNode;
+  const hookLine = `[smoke] ${hookOk ? "PASS" : "FAIL"} workbench-hook —— ${hookOk ? hookScript : "missing plain node script outside asar"}`;
+  if (hookOk) {
+    console.log(hookLine);
+  } else {
+    console.error(hookLine);
+  }
+  const roleOk = existsSync(roleBase);
+  const roleLine = `[smoke] ${roleOk ? "PASS" : "FAIL"} role-manuals —— ${roleOk ? roleDir : `missing ${roleBase}`}`;
+  if (roleOk) {
+    console.log(roleLine);
+  } else {
+    console.error(roleLine);
+  }
   const allOk =
     mainSqliteOk &&
     secrets.ok &&
     pty.ok &&
+    roleOk &&
+    hookOk &&
     report.checks.length > 0 &&
     report.checks.every((c) => c.ok);
   if (allOk) {
     console.log(
-      "[smoke] ALL PASS：IPC ping-pong、事件订阅、better-sqlite3、CSP、密钥往返、PTY 全部通过",
+      "[smoke] ALL PASS：IPC ping-pong、事件订阅、better-sqlite3、CSP、密钥往返、PTY、角色说明书、hook 脚本全部通过",
     );
   } else {
     console.error("[smoke] 存在失败项，退出码 1");

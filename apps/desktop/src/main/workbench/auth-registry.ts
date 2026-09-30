@@ -15,9 +15,12 @@ import type {
   WorkbenchWindow,
 } from "@ff-pane/shared";
 import {
+  DEFAULT_WORKBENCH_ROLE,
   DEFAULT_WORKBENCH_WINDOW_PERMISSION,
   isWorkbenchPermissionLevel,
+  isWorkbenchRole,
   parseWorkbenchOpenedBy,
+  type WorkbenchRole,
 } from "@ff-pane/shared";
 
 interface StoredAuthNode extends WorkbenchAuthNode {
@@ -39,6 +42,7 @@ function toAuthNode(window: WorkbenchWindow): WorkbenchAuthNode | undefined {
       : {}),
     ...(window.parentClosed === true ? { parentClosed: true } : {}),
     ...(window.permissionNeedsDowngrade === true ? { permissionNeedsDowngrade: true } : {}),
+    role: isWorkbenchRole(window.role) ? window.role : DEFAULT_WORKBENCH_ROLE,
   };
 }
 
@@ -55,7 +59,7 @@ function applyAuthNode(window: WorkbenchWindow, node: WorkbenchAuthNode): Workbe
     ...(window.terminalId !== undefined ? { terminalId: window.terminalId } : {}),
     ...(window.profileId !== undefined ? { profileId: window.profileId } : {}),
     ...(window.nativeSessionId !== undefined ? { nativeSessionId: window.nativeSessionId } : {}),
-    ...(window.role !== undefined ? { role: window.role } : {}),
+    role: node.role ?? (isWorkbenchRole(window.role) ? window.role : DEFAULT_WORKBENCH_ROLE),
     ...(node.parentWindowId !== undefined ? { parentWindowId: node.parentWindowId } : {}),
     ...(node.parentClosed === true ? { parentClosed: true } : {}),
     ...(node.permissionNeedsDowngrade === true ? { permissionNeedsDowngrade: true } : {}),
@@ -78,10 +82,12 @@ function mergeRendererLayout(
     }
     const existing = existingById.get(window.id);
     const openedBy = existing?.openedBy ?? base.openedBy;
+    const role = existing?.role ?? base.role ?? DEFAULT_WORKBENCH_ROLE;
     authInput[window.id] = {
       id: window.id,
       permission: base.permission,
       openedBy,
+      role,
       ...(existing?.parentWindowId !== undefined
         ? { parentWindowId: existing.parentWindowId }
         : {}),
@@ -112,6 +118,8 @@ export interface WorkbenchAuthRegistry {
     readonly cycle: boolean;
   };
   snapshot(): Readonly<Record<string, WorkbenchAuthNode>>;
+  /** 更新已登记窗口的角色。窗口不存在时返回 false。 */
+  setRole(windowId: string, role: WorkbenchRole): boolean;
   clear(): void;
 }
 
@@ -179,6 +187,14 @@ export function createWorkbenchAuthRegistry(): WorkbenchAuthRegistry {
         out[id] = node;
       }
       return out;
+    },
+    setRole(windowId, role) {
+      const stored = byId.get(windowId);
+      if (stored === undefined) {
+        return false;
+      }
+      byId.set(windowId, { ...stored, role });
+      return true;
     },
     clear() {
       byId.clear();

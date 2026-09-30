@@ -7,6 +7,9 @@
 /** CLI / MCP 进程环境变量名。 */
 export const FF_PANE_WINDOW_TOKEN_ENV = "FF_PANE_WINDOW_TOKEN";
 
+/** 控制通道管道名（hook 与 T10.7 sidecar 继承）。值只在进程环境里，不进配置明文。 */
+export const FF_PANE_WB_PIPE_ENV = "FF_PANE_WB_PIPE";
+
 /** 令牌字节数（≥32）。 */
 export const WINDOW_TOKEN_BYTES = 32;
 
@@ -91,6 +94,9 @@ export function resolveCaller(
 /** Claude MCP 配置 env 中的占位符（官方 `${VAR}` 展开；文件不得含令牌明文）。 */
 export const FF_PANE_WINDOW_TOKEN_ENV_PLACEHOLDER = `\${${FF_PANE_WINDOW_TOKEN_ENV}}`;
 
+/** Claude MCP 配置里的管道名占位符（由 CLI 从进程 env 展开）。 */
+export const FF_PANE_WB_PIPE_ENV_PLACEHOLDER = `\${${FF_PANE_WB_PIPE_ENV}}`;
+
 export type McpTokenDeliveryMode = "claude-env-expand" | "codex-forward";
 
 type McpSpecLike = {
@@ -119,13 +125,17 @@ export function injectTokenIntoMcpServers<T extends McpSpecLike>(
         env: {
           ...(spec.env ?? {}),
           [FF_PANE_WINDOW_TOKEN_ENV]: FF_PANE_WINDOW_TOKEN_ENV_PLACEHOLDER,
+          [FF_PANE_WB_PIPE_ENV]: FF_PANE_WB_PIPE_ENV_PLACEHOLDER,
         },
       };
       continue;
     }
-    const envVars = [...new Set([...(spec.envVars ?? []), FF_PANE_WINDOW_TOKEN_ENV])];
+    const envVars = [
+      ...new Set([...(spec.envVars ?? []), FF_PANE_WINDOW_TOKEN_ENV, FF_PANE_WB_PIPE_ENV]),
+    ];
     const env = { ...(spec.env ?? {}) };
     delete (env as Record<string, string>)[FF_PANE_WINDOW_TOKEN_ENV];
+    delete (env as Record<string, string>)[FF_PANE_WB_PIPE_ENV];
     out[name] = {
       ...spec,
       ...(Object.keys(env).length > 0 ? { env } : { env: undefined }),

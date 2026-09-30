@@ -169,6 +169,10 @@
         "title": "Workbench: maximize/restore window",
         "keywords": "workbench maximize restore 最大化 还原"
       },
+      "workbench-set-manager": {
+        "title": "Set current window as manager",
+        "keywords": "workbench set manager role 管理者 角色 当前窗口"
+      },
       "nav-toggle-sidebar": {
         "title": "Toggle navigation sidebar",
         "keywords": "sidebar collapse expand 侧栏 导航 收起 展开"
@@ -320,6 +324,8 @@
       "kindCodex": "Codex",
       "profile": "Launch profile",
       "permission": "Permission level",
+      "role": "Role",
+      "roleHint": "Plain windows get the shared brief only. Manager, planner, worker and reviewer also get their own brief.",
       "yoloConfirm": "I understand YOLO skips all CLI permission checks and may alter the repo or run arbitrary commands.",
       "yoloConfirmShort": "Confirm YOLO risk",
       "initialPrompt": "Initial prompt (optional)",
@@ -347,6 +353,27 @@
       "capped": "Capped to {{level}} by parent ceiling",
       "apply": "Apply",
       "applyAndRestart": "Apply and restart"
+    },
+    "role": {
+      "level": {
+        "manager": "Manager",
+        "planner": "Planner",
+        "worker": "Worker",
+        "reviewer": "Reviewer",
+        "none": "Plain"
+      },
+      "badgeHint": "Click or right-click to set this window's role",
+      "notAi": "The focused window is not an AI window",
+      "rejected": "This window cannot be given that role",
+      "dropped": "The window had exited, so the role note was not written. The next launch injects it"
+    },
+    "deliver": {
+      "pending": "{{count}} waiting to be sent",
+      "send": "Send now",
+      "cancel": "Cancel",
+      "blocked": "Waiting on a permission prompt — not sending",
+      "busy": "This turn has not finished — not sending",
+      "noNode": "No node.exe is available, so turn-complete signals cannot arrive. Use Send now for anything waiting."
     },
     "empty": {
       "noProject": "No project selected. Create or pick one on the projects page, then open a terminal.",
@@ -626,6 +653,28 @@
       "hint": "Default level when you create an AI window in the UI. Child windows opened by a window cannot exceed the parent. Not OS isolation on Windows.",
       "loadError": "Failed to load",
       "error": "Failed to save default permission"
+    },
+    "workbenchRoles": {
+      "title": "Workbench role briefs",
+      "hint": "Injected when an AI window starts. Edits here are override copies in the app data directory. Reset uses the built-in brief again.",
+      "pick": "Brief",
+      "save": "Save override",
+      "reset": "Reset to default",
+      "saved": "Override saved",
+      "resetDone": "Restored the built-in brief",
+      "loadError": "Failed to load briefs",
+      "error": "Failed to save brief",
+      "manual": {
+        "base": "Shared brief",
+        "manager": "Manager",
+        "planner": "Planner",
+        "worker": "Worker",
+        "reviewer": "Reviewer"
+      },
+      "source": {
+        "default": "Using the built-in text",
+        "override": "Using your override"
+      }
     },
     "profiles": {
       "title": "Agent profiles",

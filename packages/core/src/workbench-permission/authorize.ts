@@ -3,7 +3,7 @@
  * 纯函数；T10.7 MCP 工具必须以本模块为唯一裁决依据。
  */
 
-import type { WorkbenchOpenedBy, WorkbenchPermissionLevel } from "@ff-pane/shared";
+import type { WorkbenchOpenedBy, WorkbenchPermissionLevel, WorkbenchRole } from "@ff-pane/shared";
 import { minPermissionLevel, permissionLevelLte } from "@ff-pane/shared";
 
 /** 授权树中的窗口节点。 */
@@ -14,6 +14,8 @@ export interface WorkbenchAuthNode {
   readonly parentClosed?: boolean;
   readonly openedBy: WorkbenchOpenedBy;
   readonly permissionNeedsDowngrade?: boolean;
+  /** T10.6：窗口角色。缺省视为 none。 */
+  readonly role?: WorkbenchRole;
 }
 
 /** 调用方：界面用户（最高）或某窗口。 */

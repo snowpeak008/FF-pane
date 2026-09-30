@@ -11,6 +11,8 @@ import {
   authorizeOpenChild,
   canDelegate,
   createWindowTokenRegistry,
+  FF_PANE_WB_PIPE_ENV,
+  FF_PANE_WB_PIPE_ENV_PLACEHOLDER,
   FF_PANE_WINDOW_TOKEN_ENV,
   FF_PANE_WINDOW_TOKEN_ENV_PLACEHOLDER,
   generateWindowToken,
@@ -300,6 +302,7 @@ describe("window token registry", () => {
       "claude-env-expand",
     );
     expect(claude["k"]?.env?.[FF_PANE_WINDOW_TOKEN_ENV]).toBe(FF_PANE_WINDOW_TOKEN_ENV_PLACEHOLDER);
+    expect(claude["k"]?.env?.[FF_PANE_WB_PIPE_ENV]).toBe(FF_PANE_WB_PIPE_ENV_PLACEHOLDER);
     expect(JSON.stringify(claude)).not.toContain(token);
 
     const codex = injectTokenIntoMcpServers(
@@ -308,7 +311,9 @@ describe("window token registry", () => {
       "codex-forward",
     );
     expect(codex["k"]?.env?.[FF_PANE_WINDOW_TOKEN_ENV]).toBeUndefined();
+    expect(codex["k"]?.env?.[FF_PANE_WB_PIPE_ENV]).toBeUndefined();
     expect(codex["k"]?.envVars).toContain(FF_PANE_WINDOW_TOKEN_ENV);
+    expect(codex["k"]?.envVars).toContain(FF_PANE_WB_PIPE_ENV);
     expect(JSON.stringify(codex)).not.toContain(token);
   });
 });

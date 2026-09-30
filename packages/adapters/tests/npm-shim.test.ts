@@ -7,7 +7,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
 import { afterEach, describe, expect, it } from "vitest";
-import { parseNpmCmdShim, resolveDirectCliTarget } from "../src/process/npm-shim.js";
+import {
+  parseNpmCmdShim,
+  resolveDirectCliTarget,
+  resolveHookNodeExecutable,
+} from "../src/process/npm-shim.js";
 
 const temps: string[] = [];
 
@@ -117,5 +121,30 @@ describe("resolveDirectCliTarget", () => {
       PATH: `${dir};${process.env["PATH"] ?? ""}`,
     });
     expect(target).toBeUndefined();
+  });
+});
+
+describe("resolveHookNodeExecutable", () => {
+  it("shim-node 复用已经确定的 node.exe", () => {
+    const dir = tempDir();
+    const nodeExe = join(dir, "node.exe");
+    writeFileSync(nodeExe, "MZ");
+    expect(
+      resolveHookNodeExecutable({ PATH: "", Path: "" }, { kind: "shim-node", file: nodeExe }),
+    ).toBe(nodeExe);
+  });
+
+  it("原生 exe 且 PATH 上没有 node.exe 时不退回 cmd", () => {
+    const dir = tempDir();
+    const exe = join(dir, "codex.exe");
+    const cmd = join(dir, "node.cmd");
+    writeFileSync(exe, "MZ");
+    writeFileSync(cmd, "@echo off\r\n");
+    expect(
+      resolveHookNodeExecutable(
+        { PATH: dir, Path: dir, PATHEXT: ".COM;.EXE;.BAT;.CMD" },
+        { kind: "native", file: exe },
+      ),
+    ).toBeUndefined();
   });
 });

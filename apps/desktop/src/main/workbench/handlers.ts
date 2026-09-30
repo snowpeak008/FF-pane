@@ -8,6 +8,8 @@ import { createWindowTokenRegistry, type WindowTokenRegistry } from "@ff-pane/co
 import {
   clampMaxWorkbenchWindows,
   isWorkbenchPermissionLevel,
+  isWorkbenchRole,
+  isWorkbenchRoleManualId,
   type Provider,
 } from "@ff-pane/shared";
 import {
@@ -15,11 +17,12 @@ import {
   createProfileStore,
   createProjectSettingsStore,
   createProviderStore,
+  createWorkbenchLayoutStore,
   initGlobalLayout,
   resolveGlobalLayout,
   resolveProjectLayout,
 } from "@ff-pane/storage";
-import type { BrowserWindow } from "electron";
+import { app, type BrowserWindow } from "electron";
 import type { InvokeHandlers } from "../../shared-ipc/server";
 import { publishEvent } from "../../shared-ipc/server";
 import { resolveGlobalRoot } from "../data-root";
@@ -28,15 +31,43 @@ import { WORKBENCH_WINDOW_LIMIT_ERROR_PREFIX } from "../terminal/handlers";
 import type { PtyManager } from "../terminal/manager";
 import { createWorkbenchAuthRegistry, type WorkbenchAuthRegistry } from "./auth-registry";
 import { CodexSessionClaimer } from "./codex-claim";
+import { createWorkbenchControlServer } from "./control-channel";
+import { releaseWindowHooks } from "./hook-launch";
+import { createIdleDeliverQueue, type IdleDeliverQueue } from "./idle-deliver";
 import { assertLaunchCliIpcSafe, launchCliWindow, WorkbenchMcpTempRegistry } from "./launch-cli";
 import { cleanupStaleWorkbenchMcpDirs } from "./mcp-temp";
+import {
+  composeWindowRolePrompt,
+  listRoleManuals,
+  RolePromptTempRegistry,
+  resetRoleManualOverride,
+  resolveRoleSwitchManualPath,
+  saveRoleManualOverride,
+  writeClaudeRolePromptFile,
+} from "./role-manuals";
+import {
+  resolveWorkbenchRoleOverridesDir,
+  resolveWorkbenchRoleResourcesDir,
+} from "./role-resources";
+import { setWindowRole } from "./set-role";
 
 export interface WorkbenchCliLayer {
-  readonly handlers: Pick<InvokeHandlers, "workbench:launch-cli">;
+  readonly handlers: Pick<
+    InvokeHandlers,
+    | "workbench:launch-cli"
+    | "workbench:set-role"
+    | "workbench:deliver-now"
+    | "workbench:deliver-cancel"
+    | "workbench:list-role-manuals"
+    | "workbench:save-role-manual"
+    | "workbench:reset-role-manual"
+  >;
   readonly mcpRegistry: WorkbenchMcpTempRegistry;
   readonly codexClaimer: CodexSessionClaimer;
   readonly tokenRegistry: WindowTokenRegistry;
   readonly authRegistry: WorkbenchAuthRegistry;
+  readonly idleQueue: IdleDeliverQueue;
+  readonly rolePromptTemps: RolePromptTempRegistry;
   readonly dispose: () => Promise<void>;
 }
 
@@ -69,11 +100,110 @@ export async function createWorkbenchCliLayer(
     secretsFile: resolveSecretsFile(layout.rootDir),
   });
   const mcpRegistry = new WorkbenchMcpTempRegistry();
+  const rolePromptTemps = new RolePromptTempRegistry();
   const codexClaimer = new CodexSessionClaimer();
   const tokenRegistry = createWindowTokenRegistry();
   const authRegistry = options.authRegistry ?? createWorkbenchAuthRegistry();
+  const layouts = createWorkbenchLayoutStore(layout.workbenchLayoutsFile);
+  const resourcesDir = resolveWorkbenchRoleResourcesDir({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    appPath: app.getAppPath(),
+  });
+  const overridesDir = resolveWorkbenchRoleOverridesDir(layout.rootDir);
   const getMax =
     options.getMaxWorkbenchWindows ?? (async () => (await config.readConfig()).maxWorkbenchWindows);
+
+  const publishRoleNotice = (notice: {
+    readonly windowId: string;
+    readonly delivery: "dropped";
+    readonly reason?: string;
+  }): void => {
+    const window = options.getWindow();
+    if (window === null || window.isDestroyed()) {
+      return;
+    }
+    publishEvent(window.webContents, "workbench:role-notice", notice);
+  };
+
+  const findLiveTerminalId = (windowId: string): string | undefined => {
+    for (const record of options.manager.list()) {
+      if (record.exited) {
+        continue;
+      }
+      if (record.metadata?.["windowId"] === windowId) {
+        return record.id;
+      }
+    }
+    return undefined;
+  };
+
+  const publishDeliverPending = (notice: {
+    readonly windowId: string;
+    readonly count: number;
+    readonly mode: "manual" | "blocked" | "busy" | "clear";
+  }): void => {
+    const window = options.getWindow();
+    if (window === null || window.isDestroyed()) {
+      return;
+    }
+    publishEvent(window.webContents, "workbench:deliver-pending", notice);
+  };
+
+  const idleQueue = createIdleDeliverQueue({
+    isIdle: (terminalId, quietMs) => options.manager.isIdle(terminalId, quietMs),
+    isAlive: (terminalId) => {
+      const record = options.manager.get(terminalId);
+      return record !== undefined && record.exited !== true;
+    },
+    write: (terminalId, data) => {
+      options.manager.write(terminalId, data);
+    },
+    now: () => Date.now(),
+    schedule: (delayMs, fn) => {
+      const timer = setTimeout(fn, delayMs);
+      return () => {
+        clearTimeout(timer);
+      };
+    },
+    onDeferred: (outcome) => {
+      if (outcome.tag === undefined || outcome.status !== "dropped") {
+        return;
+      }
+      if (outcome.reason === "cancelled") {
+        return;
+      }
+      publishRoleNotice({
+        windowId: outcome.tag,
+        delivery: "dropped",
+        ...(outcome.reason !== undefined ? { reason: outcome.reason } : {}),
+      });
+    },
+    onPending: (notice) => {
+      if (notice.windowId === undefined) {
+        return;
+      }
+      publishDeliverPending({
+        windowId: notice.windowId,
+        count: notice.count,
+        mode: notice.mode,
+      });
+    },
+  });
+
+  const control = await createWorkbenchControlServer({
+    tokens: tokenRegistry,
+    onHook: (windowId, signal) => {
+      const terminalId = findLiveTerminalId(windowId);
+      if (terminalId === undefined) {
+        return;
+      }
+      idleQueue.noteHook(terminalId, signal);
+    },
+    log: (message) => {
+      console.error(`[wb-control] ${message}`);
+    },
+  });
 
   const handlers: WorkbenchCliLayer["handlers"] = {
     "workbench:launch-cli": async (request) => {
@@ -97,6 +227,7 @@ export async function createWorkbenchCliLayer(
             ? { nativeSessionId: request.nativeSessionId }
             : {}),
           ...(permission !== undefined ? { permission } : {}),
+          ...(isWorkbenchRole(request.role) ? { role: request.role } : {}),
         },
         {
           manager: options.manager,
@@ -133,9 +264,22 @@ export async function createWorkbenchCliLayer(
           mcpRegistry,
           tokenRegistry,
           authRegistry,
+          loadRoleInjection: async ({ windowId, role, runtime }) => {
+            const text = await composeWindowRolePrompt(resourcesDir, overridesDir, role);
+            if (runtime === "claude-code") {
+              const filePath = writeClaudeRolePromptFile(windowId, text);
+              rolePromptTemps.track(windowId, filePath);
+              return { claudePromptFile: filePath };
+            }
+            return { developerInstructions: text };
+          },
           clampMax: clampMaxWorkbenchWindows,
           limitErrorPrefix: WORKBENCH_WINDOW_LIMIT_ERROR_PREFIX,
           codexClaimer,
+          controlPipe: control.address,
+          isPackaged: app.isPackaged,
+          resourcesPath: process.resourcesPath,
+          idleQueue,
           onCodexSessionClaimed: (windowId, nativeSessionId) => {
             const window = options.getWindow();
             if (window === null || window.isDestroyed()) {
@@ -160,7 +304,66 @@ export async function createWorkbenchCliLayer(
         ...(result.model !== undefined ? { model: result.model } : {}),
         effectivePermission: result.effectivePermission,
         permissionCapped: result.permissionCapped,
+        turnSignal: result.turnSignal,
       };
+    },
+    "workbench:set-role": async (request) => {
+      if (!isWorkbenchRole(request.role)) {
+        throw new Error("invalid workbench role");
+      }
+      const result = await setWindowRole({ kind: "user" }, request.windowId, request.role, {
+        authRegistry,
+        readLayouts: () => layouts.readAll(),
+        saveLayout: (next) => layouts.saveProject(next),
+        findLiveTerminalId,
+        idleQueue,
+        manualPath: (role) => resolveRoleSwitchManualPath(resourcesDir, overridesDir, role),
+      });
+      if (!result.ok) {
+        throw new Error(`set-role ${result.reason}`);
+      }
+      return { ok: true as const, role: result.role, delivery: result.delivery };
+    },
+    "workbench:deliver-now": (request) => {
+      const terminalId = findLiveTerminalId(request.windowId);
+      if (terminalId === undefined) {
+        return { ok: false as const, reason: "unknown-window" as const };
+      }
+      const result = idleQueue.deliverNow(terminalId);
+      if (result.status === "refused") {
+        return {
+          ok: false as const,
+          reason: result.reason === "dead" ? ("unknown-window" as const) : result.reason,
+        };
+      }
+      return { ok: true as const, count: result.count };
+    },
+    "workbench:deliver-cancel": (request) => {
+      const terminalId = findLiveTerminalId(request.windowId);
+      if (terminalId !== undefined) {
+        idleQueue.cancel(terminalId);
+      }
+      return { ok: true as const };
+    },
+    "workbench:list-role-manuals": async () => {
+      const manuals = await listRoleManuals(resourcesDir, overridesDir);
+      return { manuals };
+    },
+    "workbench:save-role-manual": async (request) => {
+      if (!isWorkbenchRoleManualId(request.id)) {
+        throw new Error("unknown role manual");
+      }
+      await saveRoleManualOverride(overridesDir, request.id, request.content);
+      return { ok: true as const };
+    },
+    "workbench:reset-role-manual": async (request) => {
+      if (!isWorkbenchRoleManualId(request.id)) {
+        throw new Error("unknown role manual");
+      }
+      await resetRoleManualOverride(overridesDir, request.id);
+      const manuals = await listRoleManuals(resourcesDir, overridesDir);
+      const manual = manuals.find((item) => item.id === request.id);
+      return { ok: true as const, content: manual?.defaultContent ?? "" };
     },
   };
 
@@ -170,11 +373,16 @@ export async function createWorkbenchCliLayer(
     codexClaimer,
     tokenRegistry,
     authRegistry,
+    idleQueue,
+    rolePromptTemps,
     dispose: async () => {
+      await control.close();
+      idleQueue.dispose();
       codexClaimer.dispose();
       tokenRegistry.clear();
       authRegistry.clear();
       await mcpRegistry.releaseAll();
+      await rolePromptTemps.releaseAll();
     },
   };
 }
@@ -191,5 +399,6 @@ export function releaseMcpForTerminalMetadata(
     void registry.release(windowId);
     claimer?.cancel(windowId);
     tokenRegistry?.revoke(windowId);
+    releaseWindowHooks(windowId);
   }
 }

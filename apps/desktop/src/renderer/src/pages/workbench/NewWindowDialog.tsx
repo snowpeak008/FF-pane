@@ -2,11 +2,18 @@
  * 工作台新建窗口对话框（T10.4 / T10.5）：PowerShell / Claude / Codex + 权限。
  */
 
-import type { AgentProfile, WorkbenchPermissionLevel, WorkbenchWindowKind } from "@ff-pane/shared";
+import type {
+  AgentProfile,
+  WorkbenchPermissionLevel,
+  WorkbenchRole,
+  WorkbenchWindowKind,
+} from "@ff-pane/shared";
 import {
+  DEFAULT_WORKBENCH_ROLE,
   DEFAULT_WORKBENCH_WINDOW_PERMISSION,
   runtimeToWorkbenchKind,
   WORKBENCH_PERMISSION_LEVELS,
+  WORKBENCH_ROLES,
 } from "@ff-pane/shared";
 import { type ReactElement, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -32,6 +39,7 @@ export interface NewWindowDialogResult {
   readonly profileId?: string;
   readonly initialPrompt?: string;
   readonly permission?: WorkbenchPermissionLevel;
+  readonly role?: WorkbenchRole;
 }
 
 export interface NewWindowDialogProps {
@@ -73,6 +81,7 @@ export function NewWindowDialog({
   const [profileId, setProfileId] = useState<string>("");
   const [initialPrompt, setInitialPrompt] = useState("");
   const [permission, setPermission] = useState<WorkbenchPermissionLevel>(defaultPermission);
+  const [role, setRole] = useState<WorkbenchRole>(DEFAULT_WORKBENCH_ROLE);
   const [yoloConfirm, setYoloConfirm] = useState(false);
   const [cliMissing, setCliMissing] = useState(false);
   const [probing, setProbing] = useState(false);
@@ -90,6 +99,7 @@ export function NewWindowDialog({
       return;
     }
     setPermission(defaultPermission);
+    setRole(DEFAULT_WORKBENCH_ROLE);
     setYoloConfirm(false);
   }, [defaultPermission, open]);
 
@@ -249,6 +259,26 @@ export function NewWindowDialog({
                       </label>
                     ) : null}
                   </fieldset>
+                  <fieldset className="flex flex-col gap-1.5">
+                    <legend className="text-xs font-medium text-fg-muted">
+                      {t("workbench.newWindow.role")}
+                    </legend>
+                    <p className="text-2xs text-fg-muted">{t("workbench.newWindow.roleHint")}</p>
+                    <div className="flex flex-wrap gap-2">
+                      {WORKBENCH_ROLES.map((item) => (
+                        <Button
+                          key={item}
+                          type="button"
+                          size="sm"
+                          variant={role === item ? "primary" : "secondary"}
+                          data-testid={`workbench-new-role-${item}`}
+                          onClick={() => setRole(item)}
+                        >
+                          {t(`workbench.role.level.${item}`)}
+                        </Button>
+                      ))}
+                    </div>
+                  </fieldset>
                   <Field
                     htmlFor="workbench-new-prompt"
                     label={t("workbench.newWindow.initialPrompt")}
@@ -283,7 +313,7 @@ export function NewWindowDialog({
               onConfirm({
                 kind,
                 ...(kind !== "shell" && profileId !== "" ? { profileId } : {}),
-                ...(kind !== "shell" ? { permission } : {}),
+                ...(kind !== "shell" ? { permission, role } : {}),
                 ...(initialPrompt.trim() !== "" ? { initialPrompt: initialPrompt.trim() } : {}),
               });
               onOpenChange(false);

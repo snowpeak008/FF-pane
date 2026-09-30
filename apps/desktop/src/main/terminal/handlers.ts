@@ -15,7 +15,15 @@ export interface TerminalLayerOptions {
   /** 读取同时窗口上限；缺省回退出厂默认。 */
   readonly getMaxWorkbenchWindows?: () => number | Promise<number>;
   /** PTY 退出时回调（含自然退出与 kill）；用于清理窗口级临时文件。 */
-  readonly onTerminalExit?: (metadata: Readonly<Record<string, unknown>> | undefined) => void;
+  readonly onTerminalExit?: (
+    metadata: Readonly<Record<string, unknown>> | undefined,
+    terminalId: string,
+  ) => void;
+  /**
+   * 用户按键（不含空闲队列自己的 write）。
+   * data 含 `\r` 表示这次是提交（Enter）。
+   */
+  readonly onUserInput?: (terminalId: string, data: string) => void;
 }
 
 export interface TerminalLayer {
@@ -58,7 +66,7 @@ export function createTerminalLayer(
         publishEvent(window.webContents, "terminal:output", batch);
       },
       onExit: (notice) => {
-        options.onTerminalExit?.(notice.metadata);
+        options.onTerminalExit?.(notice.metadata, notice.id);
         const window = getWindow();
         if (window === null || window.isDestroyed()) {
           return;
@@ -89,6 +97,7 @@ export function createTerminalLayer(
     },
     "terminal:write": (request) => {
       manager.write(request.id, request.data);
+      options.onUserInput?.(request.id, request.data);
       return { ok: true as const };
     },
     "terminal:resize": (request) => {

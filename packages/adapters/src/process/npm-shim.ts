@@ -102,6 +102,43 @@ export function parseNpmCmdShim(
   return undefined;
 }
 
+function isNodeBinary(file: string): boolean {
+  return /(?:^|[\\/])node(?:\.exe)?$/i.test(file);
+}
+
+/** 只接受真正的 node 可执行文件，不接受 node.cmd / node.bat。 */
+function findPlainNodeExecutable(env: NodeJS.ProcessEnv): string | undefined {
+  const pathEnv = getEnvCaseInsensitive(env, "PATH") ?? "";
+  const name = process.platform === "win32" ? "node.exe" : "node";
+  for (const rawDir of pathEnv.split(path.delimiter)) {
+    const dir = rawDir.replace(/^"|"$/g, "");
+    if (dir === "") {
+      continue;
+    }
+    const candidate = path.join(dir, name);
+    if (isFile(candidate)) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * hook / notify 使用的 node。
+ * Codex 若是 shim-node，直接用垫片已经确定的 node.exe。
+ * 否则只在 PATH 上找 node.exe（Windows）或 node（其它平台）。
+ * 找不到就返回 undefined，调用方不得改走 shell。
+ */
+export function resolveHookNodeExecutable(
+  env: NodeJS.ProcessEnv = process.env,
+  launched?: Pick<DirectCliTarget, "kind" | "file">,
+): string | undefined {
+  if (launched?.kind === "shim-node" && isNodeBinary(launched.file) && isFile(launched.file)) {
+    return launched.file;
+  }
+  return findPlainNodeExecutable(env);
+}
+
 /**
  * 解析 CLI 的直接 spawn 目标：原生 exe 或 npm shim 真实入口。
  * Windows 上若只能落到未识别的 `.cmd`，返回 undefined（拒绝 cmd 回退）。

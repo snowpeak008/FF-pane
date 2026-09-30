@@ -61,6 +61,8 @@ import type {
   TaskSettledStatus,
   TranscriptEntry,
   WorkbenchPermissionLevel,
+  WorkbenchRole,
+  WorkbenchRoleManualId,
 } from "@ff-pane/shared";
 
 /** 项目级请求基：一律携带项目根路径，主进程据此 resolveProjectLayout。 */
@@ -255,6 +257,8 @@ export interface LaunchCliWindowRequest {
   readonly nativeSessionId?: string;
   /** T10.5：窗口权限等级。 */
   readonly permission?: WorkbenchPermissionLevel;
+  /** T10.6：新建窗口时的角色。登记表已有角色时以登记表为准。 */
+  readonly role?: WorkbenchRole;
 }
 
 /** workbench:launch-cli 响应（不含密钥）。 */
@@ -272,12 +276,73 @@ export interface LaunchCliWindowResponse {
   readonly effectivePermission: WorkbenchPermissionLevel;
   /** T10.5'：请求权限被祖先上限压低时为 true。 */
   readonly permissionCapped: boolean;
+  /** auto = 已装 node 直启的回合信号；manual = 没有 node.exe，投递一直要确认。 */
+  readonly turnSignal: "auto" | "manual";
 }
 
 /** workbench:session-claimed 事件（Codex 认领到原生会话 id）。 */
 export interface WorkbenchSessionClaimedEvent {
   readonly windowId: string;
   readonly nativeSessionId: string;
+}
+
+/** workbench:set-role 请求（T10.6）。调用方固定为界面用户。 */
+export interface SetWorkbenchRoleRequest {
+  readonly windowId: string;
+  readonly role: WorkbenchRole;
+}
+
+/** workbench:set-role 响应。manual/held 的按钮走 workbench:deliver-pending。 */
+export interface SetWorkbenchRoleResponse {
+  readonly ok: true;
+  readonly role: WorkbenchRole;
+  readonly delivery: "skipped" | "queued" | "manual" | "held" | "delivered" | "dropped";
+}
+
+export interface WorkbenchRoleManualView {
+  readonly id: WorkbenchRoleManualId;
+  readonly content: string;
+  readonly defaultContent: string;
+  readonly source: "override" | "default";
+  readonly path: string;
+}
+
+export interface ListWorkbenchRoleManualsResponse {
+  readonly manuals: readonly WorkbenchRoleManualView[];
+}
+
+export interface SaveWorkbenchRoleManualRequest {
+  readonly id: WorkbenchRoleManualId;
+  readonly content: string;
+}
+
+export interface ResetWorkbenchRoleManualRequest {
+  readonly id: WorkbenchRoleManualId;
+}
+
+/** 角色说明因窗口退出没写进去（T10.6'）。取消待投递不走这条。 */
+export interface WorkbenchRoleNoticeEvent {
+  readonly windowId: string;
+  readonly delivery: "dropped";
+  readonly reason?: string;
+}
+
+export interface DeliverWorkbenchPendingRequest {
+  readonly windowId: string;
+}
+
+export type DeliverWorkbenchPendingResponse =
+  | { readonly ok: true; readonly count: number }
+  | {
+      readonly ok: false;
+      readonly reason: "blocked" | "busy" | "empty" | "unknown-window";
+    };
+
+/** 某窗口待投递条数。manual 才显示立即发送；blocked 绝不发送。 */
+export interface WorkbenchDeliverPendingEvent {
+  readonly windowId: string;
+  readonly count: number;
+  readonly mode: "manual" | "blocked" | "busy" | "clear";
 }
 
 export interface TerminalOutputEvent {
@@ -1312,6 +1377,34 @@ export interface IpcInvokeContracts {
     request: LaunchCliWindowRequest;
     response: LaunchCliWindowResponse;
   };
+  /** 界面把窗口设为某个角色（T10.6）。 */
+  "workbench:set-role": {
+    request: SetWorkbenchRoleRequest;
+    response: SetWorkbenchRoleResponse;
+  };
+  /** 未知 hook 状态下，用户确认立即投递队列（T10.6'）。 */
+  "workbench:deliver-now": {
+    request: DeliverWorkbenchPendingRequest;
+    response: DeliverWorkbenchPendingResponse;
+  };
+  /** 丢掉该窗口待投递队列（T10.6'）。 */
+  "workbench:deliver-cancel": {
+    request: DeliverWorkbenchPendingRequest;
+    response: { readonly ok: true };
+  };
+  /** 设置页：角色说明书（覆盖副本优先）。 */
+  "workbench:list-role-manuals": {
+    request: undefined;
+    response: ListWorkbenchRoleManualsResponse;
+  };
+  "workbench:save-role-manual": {
+    request: SaveWorkbenchRoleManualRequest;
+    response: { readonly ok: true };
+  };
+  "workbench:reset-role-manual": {
+    request: ResetWorkbenchRoleManualRequest;
+    response: { readonly ok: true; readonly content: string };
+  };
   /** 列出工作台已登记的全部项目（注册表原样，只读 projects.json，不碰任何项目目录）。 */
   "projects:list": { request: undefined; response: readonly ProjectRegistryEntry[] };
   /**
@@ -1563,6 +1656,9 @@ export interface IpcEventContracts {
   "workbench:flush-request": { payload: WorkbenchFlushRequestEvent };
   /** Codex 窗口认领到原生会话 id（T10.4'）。 */
   "workbench:session-claimed": { payload: WorkbenchSessionClaimedEvent };
+  /** 待投递条数变化（T10.6'）。 */
+  "workbench:role-notice": { payload: WorkbenchRoleNoticeEvent };
+  "workbench:deliver-pending": { payload: WorkbenchDeliverPendingEvent };
 }
 
 export type InvokeChannel = keyof IpcInvokeContracts;
@@ -1598,6 +1694,12 @@ export const INVOKE_CHANNELS = [
   "workbench:remove-layout",
   "workbench:flush-ack",
   "workbench:launch-cli",
+  "workbench:set-role",
+  "workbench:deliver-now",
+  "workbench:deliver-cancel",
+  "workbench:list-role-manuals",
+  "workbench:save-role-manual",
+  "workbench:reset-role-manual",
   "projects:list",
   "projects:summary",
   "projects:create",
@@ -1677,6 +1779,8 @@ export const EVENT_CHANNELS = [
   "terminal:exit",
   "workbench:flush-request",
   "workbench:session-claimed",
+  "workbench:role-notice",
+  "workbench:deliver-pending",
 ] as const satisfies readonly EventChannel[];
 
 type AssertNever<T extends never> = T;

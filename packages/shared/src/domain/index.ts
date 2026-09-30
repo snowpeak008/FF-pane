@@ -25,3 +25,4 @@ export * from "./session.js";
 export * from "./task.js";
 export * from "./workbench.js";
 export * from "./workbench-permission.js";
+export * from "./workbench-role.js";

@@ -1,6 +1,6 @@
 # Phase 10 · 多窗口终端工作台 改造计划
 
-> 状态：v1.0（Tony 已确认，执行中；**T10.0 / T10.1 / T10.2 / T10.3 / T10.4 / T10.5 已验收通过**，见 `docs/验收记录/T10.0-验收.md` / `T10.1-验收.md` / `T10.2-验收.md` / `T10.3-验收.md` / `T10.4-验收.md` / `T10.5-验收.md`，tag `v0.10.0` / `v0.10.1` / `v0.10.2` / `v0.10.3` / `v0.10.4` / `v0.10.5`）
+> 状态：v1.0（Tony 已确认，执行中；**T10.0 / T10.1 / T10.2 / T10.3 / T10.4 / T10.5 / T10.6 已验收通过**，见 `docs/验收记录/T10.0-验收.md` / `T10.1-验收.md` / `T10.2-验收.md` / `T10.3-验收.md` / `T10.4-验收.md` / `T10.5-验收.md` / `T10.6-验收.md`，tag `v0.10.0` / `v0.10.1` / `v0.10.2` / `v0.10.3` / `v0.10.4` / `v0.10.5` / `v0.10.6`）
 > 编写：主控（只写计划、派活、验收）；执行与检查均由子 agent（Grok 4.7 High Fast）完成
 > 依据：本仓调研（FF-pane v0.9.2，最新任务 T9.11）、cc-pane 参考调研、终端/CLI 可行性调研
 
@@ -44,14 +44,25 @@
 
 ### 3.1 预定义角色（不用 Tony 手动设计）
 
-角色 = 一份 Markdown 说明书（放在应用资源里，可在设置中查看/改写副本），启动窗口时作为系统提示注入：
+工作台角色与旧会话 `Role` / `CustomRole` 分开。窗口角色只有五种：`manager`（管理者）、`planner`（规划）、`worker`（执行）、`reviewer`（检查）、`none`（普通，默认）。类型在 `packages/shared`；布局 schema v4 带 `role`（仍可读 v1–v3，缺省或非法值按普通处理）；主进程 `WorkbenchAuthRegistry` 在登记之后以注册表为准。
 
-- **管理者**：接 Tony 的目标 → 拆分 → 开窗口派活 → 收回报 → 汇总给 Tony。不亲自改代码。
-- **规划**：只读代码，产出计划 `.md`。
-- **执行**：按任务说明改代码、跑检查。
-- **检查**：只读 + 可跑测试，给出通过/不通过与问题清单。
+说明书是随应用打包的 Markdown（`apps/desktop/resources/workbench-roles/{base,manager,planner,worker,reviewer}.md`）。开发态从应用目录 `resources/workbench-roles` 读，打包后从 `extraResources` 的 `workbench-roles` 读。设置页可查看、编辑覆盖副本（应用数据目录 `workbench-role-overrides/`，原子写，空内容拒绝）或恢复默认。覆盖副本优先。
 
-成为管理者的两种方式：①在窗口里对 AI 说「你来当管理」，AI 调 MCP `register_manager`；②界面右键窗口「设为管理者」。
+系统提示 = `base` + 该角色说明书。`none` 只有 `base`。新开与续接都注入：
+
+- Claude：合并正文写入按窗口的临时文件，参数 `--append-system-prompt-file`（追加，不替换 Claude 自己的系统提示）。
+- Codex 0.159.2：`-c developer_instructions=<JSON 字符串>`。已用隔离 `CODEX_HOME` 的 `codex debug prompt-input` 验证：该键出现在第一条 developer 消息的开头，skills / permissions / collaboration 仍在，属于追加而不是整段替换。未知 `-c` 键会被静默忽略，故未采用未出现在二进制里的 `experimental_instructions_file`。`model_instructions_file` 对 `prompt-input` 无效果，且名称像替换，不使用。不写项目 `AGENTS.md`，不改用户 `~/.codex`。
+
+运行中改角色不重启。主进程 `setWindowRole(actor, windowId, role)` 用纯函数 `canSetRole` 裁决后改注册表和布局，并向存活 PTY 投递一行：`[FF-pane] 你的角色已设为…，请先阅读 <说明书绝对路径> 并按其行事`。投递走空闲队列，**永不强制写入**。窗口向 PTY 提交回车（用户按 Enter，或队列自己写出的回车）后记为忙；Claude 的 Stop，或 Codex notify 的 `agent-turn-complete`，才记为空闲。自动投递必须同时是空闲、用户在该窗口 1500ms 内没有输入、输出静默达到 1500ms。启动后还没收到回合结束时不自动投递，窗口里显示「有 N 条待投递——立即发送 / 取消」。PermissionRequest 等待中绝不投递。正文不含换行，回车单独发送；发出回车后下一条要等下一次回合结束。下次启动/续接改用系统提示。Claude 用 `--settings` 合并观察型 hooks（不写 `~/.claude`，不覆盖用户 hooks，没有额外信任开关，也不改用户项目 hooks 的信任状态）。hooks 用 exec 形态：`command` 是 node.exe 绝对路径，`args` 是脚本路径和固定事件名；官方文档写明带 `args` 时忽略 shell，事件 JSON 只从 stdin 进入。Codex 不用 hooks，也不使用 `--dangerously-bypass-hook-trust`；改为 `-c notify=[node.exe 绝对路径, hook 脚本绝对路径]`，由 Codex 把事件 JSON 追加为最后一个参数，不经 cmd / PowerShell / 任何 shell。脚本放在 extraResources，普通 node 能读。没有 node.exe 时不装 notify，该窗口投递一直手动确认，并在界面说明。这条 `-c` 会盖过用户 `config.toml` 里的 notify：工作台 Codex 窗口会暂时替换用户自定义 notify，不转发、不写 `~/.codex`。hook 经本地命名管道 / Unix socket 上报，请求带窗口令牌。
+
+`canSetRole`：界面用户可设任意窗口的任意角色；窗口把自己设为 `manager` 仅限 `openedBy=user` 的顶层窗口；窗口可设定自己后代的角色；其余拒绝。MCP `ffpane_set_role` 在 T10.7 接入，本单只提供上述主进程 API。
+
+界面：新建 AI 窗口可选角色（默认普通）；标题栏角色徽章（点击或右键菜单）；管理者标题栏用主色底；命令面板「将当前窗口设为管理者」。对 AI 说「你来当管理」时，说明书要求它调用 `ffpane_set_role`（工具本身 T10.7 才实现）。
+
+- **管理者**：接 Tony 的目标 → 澄清 → 拆分 → `ffpane_write_brief` → `ffpane_open_window` 开规划/执行/检查 → 收回报，必要时 `ffpane_read_output` → 派检查 → 汇总。不亲自改代码。
+- **规划**：只读代码，用 `ffpane_write_brief` 写计划，`ffpane_report` 回报路径。
+- **执行**：按 brief 改代码、自测，`ffpane_report` 汇报 done/blocked/failed。
+- **检查**：不改代码，跑检查、审阅 diff，给出通过/不通过，`ffpane_report` 汇报。
 
 ### 3.2 窗口间通信（混合方案）
 
@@ -60,6 +71,26 @@
 3. **长内容外置**：计划/任务说明写成 `.ffpane/briefs/*.md`，消息里只放路径。
 4. **提醒**：主进程向目标窗口终端写一行「[新消息] 来自 X，请调用 read_inbox」；窗口忙（输出未静默）时排队，空闲再投。提醒丢了也不怕——消息在收件箱和 `.md` 里。
 5. **兜底**：不支持 MCP 的 CLI 可直接读写 `.ffpane/inbox/<窗口>/` 下的 `.md`。
+
+### 3.2.1 工作台 MCP 工具清单（T10.6 角色说明书与 T10.7 实现共同遵守）
+
+服务名 `ffpane-workbench`（stdio sidecar，按窗口令牌识别调用方，主进程用 T10.5 的 `authorize` 裁决）：
+
+| 工具 | 作用 | 裁决要点 |
+|---|---|---|
+| `ffpane_whoami` | 返回本窗口 id、名称、角色、权限、上级、项目 | 任何窗口 |
+| `ffpane_list_windows` | 列出本窗口可见的窗口（自己的后代 + 上级链） | 只返回可见范围 |
+| `ffpane_set_role` | 设定窗口角色（含把自己设为管理者） | 与 `canSetRole` 相同：用户任意；自设 manager 仅用户开启的顶层窗口；窗口可设定后代；其余拒绝 |
+| `ffpane_open_window` | 开子窗口：CLI、启动配置、角色、权限、标题、任务说明文件路径 | 仅管理者；权限 ≤ 自己；受窗口上限 |
+| `ffpane_write_brief` | 在 `.ffpane/briefs/` 写任务说明 `.md`，返回路径 | 路径限定在 briefs 目录内 |
+| `ffpane_send_message` | 给后代发消息/指令（正文或 brief 路径） | 仅后代 |
+| `ffpane_report` | 向上级汇报（状态 done/blocked/failed/progress + 摘要 + 可选文件路径） | 仅上级链 |
+| `ffpane_read_inbox` | 读取本窗口收件箱（未读/全部） | 仅自己 |
+| `ffpane_read_output` | 读取后代窗口最近终端输出 | 仅后代 |
+| `ffpane_close_window` | 关闭后代窗口 | 仅后代 |
+| `ffpane_open_panel` | 在界面打开隐藏面板（plan/tasks/runs） | 任何窗口（只影响 UI 显示） |
+
+角色默认建议权限：管理者 `edit`（实际由 Tony 设定）、规划 `read-only`、执行 `edit-exec`、检查 `edit-exec`（说明书约束不改代码，只跑检查）。
 
 ### 3.3 权限模型
 
@@ -100,8 +131,8 @@
 | T10.3 | Provider 填表化 + 模板 + 迁移 | ✅ 已验收（`docs/验收记录/T10.3-验收.md`，tag `v0.10.3`） |
 | T10.4 | 在窗口中启动 Claude / Codex / Grok：注入 Provider、角色说明、知识库 MCP；支持续接 | ✅ 已验收（`docs/验收记录/T10.4-验收.md`，tag `v0.10.4`；角色说明书注入延至 T10.6，见开发进度调研结论） |
 | T10.5 | 窗口身份令牌 + 权限等级 + 自上而下下放规则 | ✅ 已验收（`docs/验收记录/T10.5-验收.md`，tag `v0.10.5`；移交 T10.7 三条见 `docs/开发进度.md`） |
-| T10.6 | 内置角色说明书 + 「设为管理者」 | 对窗口说“你来当管理”即生效 |
-| T10.7 | 工作台 MCP：开窗口/派活/发消息/收件箱/回报/看输出/关窗口；消息落盘 `.md`；空闲提醒队列 | 管理者自动开窗口派活、收回报，记录可翻看。开工前遵守 T10.5 移交：先登记父级再启动；冷启动先恢复父子再封顶；字面量 `${FF_PANE_WINDOW_TOKEN}` 必须报错 |
+| T10.6 | 内置角色说明书 + 「设为管理者」 | ✅ 已验收（`docs/验收记录/T10.6-验收.md`，tag `v0.10.6`；移交 T10.7 四条见 `docs/开发进度.md`） |
+| T10.7 | 工作台 MCP：开窗口/派活/发消息/收件箱/回报/看输出/关窗口；消息落盘 `.md`；空闲提醒队列 | 管理者自动开窗口派活、收回报，记录可翻看。开工前遵守 T10.5 移交：先登记父级再启动；冷启动先恢复父子再封顶；字面量 `${FF_PANE_WINDOW_TOKEN}` 必须报错。同时遵守 T10.6 移交：手动发送一次只发队首；Stop 不覆盖未结束的权限阻塞且 shell 环境去掉管道名；Codex 首轮前手动发送须提示残余风险；冷读 manager 不得直接当开窗口授权。工作台 Codex 窗口暂时替换用户自定义 notify |
 | T10.8 | ~~Grok 的 MCP 接入~~ **挂起**（Tony 决定本阶段不做 Grok） | — |
 | T10.9 | 计划 / 任务看板 / 运行记录 改为隐藏面板，数据改接工作台，可由 MCP `open_panel` 呼出 | 说一声就能打开看板 |
 | T10.10 | 记忆 MCP（检索/新增），让窗口能主动用记忆 | AI 窗口能查项目记忆 |
@@ -124,7 +155,7 @@
 
 | 风险 | 对策 |
 |---|---|
-| 往正在运行的 AI 命令行里写字不可靠 | 提醒只作“敲门”，正文走 MCP 收件箱 + `.md`；忙闲用输出静默判断并排队；Codex 评估原生 `notify` |
+| 往正在运行的 AI 命令行里写字不可靠 | 提醒只作“敲门”，正文走 MCP 收件箱 + `.md`；提交回车即忙，Codex 用 notify 的 `agent-turn-complete` 回空闲后再投递 |
 | Windows 沙箱不可靠 | 权限以 CLI 规则 + MCP 裁决为准；界面如实标注 |
 | Grok 无法按窗口注入 MCP | 见第 6 节待定项；Grok 可先走 `.md` 收件箱兜底 |
 | 原生模块 node-pty 打包 | 沿用 better-sqlite3 的 N-API 预编译 + asarUnpack + `npmRebuild:false`；加冒烟 |

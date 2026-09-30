@@ -3,9 +3,10 @@
  * 假 CLI = npm 形态 .cmd → node + js（与直启解析一致），打印 JSON argv（不打印密钥值）。
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import { gotoRoute, type LaunchedApp, launchApp } from "./_launch";
 
@@ -29,6 +30,65 @@ function writeFakeCli(dir: string, name: "claude" | "codex", envKey: string): vo
     "utf8",
   );
   // npm 全局垫片形态（供 resolveDirectCliTarget 解析）
+  writeFileSync(
+    join(dir, `${name}.cmd`),
+    [
+      "@ECHO off",
+      "SETLOCAL",
+      "CALL :find_dp0",
+      `IF EXIST "%dp0%\\node.exe" ( SET "_prog=%dp0%\\node.exe" ) ELSE ( SET "_prog=node" )`,
+      `endLocal & "%_prog%"  "%dp0%\\node_modules\\${name}\\bin\\${name}.js" %*`,
+      ":find_dp0",
+      "SET dp0=%~dp0",
+      "EXIT /b",
+      "",
+    ].join("\r\n"),
+    "utf8",
+  );
+}
+
+/** 不退出，并把 stdin 回写到 stdout。可选：看到触发文件就用打包的 hook 脚本上报。 */
+function writePersistentFakeCli(
+  dir: string,
+  name: "claude" | "codex",
+  envKey: string,
+  options?: { readonly hookScript?: string; readonly triggerFile?: string },
+): void {
+  const bin = join(dir, "node_modules", name, "bin");
+  mkdirSync(bin, { recursive: true });
+  const script = join(bin, `${name}.js`);
+  writeFileSync(
+    script,
+    [
+      "#!/usr/bin/env node",
+      `const tag = ${JSON.stringify(name === "claude" ? "FAKE_CLAUDE" : "FAKE_CODEX")};`,
+      "const argv = process.argv.slice(2);",
+      "process.stdout.write(tag + '_ARGV_JSON=' + JSON.stringify(argv) + '\\n');",
+      `const key = ${JSON.stringify(envKey)};`,
+      "process.stdout.write(tag + '_ENV_' + key + '=' + (process.env[key] ? 'present' : 'absent') + '\\n');",
+      "process.stdout.write(tag + '_ENV_FF_PANE_WINDOW_TOKEN=' + (process.env.FF_PANE_WINDOW_TOKEN ? 'present' : 'absent') + '\\n');",
+      "process.stdout.write(tag + '_ENV_FF_PANE_WB_PIPE=' + (process.env.FF_PANE_WB_PIPE ? 'present' : 'absent') + '\\n');",
+      `const hookScript = ${JSON.stringify(options?.hookScript ?? "")};`,
+      `const triggerFile = ${JSON.stringify(options?.triggerFile ?? "")};`,
+      "const fs = require('node:fs');",
+      "const { spawn } = require('node:child_process');",
+      "if (triggerFile) {",
+      "  setInterval(() => {",
+      "    let text = '';",
+      "    try { text = fs.readFileSync(triggerFile, 'utf8').trim(); } catch { return; }",
+      "    if (!text) return;",
+      "    try { fs.unlinkSync(triggerFile); } catch {}",
+      "    if (!hookScript) { process.stdout.write(tag + '_HOOK_SCRIPT=absent\\n'); return; }",
+      "    const child = spawn(process.execPath, [hookScript, text], { env: process.env, stdio: 'ignore', windowsHide: true, shell: false });",
+      "    child.on('exit', (code) => { process.stdout.write(tag + '_HOOK_EXIT=' + text + ':' + String(code) + '\\n'); });",
+      "  }, 200);",
+      "}",
+      "process.stdin.setEncoding('utf8');",
+      "process.stdin.on('data', (chunk) => { process.stdout.write(String(chunk)); });",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
   writeFileSync(
     join(dir, `${name}.cmd`),
     [
@@ -96,9 +156,12 @@ async function readReplayForWindow(page: LaunchedApp["page"], windowId: string):
 }
 
 function parseArgvJson(replay: string, tag: "FAKE_CLAUDE" | "FAKE_CODEX"): string[] {
-  const line = replay.split(/\r?\n/).find((item) => item.includes(`${tag}_ARGV_JSON=`));
-  expect(line).toBeTruthy();
-  const json = line?.slice(line.indexOf("=") + 1) ?? "[]";
+  const marker = `${tag}_ARGV_JSON=`;
+  const start = replay.indexOf(marker);
+  expect(start).toBeGreaterThanOrEqual(0);
+  const flat = replay.slice(start + marker.length).replace(/\r?\n/g, "");
+  const envAt = flat.indexOf(`${tag}_ENV_`);
+  const json = envAt >= 0 ? flat.slice(0, envAt) : flat;
   return JSON.parse(json) as string[];
 }
 
@@ -107,10 +170,14 @@ async function confirmAiWindow(
   kind: "claude" | "codex",
   initialPrompt?: string,
   permission?: "read-only" | "edit" | "edit-exec" | "yolo",
+  role?: "manager" | "planner" | "worker" | "reviewer" | "none",
 ): Promise<void> {
   await expect(page.getByTestId("workbench-new-window-dialog")).toBeVisible();
   await page.getByTestId(`workbench-new-kind-${kind}`).click();
   await expect(page.getByTestId("workbench-new-profile")).toBeVisible({ timeout: 10_000 });
+  if (role !== undefined) {
+    await page.getByTestId(`workbench-new-role-${role}`).click();
+  }
   if (permission !== undefined) {
     await page.getByTestId(`workbench-new-permission-${permission}`).click();
     if (permission === "yolo") {
@@ -441,6 +508,9 @@ test("Codex 预置假 rollout 后认领成功，续接 argv 为 resume <id>", as
     expect(argv[0]).toBe("resume");
     expect(argv).toContain(claimedId);
     expect(argv).not.toContain("--last");
+    expect(argv).not.toContain("--dangerously-bypass-hook-trust");
+    expect(argv.join("\n")).toContain("notify=[");
+    expect(argv.join("\n")).not.toContain("features.hooks");
   } finally {
     await launched.cleanup();
     rmSync(fakeBinDir, { recursive: true, force: true });
@@ -557,6 +627,245 @@ test("T10.5：只读 Claude 权限参数 + 令牌 env 存在 + 改 yolo 重启",
     const after = parseArgvJson(await readReplayForWindow(page, windowId), "FAKE_CLAUDE");
     expect(after).toContain("--dangerously-skip-permissions");
     expect(after).not.toContain("plan");
+  } finally {
+    await launched.cleanup();
+    rmSync(fakeBinDir, { recursive: true, force: true });
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("T10.6：worker 说明书注入，运行中改管理者，设置覆盖进新窗口", async () => {
+  const fakeBinDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-role-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-role-proj-"));
+  writePersistentFakeCli(fakeBinDir, "claude", "ANTHROPIC_API_KEY", {
+    hookScript: join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "..",
+      "out",
+      "main",
+      "workbench-hook.mjs",
+    ),
+    triggerFile: join(projectDir, "ffpane-hook-trigger"),
+  });
+  writePersistentFakeCli(fakeBinDir, "codex", "OPENAI_API_KEY");
+
+  const launched = await launchApp({ pathPrepend: fakeBinDir });
+  try {
+    const { app, page } = launched;
+    await createProject(app, page, projectDir, "E2E Role");
+    await page.getByRole("button", { name: /^E2E Role/ }).click();
+    await page.evaluate(async () => {
+      const invoke = (channel: string, req?: unknown) =>
+        // biome-ignore lint/suspicious/noExplicitAny: E2E
+        (window as any).ffpane.invoke(channel, req);
+      const provider = await invoke("providers:create", {
+        draft: {
+          name: "Local Claude",
+          templateId: "local-login",
+          models: [{ id: "sonnet", label: "Sonnet", kind: "chat" }],
+          defaultModelId: "sonnet",
+          enabled: true,
+        },
+      });
+      await invoke("profiles:create", {
+        draft: {
+          name: "Claude WB",
+          runtime: "claude-code",
+          providerId: provider.id,
+          defaultRole: "worker",
+          permissionPreset: {
+            readPaths: ["**"],
+            writePaths: ["**"],
+            shell: "allowed",
+            network: false,
+            dangerousOpsRequireApproval: true,
+          },
+          connectionMode: "local_cli",
+          model: "sonnet",
+        },
+      });
+    });
+
+    await gotoRoute(page, "/workbench");
+    await page.getByTestId("workbench-new-tab").click();
+    await confirmAiWindow(page, "claude", undefined, undefined, "worker");
+
+    const windowId = await requireWindowId(page, 0);
+    const pane = page.locator(`[data-window-id="${windowId}"]`);
+    await expect(pane.getByTestId("workbench-role-badge")).toHaveAttribute("data-role", "worker");
+    await expect
+      .poll(async () => readReplayForWindow(page, windowId), { timeout: 20_000 })
+      .toContain("FAKE_CLAUDE_ARGV_JSON=");
+    const argv = parseArgvJson(await readReplayForWindow(page, windowId), "FAKE_CLAUDE");
+    const promptFlag = argv.indexOf("--append-system-prompt-file");
+    expect(promptFlag).toBeGreaterThanOrEqual(0);
+    const promptPath = argv[promptFlag + 1];
+    expect(promptPath).toBeTruthy();
+    const promptBody = readFileSync(promptPath ?? "", "utf8");
+    expect(promptBody).toContain("只改 brief 范围内的文件");
+    const settingsFlag = argv.indexOf("--settings");
+    expect(settingsFlag).toBeGreaterThanOrEqual(0);
+    const settingsBody = readFileSync(argv[settingsFlag + 1] ?? "", "utf8");
+    expect(settingsBody).toContain("PermissionRequest");
+    expect(settingsBody).toContain("Stop");
+    expect(settingsBody).not.toContain("disableAllHooks");
+    const replayBefore = await readReplayForWindow(page, windowId);
+    expect(replayBefore).toContain("FAKE_CLAUDE_ENV_FF_PANE_WINDOW_TOKEN=present");
+    expect(replayBefore).toContain("FAKE_CLAUDE_ENV_FF_PANE_WB_PIPE=present");
+
+    await pane.getByTestId("workbench-role-badge").click();
+    await pane.getByTestId("workbench-role-option-manager").click();
+    await expect(pane.locator("[data-manager='true']")).toBeVisible();
+    await expect(pane.getByTestId("workbench-deliver-now")).toBeVisible();
+    await page.waitForTimeout(1_500);
+    expect(await readReplayForWindow(page, windowId)).not.toContain("manager.md");
+    await pane.getByTestId("workbench-deliver-now").click();
+    await expect
+      .poll(async () => readReplayForWindow(page, windowId), { timeout: 20_000 })
+      .toContain("manager.md");
+
+    writeFileSync(join(projectDir, "ffpane-hook-trigger"), "PermissionRequest", "utf8");
+    await expect
+      .poll(async () => readReplayForWindow(page, windowId), { timeout: 20_000 })
+      .toContain("FAKE_CLAUDE_HOOK_EXIT=PermissionRequest:0");
+    await pane.getByTestId("workbench-role-badge").click();
+    await pane.getByTestId("workbench-role-option-planner").click();
+    await expect(pane.getByTestId("workbench-deliver-blocked")).toBeVisible();
+    await expect(pane.getByTestId("workbench-deliver-now")).toHaveCount(0);
+    await page.waitForTimeout(2_000);
+    expect(await readReplayForWindow(page, windowId)).not.toContain("planner.md");
+    writeFileSync(join(projectDir, "ffpane-hook-trigger"), "Stop", "utf8");
+    await expect
+      .poll(async () => readReplayForWindow(page, windowId), { timeout: 20_000 })
+      .toContain("planner.md");
+
+    await gotoRoute(page, "/settings");
+    const manual = page.getByTestId("setting-workbench-role-manual");
+    await manual.scrollIntoViewIfNeeded();
+    await manual.selectOption("worker");
+    await expect(page.getByTestId("setting-workbench-role-manual-text")).toHaveValue(
+      /只改 brief 范围内的文件/,
+    );
+    const marker = "E2E-ROLE-OVERRIDE-WORKER";
+    await page.getByTestId("setting-workbench-role-manual-text").fill(`${marker}\n`);
+    await page.getByTestId("setting-workbench-role-save").click();
+    await expect(page.getByText("Using your override")).toBeVisible();
+
+    await gotoRoute(page, "/workbench");
+    await page.getByTestId("workbench-new-tab").click();
+    await confirmAiWindow(page, "claude", undefined, undefined, "worker");
+    const secondId = await requireWindowId(page, 0);
+    expect(secondId).not.toBe(windowId);
+    await expect
+      .poll(async () => readReplayForWindow(page, secondId), { timeout: 20_000 })
+      .toContain("FAKE_CLAUDE_ARGV_JSON=");
+    const secondArgv = parseArgvJson(await readReplayForWindow(page, secondId), "FAKE_CLAUDE");
+    const secondFlag = secondArgv.indexOf("--append-system-prompt-file");
+    const secondPath = secondArgv[secondFlag + 1];
+    expect(readFileSync(secondPath ?? "", "utf8")).toContain(marker);
+  } finally {
+    await launched.cleanup();
+    rmSync(fakeBinDir, { recursive: true, force: true });
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("T10.6：Codex notify 的 agent-turn-complete 之后才自动投递", async () => {
+  const fakeBinDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-codex-notify-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-codex-notify-proj-"));
+  const triggerFile = join(projectDir, "ffpane-codex-notify");
+  seedFakeClaude(fakeBinDir);
+  writePersistentFakeCli(fakeBinDir, "codex", "OPENAI_API_KEY", {
+    hookScript: join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "..",
+      "out",
+      "main",
+      "workbench-hook.mjs",
+    ),
+    triggerFile,
+  });
+
+  const launched = await launchApp({ pathPrepend: fakeBinDir });
+  try {
+    const { app, page } = launched;
+    await createProject(app, page, projectDir, "E2E Codex Notify");
+    await page.getByRole("button", { name: /^E2E Codex Notify/ }).click();
+    await page.evaluate(async () => {
+      const invoke = (channel: string, req?: unknown) =>
+        // biome-ignore lint/suspicious/noExplicitAny: E2E
+        (window as any).ffpane.invoke(channel, req);
+      const provider = await invoke("providers:create", {
+        draft: {
+          name: "Local Codex Notify",
+          templateId: "local-login",
+          models: [{ id: "gpt-5", label: "GPT", kind: "chat" }],
+          defaultModelId: "gpt-5",
+          enabled: true,
+        },
+      });
+      await invoke("profiles:create", {
+        draft: {
+          name: "Codex Notify WB",
+          runtime: "codex",
+          providerId: provider.id,
+          defaultRole: "worker",
+          permissionPreset: {
+            readPaths: ["**"],
+            writePaths: ["**"],
+            shell: "allowed",
+            network: false,
+            dangerousOpsRequireApproval: true,
+          },
+          connectionMode: "local_cli",
+          model: "gpt-5",
+        },
+      });
+    });
+
+    await gotoRoute(page, "/workbench");
+    await page.getByTestId("workbench-new-tab").click();
+    await confirmAiWindow(page, "codex", undefined, undefined, "worker");
+    const windowId = await requireWindowId(page, 0);
+    const pane = page.locator(`[data-window-id="${windowId}"]`);
+    await expect
+      .poll(async () => readReplayForWindow(page, windowId), { timeout: 20_000 })
+      .toContain("FAKE_CODEX_ARGV_JSON=");
+    const argv = parseArgvJson(await readReplayForWindow(page, windowId), "FAKE_CODEX");
+    const notify = argv.find((arg) => arg.startsWith("notify=")) ?? "";
+    const notifyArgv = JSON.parse(notify.slice("notify=".length)) as string[];
+    expect(notifyArgv).toHaveLength(2);
+    expect(notifyArgv[0]?.toLowerCase()).toMatch(/node(?:\.exe)?$/);
+    expect(notifyArgv[1]).toMatch(/workbench-hook\.mjs$/);
+    expect(notifyArgv.join("\n")).not.toMatch(/cmd\.exe|powershell|\.cmd|\.bat/i);
+    expect(argv).not.toContain("--dangerously-bypass-hook-trust");
+    expect(argv.join("\n")).not.toContain("features.hooks");
+
+    await pane.getByTestId("workbench-role-badge").click();
+    await pane.getByTestId("workbench-role-option-manager").click();
+    await expect(pane.getByTestId("workbench-deliver-now")).toBeVisible();
+    await page.waitForTimeout(1_500);
+    expect(await readReplayForWindow(page, windowId)).not.toContain("manager.md");
+
+    const pwned = join(process.env["TEMP"] ?? tmpdir(), "ffpane-notify-pwned.txt");
+    rmSync(pwned, { force: true });
+    writeFileSync(
+      triggerFile,
+      JSON.stringify({
+        type: "agent-turn-complete",
+        "thread-id": "e2e",
+        "turn-id": "1",
+        "last-assistant-message": `" & calc.exe & echo pwned > "${pwned}" & %PATH%\r\n${"A".repeat(4000)}`,
+      }),
+      "utf8",
+    );
+    await expect
+      .poll(async () => readReplayForWindow(page, windowId), { timeout: 20_000 })
+      .toContain("manager.md");
+    expect(await readReplayForWindow(page, windowId)).toContain("FAKE_CODEX_HOOK_EXIT=");
+    expect(existsSync(pwned)).toBe(false);
   } finally {
     await launched.cleanup();
     rmSync(fakeBinDir, { recursive: true, force: true });

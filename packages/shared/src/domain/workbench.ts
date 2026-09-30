@@ -6,6 +6,7 @@
 
 import type { ProjectId } from "./common.js";
 import type { WorkbenchOpenedBy, WorkbenchPermissionLevel } from "./workbench-permission.js";
+import type { WorkbenchRole } from "./workbench-role.js";
 
 /** 出厂默认：同时运行的工作台窗口上限。 */
 export const DEFAULT_MAX_WORKBENCH_WINDOWS = 12;
@@ -81,8 +82,8 @@ export interface WorkbenchWindow {
    * Claude = `--session-id` / `--resume` 的 UUID；Codex = `codex resume <id>`（可缺省，续接降级 `--last`）。
    */
   readonly nativeSessionId?: string;
-  /** 预留：角色（管理者 / 规划 / 执行 / 检查 / 普通）。 */
-  readonly role?: string;
+  /** 工作台角色。缺省视为 none。shell 窗口通常不设。 */
+  readonly role?: WorkbenchRole;
   /** AI 窗口权限等级；shell 不设。 */
   readonly permission?: WorkbenchPermissionLevel;
   /**

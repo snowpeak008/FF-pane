@@ -18,6 +18,12 @@ export default defineConfig({
           "knowledge-mcp": resolve(__dirname, "src/mcp/server.ts"),
           // T9.1 工作台自配置 MCP sidecar：同上进程模型（CLI 拉起、文件信箱与主进程通信）。
           "config-mcp": resolve(__dirname, "src/mcp/config-server.ts"),
+          // T10.6' 观察型 hook：普通 node 直接执行的 .mjs，不进 asar。
+          "workbench-hook": resolve(__dirname, "src/mcp/workbench-hook.ts"),
+        },
+        output: {
+          entryFileNames: (chunk) =>
+            chunk.name === "workbench-hook" ? "workbench-hook.mjs" : "[name].js",
         },
       },
     },

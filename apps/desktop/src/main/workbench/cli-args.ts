@@ -28,6 +28,13 @@ export interface BuildInteractiveClaudeArgsInput {
    */
   readonly strictMcp?: boolean;
   readonly initialPrompt?: string;
+  /** 合并后的系统提示文件（`--append-system-prompt-file`）。无密钥。 */
+  readonly appendSystemPromptFile?: string;
+  /**
+   * 本窗口额外 settings（`--settings`）。只放观察型 hooks。
+   * 官方行为是与用户 settings 合并，不会关掉用户自己的 hooks。
+   */
+  readonly settingsFile?: string;
   /** T10.5：权限等级 → CLI 参数。 */
   readonly permission?: WorkbenchPermissionLevel;
 }
@@ -43,8 +50,19 @@ export interface BuildInteractiveCodexArgsInput {
   /** 是否续接（true 且无 id → `codex resume` 选择器）。 */
   readonly resume?: boolean;
   readonly initialPrompt?: string;
+  /**
+   * 追加到 Codex 开发者说明前面的文本（`-c developer_instructions=`）。
+   * 不替换 Codex 自带说明。值由本函数 JSON.stringify。
+   */
+  readonly developerInstructions?: string;
   /** T10.5：权限等级 → CLI 参数（续接时同样重给）。 */
   readonly permission?: WorkbenchPermissionLevel;
+  /**
+   * Codex `notify` 命令数组，只能是 `[node 可执行文件, hook 脚本]`。
+   * 写成 `-c notify=[...]`。Codex 会把事件 JSON 追加为最后一个参数，不经 shell。
+   * 这条覆盖会盖过用户 config.toml 里的 notify，且只对本次进程生效。
+   */
+  readonly notifyArgv?: readonly string[];
 }
 
 /**
@@ -78,6 +96,12 @@ export function buildInteractiveClaudeArgs(input: BuildInteractiveClaudeArgsInpu
     if (input.strictMcp !== false) {
       args.push("--strict-mcp-config");
     }
+  }
+  if (input.appendSystemPromptFile !== undefined && input.appendSystemPromptFile.trim() !== "") {
+    args.push("--append-system-prompt-file", input.appendSystemPromptFile.trim());
+  }
+  if (input.settingsFile !== undefined && input.settingsFile.trim() !== "") {
+    args.push("--settings", input.settingsFile.trim());
   }
   if (input.initialPrompt !== undefined && input.initialPrompt.trim() !== "") {
     args.push(input.initialPrompt);
@@ -113,6 +137,13 @@ export function buildInteractiveCodexArgs(input: BuildInteractiveCodexArgsInput)
   }
   for (const [key, value] of Object.entries(input.configOverrides ?? {})) {
     args.push("-c", `${key}=${value}`);
+  }
+  if (input.developerInstructions !== undefined && input.developerInstructions.trim() !== "") {
+    args.push("-c", `developer_instructions=${JSON.stringify(input.developerInstructions)}`);
+  }
+  if (input.notifyArgv !== undefined && input.notifyArgv.length > 0) {
+    const encoded = input.notifyArgv.map((part) => JSON.stringify(part)).join(",");
+    args.push("-c", `notify=[${encoded}]`);
   }
   if (input.initialPrompt !== undefined && input.initialPrompt.trim() !== "") {
     args.push(input.initialPrompt);

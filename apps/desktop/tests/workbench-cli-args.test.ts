@@ -67,6 +67,21 @@ describe("buildInteractiveClaudeArgs", () => {
     ).toEqual(["--session-id", "11111111-1111-4111-8111-111111111111"]);
   });
 
+  it("新开与续接都带 --append-system-prompt-file", () => {
+    const file = "C:\\tmp\\role.md";
+    const fresh = buildInteractiveClaudeArgs({
+      sessionId: "11111111-1111-4111-8111-111111111111",
+      appendSystemPromptFile: file,
+      initialPrompt: "hello",
+    });
+    expect(fresh.slice(-3)).toEqual(["--append-system-prompt-file", file, "hello"]);
+    const resumed = buildInteractiveClaudeArgs({
+      resumeSessionId: "11111111-1111-4111-8111-111111111111",
+      appendSystemPromptFile: file,
+    });
+    expect(resumed.slice(-2)).toEqual(["--append-system-prompt-file", file]);
+  });
+
   it("read-only 权限：plan + disallowedTools；续接同样带上", () => {
     const fresh = buildInteractiveClaudeArgs({
       sessionId: "11111111-1111-4111-8111-111111111111",
@@ -109,6 +124,28 @@ describe("buildInteractiveCodexArgs", () => {
         "hi",
       ]
     `);
+  });
+
+  it("新开与续接都追加 developer_instructions，不覆盖已有 -c", () => {
+    const text = "角色说明\n第二行";
+    const fresh = buildInteractiveCodexArgs({
+      cwd: "D:\\repo",
+      configOverrides: { sandbox_mode: JSON.stringify("read-only") },
+      developerInstructions: text,
+      initialPrompt: "hi",
+    });
+    expect(fresh).toContain("-c");
+    expect(fresh).toContain('sandbox_mode="read-only"');
+    const flag = `developer_instructions=${JSON.stringify(text)}`;
+    expect(fresh.slice(-3)).toEqual(["-c", flag, "hi"]);
+    const resumed = buildInteractiveCodexArgs({
+      cwd: "D:\\repo",
+      resume: true,
+      resumeSessionId: "abc",
+      developerInstructions: text,
+    });
+    expect(resumed.slice(0, 4)).toEqual(["resume", "abc", "-C", "D:\\repo"]);
+    expect(resumed.slice(-2)).toEqual(["-c", flag]);
   });
 
   it("续接精确 id", () => {
@@ -250,5 +287,40 @@ describe("MCP temp token redline", () => {
     } finally {
       await file.remove();
     }
+  });
+});
+
+describe("T10.6' hook argv", () => {
+  it("Claude --settings；Codex 只带 notify，不含 hooks 与 bypass", () => {
+    expect(
+      buildInteractiveClaudeArgs({
+        sessionId: "11111111-1111-4111-8111-111111111111",
+        settingsFile: "C:\\tmp\\claude-settings.json",
+      }),
+    ).toEqual([
+      "--session-id",
+      "11111111-1111-4111-8111-111111111111",
+      "--settings",
+      "C:\\tmp\\claude-settings.json",
+    ]);
+
+    const nodePath = "C:\\Program Files\\nodejs\\node.exe";
+    const scriptPath = "C:\\用户\\workbench-hook.mjs";
+    const codex = buildInteractiveCodexArgs({
+      cwd: "C:\\proj",
+      resume: true,
+      resumeSessionId: "sess-1",
+      notifyArgv: [nodePath, scriptPath],
+    });
+    expect(codex[0]).toBe("resume");
+    expect(codex[1]).toBe("sess-1");
+    const notify = codex.find((arg) => arg.startsWith("notify=")) ?? "";
+    expect(JSON.parse(notify.slice("notify=".length))).toEqual([nodePath, scriptPath]);
+    const joined = codex.join("\n");
+    expect(joined).not.toMatch(/cmd\.exe|powershell|\.cmd|\.bat|\/bin\/sh/i);
+    expect(joined).not.toContain("--dangerously-bypass-hook-trust");
+    expect(joined).not.toContain("features.hooks");
+    expect(joined).not.toContain("hooks.");
+    expect(joined).not.toContain("FF_PANE_WINDOW_TOKEN");
   });
 });

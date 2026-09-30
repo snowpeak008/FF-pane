@@ -14,20 +14,24 @@ import type {
 } from "@ff-pane/shared";
 import {
   isWorkbenchPermissionLevel,
+  isWorkbenchRole,
   isWorkbenchWindowKind,
   parseWorkbenchOpenedBy,
 } from "@ff-pane/shared";
 import { readJson, writeJsonAtomic } from "../fs/index.js";
 import { WorkbenchLayoutsFileInvalidError } from "./errors.js";
 
-/** 当前布局文件 schema 版本（T10.5：permission / openedBy / parentClosed）。 */
-export const WORKBENCH_LAYOUTS_FILE_VERSION = 3;
+/** 当前布局文件 schema 版本（T10.6：窗口 role）。 */
+export const WORKBENCH_LAYOUTS_FILE_VERSION = 4;
 
 /** 可读取的旧版（读入后按当前版本写出）。 */
 export const WORKBENCH_LAYOUTS_FILE_VERSION_LEGACY = 1;
 
 /** 亦可读取的中间版。 */
 export const WORKBENCH_LAYOUTS_FILE_VERSION_V2 = 2;
+
+/** T10.5 权限字段版，缺 role 时按 none。 */
+export const WORKBENCH_LAYOUTS_FILE_VERSION_V3 = 3;
 
 export interface WorkbenchLayoutsFile {
   readonly version: typeof WORKBENCH_LAYOUTS_FILE_VERSION;
@@ -123,7 +127,7 @@ function parseWindow(value: unknown, projectId: ProjectId): WorkbenchWindow | nu
     ...(typeof raw["nativeSessionId"] === "string" && raw["nativeSessionId"].trim() !== ""
       ? { nativeSessionId: raw["nativeSessionId"] }
       : {}),
-    ...(typeof raw["role"] === "string" ? { role: raw["role"] } : {}),
+    ...(isWorkbenchRole(raw["role"]) ? { role: raw["role"] } : {}),
     ...(permission !== undefined ? { permission } : {}),
     ...(typeof raw["parentWindowId"] === "string" && raw["parentWindowId"].trim() !== ""
       ? { parentWindowId: raw["parentWindowId"] }
@@ -242,6 +246,7 @@ async function loadFile(
   const file = raw as { readonly version?: unknown; readonly layouts?: unknown };
   if (
     file.version !== WORKBENCH_LAYOUTS_FILE_VERSION &&
+    file.version !== WORKBENCH_LAYOUTS_FILE_VERSION_V3 &&
     file.version !== WORKBENCH_LAYOUTS_FILE_VERSION_V2 &&
     file.version !== WORKBENCH_LAYOUTS_FILE_VERSION_LEGACY
   ) {
@@ -322,6 +327,7 @@ export function parseWorkbenchLayoutsFileStrict(
   const file = raw as { readonly version?: unknown; readonly layouts?: unknown };
   if (
     file.version !== WORKBENCH_LAYOUTS_FILE_VERSION &&
+    file.version !== WORKBENCH_LAYOUTS_FILE_VERSION_V3 &&
     file.version !== WORKBENCH_LAYOUTS_FILE_VERSION_V2 &&
     file.version !== WORKBENCH_LAYOUTS_FILE_VERSION_LEGACY
   ) {

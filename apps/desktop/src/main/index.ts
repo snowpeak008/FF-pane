@@ -220,7 +220,7 @@ async function bootstrap(): Promise<void> {
     const configStore = createConfigStore(resolveGlobalLayout(resolveGlobalRoot()).configFile);
     terminalLayer = createTerminalLayer(() => mainWindow, {
       getMaxWorkbenchWindows: async () => (await configStore.readConfig()).maxWorkbenchWindows,
-      onTerminalExit: (metadata) => {
+      onTerminalExit: (metadata, terminalId) => {
         const layer = workbenchCliLayer;
         if (layer !== null) {
           releaseMcpForTerminalMetadata(
@@ -229,6 +229,21 @@ async function bootstrap(): Promise<void> {
             layer.codexClaimer,
             layer.tokenRegistry,
           );
+          layer.idleQueue.drop(terminalId);
+          const windowId = metadata?.["windowId"];
+          if (typeof windowId === "string" && windowId.trim() !== "") {
+            void layer.rolePromptTemps.release(windowId);
+          }
+        }
+      },
+      onUserInput: (terminalId, data) => {
+        const queue = workbenchCliLayer?.idleQueue;
+        if (queue === undefined) {
+          return;
+        }
+        queue.noteInput(terminalId);
+        if (data.includes("\r")) {
+          queue.noteSubmit(terminalId);
         }
       },
     });

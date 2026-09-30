@@ -13,6 +13,7 @@ import { ProvidersSection } from "./providers/ProvidersSection";
 import { RolesSection } from "./roles/RolesSection";
 import { WorkbenchDefaultPermissionSection } from "./WorkbenchDefaultPermissionSection";
 import { WorkbenchLimitSection } from "./WorkbenchLimitSection";
+import { WorkbenchRoleManualsSection } from "./WorkbenchRoleManualsSection";
 
 /**
  * 设置页（T3.2 / 项目设计计划 §11）。
@@ -36,6 +37,8 @@ export function SettingsPage(): ReactElement {
           <WorkbenchLimitSection />
           <Separator />
           <WorkbenchDefaultPermissionSection />
+          <Separator />
+          <WorkbenchRoleManualsSection />
           <Separator />
           <ProvidersSection />
           <Separator />

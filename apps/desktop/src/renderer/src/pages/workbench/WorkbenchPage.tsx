@@ -40,6 +40,7 @@ export function WorkbenchPage(): ReactElement {
   const setActiveTab = useWorkbenchStore((s) => s.setActiveTab);
   const focusWindow = useWorkbenchStore((s) => s.focusWindow);
   const toggleMaximize = useWorkbenchStore((s) => s.toggleMaximize);
+  const applyWindowRole = useWorkbenchStore((s) => s.applyWindowRole);
   const updateSplitSizes = useWorkbenchStore((s) => s.updateSplitSizes);
   const bindTerminalId = useWorkbenchStore((s) => s.bindTerminalId);
   const markCwdFallback = useWorkbenchStore((s) => s.markCwdFallback);
@@ -128,6 +129,7 @@ export function WorkbenchPage(): ReactElement {
           ...(result.profileId !== undefined ? { profileId: result.profileId } : {}),
           ...(result.initialPrompt !== undefined ? { initialPrompt: result.initialPrompt } : {}),
           ...(result.permission !== undefined ? { permission: result.permission } : {}),
+          ...(result.role !== undefined ? { role: result.role } : {}),
         });
         return;
       }
@@ -140,6 +142,7 @@ export function WorkbenchPage(): ReactElement {
         ...(result.profileId !== undefined ? { profileId: result.profileId } : {}),
         ...(result.initialPrompt !== undefined ? { initialPrompt: result.initialPrompt } : {}),
         ...(result.permission !== undefined ? { permission: result.permission } : {}),
+        ...(result.role !== undefined ? { role: result.role } : {}),
       });
     },
     [createTabWithWindow, entry, pendingCreate, splitWindow],
@@ -219,6 +222,25 @@ export function WorkbenchPage(): ReactElement {
       return;
     }
     toggleMaximize(entry.id, projectLayout.focusedWindowId);
+  });
+  useCommandHandler("workbench-set-manager", () => {
+    if (entry === null || projectLayout === null || projectLayout.focusedWindowId === null) {
+      return;
+    }
+    const focused = projectLayout.windows[projectLayout.focusedWindowId];
+    if (focused === undefined || (focused.kind !== "claude" && focused.kind !== "codex")) {
+      toast.error(t("workbench.role.notAi"));
+      return;
+    }
+    void applyWindowRole(entry.id, focused.id, "manager").then((result) => {
+      if (!result.ok) {
+        toast.error(t("workbench.role.rejected"), { description: result.message });
+        return;
+      }
+      if (result.delivery === "dropped") {
+        toast.message(t("workbench.role.dropped"));
+      }
+    });
   });
 
   if (loading || !hydrated) {

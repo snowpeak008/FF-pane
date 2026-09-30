@@ -19,7 +19,7 @@ A local-first, vendor-agnostic, pluggable multi-agent project workbench.
 
 ## 项目状态
 
-**v0.10.5（M3 完成；Phase 10 多窗口终端工作台进行中；T10.5 窗口身份令牌与四级权限已交付）。** 进度事实源见 [docs/开发进度.md](docs/开发进度.md)。
+**v0.10.6（M3 完成；Phase 10 多窗口终端工作台进行中；T10.6 内置角色说明书与设为管理者已交付）。** 进度事实源见 [docs/开发进度.md](docs/开发进度.md)。
 
 ## 启动方式
 

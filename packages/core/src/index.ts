@@ -46,3 +46,5 @@ export * from "./run-guard/index.js";
 export * from "./task/index.js";
 /** 工作台权限等级映射 + 层级授权 + 窗口令牌（T10.5）。 */
 export * from "./workbench-permission/index.js";
+/** 工作台角色裁决与系统提示合成（T10.6）。 */
+export * from "./workbench-role/index.js";

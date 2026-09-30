@@ -10,10 +10,15 @@ import type {
   ProjectWorkbenchLayout,
   WorkbenchOpenedBy,
   WorkbenchPermissionLevel,
+  WorkbenchRole,
   WorkbenchTab,
   WorkbenchWindow,
 } from "@ff-pane/shared";
-import { DEFAULT_WORKBENCH_WINDOW_PERMISSION, WORKBENCH_PERMISSION_RANK } from "@ff-pane/shared";
+import {
+  DEFAULT_WORKBENCH_ROLE,
+  DEFAULT_WORKBENCH_WINDOW_PERMISSION,
+  WORKBENCH_PERMISSION_RANK,
+} from "@ff-pane/shared";
 import { create } from "zustand";
 import {
   collectWindowIds,
@@ -62,6 +67,7 @@ export interface WorkbenchStoreActions {
     readonly profileId?: string;
     readonly initialPrompt?: string;
     readonly permission?: WorkbenchPermissionLevel;
+    readonly role?: WorkbenchRole;
     readonly parentWindowId?: string;
     readonly openedBy?: WorkbenchOpenedBy;
   }) => { readonly ok: true; readonly windowId: string; readonly autoLaunch: boolean };
@@ -74,6 +80,7 @@ export interface WorkbenchStoreActions {
     readonly profileId?: string;
     readonly initialPrompt?: string;
     readonly permission?: WorkbenchPermissionLevel;
+    readonly role?: WorkbenchRole;
     readonly parentWindowId?: string;
     readonly openedBy?: WorkbenchOpenedBy;
   }) =>
@@ -89,6 +96,7 @@ export interface WorkbenchStoreActions {
       title: string;
       terminalId: string | undefined;
       permission: WorkbenchPermissionLevel;
+      role: WorkbenchRole;
       permissionNeedsDowngrade: boolean;
       parentClosed: boolean;
     }>,
@@ -99,6 +107,18 @@ export interface WorkbenchStoreActions {
     windowId: string,
     permission: WorkbenchPermissionLevel,
   ) => void;
+  /** 界面设角色：主进程裁决并在运行中的窗口投递说明。 */
+  readonly applyWindowRole: (
+    projectId: ProjectId,
+    windowId: string,
+    role: WorkbenchRole,
+  ) => Promise<
+    | {
+        readonly ok: true;
+        readonly delivery: "skipped" | "queued" | "manual" | "held" | "delivered" | "dropped";
+      }
+    | { readonly ok: false; readonly message: string }
+  >;
   /** 本会话内新建的窗口（应用重启后清空）——用于 AI 窗口是否自动启动。 */
   readonly wasCreatedThisSession: (windowId: string) => boolean;
   /** 取出并清除新建时暂存的初始指令。 */
@@ -321,6 +341,7 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
     profileId,
     initialPrompt,
     permission,
+    role,
     parentWindowId,
     openedBy,
   }) {
@@ -347,6 +368,7 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
           ? {
               permission: permission ?? DEFAULT_WORKBENCH_WINDOW_PERMISSION,
               openedBy: openedBy ?? "user",
+              role: role ?? DEFAULT_WORKBENCH_ROLE,
             }
           : {}),
         ...(parentWindowId !== undefined ? { parentWindowId } : {}),
@@ -377,6 +399,7 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
     profileId,
     initialPrompt,
     permission,
+    role,
     parentWindowId,
     openedBy,
   }) {
@@ -408,6 +431,7 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
           ? {
               permission: permission ?? DEFAULT_WORKBENCH_WINDOW_PERMISSION,
               openedBy: openedBy ?? "user",
+              role: role ?? DEFAULT_WORKBENCH_ROLE,
             }
           : {}),
         ...(parentWindowId !== undefined ? { parentWindowId } : {}),
@@ -466,6 +490,9 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
       }
       if (patch.permission !== undefined) {
         Object.assign(next, { permission: patch.permission });
+      }
+      if (patch.role !== undefined) {
+        Object.assign(next, { role: patch.role });
       }
       if (patch.permissionNeedsDowngrade !== undefined) {
         Object.assign(next, { permissionNeedsDowngrade: patch.permissionNeedsDowngrade });
@@ -530,6 +557,25 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
     });
   },
 
+  async applyWindowRole(projectId, windowId, role) {
+    await flushWorkbenchLayouts();
+    const settled = await invokeQuery("workbench:set-role", { windowId, role });
+    if (settled.status === "error") {
+      return { ok: false as const, message: settled.error.message };
+    }
+    patchProject(set, get, projectId, (current) => {
+      const window = current.windows[windowId];
+      if (window === undefined) {
+        return current;
+      }
+      return {
+        ...current,
+        windows: { ...current.windows, [windowId]: { ...window, role } },
+      };
+    });
+    return { ok: true as const, delivery: settled.data.delivery };
+  },
+
   convertWindowToShell(projectId, windowId) {
     patchProject(set, get, projectId, (current) => {
       const window = current.windows[windowId];
@@ -544,6 +590,7 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
         parentWindowId: _pw,
         parentClosed: _pc,
         permissionNeedsDowngrade: _pd,
+        role: _role,
         ...rest
       } = window;
       void _p;
@@ -553,6 +600,7 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
       void _pw;
       void _pc;
       void _pd;
+      void _role;
       return {
         ...current,
         windows: {
