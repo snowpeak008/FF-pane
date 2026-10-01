@@ -92,6 +92,16 @@ function keepAlive() {
 }
 
 async function main() {
+  const script = process.env.FFPANE_WB_SCRIPT ?? "";
+  const argv = process.argv.slice(2);
+  if (script === "effort-worker" || script === "effort-self") {
+    process.stdout.write(`FAKE_ARGV_JSON=${JSON.stringify(argv)}\n`);
+    if (argv.includes("--resume")) {
+      process.stdout.write("FFPANE_RESUMED=1\n");
+      keepAlive();
+      return;
+    }
+  }
   const spec = loadServer();
   if (spec === undefined || typeof spec.command !== "string") {
     process.stdout.write("FFPANE_MCP_NOCONFIG\n");
@@ -124,6 +134,80 @@ async function main() {
     return;
   }
   const me = JSON.parse(who.text);
+  if (script === "effort-self") {
+    let changed = await tool("ffpane_set_model_effort", {
+      windowId: me.windowId,
+      reasoningEffort: "low",
+    });
+    for (let attempt = 0; attempt < 20 && changed.isError; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      changed = await tool("ffpane_set_model_effort", {
+        windowId: me.windowId,
+        reasoningEffort: "low",
+      });
+    }
+    process.stdout.write(`FFPANE_MCP_EFFORT=${changed.text}\n`);
+    fireStop(spec);
+    keepAlive();
+    return;
+  }
+  if (script === "effort-worker" && (me.parent === null || me.parent === undefined)) {
+    let opened = await tool("ffpane_open_window", {
+      cli: "claude",
+      role: "worker",
+      permission: "edit",
+      title: "强度工",
+    });
+    for (let attempt = 0; attempt < 20 && opened.isError; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      opened = await tool("ffpane_open_window", {
+        cli: "claude",
+        role: "worker",
+        permission: "edit",
+        title: "强度工",
+      });
+    }
+    if (opened.isError) {
+      process.stdout.write(`FFPANE_MCP_ERROR=${opened.text}\n`);
+      keepAlive();
+      return;
+    }
+    const child = JSON.parse(opened.text);
+    let seen = false;
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const output = await tool("ffpane_read_output", { windowId: child.windowId });
+      if (!output.isError && output.text.includes("FFPANE_CHILD_MARKER=1")) {
+        seen = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    if (!seen) {
+      process.stdout.write("FFPANE_MCP_ERROR=child-marker-timeout\n");
+      keepAlive();
+      return;
+    }
+    let changed = await tool("ffpane_set_model_effort", {
+      windowId: child.windowId,
+      reasoningEffort: "high",
+    });
+    for (let attempt = 0; attempt < 10 && changed.isError; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      changed = await tool("ffpane_set_model_effort", {
+        windowId: child.windowId,
+        reasoningEffort: "high",
+      });
+    }
+    process.stdout.write(`FFPANE_MCP_EFFORT=${changed.text}\n`);
+    keepAlive();
+    return;
+  }
+  if (script === "effort-worker") {
+    process.stdout.write("FFPANE_CHILD_MARKER=1\n");
+    fireStop(spec);
+    keepAlive();
+    return;
+  }
   if (me.parent !== null && me.parent !== undefined) {
     process.stdout.write("FFPANE_CHILD_MARKER=1\n");
     if (process.env.FFPANE_WB_SCRIPT === "close") {

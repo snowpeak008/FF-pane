@@ -1379,3 +1379,235 @@ T10.12a 的新配置界面只做 Claude 和 Codex 两路，不要把 `RUNTIME_OP
 - [开发进度](../开发进度.md)
 - [Phase 10 计划 §7.5](../Phase10-多窗口终端工作台计划.md)
 
+## 2026-10-01 15:52 · T10.12b · 调研 · 改模型强度
+
+### 任务要点
+
+按计划 §8 第二轮决定 3、4、7 和 T10.12b 拆分，先查本机 Claude Code、Codex CLI 在交互会话里能否用一条输入切完模型和思考强度，且不弹出要方向键选择的菜单。只看 `--help`、官方文档、`docs/adapters/claude-code.md`、`docs/adapters/codex.md`。不调用模型，不写代码。顺带查有没有只对本窗口生效、不碰用户全局设置的热加载。任一做不到就停下，不改成重启后生效。
+
+### 调研结论
+
+#### Claude Code（本机 2.1.220）
+
+启动参数能各带一个值，但是启动时的，不是会话中途的一条输入。`claude --help`：`--model <model>`（别名如 `fable` / `opus` / `sonnet`，或全名）、`--effort <level>`（`low`、`medium`、`high`、`xhigh`、`max`）。适配器文档 §1.2、§11 只记这两条启动参数，没有会话中的斜杠命令。
+
+会话中的官方命令是两条，不是一条（[Commands](https://code.claude.com/docs/en/commands)，[Model configuration](https://code.claude.com/docs/en/model-config)）：
+
+- 模型：`/model <别名或全名>`。带参数不打开选择器，文档写「立即切换」。不带参数才开选择器。自 v2.1.153 起，直接打 `/model <名>` 等于在选择器里按 Enter：切换，并把 `model` 写进用户设置，作为以后新会话的默认。只对本会话、不写设置的做法是在选择器里按 `s`，那是菜单。已有输出时，选择器还会再要一次确认（下一次回答会不带缓存重读历史）；带参数那条是否也弹这下确认，两页措辞不一致，不能当成一定没有弹窗。
+- 强度：`/effort <low|medium|high|xhigh|max|ultracode>` 或 `/effort auto`。带档位不打开滑条，不等当前回答结束就生效。不带参数打开方向键滑条。交互会话里 `low` / `medium` / `high` / `xhigh` 会跨会话保存；只有 `max` 和 `ultracode` 只对当前会话。`-p` 非交互里的 `/effort` 才是只对本次、不保存，工作台窗口不是这条路径。
+
+模型和强度不能一条切完。官方「一次切完」的例子仍是两行：`/model opus`，然后 `/effort xhigh`。要在同一次操作里调强度，得在 `/model` 选择器里用左右键，那是菜单。`/config key=value`（v2.1.181 起可多对、不打开设置界面）写的是用户设置，不是本窗口临时值。
+
+没有「本窗口专属临时设置、运行中再读一次」的文档。`--settings`、`ANTHROPIC_MODEL`、`CLAUDE_CODE_EFFORT_LEVEL` 都是启动时读。`/reload-plugins`、`/reload-skills` 不重读模型和强度。自定义模型环境变量的文档写明要重启会话才吃到。
+
+#### Codex CLI（本机 0.159.2）
+
+`codex --help` 只有启动参数：`-m, --model <MODEL>`，以及 `-c, --config <key=value>`（值按 TOML 解析，例子是 `-c model="o3"`）。没有交互会话里的一条切换命令。适配器文档记的是启动时 `-m` 和 `-c model_reasoning_effort="<档>"`（调研版本 0.147.0 / 0.153.4）；本机帮助仍是这个形状，没有新增一条输入的子命令。
+
+官方斜杠命令（[Slash commands](https://developers.openai.com/codex/cli/slash-commands)，页面未标对应 0.159.2）里，`/model` 没有参数位。规定步骤是：输入 `/model` 回车，再从弹窗里选模型；有推理强度时也在这个弹窗里一起选。模型和强度是在菜单里一起定的，不能用一条文字写完。同页里 `/fast on|off`、`/plan <提示>` 有行内参数，`/model` 没有。
+
+`-c` 是本次启动覆盖，官方说明不改 `~/.codex/config.toml`。运行中的 TUI 没有「重新读取一份本窗口临时配置」的命令。`/debug-config` 只打印。`/statusline`、`/theme`、`/keymap` 会把选择写进用户 `config.toml`。
+
+### 结论
+
+两家都做不到。停下，不实现 `ffpane_set_model_effort`，也不改成重启后生效。
+
+Claude 不能一条切完模型和强度；带参数的 `/model`、以及 `low`–`xhigh` 的 `/effort`，还会写入用户全局设置。Codex 的 `/model` 必须弹窗用方向键选，没有一条文字同时写上模型和强度。两边都没有「只对本窗口、不碰用户全局、运行中热加载」的设置文件。
+
+可交给主控选的替代（本次都没做）：
+
+1. 仍用现在的启动参数，重启或续接才生效。Claude `--model` 加 `--effort`，Codex `-m` 加 `-c model_reasoning_effort="档"`。这两条不写用户全局设置。这就是计划不准自行改成的「重启后生效」。
+2. Claude 分两行写 `/model <名>` 和 `/effort <档>`。不弹选择器，但常用档会改用户以后新会话的默认。
+3. Claude 在 `/model` 选择器里按 `s`，只对本会话，但是菜单，软件写不进固定模板。
+4. Codex 继续用 `/model` 弹窗，人和方向键选模型和强度。软件不能一条写完。
+
+### 改动文件
+
+- `docs/对话记录/Phase10-对话总记录.md`（本条，只追加）
+
+### 命令结果
+
+- `claude --version` → `2.1.220 (Claude Code)`
+- `codex --version` → `codex-cli 0.159.2`
+- `claude --help`、`codex --help`：只看到上面的启动参数，没有会话中一条切完的命令
+- 未启动交互会话，未调用模型，未跑 lint / typecheck / 测试
+- `Get-Date -Format "yyyy-MM-dd HH:mm"` → `2026-10-01 15:52`
+
+### 问题与遗留
+
+需要主控定：接受「重启 / 续接才生效」，还是接受 Claude 两条斜杠命令（会改用户全局默认），还是先不做立即切换。在此之前不写实现。
+
+Claude 带参数的 `/model` 在已有对话时会不会再要一次确认，官方两页措辞不一致，本次没有开会话去试。
+
+### 相关文件链接
+
+- [Phase 10 计划 §8、§3.2.1、§7.3、§7.4](../Phase10-多窗口终端工作台计划.md)
+- [Claude Code Commands](https://code.claude.com/docs/en/commands)
+- [Claude Code Model configuration](https://code.claude.com/docs/en/model-config)
+- [Codex CLI slash commands](https://developers.openai.com/codex/cli/slash-commands)
+- 适配器：`docs/adapters/claude-code.md`、`docs/adapters/codex.md`
+- 上一则：[2026-10-01 13:42 · Phase10 · T10.12 · 调研 · 项目配置现状](./Phase10-对话总记录.md)
+
+## 2026-10-01 16:14 · T10.12b · 执行 · 改模型强度
+
+### 任务要点
+
+按计划 §9.9 实现管理者改窗口的模型和思考强度。覆盖记在窗口布局上，优先级是窗口覆盖、项目配置这一路、都没有就不传。新工具 `ffpane_set_model_effort`：已授权管理者可改自己，以及自己后代里的写计划、工作者、检查员、普通窗口；不能改别的管理者。空闲时自动续接重启并带上新启动参数；忙则排队，同一窗口新请求覆盖旧请求。管理者窗口和全放开窗口不自动重启，沿用现有确认框，用户点确认才续接。无法续接（例如还没有原生会话 id）不硬重启，标待生效。续接失败显示原因，不自动重试。不往 PTY 写切换命令，不改用户全局 CLI 设置。不提交。
+
+### 调研结论
+
+#### Claude Code
+
+沿用上一则（2026-10-01 15:52）。本机 2.1.220 不能一条输入切完模型和强度还不弹菜单，带参数的斜杠命令还会写用户设置。本步不走那条路。
+
+#### Codex CLI
+
+沿用上一则。本机 0.159.2 的 `/model` 要弹窗选择。本步不走那条路。
+
+### 结论
+
+已按 §9.9 实现，未提交。空闲的工作者窗口会自动续接，启动参数带上新强度；管理者改自己会先出现确认框，点确认后才续接。不需要主控再定做法。
+
+模型白名单：去掉首尾空白后不能为空，不能含换行或其它控制字符，最多 128 个字符；只允许字母、数字和 `.` `_` `:` `@` `/` `-`，末尾可以有 `[1m]` 这类后缀。思考强度只用既有档位 `none` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max`。
+
+### 改动文件
+
+- `packages/shared/src/domain/workbench.ts`、`model-override.ts`、`index.ts`
+- `packages/storage/src/workbench/store.ts`
+- `apps/desktop/src/main/data.ts`、`index.ts`
+- `apps/desktop/src/main/workbench/model-effort.ts`、`handlers.ts`、`mcp-tools.ts`
+- `apps/desktop/src/mcp/workbench-tools.ts`
+- `apps/desktop/src/shared-ipc/contracts.ts`
+- `apps/desktop/src/renderer/src/stores/workbench.ts`
+- `apps/desktop/src/renderer/src/pages/workbench/WindowPane.tsx`、`TerminalView.tsx`
+- `apps/desktop/resources/workbench-roles/manager.md`
+- `locales/zh-CN.json`、`locales/en-US.json`
+- `docs/Phase10-多窗口终端工作台计划.md`（§3.2.1、§8 的 T10.12b 条目改成指向 §9.9）
+- `apps/desktop/tests/model-effort.test.ts`、`workbench-mcp.test.ts`、`workbench-memory.test.ts`
+- `packages/shared/tests/model-override.test.ts`
+- `apps/desktop/tests/e2e/model-effort.spec.ts`、`fake-workbench-cli.js`
+- `docs/对话记录/Phase10-对话总记录.md`（本条）
+
+### 命令结果
+
+- `pnpm lint`：通过（Biome 753 个文件，check-i18n PASS）。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- `vitest run` 模型覆盖、权限队列、以及工作台 MCP / 记忆单测：4 个文件，40 过。
+- `playwright test tests/e2e/model-effort.spec.ts`：2 过（工作者自动续接 20.1s，管理者确认后续接 13.7s）。
+
+### 问题与遗留
+
+未提交。窗口里如果有人再手动改模型，这里的显示仍是上次启动参数，软件不知道。续接失败的原因来自启动错误原文。
+
+### 相关文件链接
+
+- [Phase 10 计划 §9.9、§3.2.1、§7.4](../Phase10-多窗口终端工作台计划.md)
+- 调研：[2026-10-01 15:52 · T10.12b · 调研 · 改模型强度](./Phase10-对话总记录.md)
+- 角色说明：`apps/desktop/resources/workbench-roles/manager.md`
+
+## 2026-10-01 16:35 · T10.12b · 检查 · 改模型强度
+
+### 任务要点
+
+独立检查未提交的 T10.12b。对照计划 §9.9、§8 第二轮决定 4、§3.2.1、§4.1、§7.3、§7.4，以及总记录里的调研和执行条目。审查 diff 与代码，做反向探针，首验完整跑 lint / desktop typecheck / `pnpm test` / `pnpm smoke` / `pnpm test:e2e`。不改实现，不提交。
+
+### 结论
+
+**有条件通过，1 项必须修。** 覆盖字段、空闲才续接、忙时只留最后一次、管理者和全放开要确认、无法续接和失败都不硬重启、非法覆盖读入即丢、不往终端写切换命令，这些都在。必须先修：窗口已经空闲时连续两次请求会各发一次续接；后一次若撞上第一次还在启动，会被重入闩丢掉，最后的值不一定进这一次启动参数。没有需要主控另选产品方案。
+
+### 改动文件
+
+- 新增验收记录：`docs/验收记录/T10.12b-验收.md`
+- `docs/对话记录/Phase10-对话总记录.md`（本条，只追加）
+- 反向探针测试跑完已删，未入库
+
+### 命令结果
+
+- `pnpm lint`：通过（Biome 753 个文件，check-i18n PASS）。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- `pnpm test`：2405 过 / 1 跳过（140 个文件）。
+- `pnpm smoke`：11 项 ALL PASS。版本 v0.10.13。
+- `pnpm test:e2e`：51 过（约 4.9 分钟）。
+- 反向探针：`vitest run apps/desktop/tests/t1012b-probe.test.ts` 3 过，随后删除该文件。
+
+### 问题与遗留
+
+必须修见验收记录。建议不阻断：待生效文案没写出新的模型和强度；§8 决定 3 的旧句子还在；清洗锁不阻止已授权管理者改那个后代窗口的强度。
+
+### 相关文件链接
+
+- [T10.12b 验收记录](../验收记录/T10.12b-验收.md)
+- [Phase 10 计划 §9.9](../Phase10-多窗口终端工作台计划.md)
+- 执行：[2026-10-01 16:14 · T10.12b · 执行 · 改模型强度](./Phase10-对话总记录.md)
+
+## 2026-10-01 16:42 · T10.12b · 修复 · 改模型强度
+
+### 任务要点
+
+按验收必须修和 §9.9：同一窗口空闲时连续调用，或续接进行中又来新请求，不能并发两次续接，最后一次的值必须进启动。需要确认的窗口，确认框显示最新值，确认一次只续接一次。
+
+### 结论
+
+已修好，未提交。空闲连发两次只发一次续接，启动读到的是第二次的值。续接已经读过旧值之后又来新请求，等这次结束再续接一次，不会两路一起重启。失败仍然不自动重试。不需要主控决策。
+
+顺手做了验收建议第 2 条：待生效和确认框写上即将用的模型和强度。没有改 §8 决定 3 的旧句子，也没有改清洗锁的权限。
+
+### 改动文件
+
+- `apps/desktop/src/main/workbench/model-effort.ts`
+- `apps/desktop/src/main/workbench/handlers.ts`
+- `apps/desktop/src/renderer/src/pages/workbench/WindowPane.tsx`
+- `apps/desktop/tests/model-effort.test.ts`
+- `locales/zh-CN.json`、`locales/en-US.json`
+- `docs/对话记录/Phase10-对话总记录.md`（本条，只追加）
+
+### 命令结果
+
+- `pnpm lint`：通过（Biome 753 个文件，check-i18n PASS）。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- `vitest run apps/desktop/tests/model-effort.test.ts`：12 过。
+- 重新构建后 `playwright test tests/e2e/model-effort.spec.ts`：2 过。
+
+### 问题与遗留
+
+没有。建议第 3、4 条未做。
+
+### 相关文件链接
+
+- [T10.12b 验收记录](../验收记录/T10.12b-验收.md)
+- 检查：[2026-10-01 16:35 · T10.12b · 检查 · 改模型强度](./Phase10-对话总记录.md)
+
+## 2026-10-01 17:03 · T10.12b · 复验 · 改模型强度
+
+### 任务要点
+
+复验 T10.12b 必须修。重跑空闲时连续改两次，并补「续接进行中又来新值」和「管理者连续改两次、确认一次」。核对上一轮通过的探针。最后一轮完整跑 lint / desktop typecheck / `pnpm test` / `pnpm smoke` / `pnpm test:e2e`。不改实现。
+
+### 结论
+
+**通过。** 空闲连改两次只续接一次，参数是第二次的值。进行中再改不会并发重启，这次结束后再续接一次并带上最后的值。管理者两次改动都停在确认，确认时是最新值，确认一次不再自动续接。上一轮的注入、越权、无法续接和失败不重试仍然成立。不需要主控决策。
+
+### 改动文件
+
+- 追加复验：`docs/验收记录/T10.12b-验收.md`
+- `docs/对话记录/Phase10-对话总记录.md`（本条，只追加）
+- 探针跑完已删
+
+### 命令结果
+
+- 复验探针 4 项：通过。
+- `pnpm lint`：通过（Biome 753 个文件，check-i18n PASS）。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- `pnpm test`：2408 过 / 1 跳过（140 个文件）。
+- `pnpm smoke`：11 项 ALL PASS。v0.10.13。
+- `pnpm test:e2e`：51 过（约 5.0 分钟）。
+
+### 问题与遗留
+
+没有。建议第 3、4 条仍未做，不阻断。
+
+### 相关文件链接
+
+- [T10.12b 验收记录](../验收记录/T10.12b-验收.md)
+- 修复：[2026-10-01 16:42 · T10.12b · 修复 · 改模型强度](./Phase10-对话总记录.md)
+

@@ -76,6 +76,14 @@ export function WindowPane({
   const [pendingPermission, setPendingPermission] = useState<WorkbenchPermissionLevel>(permission);
   const [yoloConfirm, setYoloConfirm] = useState(false);
   const [launchNonce, setLaunchNonce] = useState(0);
+  const modelEffortResumeRef = useRef(false);
+  const modelEffortConfirmRef = useRef(false);
+  const [modelEffort, setModelEffort] = useState<{
+    reason: "busy" | "confirm" | "not-running" | "no-session" | "failed";
+    error?: string;
+    model?: string;
+    effort?: string;
+  } | null>(null);
   const [manualTurnSignal, setManualTurnSignal] = useState(false);
   const running = exitCode === undefined && window.terminalId !== undefined;
   const autoStart = wasCreatedThisSession(window.id);
@@ -101,6 +109,14 @@ export function WindowPane({
     sensitiveResolvers.current = [];
     for (const resolve of pending) {
       resolve(accepted);
+    }
+    if (modelEffortConfirmRef.current) {
+      modelEffortConfirmRef.current = false;
+      if (accepted) {
+        modelEffortResumeRef.current = true;
+        setResumeNext(true);
+        setLaunchNonce((n) => n + 1);
+      }
     }
   };
 
@@ -160,6 +176,41 @@ export function WindowPane({
       return;
     }
     setDeliverPending({ count: payload.count, mode: payload.mode });
+  });
+
+  useSubscription("workbench:model-effort", (payload) => {
+    if (payload.windowId !== window.id) {
+      return;
+    }
+    if (payload.modelOverride !== undefined || payload.effortOverride !== undefined) {
+      patchWindow(window.projectId, window.id, {
+        ...(payload.modelOverride !== undefined ? { modelOverride: payload.modelOverride } : {}),
+        ...(payload.effortOverride !== undefined ? { effortOverride: payload.effortOverride } : {}),
+      });
+    }
+    if (payload.action === "clear") {
+      setModelEffort(null);
+      return;
+    }
+    if (payload.action === "resume") {
+      modelEffortConfirmRef.current = false;
+      setSensitiveOpen(false);
+      setModelEffort(null);
+      modelEffortResumeRef.current = true;
+      setResumeNext(true);
+      setLaunchNonce((n) => n + 1);
+      return;
+    }
+    setModelEffort({
+      reason: payload.reason,
+      ...(payload.error !== undefined ? { error: payload.error } : {}),
+      ...(payload.modelOverride !== undefined ? { model: payload.modelOverride } : {}),
+      ...(payload.effortOverride !== undefined ? { effort: payload.effortOverride } : {}),
+    });
+    if (payload.action === "confirm") {
+      modelEffortConfirmRef.current = true;
+      setSensitiveOpen(true);
+    }
   });
 
   useSubscription("workbench:role-notice", (payload) => {
@@ -273,6 +324,39 @@ export function WindowPane({
                   model: window.routeModel ?? t("workbench.window.modelDefault"),
                   effort: window.routeEffort ?? t("workbench.window.effortDefault"),
                 })}
+              </span>
+            ) : null}
+            {modelEffort !== null ? (
+              <span
+                className="shrink-0 text-2xs text-warning-text"
+                data-testid="workbench-model-effort-pending"
+                data-reason={modelEffort.reason}
+              >
+                {t("workbench.window.modelEffort.pending", {
+                  reason: t(`workbench.window.modelEffort.reason.${modelEffort.reason}`),
+                  model:
+                    modelEffort.model ?? window.modelOverride ?? t("workbench.window.modelDefault"),
+                  effort:
+                    modelEffort.effort ??
+                    window.effortOverride ??
+                    t("workbench.window.effortDefault"),
+                })}
+                {modelEffort.error !== undefined && modelEffort.error !== ""
+                  ? ` ${modelEffort.error}`
+                  : ""}
+                {modelEffort.reason === "confirm" ? (
+                  <button
+                    type="button"
+                    className="ml-1 underline"
+                    data-testid="workbench-model-effort-confirm"
+                    onClick={() => {
+                      modelEffortConfirmRef.current = true;
+                      setSensitiveOpen(true);
+                    }}
+                  >
+                    {t("workbench.window.modelEffort.confirmAgain")}
+                  </button>
+                ) : null}
               </span>
             ) : null}
           </button>
@@ -604,6 +688,25 @@ export function WindowPane({
               },
               onLaunchRoute: (route) => {
                 patchWindow(window.projectId, window.id, { routeSnapshot: route });
+                if (modelEffortResumeRef.current || modelEffort !== null) {
+                  modelEffortResumeRef.current = false;
+                  setModelEffort(null);
+                  void invokeQuery("workbench:model-effort-settled", {
+                    windowId: window.id,
+                    ok: true,
+                  });
+                }
+              },
+              onRelaunchSettled: (ok, error) => {
+                if (ok || !modelEffortResumeRef.current) {
+                  return;
+                }
+                modelEffortResumeRef.current = false;
+                void invokeQuery("workbench:model-effort-settled", {
+                  windowId: window.id,
+                  ok: false,
+                  ...(error !== undefined && error !== "" ? { error } : {}),
+                });
               },
             }
           : {})}
@@ -617,10 +720,21 @@ export function WindowPane({
           }
         }}
         title={t("workbench.resumeConfirm.title")}
-        description={t("workbench.resumeConfirm.body", {
-          permission: t(`workbench.permission.level.${permission}`),
-          role: t(`workbench.role.level.${role}`),
-        })}
+        description={
+          modelEffort?.reason === "confirm"
+            ? t("workbench.window.modelEffort.confirmBody", {
+                model:
+                  modelEffort.model ?? window.modelOverride ?? t("workbench.window.modelDefault"),
+                effort:
+                  modelEffort.effort ??
+                  window.effortOverride ??
+                  t("workbench.window.effortDefault"),
+              })
+            : t("workbench.resumeConfirm.body", {
+                permission: t(`workbench.permission.level.${permission}`),
+                role: t(`workbench.role.level.${role}`),
+              })
+        }
         tone="primary"
         confirmLabel={t("workbench.resumeConfirm.confirm")}
         cancelLabel={t("workbench.resumeConfirm.cancel")}

@@ -13,6 +13,7 @@ export * from "./handoff.js";
 export * from "./knowledge.js";
 export * from "./language.js";
 export * from "./memory.js";
+export * from "./model-override.js";
 export * from "./permission.js";
 export * from "./plan.js";
 export * from "./profile.js";

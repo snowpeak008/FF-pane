@@ -129,6 +129,7 @@ function harness(
       byRoot.set(projectRoot, list);
       added.push({ root: projectRoot, entry });
     },
+    setModelEffort: async () => ({ ok: false as const, error: "unused" }),
   };
   return {
     views,

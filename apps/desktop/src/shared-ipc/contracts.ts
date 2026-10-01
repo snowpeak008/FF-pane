@@ -458,6 +458,21 @@ export interface WorkbenchDeliverPendingEvent {
   readonly mode: "manual" | "blocked" | "busy" | "clear";
 }
 
+export interface ModelEffortSettledRequest {
+  readonly windowId: string;
+  readonly ok: boolean;
+  readonly error?: string;
+}
+
+export interface WorkbenchModelEffortEvent {
+  readonly windowId: string;
+  readonly action: "resume" | "confirm" | "pending" | "clear";
+  readonly reason: "busy" | "confirm" | "not-running" | "no-session" | "failed";
+  readonly error?: string;
+  readonly modelOverride?: string;
+  readonly effortOverride?: string;
+}
+
 export interface TerminalOutputEvent {
   readonly id: string;
   readonly data: string;
@@ -1519,6 +1534,11 @@ export interface IpcInvokeContracts {
     request: DeliverWorkbenchPendingRequest;
     response: { readonly ok: true };
   };
+  /** 模型 / 强度自动续接的结果。失败不自动重试。 */
+  "workbench:model-effort-settled": {
+    request: ModelEffortSettledRequest;
+    response: { readonly ok: true };
+  };
   /** 设置页：角色说明书（覆盖副本优先）。 */
   "workbench:list-role-manuals": {
     request: undefined;
@@ -1828,6 +1848,7 @@ export interface IpcEventContracts {
   /** 待投递条数变化（T10.6'）。 */
   "workbench:role-notice": { payload: WorkbenchRoleNoticeEvent };
   "workbench:deliver-pending": { payload: WorkbenchDeliverPendingEvent };
+  "workbench:model-effort": { payload: WorkbenchModelEffortEvent };
   "workbench:child-window": { payload: WorkbenchChildWindowEvent };
   "workbench:inbox-notice": { payload: WorkbenchInboxNoticeEvent };
   "workbench:open-panel": { payload: WorkbenchOpenPanelEvent };
@@ -1872,6 +1893,7 @@ export const INVOKE_CHANNELS = [
   "workbench:set-permission",
   "workbench:deliver-now",
   "workbench:deliver-cancel",
+  "workbench:model-effort-settled",
   "workbench:list-role-manuals",
   "workbench:save-role-manual",
   "workbench:reset-role-manual",
@@ -1967,6 +1989,7 @@ export const EVENT_CHANNELS = [
   "workbench:session-claimed",
   "workbench:role-notice",
   "workbench:deliver-pending",
+  "workbench:model-effort",
   "workbench:child-window",
   "workbench:inbox-notice",
   "workbench:open-panel",

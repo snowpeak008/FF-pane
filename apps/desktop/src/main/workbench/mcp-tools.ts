@@ -126,6 +126,14 @@ export interface WorkbenchToolDeps {
     limit: number,
   ) => Promise<readonly MemoryEntry[]>;
   readonly addProjectMemory: (projectRoot: string, entry: MemoryEntry) => Promise<void>;
+  readonly setModelEffort: (input: {
+    readonly callerId: string;
+    readonly windowId: string;
+    readonly model?: unknown;
+    readonly reasoningEffort?: unknown;
+  }) => Promise<
+    { readonly ok: true; readonly message: string } | { readonly ok: false; readonly error: string }
+  >;
 }
 
 const buckets = new Map<string, { t: number; n: number }>();
@@ -250,6 +258,8 @@ export async function executeWorkbenchTool(
       return searchMemory(caller, args, deps);
     case "ffpane_memory_add":
       return addMemory(caller, args, deps);
+    case "ffpane_set_model_effort":
+      return setModelEffort(callerId, args, deps);
     default:
       return fail(`未知工具：${name}`);
   }
@@ -823,6 +833,27 @@ async function addMemory(
     category: entry.category,
     title: entry.title,
   });
+}
+
+async function setModelEffort(
+  callerId: string,
+  args: Readonly<Record<string, unknown>>,
+  deps: WorkbenchToolDeps,
+): Promise<ToolTextResult> {
+  const windowId = args["windowId"];
+  if (typeof windowId !== "string" || windowId.trim() === "") {
+    return fail("ffpane_set_model_effort 需要目标窗口 id。");
+  }
+  const result = await deps.setModelEffort({
+    callerId,
+    windowId: windowId.trim(),
+    ...(args["model"] !== undefined ? { model: args["model"] } : {}),
+    ...(args["reasoningEffort"] !== undefined ? { reasoningEffort: args["reasoningEffort"] } : {}),
+  });
+  if (!result.ok) {
+    return fail(result.error);
+  }
+  return ok({ ok: true, windowId: windowId.trim(), message: result.message });
 }
 
 export { openChildWindow };

@@ -89,6 +89,13 @@ export interface WorkbenchWindow {
   /** 本次启动下发的思考强度。缺省表示不下发。 */
   readonly routeEffort?: string;
   /**
+   * 管理者改过的模型。启动时盖过项目配置里的模型；缺省表示不覆盖。
+   * 优先级：本字段 → 项目配置这一路 → 都不填则不传参数。
+   */
+  readonly modelOverride?: string;
+  /** 管理者改过的思考强度。优先级同 modelOverride。 */
+  readonly effortOverride?: string;
+  /**
    * AI 窗口：CLI 原生会话 id。
    * Claude = `--session-id` / `--resume` 的 UUID；Codex = `codex resume <id>`（可缺省，续接降级 `--last`）。
    */

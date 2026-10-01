@@ -94,6 +94,7 @@ import { createMemoryIndexService, type MemoryIndexService } from "./memory-inde
 import { type ProjectSummarySources, summarizeProjects } from "./project-summary";
 import { resolveProbeOutlet } from "./provider-proxy";
 import { createSafeStorageBackend, createSecretStore, resolveSecretsFile } from "./secrets";
+import { keepModelEffortOverrides } from "./workbench/model-effort";
 
 /** 本数据层负责的 invoke 通道集合。 */
 type DataChannel =
@@ -597,8 +598,18 @@ export async function createDataHandlers(
     },
     "workbench:save-layout": async (request) => {
       const authRegistry = options.authRegistry;
-      const layout =
-        authRegistry !== undefined ? authRegistry.syncLayout(request.layout) : request.layout;
+      const previous = (await workbenchLayouts.readAll())[request.layout.projectId];
+      const windows = { ...request.layout.windows };
+      if (previous !== undefined) {
+        for (const [id, window] of Object.entries(windows)) {
+          const prior = previous.windows[id];
+          if (prior !== undefined) {
+            windows[id] = keepModelEffortOverrides(window, prior);
+          }
+        }
+      }
+      const incoming = { ...request.layout, windows };
+      const layout = authRegistry !== undefined ? authRegistry.syncLayout(incoming) : incoming;
       await workbenchLayouts.saveProject(layout);
       return { ok: true as const };
     },

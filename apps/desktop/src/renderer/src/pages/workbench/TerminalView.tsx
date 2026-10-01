@@ -62,6 +62,8 @@ export interface TerminalViewProps {
   readonly launchNonce?: number;
   /** 用户点续接或重新开始之前。返回 false 则不启动。 */
   readonly beforeUserRelaunch?: () => boolean | Promise<boolean>;
+  /** 由父级 nonce 触发的再拉起结束。成功时 ok 为 true。 */
+  readonly onRelaunchSettled?: (ok: boolean, error?: string) => void;
 }
 
 interface ThemeColors {
@@ -122,6 +124,7 @@ export function TerminalView({
   onLaunchRoute,
   launchNonce = 0,
   beforeUserRelaunch,
+  onRelaunchSettled,
 }: TerminalViewProps): ReactElement {
   const { t } = useTranslation();
   const { resolvedTheme } = useTheme();
@@ -158,6 +161,8 @@ export function TerminalView({
   onTurnSignalRef.current = onTurnSignal;
   const onLaunchRouteRef = useRef(onLaunchRoute);
   onLaunchRouteRef.current = onLaunchRoute;
+  const onRelaunchSettledRef = useRef(onRelaunchSettled);
+  onRelaunchSettledRef.current = onRelaunchSettled;
 
   const writeToPty = useCallback((data: string) => {
     const current = infoRef.current;
@@ -353,6 +358,7 @@ export function TerminalView({
         relaunchGuardRef.current.leave();
         relaunchBusyRef.current = false;
         setLaunching(false);
+        onRelaunchSettledRef.current?.(false);
         return;
       }
       try {
@@ -377,6 +383,7 @@ export function TerminalView({
         if (settled.status === "error") {
           setError(settled.error.message);
           setStopped(true);
+          onRelaunchSettledRef.current?.(false, settled.error.message);
           return;
         }
         rememberLiveTerminal(windowId, settled.data.terminal.id);

@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 import { createWindowTokenRegistry, type WindowTokenRegistry } from "@ff-pane/core";
 import {
   clampMaxWorkbenchWindows,
+  DEFAULT_WORKBENCH_ROLE,
+  DEFAULT_WORKBENCH_WINDOW_PERMISSION,
   isWorkbenchPermissionLevel,
   isWorkbenchRole,
   isWorkbenchRoleManualId,
@@ -46,6 +48,13 @@ import { assertLaunchCliIpcSafe, launchCliWindow, WorkbenchMcpTempRegistry } fro
 import { decideManagerGrantRestore } from "./manager-grant";
 import { cleanupStaleWorkbenchMcpDirs } from "./mcp-temp";
 import { executeWorkbenchTool } from "./mcp-tools";
+import {
+  canSetModelEffort,
+  createModelEffortController,
+  type ModelEffortController,
+  parseModelEffortArgs,
+  withModelEffortOverrides,
+} from "./model-effort";
 import { openChildWindow } from "./open-child";
 import { clampReadOutputBytes, takeUtf8Tail } from "./output-text";
 import {
@@ -83,6 +92,7 @@ export interface WorkbenchCliLayer {
     | "workbench:set-permission"
     | "workbench:deliver-now"
     | "workbench:deliver-cancel"
+    | "workbench:model-effort-settled"
     | "workbench:list-role-manuals"
     | "workbench:save-role-manual"
     | "workbench:reset-role-manual"
@@ -98,6 +108,7 @@ export interface WorkbenchCliLayer {
   readonly tokenRegistry: WindowTokenRegistry;
   readonly authRegistry: WorkbenchAuthRegistry;
   readonly idleQueue: IdleDeliverQueue;
+  readonly modelEffort: ModelEffortController;
   readonly rolePromptTemps: RolePromptTempRegistry;
   readonly dispose: () => Promise<void>;
 }
@@ -235,6 +246,8 @@ export async function createWorkbenchCliLayer(
     },
   });
 
+  let afterIdleHook = (_windowId: string): void => undefined;
+
   let onTool: (
     context: WorkbenchControlRequestContext,
   ) =>
@@ -250,13 +263,13 @@ export async function createWorkbenchCliLayer(
     onRequest: (context) => onTool(context),
     onHook: (windowId, signal, meta) => {
       const terminalId = findLiveTerminalId(windowId);
-      if (terminalId === undefined) {
-        return;
+      if (terminalId !== undefined) {
+        idleQueue.noteHook(terminalId, signal, {
+          ...(meta?.toolUseId !== undefined ? { toolUseId: meta.toolUseId } : {}),
+          ...(meta?.toolDigest !== undefined ? { toolDigest: meta.toolDigest } : {}),
+        });
       }
-      idleQueue.noteHook(terminalId, signal, {
-        ...(meta?.toolUseId !== undefined ? { toolUseId: meta.toolUseId } : {}),
-        ...(meta?.toolDigest !== undefined ? { toolDigest: meta.toolDigest } : {}),
-      });
+      afterIdleHook(windowId);
     },
     log: (message) => {
       console.error(`[wb-control] ${message}`);
@@ -416,6 +429,71 @@ export async function createWorkbenchCliLayer(
       }),
   });
 
+  const modelEffortView = new Map<
+    string,
+    { readonly modelOverride?: string; readonly effortOverride?: string }
+  >();
+
+  const publishModelEffort = (notice: {
+    readonly windowId: string;
+    readonly action: "resume" | "confirm" | "pending" | "clear";
+    readonly reason: "busy" | "confirm" | "not-running" | "no-session" | "failed";
+    readonly error?: string;
+  }): void => {
+    const browser = options.getWindow();
+    if (browser === null || browser.isDestroyed()) {
+      return;
+    }
+    const extra = modelEffortView.get(notice.windowId);
+    publishEvent(browser.webContents, "workbench:model-effort", {
+      windowId: notice.windowId,
+      action: notice.action,
+      reason: notice.reason,
+      ...(notice.error !== undefined && notice.error !== "" ? { error: notice.error } : {}),
+      ...(extra?.modelOverride !== undefined ? { modelOverride: extra.modelOverride } : {}),
+      ...(extra?.effortOverride !== undefined ? { effortOverride: extra.effortOverride } : {}),
+    });
+  };
+
+  const modelEffort = createModelEffortController({ onChange: publishModelEffort });
+
+  const modelEffortFacts = async (windowId: string) => {
+    const all = await layouts.readAll();
+    let stored: (typeof all)[string]["windows"][string] | undefined;
+    for (const layout of Object.values(all)) {
+      const window = layout.windows[windowId];
+      if (window !== undefined) {
+        stored = window;
+        break;
+      }
+    }
+    const node = authRegistry.get(windowId);
+    const terminalId = findLiveTerminalId(windowId);
+    const record = terminalId !== undefined ? options.manager.get(terminalId) : undefined;
+    const fromMeta = record?.metadata?.["nativeSessionId"];
+    const sessionId =
+      typeof fromMeta === "string" && fromMeta.trim() !== "" ? fromMeta : stored?.nativeSessionId;
+    const role =
+      node?.role ?? (isWorkbenchRole(stored?.role) ? stored.role : DEFAULT_WORKBENCH_ROLE);
+    const permission =
+      node?.permission ??
+      (isWorkbenchPermissionLevel(stored?.permission)
+        ? stored.permission
+        : DEFAULT_WORKBENCH_WINDOW_PERMISSION);
+    return {
+      running: terminalId !== undefined,
+      phase: terminalId !== undefined ? idleQueue.phaseOf(terminalId) : ("unknown" as const),
+      canResume: terminalId !== undefined && sessionId !== undefined && sessionId.trim() !== "",
+      needsConfirm: role === "manager" || permission === "yolo",
+    };
+  };
+
+  afterIdleHook = (windowId) => {
+    void modelEffortFacts(windowId).then((facts) => {
+      modelEffort.onPossibleIdle(windowId, facts);
+    });
+  };
+
   const handlers: WorkbenchCliLayer["handlers"] = {
     "workbench:launch-cli": async (request) => {
       assertLaunchCliIpcSafe(request);
@@ -441,13 +519,17 @@ export async function createWorkbenchCliLayer(
       if (!resolved.ok) {
         throw new Error(resolved.error);
       }
+      const generationBeforeRead = modelEffort.generation(request.windowId);
+      const storedWindow = (await layouts.readAll())[request.projectId]?.windows[request.windowId];
+      modelEffort.noteLaunchRead(request.windowId, generationBeforeRead);
+      const route = withModelEffortOverrides(resolved.route, storedWindow);
       const result = await launchCliWindow(
         {
           windowId: request.windowId,
           projectId: request.projectId,
           projectRoot: request.projectRoot,
           kind,
-          route: resolved.route,
+          route,
           cols: request.cols,
           rows: request.rows,
           ...(request.cwd !== undefined ? { cwd: request.cwd } : {}),
@@ -525,6 +607,15 @@ export async function createWorkbenchCliLayer(
       if (terminalId !== undefined) {
         idleQueue.cancel(terminalId);
       }
+      return { ok: true as const };
+    },
+    "workbench:model-effort-settled": (request) => {
+      const error = request.error?.trim();
+      modelEffort.settled(
+        request.windowId,
+        request.ok,
+        ...(error !== undefined && error !== "" ? [error] : []),
+      );
       return { ok: true as const };
     },
     "workbench:list-role-manuals": async () => {
@@ -873,6 +964,7 @@ export async function createWorkbenchCliLayer(
           tokenRegistry.revoke(windowId);
         },
         releaseRuntime: (windowId) => {
+          modelEffort.drop(windowId);
           void mcpRegistry.release(windowId);
           codexClaimer.cancel(windowId);
           releaseWindowHooks(windowId);
@@ -899,6 +991,92 @@ export async function createWorkbenchCliLayer(
       addProjectMemory: async (projectRoot, entry) => {
         await addCallerProjectMemory(memoryIndex, projectRoot, entry);
       },
+      setModelEffort: async (input) => {
+        const parsed = parseModelEffortArgs({
+          model: input.model,
+          reasoningEffort: input.reasoningEffort,
+        });
+        if (!parsed.ok) {
+          return parsed;
+        }
+        const all = await layouts.readAll();
+        let found:
+          | {
+              readonly layout: (typeof all)[string];
+              readonly window: (typeof all)[string]["windows"][string];
+            }
+          | undefined;
+        for (const layout of Object.values(all)) {
+          const window = layout.windows[input.windowId];
+          if (window !== undefined) {
+            found = { layout, window };
+            break;
+          }
+        }
+        if (
+          found === undefined ||
+          (found.window.kind !== "claude" && found.window.kind !== "codex")
+        ) {
+          return { ok: false, error: "找不到这个 Claude 或 Codex 窗口。" };
+        }
+        const node = authRegistry.get(input.windowId);
+        if (node === undefined) {
+          authRegistry.upsert(
+            {
+              id: found.window.id,
+              permission: isWorkbenchPermissionLevel(found.window.permission)
+                ? found.window.permission
+                : DEFAULT_WORKBENCH_WINDOW_PERMISSION,
+              openedBy: found.window.openedBy ?? "user",
+              role: isWorkbenchRole(found.window.role) ? found.window.role : DEFAULT_WORKBENCH_ROLE,
+              ...(found.window.parentWindowId !== undefined &&
+              found.window.parentWindowId.trim() !== ""
+                ? { parentWindowId: found.window.parentWindowId }
+                : {}),
+            },
+            found.window.projectId,
+          );
+        }
+        const tree = authRegistry.snapshot();
+        const targetRole =
+          tree[input.windowId]?.role ??
+          (isWorkbenchRole(found.window.role) ? found.window.role : DEFAULT_WORKBENCH_ROLE);
+        const allowed = canSetModelEffort({
+          callerId: input.callerId,
+          callerGranted: authRegistry.isManagerGranted(input.callerId),
+          targetId: input.windowId,
+          targetRole,
+          tree,
+        });
+        if (!allowed.ok) {
+          return allowed;
+        }
+        const nextWindow = {
+          ...found.window,
+          ...(parsed.model !== undefined ? { modelOverride: parsed.model } : {}),
+          ...(parsed.reasoningEffort !== undefined
+            ? { effortOverride: parsed.reasoningEffort }
+            : {}),
+        };
+        await layouts.saveProject({
+          ...found.layout,
+          windows: { ...found.layout.windows, [input.windowId]: nextWindow },
+        });
+        modelEffortView.set(input.windowId, {
+          ...(nextWindow.modelOverride !== undefined
+            ? { modelOverride: nextWindow.modelOverride }
+            : {}),
+          ...(nextWindow.effortOverride !== undefined
+            ? { effortOverride: nextWindow.effortOverride }
+            : {}),
+        });
+        const facts = await modelEffortFacts(input.windowId);
+        const decision = modelEffort.request(input.windowId, facts, {
+          ...(nextWindow.modelOverride !== undefined ? { model: nextWindow.modelOverride } : {}),
+          ...(nextWindow.effortOverride !== undefined ? { effort: nextWindow.effortOverride } : {}),
+        });
+        return { ok: true, message: decision.message };
+      },
       openPanel: (panel, openerTitle, projectId) => {
         const browser = options.getWindow();
         if (browser === null || browser.isDestroyed()) {
@@ -921,6 +1099,7 @@ export async function createWorkbenchCliLayer(
     tokenRegistry,
     authRegistry,
     idleQueue,
+    modelEffort,
     rolePromptTemps,
     dispose: async () => {
       await control.close();

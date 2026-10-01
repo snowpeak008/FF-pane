@@ -449,7 +449,19 @@
       "routeRelay": "中转 {{name}}",
       "routePending": "尚未记录",
       "modelDefault": "CLI 默认模型",
-      "effortDefault": "CLI 默认强度"
+      "effortDefault": "CLI 默认强度",
+      "modelEffort": {
+        "pending": "待生效：{{reason}}（{{model}} · {{effort}}）",
+        "confirmBody": "将改为模型 {{model}}、思考强度 {{effort}}。确认后才会重新打开这个窗口。",
+        "confirmAgain": "确认续接",
+        "reason": {
+          "busy": "空闲后自动续接",
+          "confirm": "等你确认后续接",
+          "not-running": "下次手动重启时生效",
+          "no-session": "无法续接，下次手动重启时生效",
+          "failed": "续接失败"
+        }
+      }
     },
     "limit": {
       "reached": "已达到同时运行窗口上限（{{max}}）。请先关闭一些窗口，或在设置中提高上限。"

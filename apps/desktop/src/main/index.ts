@@ -255,6 +255,7 @@ async function bootstrap(): Promise<void> {
           layer.idleQueue.drop(terminalId);
           const windowId = metadata?.["windowId"];
           if (typeof windowId === "string" && windowId.trim() !== "") {
+            layer.modelEffort.noteTerminalExit(windowId);
             void layer.rolePromptTemps.release(windowId);
           }
         }

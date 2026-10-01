@@ -14,10 +14,12 @@ import type {
 } from "@ff-pane/shared";
 import {
   isConnectionMode,
+  isReasoningEffortLevel,
   isWorkbenchPermissionLevel,
   isWorkbenchRole,
   isWorkbenchWindowKind,
   parseWorkbenchOpenedBy,
+  validateModelOverride,
 } from "@ff-pane/shared";
 import { readJson, writeJsonAtomic } from "../fs/index.js";
 import { WorkbenchLayoutsFileInvalidError } from "./errors.js";
@@ -109,6 +111,12 @@ function parseWindow(value: unknown, projectId: ProjectId): WorkbenchWindow | nu
   const permission = isWorkbenchPermissionLevel(permissionRaw) ? permissionRaw : undefined;
   const openedBy =
     raw["openedBy"] !== undefined ? parseWorkbenchOpenedBy(raw["openedBy"]) : undefined;
+  const modelOverride =
+    typeof raw["modelOverride"] === "string"
+      ? validateModelOverride(raw["modelOverride"])
+      : undefined;
+  const effortOverrideRaw =
+    typeof raw["effortOverride"] === "string" ? raw["effortOverride"].trim() : undefined;
   const window: WorkbenchWindow = {
     id: raw["id"],
     projectId: typeof raw["projectId"] === "string" ? (raw["projectId"] as ProjectId) : projectId,
@@ -128,6 +136,10 @@ function parseWindow(value: unknown, projectId: ProjectId): WorkbenchWindow | nu
       : {}),
     ...(typeof raw["routeEffort"] === "string" && raw["routeEffort"].trim() !== ""
       ? { routeEffort: raw["routeEffort"] }
+      : {}),
+    ...(modelOverride?.ok === true ? { modelOverride: modelOverride.model } : {}),
+    ...(effortOverrideRaw !== undefined && isReasoningEffortLevel(effortOverrideRaw)
+      ? { effortOverride: effortOverrideRaw }
       : {}),
     ...(typeof raw["nativeSessionId"] === "string" && raw["nativeSessionId"].trim() !== ""
       ? { nativeSessionId: raw["nativeSessionId"] }

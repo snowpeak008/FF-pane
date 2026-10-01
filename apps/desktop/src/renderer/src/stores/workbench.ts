@@ -115,6 +115,8 @@ export interface WorkbenchStoreActions {
       permissionNeedsDowngrade: boolean;
       parentClosed: boolean;
       managerGrantPending: boolean;
+      modelOverride: string;
+      effortOverride: string;
       routeSnapshot: {
         readonly connectionMode: "local_cli" | "relay";
         readonly providerName?: string;
@@ -543,6 +545,12 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
       }
       if (patch.managerGrantPending === true) {
         Object.assign(next, { managerGrantPending: true });
+      }
+      if (patch.modelOverride !== undefined) {
+        Object.assign(next, { modelOverride: patch.modelOverride });
+      }
+      if (patch.effortOverride !== undefined) {
+        Object.assign(next, { effortOverride: patch.effortOverride });
       }
       if (patch.routeSnapshot !== undefined) {
         const {

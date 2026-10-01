@@ -170,6 +170,7 @@ function harness(
     },
     searchProjectMemory: async () => [],
     addProjectMemory: async () => undefined,
+    setModelEffort: async () => ({ ok: false as const, error: "unused" }),
   };
   return { views, tree, reminders, outputCalls, closedIds, panels, deps };
 }

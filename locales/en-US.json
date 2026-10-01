@@ -449,7 +449,19 @@
       "routeRelay": "Relay {{name}}",
       "routePending": "Not recorded yet",
       "modelDefault": "CLI default model",
-      "effortDefault": "CLI default effort"
+      "effortDefault": "CLI default effort",
+      "modelEffort": {
+        "pending": "Pending: {{reason}} ({{model}} · {{effort}})",
+        "confirmBody": "Will switch to model {{model}} and effort {{effort}}. The window restarts only after you confirm.",
+        "confirmAgain": "Confirm resume",
+        "reason": {
+          "busy": "will resume when the window is idle",
+          "confirm": "waiting for you to confirm resume",
+          "not-running": "applies on the next manual restart",
+          "no-session": "cannot resume yet; applies on the next manual restart",
+          "failed": "resume failed"
+        }
+      }
     },
     "limit": {
       "reached": "Reached the concurrent window limit ({{max}}). Close some windows, or raise the limit in Settings."

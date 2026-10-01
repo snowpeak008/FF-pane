@@ -22,6 +22,7 @@ export const WORKBENCH_MCP_TOOL_NAMES = [
   "ffpane_open_panel",
   "ffpane_memory_search",
   "ffpane_memory_add",
+  "ffpane_set_model_effort",
 ] as const;
 
 export type WorkbenchMcpToolName = (typeof WORKBENCH_MCP_TOOL_NAMES)[number];
@@ -234,6 +235,24 @@ export const WORKBENCH_MCP_TOOLS: readonly McpToolDefinition[] = [
         body: { type: "string", description: "正文。换行会保留。" },
       },
       required: ["category", "title", "body"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "ffpane_set_model_effort",
+    description:
+      "改某个窗口的模型或思考强度。只填要改的那一项，另一项保持原样。改完记在那个窗口上：空闲时自动续接重启并带上新参数；窗口正忙就排队，同一窗口新的请求会覆盖还没生效的旧请求。管理者窗口和全放开窗口不会自动重启，要等用户确认。会话还不能续接时不会硬重启，留给下次手动重启。不能用来改别的管理者。模型名只能是字母、数字和 . _ : @ / -，可以带 [1m] 这类后缀，最多 128 个字符。思考强度只能是 none、minimal、low、medium、high、xhigh、max。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        windowId: { type: "string", description: "目标窗口 id。改自己时填自己的 id。" },
+        model: { type: "string", description: "新模型名。不填则不改模型。" },
+        reasoningEffort: {
+          type: "string",
+          description: "新的思考强度。不填则不改强度。",
+        },
+      },
+      required: ["windowId"],
       additionalProperties: false,
     },
   },
