@@ -44,7 +44,7 @@ import {
   CLAUDE_INTERACTIVE_COMMAND,
   CODEX_INTERACTIVE_COMMAND,
 } from "./cli-args";
-import type { CodexSessionClaimer } from "./codex-claim";
+import { type CodexSessionClaimer, withCodexClaimMarker } from "./codex-claim";
 import {
   prepareWindowHooks,
   releaseWindowHooks,
@@ -161,6 +161,8 @@ export interface LaunchCliWindowDeps {
   readonly limitErrorPrefix: string;
   readonly codexClaimer?: CodexSessionClaimer;
   readonly onCodexSessionClaimed?: (windowId: string, nativeSessionId: string) => void;
+  /** 记号没对上或等到超时。调用方标编号未识别，不静默接最近一条。 */
+  readonly onCodexSessionUnidentified?: (windowId: string) => void;
   readonly now?: () => number;
   /** T10.5：窗口身份令牌注册表。 */
   readonly tokenRegistry: WindowTokenRegistry;
@@ -405,6 +407,7 @@ async function launchCliWindowBody(
   let args: string[];
   let claimingSession = false;
   let resumePicker = false;
+  let claimMarker: string | undefined;
 
   if (runtime === "claude-code") {
     let serversForMcp = mcpServers;
@@ -414,8 +417,11 @@ async function launchCliWindowBody(
       mcpTemp = writeWorkbenchClaudeMcpFile(serversForMcp);
       deps.mcpRegistry.track(input.windowId, mcpTemp);
     }
-    const resuming = input.resume === true && nativeSessionId !== undefined;
-    if (!resuming) {
+    const wantResume = input.resume === true;
+    const resuming = wantResume && nativeSessionId !== undefined;
+    if (wantResume && nativeSessionId === undefined) {
+      resumePicker = true;
+    } else if (!resuming) {
       nativeSessionId = randomUUID();
     }
     args = buildInteractiveClaudeArgs({
@@ -423,9 +429,11 @@ async function launchCliWindowBody(
       ...(effort !== undefined ? { effort } : {}),
       ...(resuming && nativeSessionId !== undefined
         ? { resumeSessionId: nativeSessionId }
-        : nativeSessionId !== undefined
-          ? { sessionId: nativeSessionId }
-          : {}),
+        : resumePicker
+          ? { resumePicker: true }
+          : nativeSessionId !== undefined
+            ? { sessionId: nativeSessionId }
+            : {}),
       permission,
       ...(mcpTemp !== undefined ? { mcpConfigPath: mcpTemp.path, strictMcp: true } : {}),
       ...(roleInjection.claudePromptFile !== undefined
@@ -443,9 +451,17 @@ async function launchCliWindowBody(
       Object.keys(serversForMcp).length > 0 ? buildCodexMcpOverrides(serversForMcp) : {};
     const mergedOverrides = { ...configOverrides, ...mcpOverrides };
     const resuming = input.resume === true;
+    if (!resuming) {
+      nativeSessionId = undefined;
+    }
+    claimMarker = resuming ? undefined : randomUUID();
     if (resuming && nativeSessionId === undefined) {
       resumePicker = true;
     }
+    const developerInstructions =
+      claimMarker !== undefined
+        ? withCodexClaimMarker(roleInjection.developerInstructions, claimMarker)
+        : roleInjection.developerInstructions;
     args = buildInteractiveCodexArgs({
       cwd,
       ...(model !== undefined ? { model } : {}),
@@ -453,9 +469,7 @@ async function launchCliWindowBody(
       ...(Object.keys(mergedOverrides).length > 0 ? { configOverrides: mergedOverrides } : {}),
       ...(resuming ? { resume: true } : {}),
       ...(resuming && nativeSessionId !== undefined ? { resumeSessionId: nativeSessionId } : {}),
-      ...(roleInjection.developerInstructions !== undefined
-        ? { developerInstructions: roleInjection.developerInstructions }
-        : {}),
+      ...(developerInstructions !== undefined ? { developerInstructions } : {}),
       ...(hooks.notifyArgv.length > 0 ? { notifyArgv: hooks.notifyArgv } : {}),
       ...(input.initialPrompt !== undefined ? { initialPrompt: input.initialPrompt } : {}),
     });
@@ -560,20 +574,29 @@ async function launchCliWindowBody(
     initialPrompt: input.initialPrompt !== undefined && input.initialPrompt.trim() !== "",
   });
 
-  if (runtime === "codex" && input.resume !== true && deps.codexClaimer !== undefined) {
+  if (
+    runtime === "codex" &&
+    input.resume !== true &&
+    claimMarker !== undefined &&
+    deps.codexClaimer !== undefined
+  ) {
     claimingSession = true;
     const claimer = deps.codexClaimer;
     const windowId = input.windowId;
-    // 同步启动认领（首行扫描已廉价）；假 CLI 秒退时也能在 cancel 前完成认领
+    const marker = claimMarker;
+    // 同步启动认领；假 CLI 秒退时也能在 cancel 前完成认领。对不上则标未识别。
     void claimer
-      .start({ windowId, cwd, startedAtMs })
+      .start({ windowId, cwd, startedAtMs, claimMarker: marker })
       .then((id) => {
         if (id === undefined) {
+          deps.onCodexSessionUnidentified?.(windowId);
           return;
         }
         deps.onCodexSessionClaimed?.(windowId, id);
       })
-      .catch(() => undefined);
+      .catch(() => {
+        deps.onCodexSessionUnidentified?.(windowId);
+      });
   }
 
   await deps.onWindowLaunched?.(input.windowId);

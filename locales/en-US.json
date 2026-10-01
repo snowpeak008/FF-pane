@@ -265,11 +265,18 @@
       "project": "Working directory: {{path}}",
       "fallback": "The original working directory no longer exists; fell back to the project root."
     },
+    "session": {
+      "unidentified": "Session id not recognized",
+      "pending": "Recognizing session id",
+      "resumeCurrent": "Resume current conversation",
+      "fresh": "New conversation",
+      "pickHistory": "Resume from history"
+    },
     "terminal": {
       "exited": "Exited (code {{code}})",
       "restart": "Restart",
       "resume": "Resume last session",
-      "resumePickerHint": "No bound session id — Codex resume picker is open; choose a session in the terminal.",
+      "resumePickerHint": "Session id was not recognized. A picker is open. Choose the conversation in the terminal. The latest one is not resumed automatically.",
       "restartFresh": "Start fresh",
       "convertToShell": "Convert to PowerShell",
       "copy": "Copy",
@@ -425,6 +432,7 @@
       "cancel": "Cancel",
       "cancelHint": "Cancel only drops the unsent queue. It does not clear an unfinished permission prompt.",
       "blocked": "Waiting on a permission prompt — not sending. If the dialog is already gone, send another line in this window, or close and reopen it.",
+      "permissionHold": "After you approve a permission, automatic reminders wait until you send the next message.",
       "busy": "This turn has not finished — not sending",
       "noNode": "No node.exe is available, so turn-complete signals cannot arrive. Use Send now for anything waiting.",
       "codexManualHint": "Send now writes the queued text and one Enter into this terminal. Codex gets no permission signal before the first turn ends. If a confirmation is already on screen, do not press this button."

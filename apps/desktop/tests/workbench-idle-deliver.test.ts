@@ -276,7 +276,7 @@ describe("createIdleDeliverQueue", () => {
     expect(h.queue.deliverNow("t1")).toEqual({ status: "refused", reason: "blocked" });
   });
 
-  it("相同摘要的结束事件配对解锁，不同摘要不解锁", () => {
+  it("没有对应请求的同摘要结束事件不再把计数减到 0", () => {
     const same = "a".repeat(64);
     const other = "b".repeat(64);
     const matched = harness();
@@ -284,6 +284,11 @@ describe("createIdleDeliverQueue", () => {
     matched.queue.noteHook("t1", "permission-request", { toolDigest: same });
     matched.queue.enqueue({ terminalId: "t1", text: "hello" });
     matched.queue.noteHook("t1", "post-tool-use", { toolUseId: "toolu_post", toolDigest: same });
+    expect(matched.queue.phaseOf("t1")).toBe("blocked");
+    matched.queue.noteHook("t1", "stop");
+    expect(matched.writes).toEqual([]);
+    expect(matched.queue.deliverNow("t1")).toEqual({ status: "refused", reason: "blocked" });
+    matched.queue.noteHook("t1", "user-prompt-submit");
     expect(matched.queue.phaseOf("t1")).toBe("busy");
     expect(matched.writes).toEqual([]);
     matched.queue.noteHook("t1", "stop");
@@ -314,7 +319,10 @@ describe("createIdleDeliverQueue", () => {
     expect(h.writes).toEqual([]);
     expect(h.queue.deliverNow("t1")).toEqual({ status: "refused", reason: "blocked" });
     h.queue.noteHook("t1", "post-tool-use", { toolDigest: digest });
-    expect(h.queue.phaseOf("t1")).toBe("busy");
+    expect(h.queue.phaseOf("t1")).toBe("blocked");
+    h.queue.noteHook("t1", "stop");
+    expect(h.writes).toEqual([]);
+    h.queue.noteHook("t1", "user-prompt-submit");
     h.queue.noteHook("t1", "stop");
     expect(h.writes).toEqual(["hello", "\r"]);
   });

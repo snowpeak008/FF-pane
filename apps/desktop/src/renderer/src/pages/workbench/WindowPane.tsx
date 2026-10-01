@@ -6,6 +6,7 @@ import type { WorkbenchPermissionLevel, WorkbenchRole, WorkbenchWindow } from "@
 import {
   DEFAULT_WORKBENCH_ROLE,
   DEFAULT_WORKBENCH_WINDOW_PERMISSION,
+  shortSessionId,
   WORKBENCH_PERMISSION_LEVELS,
   WORKBENCH_ROLES,
 } from "@ff-pane/shared";
@@ -20,6 +21,7 @@ import { invokeQuery } from "../../ipc/query";
 import { useSubscription } from "../../ipc/useSubscription";
 import { cn } from "../../lib/cn";
 import { useWorkbenchStore } from "../../stores/workbench";
+import { type ConversationLaunchPlan, planConversationLaunch } from "./conversation-launch";
 import { needsSensitiveLaunchConfirm, rememberSensitiveLaunchConfirm } from "./sensitive-launch";
 import { TerminalView } from "./TerminalView";
 
@@ -58,8 +60,15 @@ export function WindowPane({
   const [exitCode, setExitCode] = useState<number | undefined>(undefined);
   const [permissionCappedHint, setPermissionCappedHint] = useState(false);
   const [resumeNext, setResumeNext] = useState(false);
+  const [conversationPlan, setConversationPlan] = useState<ConversationLaunchPlan>({
+    kind: "fresh",
+  });
   const [sensitiveOpen, setSensitiveOpen] = useState(false);
   const patchWindow = useWorkbenchStore((s) => s.patchWindow);
+  const noteWindowSession = useWorkbenchStore((s) => s.noteWindowSession);
+  const markWindowSessionUnidentified = useWorkbenchStore((s) => s.markWindowSessionUnidentified);
+  const clearWindowSessionId = useWorkbenchStore((s) => s.clearWindowSessionId);
+  const touchWindowConversation = useWorkbenchStore((s) => s.touchWindowConversation);
   const setWindowPermission = useWorkbenchStore((s) => s.setWindowPermission);
   const applyWindowRole = useWorkbenchStore((s) => s.applyWindowRole);
   const convertWindowToShell = useWorkbenchStore((s) => s.convertWindowToShell);
@@ -114,6 +123,13 @@ export function WindowPane({
       modelEffortConfirmRef.current = false;
       if (accepted) {
         modelEffortResumeRef.current = true;
+        setConversationPlan(
+          planConversationLaunch({
+            action: "resume-current",
+            ...(window.nativeSessionId !== undefined ? { currentId: window.nativeSessionId } : {}),
+            unidentified: window.sessionUnidentified === true,
+          }),
+        );
         setResumeNext(true);
         setLaunchNonce((n) => n + 1);
       }
@@ -171,6 +187,35 @@ export function WindowPane({
     mode: "manual" | "blocked" | "busy" | "clear";
   }>({ count: 0, mode: "clear" });
 
+  const queueConversationPlan = (plan: ConversationLaunchPlan): void => {
+    void (async () => {
+      const accepted = await askSensitiveLaunch();
+      if (!accepted) {
+        return;
+      }
+      if (plan.kind === "fresh") {
+        clearWindowSessionId(window.projectId, window.id);
+      }
+      setConversationPlan(plan);
+      setResumeNext(plan.kind !== "fresh");
+      setLaunchNonce((n) => n + 1);
+    })();
+  };
+
+  useSubscription("workbench:session-unidentified", (payload) => {
+    if (payload.windowId !== window.id) {
+      return;
+    }
+    markWindowSessionUnidentified(window.projectId, window.id);
+  });
+
+  useSubscription("workbench:conversation-touch", (payload) => {
+    if (payload.windowId !== window.id) {
+      return;
+    }
+    touchWindowConversation(window.id, payload.at);
+  });
+
   useSubscription("workbench:deliver-pending", (payload) => {
     if (payload.windowId !== window.id) {
       return;
@@ -197,6 +242,13 @@ export function WindowPane({
       setSensitiveOpen(false);
       setModelEffort(null);
       modelEffortResumeRef.current = true;
+      setConversationPlan(
+        planConversationLaunch({
+          action: "resume-current",
+          ...(window.nativeSessionId !== undefined ? { currentId: window.nativeSessionId } : {}),
+          unidentified: window.sessionUnidentified === true,
+        }),
+      );
       setResumeNext(true);
       setLaunchNonce((n) => n + 1);
       return;
@@ -583,6 +635,89 @@ export function WindowPane({
           </Button>
         </div>
       ) : null}
+      {isCli ? (
+        <div
+          className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-2 py-1 text-2xs"
+          data-testid="workbench-session-bar"
+        >
+          {window.sessionUnidentified === true ? (
+            <span data-testid="workbench-session-unidentified" className="text-warning-text">
+              {t("workbench.session.unidentified")}
+            </span>
+          ) : window.nativeSessionId !== undefined ? (
+            <button
+              type="button"
+              className="font-mono text-fg"
+              data-testid="workbench-session-id"
+              title={window.nativeSessionId}
+              onClick={() => {
+                const id = window.nativeSessionId;
+                if (id !== undefined) {
+                  void navigator.clipboard.writeText(id);
+                }
+              }}
+            >
+              {shortSessionId(window.nativeSessionId)}
+            </button>
+          ) : (
+            <span data-testid="workbench-session-pending" className="text-fg-muted">
+              {t("workbench.session.pending")}
+            </span>
+          )}
+          <button
+            type="button"
+            className="rounded-sm px-1 py-0.5 text-fg"
+            data-testid="workbench-session-resume"
+            onClick={() => {
+              queueConversationPlan(
+                planConversationLaunch({
+                  action: "resume-current",
+                  ...(window.nativeSessionId !== undefined
+                    ? { currentId: window.nativeSessionId }
+                    : {}),
+                  unidentified: window.sessionUnidentified === true,
+                }),
+              );
+            }}
+          >
+            {t("workbench.session.resumeCurrent")}
+          </button>
+          <button
+            type="button"
+            className="rounded-sm px-1 py-0.5 text-fg"
+            data-testid="workbench-session-fresh"
+            onClick={() => {
+              queueConversationPlan({ kind: "fresh" });
+            }}
+          >
+            {t("workbench.session.fresh")}
+          </button>
+          <select
+            className="rounded-sm border border-border bg-surface px-1 py-0.5"
+            data-testid="workbench-session-history"
+            value=""
+            onChange={(event) => {
+              const historyId = event.target.value;
+              if (historyId === "") {
+                return;
+              }
+              queueConversationPlan(
+                planConversationLaunch({
+                  action: "resume-history",
+                  historyId,
+                }),
+              );
+            }}
+          >
+            <option value="">{t("workbench.session.pickHistory")}</option>
+            {(window.conversations ?? []).map((item) => (
+              <option key={item.id} value={item.id}>
+                {shortSessionId(item.id)}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
       {manualTurnSignal ? (
         <div
           className="shrink-0 border-b border-border bg-warning-surface px-2 py-1 text-2xs text-warning-text"
@@ -617,11 +752,18 @@ export function WindowPane({
               ) : null}
             </>
           ) : (
-            <span data-testid="workbench-deliver-blocked">
-              {deliverPending.mode === "blocked"
-                ? t("workbench.deliver.blocked")
-                : t("workbench.deliver.busy")}
-            </span>
+            <>
+              <span data-testid="workbench-deliver-blocked">
+                {deliverPending.mode === "blocked"
+                  ? t("workbench.deliver.blocked")
+                  : t("workbench.deliver.busy")}
+              </span>
+              {deliverPending.mode === "blocked" ? (
+                <span data-testid="workbench-deliver-permission-hold">
+                  {t("workbench.deliver.permissionHold")}
+                </span>
+              ) : null}
+            </>
           )}
           <button
             type="button"
@@ -656,27 +798,33 @@ export function WindowPane({
                 autoStart: autoStart || resumeNext,
                 permission,
                 ...(window.role !== undefined ? { role: window.role } : {}),
-                ...(window.nativeSessionId !== undefined
-                  ? { nativeSessionId: window.nativeSessionId }
-                  : {}),
+                ...(conversationPlan.kind === "resume"
+                  ? { nativeSessionId: conversationPlan.sessionId, resume: true }
+                  : conversationPlan.kind === "picker"
+                    ? { resume: true }
+                    : {}),
                 ...(initialPrompt !== undefined ? { initialPrompt } : {}),
-                ...(resumeNext ? { resume: true } : {}),
               },
               onResume: () => {
-                setResumeNext(true);
-                setLaunchNonce((n) => n + 1);
+                queueConversationPlan(
+                  planConversationLaunch({
+                    action: "resume-current",
+                    ...(window.nativeSessionId !== undefined
+                      ? { currentId: window.nativeSessionId }
+                      : {}),
+                    unidentified: window.sessionUnidentified === true,
+                  }),
+                );
               },
               onRestartFresh: () => {
-                setResumeNext(false);
-                patchWindow(window.projectId, window.id, { nativeSessionId: null });
-                setLaunchNonce((n) => n + 1);
+                queueConversationPlan({ kind: "fresh" });
               },
               onConvertToShell: () => {
                 convertWindowToShell(window.projectId, window.id);
               },
               onNativeSessionId: (nativeSessionId) => {
                 if (nativeSessionId !== undefined) {
-                  patchWindow(window.projectId, window.id, { nativeSessionId });
+                  noteWindowSession(window.projectId, window.id, nativeSessionId);
                 }
               },
               onPermissionCapped: (effective) => {

@@ -2383,3 +2383,183 @@ Claude 带参数的 `/model` 在已有对话时会不会再要一次确认，官
 - `docs/验收记录/T10.15-验收.md`
 - 计划 §9.3、§7.3、§7.4
 - 总记录「2026-10-01 20:32 · T10.15 · 执行 · 加固」
+
+## 2026-10-01 22:22 · T10.15b · 执行 · 对话编号与权限配对
+
+### 任务要点
+
+按 §9.10 做对话编号和更保守的权限配对。先调研 Claude / Codex 能否在启动时指定编号。未提交。
+
+### 结论
+
+调研：本机 Claude Code 2.1.220 交互模式有 `--session-id <uuid>`，续接用 `--resume <id>`；不带编号的 `--resume` 打开选择器。本机 Codex 0.159.2 不能在启动时指定会话编号（`--help` 与官方未实现的 `--session-id` 请求都对得上）。`session_meta` 不存 `developer_instructions`，但首轮会把这段说明写进 rollout 的开发者消息。因此 Codex 用每个窗口独有的随机记号 `ffpane-claim:<uuid>` 接在本次 `developer_instructions` 末尾，只在 rollout 有限前缀里对这个记号，不按启动先后猜，不排队。对不上或记号撞车就标「编号未识别」，续接打开选择器，不用 `--last` / `--continue`。
+
+实现：Claude 新开仍在启动时指定编号；开新对话换新编号；历史只记编号、开始时间、最后活动时间，最多 24 条。窗口上显示短编号（可复制），可续接当前、开新对话、从本窗口历史里选一段。续接管理者 / 全放开仍走原来的确认。§9.9 自动续接用这个编号；没有编号就不自动续接。没有 tool_use_id 的权限摘要不再被同摘要的 PostToolUse 减到 0，要等用户再发一句才清。提醒停住时多一句说明。
+
+### 改动文件
+
+- `packages/shared/src/domain/workbench.ts`
+- `packages/storage/src/workbench/store.ts`
+- `apps/desktop/src/main/workbench/codex-claim.ts`
+- `apps/desktop/src/main/workbench/cli-args.ts`
+- `apps/desktop/src/main/workbench/launch-cli.ts`
+- `apps/desktop/src/main/workbench/idle-deliver.ts`
+- `apps/desktop/src/main/workbench/handlers.ts`
+- `apps/desktop/src/shared-ipc/contracts.ts`
+- `apps/desktop/src/renderer/src/pages/workbench/conversation-launch.ts`
+- `apps/desktop/src/renderer/src/pages/workbench/WindowPane.tsx`
+- `apps/desktop/src/renderer/src/pages/workbench/TerminalView.tsx`
+- `apps/desktop/src/renderer/src/stores/workbench.ts`
+- `locales/zh-CN.json`、`locales/en-US.json`
+- `apps/desktop/tests/codex-claim.test.ts`
+- `apps/desktop/tests/conversation-id.test.ts`
+- `apps/desktop/tests/workbench-idle-deliver.test.ts`
+- `apps/desktop/tests/workbench-cli-args.test.ts`
+- `apps/desktop/tests/e2e/workbench-cli.spec.ts`
+- `packages/storage/tests/workbench-layouts.test.ts`
+- 本条
+
+未改 `apps/desktop/scripts/real-config-probe.mjs`。未读用户 `~/.codex` / `~/.claude`。
+
+### 命令结果
+
+- `pnpm lint`：通过。Biome 762 个文件。`check-i18n` PASS。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- 相关单测：`codex-claim`、`conversation-id`、`workbench-idle-deliver`、`workbench-cli-args`、`workbench-deliver-hint` 共 5 个文件，61 过。布局单测 6 过。
+- 受影响 e2e：`workbench-cli.spec.ts` 与 `model-effort.spec.ts`。首跑 9 过、三条编号那条超时只见到 2 个编号；改成逐个等认领后再开下一个，复跑该条通过（约 7 秒）。自动续接两条也过。
+
+### 问题与遗留
+
+没有需要主控拍板的做法。未提交。下一步独立检查。
+
+### 相关文件链接
+
+- 计划 §9.10、§9.9、§7.3、§7.4
+- 总记录「2026-10-01 20:32 · T10.15 · 执行 · 加固」第 3、6 条
+
+## 2026-10-01 22:45 · T10.15b · 检查 · 对话编号与权限配对
+
+### 任务要点
+
+独立检查 T10.15b。对照计划 §9.10、§9.9、§7.4，以及总记录「2026-10-01 22:22 · T10.15b · 执行 · 对话编号与权限配对」。不改实现。探针用完已删，改过的源码已按原字节还原。
+
+### 结论
+
+有条件通过。必须修复 1 条：同一记号出现在两份 rollout 里时，若其中一份还带了别的记号，仍会认那份只有该记号的文件。两份都只有同一记号时不会挑。同目录 5 个 Codex 按记号一次认完，不排队。识别失败只开选择器，没有 `--last` 或 `--continue`。管理者和全放开第一次续接要确认。窗口令牌不进 argv、日志、文件。原来的摘要减穿不再提前投递。不需要主控另选做法。未提交。
+
+### 改动文件
+
+- `docs/验收记录/T10.15b-验收.md`
+- 本条
+
+未改实现，未改 `apps/desktop/scripts/real-config-probe.mjs`。未读写 `~/.aiworkbench`，未改 `~/.claude`、`~/.codex`。
+
+### 命令结果
+
+- `pnpm lint`：通过。Biome 762 个文件。`check-i18n` PASS。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- `pnpm test`：通过。144 个文件，2427 过，1 跳过。
+- `pnpm smoke`：通过。应用版本 0.10.17。
+- `pnpm test:e2e`：通过。53 过，约 5.7 分钟。
+
+### 问题与遗留
+
+必须修复 1 条，见验收记录第 2 节。建议 1 条：同一次进程里确认过之后不再问。没有要主控拍板的决定。未提交。
+
+### 相关文件链接
+
+- `docs/验收记录/T10.15b-验收.md`
+- 计划 §9.10、§9.9、§7.4
+- 总记录「2026-10-01 22:22 · T10.15b · 执行 · 对话编号与权限配对」
+
+## 2026-10-01 22:47 · T10.15b · 修复 · 记号撞车
+
+### 任务要点
+
+检查必须项：同一记号出现在两份 rollout 时，即使其中一份还带了别的记号，也不得认领。
+
+### 结论
+
+前缀里只要出现这个记号就计入份数。多于一份就标未识别，两份都不认。唯一一份里如果还混着别的记号，也不认。
+
+### 改动文件
+
+- `apps/desktop/src/main/workbench/codex-claim.ts`
+- `apps/desktop/tests/codex-claim.test.ts`
+- 本条
+
+### 命令结果
+
+- `vitest run tests/codex-claim.test.ts`：19 过。
+
+### 问题与遗留
+
+未提交。等复验。
+
+### 相关文件链接
+
+- `docs/验收记录/T10.15b-验收.md`
+- 总记录「2026-10-01 22:45 · T10.15b · 检查 · 对话编号与权限配对」
+
+## 2026-10-01 22:51 · T10.15b · 复验 · 记号撞车
+
+### 任务要点
+
+独立复验必须项：同一记号出现在两份 rollout 时，即使其中一份还带了别的记号，也不得认领任一份。
+
+### 结论
+
+通过。必须修复已不在。隔离目录里，干净文件和多记号文件都含同一记号时，挑选为撞车，认领返回未识别，两份都不进入已认领集合。不需要主控决策。
+
+### 改动文件
+
+- `docs/验收记录/T10.15b-验收.md`（末尾追加「复验」，首验正文未改）
+- 本条
+
+未改实现，未改 `apps/desktop/scripts/real-config-probe.mjs`。未读写 `~/.aiworkbench`，未改 `~/.claude`、`~/.codex`。
+
+### 命令结果
+
+- `vitest run tests/codex-claim.test.ts`（`apps/desktop`）：通过。与隔离探针同跑，2 个文件 20 过。探针已删。未重跑全套 test / smoke / e2e。
+
+### 问题与遗留
+
+必须项关闭。建议（非阻断）仍在：同一次进程里确认过之后不再问。未提交。
+
+### 相关文件链接
+
+- `docs/验收记录/T10.15b-验收.md`
+- 总记录「2026-10-01 22:47 · T10.15b · 修复 · 记号撞车」
+
+## 2026-10-01 22:53 · T10.15b · 提交 · v0.10.18
+
+### 任务要点
+
+复验通过。按 §7.2 第 4 步提交。版本 `0.10.17` → `0.10.18`。轻量 tag `v0.10.18`，不 push。
+
+### 结论
+
+已提交并打轻量 tag `v0.10.18`，未 push。下一步 Phase 10 终验。不需要主控决策。
+
+### 改动文件
+
+版本：根与 `apps/desktop` 的 `package.json`、README 状态行、`command-ipc.test.ts` 与 `client-server.test.ts` 里的假 AppInfo。
+进度与计划：`docs/开发进度.md` 登记 T10.15b ✅；权限摘要减穿、同目录双开认领标为已处理；Codex notify 替换标为 Tony 已接受。计划 §4、§9 增加 T10.15b 并标 ✅，§7.5 当前版本改为 0.10.18，下一步为 Phase 10 终验。
+另含本任务的实现、测试、验收记录和此前的执行 / 检查 / 修复 / 复验条目。未纳入 `apps/desktop/scripts/real-config-probe.mjs`。
+
+### 命令结果
+
+- `pnpm lint`：通过。Biome 762 个文件。`check-i18n` PASS。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- `vitest run tests/command-ipc.test.ts tests/client-server.test.ts tests/codex-claim.test.ts`：3 个文件，92 过。
+- 提交信息：`feat: T10.15b 对话编号与权限配对加固`
+- 轻量 tag `v0.10.18`，未 push
+
+### 问题与遗留
+
+没有必须修复。没有要主控拍板的决定。下一步 Phase 10 终验。
+
+### 相关文件链接
+
+- [T10.15b 验收记录](../验收记录/T10.15b-验收.md)
+- 复验：[2026-10-01 22:51 · T10.15b · 复验 · 记号撞车](./Phase10-对话总记录.md)

@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   assertTestCodexHomeIsolated,
   CodexSessionClaimer,
+  type CodexSessionMeta,
   collectCodexSessionScanDayDirs,
   cwdEquals,
   type DayParts,
@@ -57,6 +58,8 @@ function writeRollout(
     /** 显式日目录（模拟 Codex 本地日）；缺省用 UTC 日。 */
     readonly dayPath?: string;
     readonly corrupt?: boolean;
+    /** 写进文件前缀的认领记号（UUID）。 */
+    readonly marker?: string;
   },
 ): string {
   const timestamp = new Date(opts.timestampMs).toISOString();
@@ -81,7 +84,11 @@ function writeRollout(
         timestamp,
       },
     });
-    writeFileSync(file, `${line}\n`, "utf8");
+    const markerLine =
+      opts.marker === undefined
+        ? ""
+        : `${JSON.stringify({ type: "response_item", text: `ffpane-claim:${opts.marker}` })}\n`;
+    writeFileSync(file, `${line}\n${markerLine}`, "utf8");
   }
   return file;
 }
@@ -176,6 +183,7 @@ describe("测试隔离守卫", () => {
       id: "portable-ok",
       cwd,
       timestampMs: t0 + 1_000,
+      marker: "11111111-1111-4111-8111-111111111111",
     });
     const claimer = new CodexSessionClaimer({
       codexHome: home,
@@ -183,7 +191,12 @@ describe("测试隔离守卫", () => {
       intervalMs: 20,
       timeoutMs: 500,
     });
-    const id = await claimer.start({ windowId: "w-portable", cwd, startedAtMs: t0 });
+    const id = await claimer.start({
+      windowId: "w-portable",
+      cwd,
+      startedAtMs: t0,
+      claimMarker: "11111111-1111-4111-8111-111111111111",
+    });
     expect(id).toBe("portable-ok");
     claimer.dispose();
   });
@@ -206,6 +219,7 @@ describe("测试隔离守卫", () => {
       windowId: "w-log",
       cwd: join(tmpdir(), "proj"),
       startedAtMs: Date.now(),
+      claimMarker: "22222222-2222-4222-8222-222222222222",
     });
     expect(logs.some((line) => line.includes("[codex-claim] tick failed"))).toBe(true);
     expect(logs.some((line) => line.includes("simulated-scan-boom"))).toBe(true);
@@ -223,6 +237,7 @@ describe("CodexSessionClaimer", () => {
       id: "sess-1",
       cwd,
       timestampMs: t0 + 1_000,
+      marker: "33333333-3333-4333-8333-333333333333",
     });
     const claimer = new CodexSessionClaimer({
       codexHome: home,
@@ -230,7 +245,12 @@ describe("CodexSessionClaimer", () => {
       intervalMs: 20,
       timeoutMs: 500,
     });
-    const id = await claimer.start({ windowId: "w1", cwd, startedAtMs: t0 });
+    const id = await claimer.start({
+      windowId: "w1",
+      cwd,
+      startedAtMs: t0,
+      claimMarker: "33333333-3333-4333-8333-333333333333",
+    });
     expect(id).toBe("sess-1");
     claimer.dispose();
   });
@@ -250,6 +270,7 @@ describe("CodexSessionClaimer", () => {
       cwd,
       timestampMs: t0 + 1_000,
       dayPath: localDay,
+      marker: "44444444-4444-4444-8444-444444444444",
     });
     const claimer = new CodexSessionClaimer({
       codexHome: home,
@@ -260,7 +281,12 @@ describe("CodexSessionClaimer", () => {
       intervalMs: 20,
       timeoutMs: 500,
     });
-    const id = await claimer.start({ windowId: "w1", cwd, startedAtMs: t0 });
+    const id = await claimer.start({
+      windowId: "w1",
+      cwd,
+      startedAtMs: t0,
+      claimMarker: "44444444-4444-4444-8444-444444444444",
+    });
     expect(id).toBe("local-dawn");
     claimer.dispose();
   });
@@ -274,6 +300,7 @@ describe("CodexSessionClaimer", () => {
       id: "sess-x",
       cwd: join(home, "proj-b"),
       timestampMs: t0 + 1_000,
+      marker: "55555555-5555-4555-8555-555555555555",
     });
     let now = t0 + 2_000;
     const claimer = new CodexSessionClaimer({
@@ -289,39 +316,119 @@ describe("CodexSessionClaimer", () => {
       windowId: "w1",
       cwd,
       startedAtMs: t0,
+      claimMarker: "55555555-5555-4555-8555-555555555555",
     });
     expect(id).toBeUndefined();
     claimer.dispose();
   });
 
-  it("多窗口并发按启动先后配对，不串号", async () => {
+  it("同目录多个窗口按各自记号认领，不按启动先后", async () => {
     const home = fakeHome();
     const cwd = join(home, "proj");
     mkdirSync(cwd, { recursive: true });
     const t0 = Date.now() - 5_000;
-    writeRollout(home, {
-      id: "early",
-      cwd,
-      timestampMs: t0 + 1_000,
+    const markers = [
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2",
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3",
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4",
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa5",
+    ] as const;
+    markers.forEach((marker, index) => {
+      writeRollout(home, {
+        id: `sess-${index}`,
+        cwd,
+        timestampMs: t0 + (markers.length - index) * 1_000,
+        marker,
+      });
     });
-    writeRollout(home, {
-      id: "late",
-      cwd,
-      timestampMs: t0 + 2_000,
-    });
-    const now = t0 + 5_000;
+    const now = t0 + 20_000;
     const claimer = new CodexSessionClaimer({
       codexHome: home,
       now: () => now,
-      intervalMs: 30,
+      intervalMs: 20,
       timeoutMs: 1_000,
     });
-    const p1 = claimer.start({ windowId: "w1", cwd, startedAtMs: t0 });
-    const p2 = claimer.start({ windowId: "w2", cwd, startedAtMs: t0 + 500 });
-    const [id1, id2] = await Promise.all([p1, p2]);
-    expect(id1).toBe("early");
-    expect(id2).toBe("late");
+    const ids = await Promise.all(
+      markers.map((marker, index) =>
+        claimer.start({
+          windowId: `w-${index}`,
+          cwd,
+          startedAtMs: t0 + index,
+          claimMarker: marker,
+        }),
+      ),
+    );
+    expect(ids).toEqual(["sess-0", "sess-1", "sess-2", "sess-3", "sess-4"]);
     claimer.dispose();
+  });
+
+  it("记号撞车或对不上时不认领", async () => {
+    const home = fakeHome();
+    const cwd = join(home, "proj");
+    mkdirSync(cwd, { recursive: true });
+    const t0 = Date.now() - 5_000;
+    const shared = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    writeRollout(home, { id: "one", cwd, timestampMs: t0 + 1_000, marker: shared });
+    writeRollout(home, { id: "two", cwd, timestampMs: t0 + 2_000, marker: shared });
+    writeRollout(home, {
+      id: "other",
+      cwd,
+      timestampMs: t0 + 3_000,
+      marker: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    });
+    let now = t0 + 4_000;
+    const claimer = new CodexSessionClaimer({
+      codexHome: home,
+      now: () => {
+        now += 50;
+        return now;
+      },
+      intervalMs: 20,
+      timeoutMs: 200,
+    });
+    const collided = await claimer.start({
+      windowId: "w-collide",
+      cwd,
+      startedAtMs: t0,
+      claimMarker: shared,
+    });
+    const missing = await claimer.start({
+      windowId: "w-missing",
+      cwd,
+      startedAtMs: t0,
+      claimMarker: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    });
+    expect(collided).toBeUndefined();
+    expect(missing).toBeUndefined();
+    claimer.dispose();
+  });
+
+  it("记号同时出现在干净文件和多记号文件里时两份都不认", () => {
+    const marker = "abababab-abab-4aba-8aba-abababababab";
+    const other = "cdcdcdcd-cdcd-4cdc-8cdc-cdcdcdcdcdcd";
+    const t0 = Date.now() - 5_000;
+    const cwd = "D:\\repo";
+    const clean: CodexSessionMeta = {
+      id: "clean",
+      cwd,
+      timestampMs: t0 + 1_000,
+      filePath: "clean.jsonl",
+      claimMarkers: [marker],
+    };
+    const mixed: CodexSessionMeta = {
+      id: "mixed",
+      cwd,
+      timestampMs: t0 + 2_000,
+      filePath: "mixed.jsonl",
+      claimMarkers: [marker, other],
+    };
+    const pick = pickCodexSessionForClaim(
+      { windowId: "w", cwd, startedAtMs: t0, claimMarker: marker },
+      [clean, mixed],
+      new Set(),
+    );
+    expect(pick.status).toBe("collision");
   });
 
   it("文件延迟出现后仍可认领", async () => {
@@ -336,12 +443,18 @@ describe("CodexSessionClaimer", () => {
       intervalMs: 30,
       timeoutMs: 2_000,
     });
-    const pending = claimer.start({ windowId: "w1", cwd, startedAtMs: t0 });
+    const pending = claimer.start({
+      windowId: "w1",
+      cwd,
+      startedAtMs: t0,
+      claimMarker: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+    });
     await new Promise((r) => setTimeout(r, 60));
     writeRollout(home, {
       id: "delayed",
       cwd,
       timestampMs: t0 + 200,
+      marker: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
     });
     now = t0 + 500;
     const id = await pending;
@@ -358,19 +471,29 @@ describe("CodexSessionClaimer", () => {
       cwd,
       timestampMs: t0 + 1_000,
       corrupt: true,
+      marker: "ffffffff-ffff-4fff-8fff-ffffffffffff",
     });
     writeRollout(home, {
       id: "good",
       cwd,
       timestampMs: t0 + 2_000,
+      marker: "ffffffff-ffff-4fff-8fff-ffffffffffff",
     });
     const claimer = new CodexSessionClaimer({ codexHome: home });
     const pick = pickCodexSessionForClaim(
-      { windowId: "w", cwd, startedAtMs: t0 },
+      {
+        windowId: "w",
+        cwd,
+        startedAtMs: t0,
+        claimMarker: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+      },
       claimer.scanMetas(),
       new Set(),
     );
-    expect(pick?.id).toBe("good");
+    expect(pick.status).toBe("matched");
+    if (pick.status === "matched") {
+      expect(pick.meta.id).toBe("good");
+    }
   });
 
   it("超大 jsonl 只读首行，不整文件入内存", () => {

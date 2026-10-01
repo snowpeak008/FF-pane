@@ -429,12 +429,16 @@ export function TerminalView({
       return;
     }
     lastNonceRef.current = launchNonce;
-    const resume = cliLaunchRef.current?.resume === true;
+    const launch = cliLaunchRef.current;
+    const resume = launch?.resume === true;
     if (resume) {
+      if (launch?.nativeSessionId === undefined) {
+        nativeSessionIdRef.current = undefined;
+      }
       void relaunchWith({
         resume: true,
-        ...(nativeSessionIdRef.current !== undefined
-          ? { nativeSessionId: nativeSessionIdRef.current }
+        ...(launch?.nativeSessionId !== undefined
+          ? { nativeSessionId: launch.nativeSessionId }
           : {}),
       });
     } else {

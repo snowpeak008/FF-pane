@@ -96,10 +96,15 @@ export interface WorkbenchWindow {
   /** 管理者改过的思考强度。优先级同 modelOverride。 */
   readonly effortOverride?: string;
   /**
-   * AI 窗口：CLI 原生会话 id。
-   * Claude = `--session-id` / `--resume` 的 UUID；Codex = `codex resume <id>`（可缺省，续接降级 `--last`）。
+   * AI 窗口：当前对话编号。
+   * Claude 启动时用 `--session-id` 指定；Codex 按本窗口记号从 rollout 认领。
+   * 没有编号时续接打开选择器，不用 `--continue` / `--last`。
    */
   readonly nativeSessionId?: string;
+  /** Codex 记号没对上，或续接时还没有编号。 */
+  readonly sessionUnidentified?: boolean;
+  /** 本窗口对话历史。只含编号与时间，条数有上限。当前编号也在里面。 */
+  readonly conversations?: readonly WorkbenchConversationRecord[];
   /** 工作台角色。缺省视为 none。shell 窗口通常不设。 */
   readonly role?: WorkbenchRole;
   /** AI 窗口权限等级；shell 不设。 */
@@ -123,6 +128,53 @@ export interface WorkbenchWindow {
    * 只驱动标题栏文案，不授予开窗口能力。
    */
   readonly managerGrantPending?: boolean;
+}
+
+/** 单个窗口保留的对话条数上限。 */
+export const WORKBENCH_CONVERSATION_LIMIT = 24;
+
+/** 本窗口的一段对话。只记编号和时间。 */
+export interface WorkbenchConversationRecord {
+  readonly id: string;
+  readonly startedAt: number;
+  readonly lastActiveAt: number;
+}
+
+/** 界面上的短编号：取前 8 位。 */
+export function shortSessionId(id: string): string {
+  const trimmed = id.trim();
+  if (trimmed.length <= 8) {
+    return trimmed;
+  }
+  return trimmed.slice(0, 8);
+}
+
+/**
+ * 记下一段对话。同一编号只留一条，刷新最后活动时间。
+ * 超过上限时丢掉最久没活动的。
+ */
+export function noteWorkbenchConversation(
+  history: readonly WorkbenchConversationRecord[] | undefined,
+  id: string,
+  at: number,
+): readonly WorkbenchConversationRecord[] {
+  const trimmed = id.trim();
+  const prev = history ?? [];
+  if (trimmed === "" || !Number.isFinite(at)) {
+    return prev;
+  }
+  const existing = prev.find((item) => item.id === trimmed);
+  const nextRecord: WorkbenchConversationRecord =
+    existing === undefined
+      ? { id: trimmed, startedAt: at, lastActiveAt: at }
+      : {
+          id: trimmed,
+          startedAt: existing.startedAt,
+          lastActiveAt: Math.max(existing.lastActiveAt, at),
+        };
+  const merged = [nextRecord, ...prev.filter((item) => item.id !== trimmed)];
+  merged.sort((a, b) => b.lastActiveAt - a.lastActiveAt || b.startedAt - a.startedAt);
+  return merged.slice(0, WORKBENCH_CONVERSATION_LIMIT);
 }
 
 /** 分屏方向：horizontal = 左右；vertical = 上下。 */

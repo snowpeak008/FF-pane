@@ -17,6 +17,7 @@ import type {
 import {
   DEFAULT_WORKBENCH_ROLE,
   DEFAULT_WORKBENCH_WINDOW_PERMISSION,
+  noteWorkbenchConversation,
   WORKBENCH_PERMISSION_RANK,
 } from "@ff-pane/shared";
 import { create } from "zustand";
@@ -122,6 +123,14 @@ export interface WorkbenchStoreActions {
       } | null;
     }>,
   ) => void;
+  /** 记下当前对话编号，并写入本窗口历史。 */
+  readonly noteWindowSession: (projectId: ProjectId, windowId: string, sessionId: string) => void;
+  /** 记号没对上。清掉当前编号，历史保留。 */
+  readonly markWindowSessionUnidentified: (projectId: ProjectId, windowId: string) => void;
+  /** 开新对话前清掉当前编号，历史保留。 */
+  readonly clearWindowSessionId: (projectId: ProjectId, windowId: string) => void;
+  /** 刷新当前对话的最后活动时间。 */
+  readonly touchWindowConversation: (windowId: string, at: number) => void;
   /** 用户调整权限：封顶后代并标记需重启。 */
   readonly setWindowPermission: (
     projectId: ProjectId,
@@ -484,6 +493,96 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
     const prompt = pendingInitialPrompts.get(windowId);
     pendingInitialPrompts.delete(windowId);
     return prompt;
+  },
+
+  noteWindowSession(projectId, windowId, sessionId) {
+    const at = Date.now();
+    patchProject(set, get, projectId, (current) => {
+      const window = current.windows[windowId];
+      if (window === undefined) {
+        return current;
+      }
+      const id = sessionId.trim();
+      if (id === "") {
+        return current;
+      }
+      const { sessionUnidentified: _flag, ...rest } = window;
+      void _flag;
+      return {
+        ...current,
+        windows: {
+          ...current.windows,
+          [windowId]: {
+            ...rest,
+            nativeSessionId: id,
+            conversations: noteWorkbenchConversation(window.conversations, id, at),
+          },
+        },
+      };
+    });
+  },
+
+  clearWindowSessionId(projectId, windowId) {
+    patchProject(set, get, projectId, (current) => {
+      const window = current.windows[windowId];
+      if (window === undefined) {
+        return current;
+      }
+      const { nativeSessionId: _id, sessionUnidentified: _flag, ...rest } = window;
+      void _id;
+      void _flag;
+      return {
+        ...current,
+        windows: { ...current.windows, [windowId]: rest },
+      };
+    });
+  },
+
+  markWindowSessionUnidentified(projectId, windowId) {
+    patchProject(set, get, projectId, (current) => {
+      const window = current.windows[windowId];
+      if (window === undefined) {
+        return current;
+      }
+      const { nativeSessionId: _id, ...rest } = window;
+      void _id;
+      return {
+        ...current,
+        windows: {
+          ...current.windows,
+          [windowId]: { ...rest, sessionUnidentified: true },
+        },
+      };
+    });
+  },
+
+  touchWindowConversation(windowId, at) {
+    const layouts = get().layoutsByProject;
+    for (const [projectId, layout] of Object.entries(layouts)) {
+      const window = layout.windows[windowId];
+      const currentId = window?.nativeSessionId?.trim() ?? "";
+      if (currentId === "") {
+        continue;
+      }
+      patchProject(set, get, projectId as ProjectId, (current) => {
+        const live = current.windows[windowId];
+        const liveId = live?.nativeSessionId;
+        if (live === undefined || liveId === undefined || liveId.trim() === "") {
+          return current;
+        }
+        return {
+          ...current,
+          windows: {
+            ...current.windows,
+            [windowId]: {
+              ...live,
+              conversations: noteWorkbenchConversation(live.conversations, liveId, at),
+            },
+          },
+        };
+      });
+      return;
+    }
   },
 
   patchWindow(projectId, windowId, patch) {

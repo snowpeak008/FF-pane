@@ -128,6 +128,13 @@ describe("workbench layout store", () => {
           createdAt: 2,
           profileId: "prof-1",
           nativeSessionId: "11111111-1111-4111-8111-111111111111",
+          conversations: [
+            {
+              id: "11111111-1111-4111-8111-111111111111",
+              startedAt: 2,
+              lastActiveAt: 3,
+            },
+          ],
         },
       },
       maximizedWindowId: null,
@@ -142,6 +149,13 @@ describe("workbench layout store", () => {
     expect(raw.layouts["proj-a"]?.windows["win-2"]?.nativeSessionId).toBe(
       "11111111-1111-4111-8111-111111111111",
     );
+    expect(raw.layouts["proj-a"]?.windows["win-2"]?.conversations).toEqual([
+      {
+        id: "11111111-1111-4111-8111-111111111111",
+        startedAt: 2,
+        lastActiveAt: 3,
+      },
+    ]);
   });
 
   it("v3 无 role 或非法 role 仍能读出窗口", async () => {

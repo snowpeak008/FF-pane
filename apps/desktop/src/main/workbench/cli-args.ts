@@ -19,8 +19,10 @@ export interface BuildInteractiveClaudeArgsInput {
   readonly effort?: string;
   /** 新开会话预分配 UUID（`--session-id`）。与 resumeSessionId 互斥。 */
   readonly sessionId?: string;
-  /** 续接 UUID（`--resume`）。 */
+  /** 续接 UUID（`--resume <id>`）。 */
   readonly resumeSessionId?: string;
+  /** 没有编号时只传 `--resume`，打开选择器，不接最近一条。 */
+  readonly resumePicker?: boolean;
   readonly mcpConfigPath?: string;
   /**
    * 是否加 `--strict-mcp-config`。
@@ -73,6 +75,8 @@ export function buildInteractiveClaudeArgs(input: BuildInteractiveClaudeArgsInpu
   const args: string[] = [];
   if (input.resumeSessionId !== undefined && input.resumeSessionId.trim() !== "") {
     args.push("--resume", input.resumeSessionId.trim());
+  } else if (input.resumePicker === true) {
+    args.push("--resume");
   } else if (input.sessionId !== undefined && input.sessionId.trim() !== "") {
     args.push("--session-id", input.sessionId.trim());
   }

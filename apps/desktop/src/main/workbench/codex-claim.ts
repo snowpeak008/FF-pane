@@ -1,13 +1,22 @@
 /**
  * Codex 工作台会话认领：只读扫描 CODEX_HOME/sessions 下 rollout-*.jsonl，
- * 按 cwd + 启动时间窗口认领最早匹配且未被占用的 session id。
+ * 按本窗口独有的随机记号匹配 session id。不按启动先后猜，不排队。
  *
  * 性能红线：本机 sessions 可达数百文件 / 数 GB；禁止整文件 readFileSync。
- * 只读首行有限字节，并按日期目录 + mtime 窗口收窄扫描面。
+ * 只读有限前缀，并按日期目录 + mtime 窗口收窄扫描面。
  *
  * 日期目录：Codex 按**本地**日历建 YYYY/MM/DD；payload.timestamp 为 UTC。
  * 扫描同时覆盖启动/当前时刻的本地日与 UTC 日及其前后各一天。
  */
+
+/** 写进 developer_instructions、并出现在 rollout 里的记号前缀。不是密钥，不是窗口令牌。 */
+export const CODEX_CLAIM_MARKER_PREFIX = "ffpane-claim:";
+
+/** 记号扫描前缀上限。session_meta 的 base_instructions 可能很长，整文件不读。 */
+export const CODEX_ROLLOUT_PREFIX_MAX_BYTES = 512 * 1024;
+
+const CLAIM_MARKER_PATTERN =
+  /ffpane-claim:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi;
 
 import { closeSync, openSync, readdirSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
@@ -20,12 +29,16 @@ export interface CodexSessionMeta {
   /** ISO 或可解析时间；缺省用文件 mtime。 */
   readonly timestampMs: number;
   readonly filePath: string;
+  /** 从前缀里抽出的本窗口记号。没有则不能按记号认领。 */
+  readonly claimMarkers?: readonly string[];
 }
 
 export interface CodexClaimRequest {
   readonly windowId: string;
   readonly cwd: string;
   readonly startedAtMs: number;
+  /** 本次启动写进 developer_instructions 的随机记号。空则不认领。 */
+  readonly claimMarker: string;
 }
 
 export interface DayParts {
@@ -44,6 +57,8 @@ export interface CodexClaimerOptions {
   readonly timeoutMs?: number;
   /** 首行读取上限（字节），默认 64KiB。 */
   readonly firstLineMaxBytes?: number;
+  /** 记号扫描前缀上限（字节），默认 512KiB。 */
+  readonly prefixMaxBytes?: number;
   /** 可注入本地日历拆分（单测模拟 TZ 偏移）。 */
   readonly localDayParts?: (atMs: number) => DayParts;
   readonly utcDayParts?: (atMs: number) => DayParts;
@@ -56,6 +71,28 @@ export interface CodexClaimerOptions {
 
 /** 首行读取默认上限。 */
 export const CODEX_ROLLOUT_FIRST_LINE_MAX_BYTES = 64 * 1024;
+
+/** 把记号接在开发者说明末尾。记号是随机值，不是窗口令牌。 */
+export function withCodexClaimMarker(instructions: string | undefined, marker: string): string {
+  const token = `${CODEX_CLAIM_MARKER_PREFIX}${marker.trim()}`;
+  const base = instructions?.trim() ?? "";
+  if (base === "") {
+    return token;
+  }
+  return `${base}\n${token}`;
+}
+
+/** 从前缀文本抽出记号。同一记号只留一次。 */
+export function extractCodexClaimMarkers(text: string): string[] {
+  const found = new Set<string>();
+  for (const match of text.matchAll(CLAIM_MARKER_PATTERN)) {
+    const id = match[1]?.toLowerCase();
+    if (id !== undefined && id !== "") {
+      found.add(id);
+    }
+  }
+  return [...found];
+}
 
 /** 是否处于自动化测试（仅认明确测试标记；不含生产可用的 FF_PANE_DATA_ROOT）。 */
 export function isAutomatedTestEnv(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -115,6 +152,32 @@ export function normalizeWorkbenchCwd(cwd: string): string {
 
 export function cwdEquals(a: string, b: string): boolean {
   return normalizeWorkbenchCwd(a) === normalizeWorkbenchCwd(b);
+}
+
+/**
+ * 只读文件开头的有限字节。大 jsonl 不会整文件入内存。
+ */
+export function readFilePrefix(filePath: string, maxBytes: number): string | undefined {
+  let fd: number | undefined;
+  try {
+    fd = openSync(filePath, "r");
+    const buf = Buffer.alloc(Math.max(1, maxBytes));
+    const n = readSync(fd, buf, 0, buf.length, 0);
+    if (n <= 0) {
+      return undefined;
+    }
+    return buf.subarray(0, n).toString("utf8");
+  } catch {
+    return undefined;
+  } finally {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd);
+      } catch {
+        // ignore
+      }
+    }
+  }
 }
 
 /**
@@ -304,24 +367,46 @@ function listRolloutFilesInDirs(
   return out;
 }
 
+export type CodexClaimPick =
+  | { readonly status: "matched"; readonly meta: CodexSessionMeta }
+  | { readonly status: "waiting" }
+  | { readonly status: "collision" }
+  | { readonly status: "rejected" };
+
 /**
- * 从候选 meta 中为请求挑选最早合法会话。
- * 时间窗：timestamp >= startedAtMs - 2s（时钟/落盘误差）。
+ * 按本窗口记号挑选会话。
+ * 同一记号出现在多个文件里：撞车，不挑其中一个。
+ * 文件里同时有多个记号：这份文件不参与配对。
+ * 对不上 cwd、早于本次启动、或已被占用：继续等，不改按时间猜。
  */
 export function pickCodexSessionForClaim(
   request: CodexClaimRequest,
   metas: readonly CodexSessionMeta[],
   claimedIds: ReadonlySet<string>,
-): CodexSessionMeta | undefined {
-  const matches = metas
-    .filter(
-      (meta) =>
-        !claimedIds.has(meta.id) &&
-        cwdEquals(meta.cwd, request.cwd) &&
-        meta.timestampMs >= request.startedAtMs - 2_000,
-    )
-    .sort((a, b) => a.timestampMs - b.timestampMs || a.filePath.localeCompare(b.filePath));
-  return matches[0];
+): CodexClaimPick {
+  const marker = request.claimMarker.trim().toLowerCase();
+  if (marker === "") {
+    return { status: "rejected" };
+  }
+  const copies = metas.filter((meta) => (meta.claimMarkers ?? []).includes(marker));
+  if (copies.length > 1) {
+    return { status: "collision" };
+  }
+  const only = copies[0];
+  if (only === undefined) {
+    return { status: "waiting" };
+  }
+  if ((only.claimMarkers ?? []).length !== 1) {
+    return { status: "collision" };
+  }
+  if (
+    claimedIds.has(only.id) ||
+    !cwdEquals(only.cwd, request.cwd) ||
+    only.timestampMs < request.startedAtMs - 2_000
+  ) {
+    return { status: "waiting" };
+  }
+  return { status: "matched", meta: only };
 }
 
 interface PendingClaim {
@@ -331,10 +416,8 @@ interface PendingClaim {
 }
 
 /**
- * 多窗口并发认领协调器：统一 tick，按启动先后贪心配对最早未占用文件。
- *
- * 残余风险：Codex 若延迟很久才写 session_meta、或同 cwd 极短时间连开却只落一个文件，
- * 后开窗口会超时；超时后不静默 --last，改走 resume 选择器。
+ * 多窗口并发认领：各窗口只认自己的记号，不按启动先后排队。
+ * 超时、撞车或没有记号时返回 undefined。调用方标「编号未识别」，续接走选择器。
  */
 export class CodexSessionClaimer {
   private readonly claimed = new Set<string>();
@@ -344,6 +427,7 @@ export class CodexSessionClaimer {
     readonly intervalMs: number;
     readonly timeoutMs: number;
     readonly firstLineMaxBytes: number;
+    readonly prefixMaxBytes: number;
   };
 
   constructor(options: CodexClaimerOptions = {}) {
@@ -351,6 +435,7 @@ export class CodexSessionClaimer {
       intervalMs: options.intervalMs ?? 500,
       timeoutMs: options.timeoutMs ?? 120_000,
       firstLineMaxBytes: options.firstLineMaxBytes ?? CODEX_ROLLOUT_FIRST_LINE_MAX_BYTES,
+      prefixMaxBytes: options.prefixMaxBytes ?? CODEX_ROLLOUT_PREFIX_MAX_BYTES,
       ...options,
     };
   }
@@ -410,27 +495,23 @@ export class CodexSessionClaimer {
   private tickUnsafe(): void {
     const now = this.options.now?.() ?? Date.now();
     const metas = this.scanMetas();
-    const sorted = [...this.pending.values()].sort(
-      (a, b) =>
-        a.request.startedAtMs - b.request.startedAtMs ||
-        a.request.windowId.localeCompare(b.request.windowId),
-    );
-    const usedFiles = new Set<string>();
     const resolved: Array<{ windowId: string; id: string | undefined }> = [];
 
-    for (const entry of sorted) {
+    for (const entry of this.pending.values()) {
       if (now >= entry.deadline) {
         resolved.push({ windowId: entry.request.windowId, id: undefined });
         continue;
       }
-      const available = metas.filter((m) => !usedFiles.has(m.filePath) && !this.claimed.has(m.id));
-      const pick = pickCodexSessionForClaim(entry.request, available, this.claimed);
-      if (pick === undefined) {
+      const pick = pickCodexSessionForClaim(entry.request, metas, this.claimed);
+      if (pick.status === "waiting") {
         continue;
       }
-      usedFiles.add(pick.filePath);
-      this.claimed.add(pick.id);
-      resolved.push({ windowId: entry.request.windowId, id: pick.id });
+      if (pick.status === "matched") {
+        this.claimed.add(pick.meta.id);
+        resolved.push({ windowId: entry.request.windowId, id: pick.meta.id });
+        continue;
+      }
+      resolved.push({ windowId: entry.request.windowId, id: undefined });
     }
 
     for (const item of resolved) {
@@ -457,9 +538,10 @@ export class CodexSessionClaimer {
           return [];
         }
       });
-    const readFirstLine =
+    const readPrefix =
       this.options.readFirstLine ??
-      ((p: string, maxBytes: number) => readFileFirstLine(p, maxBytes));
+      ((p: string, maxBytes: number) =>
+        readFilePrefix(p, maxBytes) ?? readFileFirstLine(p, maxBytes));
     const statMtimeMs =
       this.options.statMtimeMs ??
       ((p: string) => {
@@ -508,14 +590,21 @@ export class CodexSessionClaimer {
       if (mtime < mtimeFloor) {
         continue;
       }
-      const firstLine = readFirstLine(filePath, this.options.firstLineMaxBytes);
-      if (firstLine === undefined || firstLine === "") {
+      const prefix = readPrefix(filePath, this.options.prefixMaxBytes);
+      if (prefix === undefined || prefix === "") {
         continue;
       }
+      const newline = prefix.indexOf("\n");
+      const firstLine = (newline === -1 ? prefix : prefix.slice(0, newline)).slice(
+        0,
+        this.options.firstLineMaxBytes,
+      );
       const meta = parseCodexRolloutSessionMeta(filePath, firstLine, mtime);
-      if (meta !== undefined) {
-        metas.push(meta);
+      if (meta === undefined) {
+        continue;
       }
+      const claimMarkers = extractCodexClaimMarkers(prefix);
+      metas.push(claimMarkers.length > 0 ? { ...meta, claimMarkers } : meta);
     }
     return metas;
   }

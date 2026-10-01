@@ -12,11 +12,11 @@
  * - 正文不含换行；正文与回车分两次 write。写出回车后记为忙，下一条要等下一次回合结束。
  * - 手动“立即发送”一次只发队首。其余继续等下一次回合结束或用户再次点击。
  * - PermissionRequest 使未决权限计数 +1。计数 > 0 时 Stop 与“立即发送”都不写入。
- *   有合法 tool_use_id 时优先用它配对。没有 id 时按 tool_name + 规范化 tool_input
- *   的摘要计入多重集，同摘要的 PostToolUse / PostToolUseFailure 才 −1。
- *   摘要对不上（例如批准时改了输入）不减计数。两者都没有时无法配对，只有
- *   UserPromptSubmit 或窗口重启才清零。权限被拒绝且没有结束事件时继续闩住。
- *   伪造的 Stop 在计数 > 0 时不解锁。减到 0 后记为 busy，还要再等一次 Stop 才投递。
+ *   有合法 tool_use_id 时用它配对，对应的 PostToolUse / PostToolUseFailure 才 −1。
+ *   没有 id 的摘要只加不减：同摘要的 PostToolUse 不再把多重集减到 0。
+ *   摘要计数只有用户再提交一次输入（UserPromptSubmit）或窗口重启才清。
+ *   因此批准权限后的自动提醒会停住，直到用户再发一句。
+ *   伪造的 Stop 在计数 > 0 时不解锁。id 配对减到 0 后记为 busy，还要再等一次 Stop 才投递。
  */
 
 export const DEFAULT_OUTPUT_QUIET_MS = 1500;
@@ -376,15 +376,8 @@ export function createIdleDeliverQueue(deps: IdleDeliverDeps): IdleDeliverQueue 
         }
         session.phase = "blocked";
       } else if (signal === "post-tool-use" || signal === "post-tool-use-failure") {
-        const pairedById =
-          toolUseId !== undefined && session.pendingPermissionIds.delete(toolUseId);
-        if (!pairedById && toolDigest !== undefined) {
-          const count = session.pendingPermissionDigests.get(toolDigest) ?? 0;
-          if (count > 1) {
-            session.pendingPermissionDigests.set(toolDigest, count - 1);
-          } else if (count === 1) {
-            session.pendingPermissionDigests.delete(toolDigest);
-          }
+        if (toolUseId !== undefined) {
+          session.pendingPermissionIds.delete(toolUseId);
         }
         session.phase = permissionOutstanding(session) > 0 ? "blocked" : "busy";
       } else if (signal === "user-prompt-submit") {

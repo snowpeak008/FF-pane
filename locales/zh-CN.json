@@ -265,11 +265,18 @@
       "project": "工作目录：{{path}}",
       "fallback": "原工作目录已不存在，已回退到项目根目录。"
     },
+    "session": {
+      "unidentified": "编号未识别",
+      "pending": "编号识别中",
+      "resumeCurrent": "续接当前对话",
+      "fresh": "开新对话",
+      "pickHistory": "从历史续接"
+    },
     "terminal": {
       "exited": "已退出（退出码 {{code}}）",
       "restart": "重新启动",
       "resume": "续接上次会话",
-      "resumePickerHint": "未绑定会话 id，已打开 Codex 选择器，请在终端中选择要续接的会话。",
+      "resumePickerHint": "编号未识别，已打开选择器。请在终端里选要续接的对话，不会自动接最近一条。",
       "restartFresh": "重新开始",
       "convertToShell": "转为 PowerShell",
       "copy": "复制",
@@ -425,6 +432,7 @@
       "cancel": "取消",
       "cancelHint": "取消只丢掉还没发出的队列，不会清掉未完成的权限确认。",
       "blocked": "正在等待权限确认，暂不发送。确认框已经关掉的话，在这个窗口再发一句，或关掉重开。",
+      "permissionHold": "批准权限后，自动提醒会等你发下一句再恢复。",
       "busy": "本回合还没结束，暂不发送",
       "noNode": "没有可用的 node.exe，收不到回合结束信号。有待投递内容时请点立即发送。",
       "codexManualHint": "点「立即发送」会把排队的字和一次回车写进当前终端。Codex 在第一轮结束前收不到权限信号。画面上如果已经有确认框，不要点这个按钮。"

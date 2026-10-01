@@ -331,6 +331,17 @@ export interface WorkbenchSessionClaimedEvent {
   readonly nativeSessionId: string;
 }
 
+/** 记号没对上。界面标编号未识别，续接走选择器。 */
+export interface WorkbenchSessionUnidentifiedEvent {
+  readonly windowId: string;
+}
+
+/** 本窗口当前对话有活动，刷新最后活动时间。 */
+export interface WorkbenchConversationTouchEvent {
+  readonly windowId: string;
+  readonly at: number;
+}
+
 /** workbench:set-role 请求（T10.6）。调用方固定为界面用户。 */
 export interface SetWorkbenchRoleRequest {
   readonly windowId: string;
@@ -1629,6 +1640,10 @@ export interface IpcEventContracts {
   "workbench:flush-request": { payload: WorkbenchFlushRequestEvent };
   /** Codex 窗口认领到原生会话 id（T10.4'）。 */
   "workbench:session-claimed": { payload: WorkbenchSessionClaimedEvent };
+  /** Codex 记号没对上（T10.15b）。 */
+  "workbench:session-unidentified": { payload: WorkbenchSessionUnidentifiedEvent };
+  /** 刷新本窗口当前对话的最后活动时间（T10.15b）。 */
+  "workbench:conversation-touch": { payload: WorkbenchConversationTouchEvent };
   /** 待投递条数变化（T10.6'）。 */
   "workbench:role-notice": { payload: WorkbenchRoleNoticeEvent };
   "workbench:deliver-pending": { payload: WorkbenchDeliverPendingEvent };
@@ -1756,6 +1771,8 @@ export const EVENT_CHANNELS = [
   "terminal:exit",
   "workbench:flush-request",
   "workbench:session-claimed",
+  "workbench:session-unidentified",
+  "workbench:conversation-touch",
   "workbench:role-notice",
   "workbench:deliver-pending",
   "workbench:model-effort",

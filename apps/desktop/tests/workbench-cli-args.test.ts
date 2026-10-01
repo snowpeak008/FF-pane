@@ -16,6 +16,13 @@ import {
 } from "../src/main/workbench/mcp-temp";
 
 describe("buildInteractiveClaudeArgs", () => {
+  it("没有编号时只打开选择器，不接最近一条", () => {
+    const args = buildInteractiveClaudeArgs({ resumePicker: true });
+    expect(args).toEqual(["--resume"]);
+    expect(args).not.toContain("--continue");
+    expect(args).not.toContain("--session-id");
+  });
+
   it("新开：session-id + model + effort + mcp strict", () => {
     expect(
       buildInteractiveClaudeArgs({

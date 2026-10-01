@@ -8,6 +8,7 @@ import type {
   PaneNode,
   ProjectId,
   ProjectWorkbenchLayout,
+  WorkbenchConversationRecord,
   WorkbenchTab,
   WorkbenchWindow,
   WorkbenchWindowKind,
@@ -20,6 +21,7 @@ import {
   isWorkbenchWindowKind,
   parseWorkbenchOpenedBy,
   validateModelOverride,
+  WORKBENCH_CONVERSATION_LIMIT,
 } from "@ff-pane/shared";
 import { readJson, writeJsonAtomic } from "../fs/index.js";
 import { WorkbenchLayoutsFileInvalidError } from "./errors.js";
@@ -86,6 +88,33 @@ function isPaneNode(value: unknown): value is PaneNode {
   return false;
 }
 
+function parseConversations(value: unknown): readonly WorkbenchConversationRecord[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const out: WorkbenchConversationRecord[] = [];
+  for (const item of value) {
+    if (out.length >= WORKBENCH_CONVERSATION_LIMIT) {
+      break;
+    }
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      continue;
+    }
+    const raw = item as Record<string, unknown>;
+    const id = typeof raw["id"] === "string" ? raw["id"].trim() : "";
+    const startedAt = raw["startedAt"];
+    const lastActiveAt = raw["lastActiveAt"];
+    if (id === "" || typeof startedAt !== "number" || !Number.isFinite(startedAt)) {
+      continue;
+    }
+    if (typeof lastActiveAt !== "number" || !Number.isFinite(lastActiveAt)) {
+      continue;
+    }
+    out.push({ id, startedAt, lastActiveAt });
+  }
+  return out;
+}
+
 function parseWindow(value: unknown, projectId: ProjectId): WorkbenchWindow | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return null;
@@ -141,6 +170,11 @@ function parseWindow(value: unknown, projectId: ProjectId): WorkbenchWindow | nu
     ...(typeof raw["nativeSessionId"] === "string" && raw["nativeSessionId"].trim() !== ""
       ? { nativeSessionId: raw["nativeSessionId"] }
       : {}),
+    ...(raw["sessionUnidentified"] === true ? { sessionUnidentified: true } : {}),
+    ...(() => {
+      const conversations = parseConversations(raw["conversations"]);
+      return conversations.length > 0 ? { conversations } : {};
+    })(),
     ...(isWorkbenchRole(raw["role"]) ? { role: raw["role"] } : {}),
     ...(permission !== undefined ? { permission } : {}),
     ...(typeof raw["parentWindowId"] === "string" && raw["parentWindowId"].trim() !== ""

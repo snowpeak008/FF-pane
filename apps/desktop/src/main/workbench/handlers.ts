@@ -319,6 +319,15 @@ export async function createWorkbenchCliLayer(
           ...(meta?.toolDigest !== undefined ? { toolDigest: meta.toolDigest } : {}),
         });
       }
+      if (signal === "stop" || signal === "user-prompt-submit") {
+        const browser = options.getWindow();
+        if (browser !== null && !browser.isDestroyed()) {
+          publishEvent(browser.webContents, "workbench:conversation-touch", {
+            windowId,
+            at: Date.now(),
+          });
+        }
+      }
       afterIdleHook(windowId);
     },
     log: (message) => {
@@ -577,6 +586,13 @@ export async function createWorkbenchCliLayer(
         windowId,
         nativeSessionId,
       });
+    },
+    onCodexSessionUnidentified: (windowId: string) => {
+      const window = options.getWindow();
+      if (window === null || window.isDestroyed()) {
+        return;
+      }
+      publishEvent(window.webContents, "workbench:session-unidentified", { windowId });
     },
     onWindowLaunched: (windowId: string) =>
       reconcileManagerGrant(windowId).catch((error: unknown) => {

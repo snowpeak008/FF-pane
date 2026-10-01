@@ -24,6 +24,27 @@ function writeFakeCli(dir: string, name: "claude" | "codex", envKey: string): vo
       `const key = ${JSON.stringify(envKey)};`,
       "process.stdout.write(tag + '_ENV_' + key + '=' + (process.env[key] ? 'present' : 'absent') + '\\n');",
       "process.stdout.write(tag + '_ENV_FF_PANE_WINDOW_TOKEN=' + (process.env.FF_PANE_WINDOW_TOKEN ? 'present' : 'absent') + '\\n');",
+      "if (tag === 'FAKE_CODEX' && process.env.CODEX_HOME) {",
+      "  const found = argv.join('\\n').match(/ffpane-claim:([0-9a-f-]{36})/i);",
+      "  if (found) {",
+      "    const fs = require('node:fs');",
+      "    const path = require('node:path');",
+      "    const id = found[1];",
+      "    const now = new Date();",
+      "    const y = String(now.getFullYear()).padStart(4, '0');",
+      "    const m = String(now.getMonth() + 1).padStart(2, '0');",
+      "    const d = String(now.getDate()).padStart(2, '0');",
+      "    const dir = path.join(process.env.CODEX_HOME, 'sessions', y, m, d);",
+      "    fs.mkdirSync(dir, { recursive: true });",
+      "    const cFlag = argv.indexOf('-C');",
+      "    const cwd = cFlag >= 0 && argv[cFlag + 1] ? argv[cFlag + 1] : process.cwd();",
+      "    const iso = now.toISOString();",
+      "    const meta = JSON.stringify({ type: 'session_meta', payload: { id, cwd, timestamp: iso } });",
+      "    const mark = JSON.stringify({ type: 'response_item', text: 'ffpane-claim:' + id });",
+      "    const file = path.join(dir, 'rollout-' + iso.replace(/[:.]/g, '-') + '-' + id + '.jsonl');",
+      "    fs.writeFileSync(file, meta + '\\n' + mark + '\\n');",
+      "  }",
+      "}",
       "process.exit(0);",
       "",
     ].join("\n"),
@@ -444,14 +465,13 @@ test("Codex 窗口至少能启动并打印 argv", async () => {
   }
 });
 
-test("Codex 预置假 rollout 后认领成功，续接 argv 为 resume <id>", async () => {
+test("Codex 按记号认领会话，续接 argv 为 resume <id>", async () => {
   const fakeBinDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-wbclaim-"));
   const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-wbclaim-proj-"));
   const codexHome = mkdtempSync(join(tmpdir(), "ffpane-e2e-wbclaim-codex-"));
   seedFakeClaude(fakeBinDir);
   seedFakeCodex(fakeBinDir);
 
-  const claimedId = "e2e-codex-claim-sess-001";
   const launched = await launchApp({ pathPrepend: fakeBinDir, codexHome });
   try {
     expect(launched.codexHome).toBe(codexHome);
@@ -492,26 +512,6 @@ test("Codex 预置假 rollout 后认领成功，续接 argv 为 resume <id>", as
       });
     });
 
-    // 紧挨启动写入假 rollout（本地日目录），保证 mtime/timestamp 落在认领窗口内
-    const stampMs = Date.now();
-    const local = new Date(stampMs);
-    const day = [
-      local.getFullYear().toString().padStart(4, "0"),
-      (local.getMonth() + 1).toString().padStart(2, "0"),
-      local.getDate().toString().padStart(2, "0"),
-    ].join("/");
-    const sessionDir = join(codexHome, "sessions", ...day.split("/"));
-    mkdirSync(sessionDir, { recursive: true });
-    const iso = new Date(stampMs).toISOString();
-    writeFileSync(
-      join(sessionDir, `rollout-${iso.replace(/[:.]/g, "-")}-${claimedId}.jsonl`),
-      `${JSON.stringify({
-        type: "session_meta",
-        payload: { id: claimedId, cwd: projectDir, timestamp: iso },
-      })}\n`,
-      "utf8",
-    );
-
     await gotoRoute(page, "/workbench");
     await page.getByTestId("workbench-new-tab").click();
     await expect(page.getByTestId("workbench-new-window-dialog")).toBeVisible();
@@ -537,7 +537,8 @@ test("Codex 预置假 rollout 后认领成功，续接 argv 为 resume <id>", as
     });
     await page.getByTestId("workbench-new-confirm").click();
     const windowId = await requireWindowId(page, 0);
-    await expect(claimedWait).resolves.toBe(claimedId);
+    const claimedId = await claimedWait;
+    expect(claimedId).toMatch(/^[0-9a-f-]{36}$/i);
 
     // 落盘防抖后再确认布局侧也有 id（可选加固）
     await page.waitForTimeout(600);
@@ -1021,5 +1022,114 @@ test("CLI 第一次解析失败后，补上可执行文件再点仍能启动", a
     await launched.cleanup();
     rmSync(fakeBinDir, { recursive: true, force: true });
     rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("T10.15b：同目录三个 Codex 各自认出编号，开新对话后能从历史续接", async () => {
+  const fakeBinDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-wbid-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-wbid-proj-"));
+  const codexHome = mkdtempSync(join(tmpdir(), "ffpane-e2e-wbid-codex-"));
+  seedFakeClaude(fakeBinDir);
+  seedFakeCodex(fakeBinDir);
+
+  const launched = await launchApp({ pathPrepend: fakeBinDir, codexHome });
+  try {
+    const { app, page } = launched;
+    await createProject(app, page, projectDir, "E2E WB Id");
+    await page.getByRole("button", { name: /^E2E WB Id/ }).click();
+    await page.evaluate(async () => {
+      const invoke = (channel: string, req?: unknown) =>
+        // biome-ignore lint/suspicious/noExplicitAny: E2E
+        (window as any).ffpane.invoke(channel, req);
+      const provider = await invoke("providers:create", {
+        draft: {
+          name: "Local Codex Id",
+          templateId: "local-login",
+          models: [{ id: "gpt-5", label: "GPT", kind: "chat" }],
+          defaultModelId: "gpt-5",
+          enabled: true,
+        },
+      });
+      await invoke("profiles:create", {
+        draft: {
+          name: "Codex Id WB",
+          runtime: "codex",
+          providerId: provider.id,
+          defaultRole: "worker",
+          permissionPreset: {
+            readPaths: ["**"],
+            writePaths: ["**"],
+            shell: "allowed",
+            network: false,
+            dangerousOpsRequireApproval: true,
+          },
+          connectionMode: "local_cli",
+          model: "gpt-5",
+        },
+      });
+    });
+
+    await gotoRoute(page, "/workbench");
+    const opened: string[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      await page.getByTestId("workbench-new-tab").click();
+      await confirmAiWindow(page, "codex");
+      const chip = page.getByTestId("workbench-session-id");
+      await expect(chip).toBeVisible({ timeout: 15_000 });
+      const sessionId = await chip.getAttribute("title");
+      expect(sessionId).toMatch(/^[0-9a-f-]{36}$/i);
+      if (sessionId !== null) {
+        opened.push(sessionId);
+      }
+    }
+    expect(new Set(opened).size).toBe(3);
+
+    const visibleId = await page.getByTestId("workbench-window").getAttribute("data-window-id");
+    const previous = opened[opened.length - 1];
+    if (visibleId === null || previous === undefined) {
+      throw new Error("missing visible codex window");
+    }
+    const target = { id: visibleId, session: previous };
+    await page.getByTestId("workbench-session-fresh").click();
+    await expect
+      .poll(
+        async () => {
+          return page.evaluate(async (wid) => {
+            // biome-ignore lint/suspicious/noExplicitAny: E2E
+            const layouts = await (window as any).ffpane.invoke("workbench:get-layouts");
+            for (const layout of Object.values(
+              layouts as Record<string, { windows?: Record<string, { nativeSessionId?: string }> }>,
+            )) {
+              const session = layout.windows?.[wid]?.nativeSessionId;
+              if (typeof session === "string") {
+                return session;
+              }
+            }
+            return "";
+          }, target.id);
+        },
+        { timeout: 20_000 },
+      )
+      .not.toBe(target.session);
+
+    await page.getByTestId("workbench-session-history").selectOption(target.session);
+    await expect
+      .poll(
+        async () => {
+          const replay = await readReplayForWindow(page, target.id);
+          return replay.includes("resume") && replay.includes(target.session) ? replay : "";
+        },
+        { timeout: 20_000 },
+      )
+      .not.toBe("");
+    const argv = parseArgvJson(await readReplayForWindow(page, target.id), "FAKE_CODEX");
+    expect(argv[0]).toBe("resume");
+    expect(argv).toContain(target.session);
+    expect(argv).not.toContain("--last");
+  } finally {
+    await launched.cleanup();
+    rmSync(fakeBinDir, { recursive: true, force: true });
+    rmSync(projectDir, { recursive: true, force: true });
+    rmSync(codexHome, { recursive: true, force: true });
   }
 });
