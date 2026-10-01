@@ -2,7 +2,7 @@
 
 - `ffpane_whoami`：返回本窗口 id、名称、角色、权限、上级、项目。
 - `ffpane_list_windows`：列出可见窗口（自己的后代和上级链）。
-- `ffpane_set_role`：设定角色。仅用户开启的顶层窗口可把自己设为 manager；其它窗口的角色由上级设定。
+- `ffpane_set_role`：设定角色。仅用户开启、且没有被冷启动清洗锁住的顶层窗口可把自己设为 manager；其它窗口的角色由上级设定。被清洗锁住的窗口只有界面用户能恢复。
 - `ffpane_open_window`：开子窗口（CLI、启动配置、角色、权限、标题、任务说明路径）。仅管理者；权限不得超过自己。
 - `ffpane_write_brief`：把说明写成 `.ffpane/briefs/` 下的 `.md` 并返回路径。路径必须在 briefs 目录内。
 - `ffpane_send_message`：给后代发消息或指令（正文或 brief 路径）。仅后代。

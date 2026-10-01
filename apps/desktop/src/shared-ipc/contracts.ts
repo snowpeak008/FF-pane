@@ -379,10 +379,54 @@ export interface WorkbenchInboxBadgesResponse {
 
 export type WorkbenchPanelId = "plan" | "tasks" | "runs";
 
-/** ffpane_open_panel：打开对应页面并 toast。 */
+/** ffpane_open_panel：打开工作台隐藏抽屉的对应页签并 toast。 */
 export interface WorkbenchOpenPanelEvent {
   readonly panel: WorkbenchPanelId;
   readonly openerTitle: string;
+  readonly projectId: ProjectId;
+}
+
+export interface WorkbenchBriefListItem {
+  readonly name: string;
+  readonly relativePath: string;
+  readonly mtimeMs: number;
+  readonly size: number;
+}
+
+export interface WorkbenchReadBriefResponse {
+  readonly relativePath: string;
+  readonly content: string;
+  readonly truncated: boolean;
+}
+
+export interface WorkbenchThreadView {
+  readonly id: string;
+  readonly ts: string;
+  readonly from: { readonly windowId: string; readonly title: string; readonly role: string };
+  readonly to: { readonly windowId: string; readonly title: string; readonly role: string };
+  readonly kind: "message" | "report" | "system";
+  readonly status?: "done" | "blocked" | "failed" | "progress";
+  readonly text: string;
+  readonly briefPath?: string;
+  readonly threadFile: string;
+}
+
+export interface WorkbenchReadThreadsResponse {
+  readonly records: readonly WorkbenchThreadView[];
+  readonly hasMore: boolean;
+  readonly capped: boolean;
+}
+
+export interface WorkbenchPanelReport {
+  readonly status: "done" | "blocked" | "failed" | "progress";
+  readonly summary: string;
+  readonly ts: string;
+  readonly briefPath?: string;
+}
+
+export interface WorkbenchPanelActivityResponse {
+  readonly runningWindowIds: readonly string[];
+  readonly reports: Readonly<Record<string, WorkbenchPanelReport>>;
 }
 
 /** ffpane_close_window：渲染端从布局拿掉该窗口。 */
@@ -1475,6 +1519,31 @@ export interface IpcInvokeContracts {
     request: undefined;
     response: WorkbenchInboxBadgesResponse;
   };
+  /** 列出当前项目 `.ffpane/briefs/*.md`（只读，按修改时间倒序）。 */
+  "workbench:list-briefs": {
+    request: { readonly projectId: ProjectId };
+    response: { readonly briefs: readonly WorkbenchBriefListItem[] };
+  };
+  /** 读取 briefs 内的一份 Markdown。超过上限时截断。 */
+  "workbench:read-brief": {
+    request: { readonly projectId: ProjectId; readonly relativePath: string };
+    response: WorkbenchReadBriefResponse;
+  };
+  /** 倒序分页读取 `.ffpane/threads/index.jsonl` 尾部。 */
+  "workbench:read-threads": {
+    request: { readonly projectId: ProjectId; readonly offset: number; readonly limit: number };
+    response: WorkbenchReadThreadsResponse;
+  };
+  /** 用系统默认程序打开 `.ffpane` 内的文件。 */
+  "workbench:open-ffpane": {
+    request: { readonly projectId: ProjectId; readonly relativePath: string };
+    response: { readonly ok: true };
+  };
+  /** 看板用：各窗口最近汇报与仍在运行的窗口。 */
+  "workbench:panel-activity": {
+    request: { readonly projectId: ProjectId };
+    response: WorkbenchPanelActivityResponse;
+  };
   /** 列出工作台已登记的全部项目（注册表原样，只读 projects.json，不碰任何项目目录）。 */
   "projects:list": { request: undefined; response: readonly ProjectRegistryEntry[] };
   /**
@@ -1777,6 +1846,11 @@ export const INVOKE_CHANNELS = [
   "workbench:save-role-manual",
   "workbench:reset-role-manual",
   "workbench:inbox-badges",
+  "workbench:list-briefs",
+  "workbench:read-brief",
+  "workbench:read-threads",
+  "workbench:open-ffpane",
+  "workbench:panel-activity",
   "projects:list",
   "projects:summary",
   "projects:create",

@@ -21,6 +21,7 @@ import { useWorkbenchStore } from "../../stores/workbench";
 import { NewWindowDialog, type NewWindowDialogResult } from "./NewWindowDialog";
 import { SplitLayout } from "./SplitLayout";
 import { TabBar } from "./TabBar";
+import { WorkbenchDrawer } from "./WorkbenchDrawer";
 
 export function WorkbenchPage(): ReactElement {
   const { t } = useTranslation();
@@ -276,7 +277,7 @@ export function WorkbenchPage(): ReactElement {
         title={t("nav.workbench.label")}
         description={t("workbench.cwd.project", { path: entry.rootPath })}
       />
-      <div className="flex min-h-0 flex-1 flex-col" data-testid="workbench-root">
+      <div className="relative flex min-h-0 flex-1 flex-col" data-testid="workbench-root">
         <TabBar
           tabs={projectLayout?.tabs ?? []}
           activeTabId={projectLayout?.activeTabId ?? null}
@@ -343,6 +344,7 @@ export function WorkbenchPage(): ReactElement {
             />
           </div>
         )}
+        <WorkbenchDrawer projectId={entry.id} />
       </div>
       <ConfirmDialog
         open={confirmCloseTabId !== null}

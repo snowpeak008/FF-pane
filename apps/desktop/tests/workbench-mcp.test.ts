@@ -255,6 +255,31 @@ describe("工具授权", () => {
     ).toContain("不能设定");
   });
 
+  it("冷启动清洗锁住的窗口不能经 MCP 自设管理者", async () => {
+    const { deps, tree } = harness(tempDir());
+    const current = tree["A"];
+    expect(current).toBeDefined();
+    if (current === undefined) {
+      return;
+    }
+    tree["A"] = { ...current, sanitizeLocked: true, parentClosed: true };
+    const calls: string[] = [];
+    const watched: WorkbenchToolDeps = {
+      ...deps,
+      setRole: async (caller, target, role) => {
+        calls.push(`${caller}:${target}:${role}`);
+        return deps.setRole(caller, target, role);
+      },
+    };
+    const result = await call(watched, "A", "ffpane_set_role", {
+      windowId: "A",
+      role: "manager",
+    });
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain("不能设定");
+    expect(calls).toEqual([]);
+  });
+
   it("列出读取、关闭和打开面板，描述与说明书一致", () => {
     expect(WORKBENCH_MCP_TOOL_NAMES).toEqual(
       expect.arrayContaining(["ffpane_read_output", "ffpane_close_window", "ffpane_open_panel"]),

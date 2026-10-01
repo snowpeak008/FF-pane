@@ -78,16 +78,16 @@
         "keywords": "session chat conversation 会话 对话 聊天"
       },
       "nav-plan": {
-        "title": "Go to plan",
-        "keywords": "plan version 计划 版本 方案"
+        "title": "Go to plan (legacy)",
+        "keywords": "plan version legacy 计划 版本 方案 旧版"
       },
       "nav-tasks": {
-        "title": "Go to tasks",
-        "keywords": "tasks board 任务 看板 进度"
+        "title": "Go to tasks (legacy)",
+        "keywords": "tasks board legacy 任务 看板 进度 旧版"
       },
       "nav-runs": {
-        "title": "Go to run records",
-        "keywords": "runs diff log 执行 记录 改动 日志"
+        "title": "Go to run records (legacy)",
+        "keywords": "runs diff log legacy 执行 记录 改动 日志 旧版"
       },
       "nav-memory": {
         "title": "Go to memory",
@@ -172,6 +172,18 @@
       "workbench-set-manager": {
         "title": "Set current window as manager",
         "keywords": "workbench set manager role 管理者 角色 当前窗口"
+      },
+      "workbench-open-plan": {
+        "title": "Workbench: open plan panel",
+        "keywords": "workbench panel plan brief 工作台 计划 说明 抽屉"
+      },
+      "workbench-open-tasks": {
+        "title": "Workbench: open task board",
+        "keywords": "workbench panel tasks board 工作台 任务 看板 抽屉"
+      },
+      "workbench-open-runs": {
+        "title": "Workbench: open run log",
+        "keywords": "workbench panel runs threads 工作台 记录 消息 抽屉"
       },
       "nav-toggle-sidebar": {
         "title": "Toggle navigation sidebar",
@@ -376,6 +388,47 @@
     },
     "panel": {
       "openedBy": "Opened from {{title}}"
+    },
+    "drawer": {
+      "noProject": "Choose a project before opening the workbench panel.",
+      "close": "Close",
+      "tab": {
+        "plan": "Plan",
+        "tasks": "Tasks",
+        "runs": "Log"
+      },
+      "plan": {
+        "empty": "This project has no briefs yet.",
+        "open": "Open in system",
+        "truncated": "The file is over 256KB. Only the beginning is shown here."
+      },
+      "tasks": {
+        "empty": "No windows to show on the board yet.",
+        "column": {
+          "progress": "In progress",
+          "blocked": "Blocked",
+          "done": "Done",
+          "failed": "Failed"
+        },
+        "parent": "Reports to {{name}}",
+        "brief": "Brief",
+        "noReport": "No report yet"
+      },
+      "runs": {
+        "empty": "No messages yet.",
+        "capped": "Only the last 1MB of the index is shown.",
+        "loadMore": "Load earlier messages",
+        "openMd": "Open markdown",
+        "filterTeam": "Team",
+        "filterWindow": "Window",
+        "filterKind": "Kind",
+        "all": "All",
+        "kind": {
+          "message": "Message",
+          "report": "Report",
+          "system": "System"
+        }
+      }
     },
     "deliver": {
       "pending": "{{count}} waiting to be sent",

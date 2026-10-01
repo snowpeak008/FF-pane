@@ -738,10 +738,15 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
   },
 
   focusWindow(projectId, windowId) {
-    patchProject(set, get, projectId, (layout) => ({
-      ...layout,
-      focusedWindowId: windowId,
-    }));
+    patchProject(set, get, projectId, (layout) => {
+      const tab = layout.tabs.find((item) => collectWindowIds(item.root).includes(windowId));
+      return {
+        ...layout,
+        focusedWindowId: windowId,
+        ...(tab !== undefined ? { activeTabId: tab.id } : {}),
+        maximizedWindowId: layout.maximizedWindowId === windowId ? windowId : null,
+      };
+    });
   },
 
   toggleMaximize(projectId, windowId) {

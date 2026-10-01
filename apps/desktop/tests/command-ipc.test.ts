@@ -69,7 +69,7 @@ afterEach(() => {
 
 const APP_INFO: AppInfo = {
   name: "FF-pane",
-  version: "0.10.8",
+  version: "0.10.9",
   runtime: { electron: "44.0.0", chrome: "140", node: "24.0.0" },
 };
 
@@ -93,9 +93,6 @@ const EXPECTED_KEY_DISPLAYS: readonly string[] = [
   "Ctrl+3",
   "Ctrl+4",
   "Ctrl+5",
-  "Ctrl+6",
-  "Ctrl+7",
-  "Ctrl+8",
   "/",
   "\u2191",
   "\u2193",
@@ -151,17 +148,18 @@ describe("快捷键表：§7 的 28 条预登记齐全（含 T10.2 工作台）"
     }
   });
 
-  it("键位覆盖 §7 全表：35 个绑定（Ctrl+1~8 展开）", () => {
+  it("键位覆盖 §7 全表：32 个绑定（Ctrl+1~5 展开）", () => {
     const bindings = registry.bindings();
-    expect(bindings).toHaveLength(35);
+    expect(bindings).toHaveLength(32);
     const displays = [...new Set(bindings.map((binding) => binding.display))].sort();
     expect(displays).toEqual([...EXPECTED_KEY_DISPLAYS].sort());
   });
 
-  it("Ctrl+1 ~ Ctrl+8 是一条命令、八个键位，且与八个页面一一对应", () => {
+  it("Ctrl+1 ~ Ctrl+5 是一条命令、五个键位，且与侧栏页面一一对应", () => {
     const indexed = registry.byCommandId("nav-page-by-index");
-    expect(indexed?.keys).toHaveLength(8);
-    expect(PAGE_SHORTCUT_ORDER).toHaveLength(8);
+    expect(indexed?.keys).toHaveLength(5);
+    expect(PAGE_SHORTCUT_ORDER).toHaveLength(5);
+    expect(PAGE_SHORTCUT_ORDER).not.toEqual(expect.arrayContaining(["plan", "tasks", "runs"]));
   });
 
   it("无修饰键的键位在输入框内一律失效，唯一例外是 Esc", () => {
@@ -392,7 +390,9 @@ describe("命令表：面板条目与键位展示", () => {
     expect(commandShortcutDisplay(registry, "nav-projects")).toBe("Ctrl+1");
     expect(commandShortcutDisplay(registry, "nav-workbench")).toBe("Ctrl+2");
     expect(commandShortcutDisplay(registry, "nav-session")).toBe("Ctrl+3");
-    expect(commandShortcutDisplay(registry, "nav-knowledge")).toBe("Ctrl+8");
+    expect(commandShortcutDisplay(registry, "nav-memory")).toBe("Ctrl+4");
+    expect(commandShortcutDisplay(registry, "nav-knowledge")).toBe("Ctrl+5");
+    expect(commandShortcutDisplay(registry, "nav-plan")).toBeUndefined();
     expect(commandShortcutDisplay(registry, "settings-open")).toBe("Ctrl+,");
   });
 });

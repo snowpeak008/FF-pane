@@ -78,16 +78,16 @@
         "keywords": "session chat conversation 会话 对话 聊天"
       },
       "nav-plan": {
-        "title": "转到计划页",
-        "keywords": "plan version 计划 版本 方案"
+        "title": "转到计划页（旧版）",
+        "keywords": "plan version legacy 计划 版本 方案 旧版"
       },
       "nav-tasks": {
-        "title": "转到任务页",
-        "keywords": "tasks board 任务 看板 进度"
+        "title": "转到任务页（旧版）",
+        "keywords": "tasks board legacy 任务 看板 进度 旧版"
       },
       "nav-runs": {
-        "title": "转到执行记录页",
-        "keywords": "runs diff log 执行 记录 改动 日志"
+        "title": "转到执行记录页（旧版）",
+        "keywords": "runs diff log legacy 执行 记录 改动 日志 旧版"
       },
       "nav-memory": {
         "title": "转到记忆页",
@@ -172,6 +172,18 @@
       "workbench-set-manager": {
         "title": "将当前窗口设为管理者",
         "keywords": "workbench set manager role 管理者 角色 当前窗口"
+      },
+      "workbench-open-plan": {
+        "title": "工作台：打开计划面板",
+        "keywords": "workbench panel plan brief 工作台 计划 说明 抽屉"
+      },
+      "workbench-open-tasks": {
+        "title": "工作台：打开任务看板",
+        "keywords": "workbench panel tasks board 工作台 任务 看板 抽屉"
+      },
+      "workbench-open-runs": {
+        "title": "工作台：打开运行记录",
+        "keywords": "workbench panel runs threads 工作台 记录 消息 抽屉"
       },
       "nav-toggle-sidebar": {
         "title": "收起/展开导航侧栏",
@@ -376,6 +388,47 @@
     },
     "panel": {
       "openedBy": "由 {{title}} 打开"
+    },
+    "drawer": {
+      "noProject": "先选一个项目，再打开工作台面板。",
+      "close": "关闭",
+      "tab": {
+        "plan": "计划",
+        "tasks": "任务",
+        "runs": "记录"
+      },
+      "plan": {
+        "empty": "这个项目还没有任务说明。",
+        "open": "在系统中打开",
+        "truncated": "文件超过 256KB，这里只显示前面一部分。"
+      },
+      "tasks": {
+        "empty": "还没有可上看板的窗口。",
+        "column": {
+          "progress": "进行中",
+          "blocked": "受阻",
+          "done": "完成",
+          "failed": "失败"
+        },
+        "parent": "上级 {{name}}",
+        "brief": "说明",
+        "noReport": "还没有汇报"
+      },
+      "runs": {
+        "empty": "还没有消息记录。",
+        "capped": "只显示索引尾部 1MB 以内的记录。",
+        "loadMore": "加载更早的记录",
+        "openMd": "打开对应 md",
+        "filterTeam": "团队",
+        "filterWindow": "窗口",
+        "filterKind": "类型",
+        "all": "全部",
+        "kind": {
+          "message": "消息",
+          "report": "汇报",
+          "system": "系统"
+        }
+      }
     },
     "deliver": {
       "pending": "有 {{count}} 条待投递",

@@ -94,7 +94,7 @@ export interface WorkbenchToolDeps {
     maxBytes: number,
   ) => Promise<{ readonly running: boolean; readonly status: string; readonly text?: string }>;
   readonly closeDescendant: CloseDescendantDeps;
-  readonly openPanel: (panel: WorkbenchPanelName, openerTitle: string) => void;
+  readonly openPanel: (panel: WorkbenchPanelName, openerTitle: string, projectId: string) => void;
 }
 
 const buckets = new Map<string, { t: number; n: number }>();
@@ -598,7 +598,7 @@ function openPanel(
   if (!allowOpenPanel(caller.id, deps.now())) {
     return fail("打开面板过于频繁，请稍后再试。");
   }
-  deps.openPanel(panel, caller.title);
+  deps.openPanel(panel, caller.title, caller.projectId);
   return ok({ ok: true, panel });
 }
 

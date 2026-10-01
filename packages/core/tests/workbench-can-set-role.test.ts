@@ -113,6 +113,22 @@ describe("canSetRole", () => {
     }
   });
 
+  it("冷启动清洗锁住的窗口不能自设管理者，界面用户仍可以", () => {
+    const locked: WorkbenchAuthNode = {
+      ...node("locked", "user"),
+      sanitizeLocked: true,
+      parentClosed: true,
+    };
+    const lockedTree = { ...tree, locked };
+    expect(
+      canSetRole({ kind: "window", windowId: "locked" }, { id: "locked" }, "manager", lockedTree),
+    ).toBe(false);
+    expect(canSetRole({ kind: "user" }, { id: "locked" }, "manager", lockedTree)).toBe(true);
+    expect(
+      canSetRole({ kind: "window", windowId: "userTop" }, { id: "locked" }, "worker", lockedTree),
+    ).toBe(false);
+  });
+
   it("父已关闭但仍有 parentWindowId 时，不能自设为管理者", () => {
     expect(
       canSetRole(

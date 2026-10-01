@@ -20,6 +20,7 @@ import { ConfigDraftDialog } from "./pages/session/ConfigDraftDialog";
 import { HabitSuggestionBridge } from "./pages/session/HabitSuggestionBridge";
 import { SessionEventBridge } from "./pages/session/SessionEventBridge";
 import { WorkbenchFlushBridge } from "./pages/workbench/WorkbenchFlushBridge";
+import { WorkbenchPanelBridge } from "./pages/workbench/WorkbenchPanelBridge";
 import { useUiStore } from "./stores/ui";
 import { useTheme } from "./theme";
 
@@ -116,6 +117,7 @@ export function App(): ReactElement {
       <TooltipProvider>
         <AppCommandPalette>
           <SecondaryPanelProvider>
+            <WorkbenchPanelBridge />
             <AppLayout>
               <AppRoutes />
             </AppLayout>

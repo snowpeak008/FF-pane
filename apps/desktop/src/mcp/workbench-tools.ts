@@ -188,7 +188,7 @@ export const WORKBENCH_MCP_TOOLS: readonly McpToolDefinition[] = [
   {
     name: "ffpane_open_panel",
     description:
-      "在界面打开计划、任务看板或运行记录。任何窗口都可以调用。参数为 plan、tasks 或 runs。当前会打开对应页面，并提示是由哪个窗口打开的。调用过于频繁会被拒绝。",
+      "在工作台打开隐藏抽屉的计划、任务看板或运行记录页签。任何窗口都可以调用。参数为 plan、tasks 或 runs。不在工作台时会先切到本窗口的项目。并提示是由哪个窗口打开的。调用过于频繁会被拒绝。",
     inputSchema: {
       type: "object",
       properties: {

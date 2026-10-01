@@ -57,6 +57,9 @@ export const COMMAND_IDS = [
   "workbench-close-tab",
   "workbench-maximize-window",
   "workbench-set-manager",
+  "workbench-open-plan",
+  "workbench-open-tasks",
+  "workbench-open-runs",
 ] as const;
 
 export type CommandId = (typeof COMMAND_IDS)[number];

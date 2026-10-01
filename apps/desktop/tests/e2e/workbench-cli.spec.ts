@@ -883,3 +883,66 @@ test("T10.6：Codex notify 的 agent-turn-complete 之后才自动投递", async
     rmSync(projectDir, { recursive: true, force: true });
   }
 });
+
+test("CLI 第一次解析失败后，补上可执行文件再点仍能启动", async () => {
+  test.setTimeout(120_000);
+  const fakeBinDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-wbcli-retry-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-wbcli-retry-proj-"));
+  mkdirSync(fakeBinDir, { recursive: true });
+  // 垫片排在 PATH 最前，但解析不了，启动应失败；后面换成真垫片再点一次。
+  writeFileSync(join(fakeBinDir, "claude.cmd"), "@ECHO off\r\nREM not a shim\r\n", "utf8");
+  const launched = await launchApp({ pathPrepend: fakeBinDir });
+  try {
+    const { app, page } = launched;
+    await createProject(app, page, projectDir, "E2E Retry");
+    await page.getByRole("button", { name: /^E2E Retry/ }).click();
+    await page.evaluate(async () => {
+      const invoke = (channel: string, req?: unknown) =>
+        // biome-ignore lint/suspicious/noExplicitAny: E2E
+        (window as any).ffpane.invoke(channel, req);
+      const provider = await invoke("providers:create", {
+        draft: {
+          name: "Local Claude",
+          templateId: "local-login",
+          models: [{ id: "sonnet", label: "Sonnet", kind: "chat" }],
+          defaultModelId: "sonnet",
+          enabled: true,
+        },
+      });
+      await invoke("profiles:create", {
+        draft: {
+          name: "Claude WB",
+          runtime: "claude-code",
+          providerId: provider.id,
+          defaultRole: "worker",
+          permissionPreset: {
+            readPaths: ["**"],
+            writePaths: ["**"],
+            shell: "allowed",
+            network: false,
+            dangerousOpsRequireApproval: true,
+          },
+          connectionMode: "local_cli",
+          model: "sonnet",
+          reasoningEffort: "medium",
+        },
+      });
+    });
+    await gotoRoute(page, "/workbench");
+    await page.getByTestId("workbench-new-tab").click();
+    await confirmAiWindow(page, "claude");
+    const windowId = await requireWindowId(page);
+    await expect(page.getByText(/Cannot resolve claude/)).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId("cli-restart-fresh")).toBeEnabled();
+
+    seedFakeClaude(fakeBinDir);
+    await page.getByTestId("cli-restart-fresh").click();
+    await expect
+      .poll(async () => readReplayForWindow(page, windowId), { timeout: 30_000 })
+      .toContain("FAKE_CLAUDE_ARGV_JSON=");
+  } finally {
+    await launched.cleanup();
+    rmSync(fakeBinDir, { recursive: true, force: true });
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});

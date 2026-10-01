@@ -99,7 +99,7 @@ export async function setWindowRole(
     if (!allowed) {
       return { ok: false, reason: "forbidden" };
     }
-    if (!deps.authRegistry.setRole(windowId, role)) {
+    if (!deps.authRegistry.setRole(windowId, role, { userInitiated: actor.kind === "user" })) {
       return { ok: false, reason: "unknown-window" };
     }
     applyManagerGrant(deps.authRegistry, windowId, role);
@@ -129,7 +129,10 @@ export async function setWindowRole(
   if (!allowed) {
     return { ok: false, reason: "forbidden" };
   }
-  if (isAi && !deps.authRegistry.setRole(windowId, role)) {
+  if (
+    isAi &&
+    !deps.authRegistry.setRole(windowId, role, { userInitiated: actor.kind === "user" })
+  ) {
     return { ok: false, reason: "unknown-window" };
   }
   if (isAi) {

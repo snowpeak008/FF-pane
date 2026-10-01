@@ -130,6 +130,35 @@ async function main() {
       keepAlive();
       return;
     }
+    if (process.env.FFPANE_WB_SCRIPT === "panel") {
+      let briefPath;
+      for (let attempt = 0; attempt < 30 && briefPath === undefined; attempt += 1) {
+        const inbox = await tool("ffpane_read_inbox", { mode: "unread", limit: 20 });
+        if (!inbox.isError) {
+          try {
+            const body = JSON.parse(inbox.text);
+            for (const item of body.messages ?? []) {
+              if (typeof item.briefPath === "string" && item.briefPath.length > 0) {
+                briefPath = item.briefPath;
+              }
+            }
+          } catch {
+            briefPath = undefined;
+          }
+        }
+        if (briefPath === undefined) {
+          await new Promise((resolve) => setTimeout(resolve, 400));
+        }
+      }
+      const report = await tool("ffpane_report", {
+        status: "blocked",
+        summary: "缺接口",
+        ...(briefPath !== undefined ? { briefPath } : {}),
+      });
+      process.stdout.write(`FFPANE_MCP_CHILD_REPORT=${report.isError ? "error" : "ok"}\n`);
+      keepAlive();
+      return;
+    }
     const report = await tool("ffpane_report", { status: "done", summary: "前端完成" });
     const opened = await tool("ffpane_open_window", {
       cli: "claude",
@@ -227,6 +256,94 @@ async function main() {
     await tool("ffpane_send_message", { windowId: child.windowId, text: "开始吧" });
     process.stdout.write(`FFPANE_MCP_CHILD=${child.windowId}\n`);
     process.stdout.write("FFPANE_MCP_READY=1\n");
+    keepAlive();
+    return;
+  }
+
+  if (process.env.FFPANE_WB_SCRIPT === "panel") {
+    const role = await tool("ffpane_set_role", { windowId: me.windowId, role: "manager" });
+    if (role.isError) {
+      process.stdout.write(`FFPANE_MCP_ERROR=${role.text}\n`);
+      keepAlive();
+      return;
+    }
+    const brief = await tool("ffpane_write_brief", {
+      name: "board.md",
+      content: "# 接口清单\n\n做前端",
+    });
+    if (brief.isError) {
+      process.stdout.write(`FFPANE_MCP_ERROR=${brief.text}\n`);
+      keepAlive();
+      return;
+    }
+    const briefBody = JSON.parse(brief.text);
+    const opened = await tool("ffpane_open_window", {
+      cli: "claude",
+      role: "worker",
+      permission: "edit",
+      title: "前端板",
+      briefPath: briefBody.relativePath,
+    });
+    if (opened.isError) {
+      process.stdout.write(`FFPANE_MCP_ERROR=${opened.text}\n`);
+      keepAlive();
+      return;
+    }
+    const child = JSON.parse(opened.text);
+    await tool("ffpane_send_message", {
+      windowId: child.windowId,
+      text: "开始吧",
+      briefPath: briefBody.relativePath,
+    });
+    let seen = false;
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const inbox = await tool("ffpane_read_inbox", { mode: "unread", limit: 20 });
+      if (!inbox.isError && inbox.text.includes("缺接口")) {
+        seen = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    process.stdout.write(`FFPANE_MCP_CHILD_BLOCKED=${seen ? "yes" : "no"}\n`);
+    const tasks = await tool("ffpane_open_panel", { panel: "tasks" });
+    process.stdout.write(`FFPANE_MCP_PANEL_TASKS=${tasks.isError ? "error" : "ok"}\n`);
+    await new Promise((resolve) => setTimeout(resolve, 20000));
+    const plan = await tool("ffpane_open_panel", { panel: "plan" });
+    process.stdout.write(`FFPANE_MCP_PANEL_PLAN=${plan.isError ? "error" : "ok"}\n`);
+    await new Promise((resolve) => setTimeout(resolve, 20000));
+    const runs = await tool("ffpane_open_panel", { panel: "runs" });
+    process.stdout.write(`FFPANE_MCP_PANEL_RUNS=${runs.isError ? "error" : "ok"}\n`);
+    keepAlive();
+    return;
+  }
+
+  if (process.env.FFPANE_WB_SCRIPT === "panel-away") {
+    const role = await tool("ffpane_set_role", { windowId: me.windowId, role: "manager" });
+    if (role.isError) {
+      process.stdout.write(`FFPANE_MCP_ERROR=${role.text}\n`);
+      keepAlive();
+      return;
+    }
+    process.stdout.write("FFPANE_MCP_HOLD=1\n");
+    const trigger = process.env.FFPANE_WB_TRIGGER ?? "";
+    let go = false;
+    for (let attempt = 0; attempt < 80 && !go; attempt += 1) {
+      try {
+        go = readFileSync(trigger, "utf8").trim() === "go";
+      } catch {
+        go = false;
+      }
+      if (!go) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    }
+    if (!go) {
+      process.stdout.write("FFPANE_MCP_ERROR=trigger timeout\n");
+      keepAlive();
+      return;
+    }
+    const tasks = await tool("ffpane_open_panel", { panel: "tasks" });
+    process.stdout.write(`FFPANE_MCP_PANEL_TASKS=${tasks.isError ? "error" : "ok"}\n`);
     keepAlive();
     return;
   }

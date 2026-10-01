@@ -9,6 +9,7 @@ import { join, relative, resolve, sep } from "node:path";
 import type { WorkbenchAuthNode } from "@ff-pane/core";
 import { walkAncestors } from "@ff-pane/core";
 import type { WorkbenchRole } from "@ff-pane/shared";
+import { isSingleMarkdownFileName } from "../../shared/workbench/markdown-name";
 import { isInsideRoot } from "./brief-files";
 import {
   hasControlChar,
@@ -181,6 +182,9 @@ export function parseThreadLine(line: string): ThreadRecord | undefined {
     if (raw["kind"] !== "message" && raw["kind"] !== "report" && raw["kind"] !== "system") {
       return undefined;
     }
+    if (typeof raw["threadFile"] !== "string" || !isSingleMarkdownFileName(raw["threadFile"])) {
+      return undefined;
+    }
     return parsed as ThreadRecord;
   } catch {
     return undefined;
@@ -290,6 +294,9 @@ export function appendThreadRecord(
 ): Promise<void> {
   const root = resolve(projectRoot);
   return runSerial(root, async () => {
+    if (!isSingleMarkdownFileName(record.threadFile)) {
+      throw new Error("thread file must be a markdown name");
+    }
     const dir = threadsDir(root);
     await mkdir(dir, { recursive: true });
     const indexPath = join(dir, "index.jsonl");

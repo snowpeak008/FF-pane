@@ -164,8 +164,15 @@ export interface WorkbenchAuthRegistry {
     readonly cycle: boolean;
   };
   snapshot(): Readonly<Record<string, WorkbenchAuthNode>>;
-  /** 更新已登记窗口的角色。窗口不存在时返回 false。 */
-  setRole(windowId: string, role: WorkbenchRole): boolean;
+  /**
+   * 更新已登记窗口的角色。窗口不存在时返回 false。
+   * 只有界面用户显式改角色时才记 userRoleSet。
+   */
+  setRole(
+    windowId: string,
+    role: WorkbenchRole,
+    options?: { readonly userInitiated?: boolean },
+  ): boolean;
   /**
    * 界面用户显式改权限。清掉清洗锁，允许高于当前登记值。
    * 有父级时，随后的 sync 仍按祖先封顶。
@@ -340,12 +347,17 @@ export function createWorkbenchAuthRegistry(): WorkbenchAuthRegistry {
       }
       return out;
     },
-    setRole(windowId, role) {
+    setRole(windowId, role, options) {
       const stored = byId.get(windowId);
       if (stored === undefined) {
         return false;
       }
-      remember(windowId, { ...stored, role, userRoleSet: true });
+      const userInitiated = options?.userInitiated !== false;
+      remember(windowId, {
+        ...stored,
+        role,
+        ...(userInitiated ? { userRoleSet: true as const } : {}),
+      });
       return true;
     },
     applyUserPermission(windowId, permission) {

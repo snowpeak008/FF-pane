@@ -24,7 +24,7 @@ import {
   resolveGlobalLayout,
   resolveProjectLayout,
 } from "@ff-pane/storage";
-import { app, type BrowserWindow } from "electron";
+import { app, type BrowserWindow, shell } from "electron";
 import type { InvokeHandlers } from "../../shared-ipc/server";
 import { publishEvent } from "../../shared-ipc/server";
 import { resolveGlobalRoot } from "../data-root";
@@ -47,6 +47,15 @@ import { cleanupStaleWorkbenchMcpDirs } from "./mcp-temp";
 import { executeWorkbenchTool } from "./mcp-tools";
 import { openChildWindow } from "./open-child";
 import { clampReadOutputBytes, takeUtf8Tail } from "./output-text";
+import {
+  assertOpenableMarkdown,
+  listBriefFiles,
+  PANEL_INDEX_PAGE_LIMIT,
+  pageNewestFirst,
+  readBriefFile,
+  readPanelThreadIndex,
+  resolveFfPaneFile,
+} from "./panel-files";
 import {
   composeWindowRolePrompt,
   listRoleManuals,
@@ -75,6 +84,11 @@ export interface WorkbenchCliLayer {
     | "workbench:save-role-manual"
     | "workbench:reset-role-manual"
     | "workbench:inbox-badges"
+    | "workbench:list-briefs"
+    | "workbench:read-brief"
+    | "workbench:read-threads"
+    | "workbench:open-ffpane"
+    | "workbench:panel-activity"
   >;
   readonly mcpRegistry: WorkbenchMcpTempRegistry;
   readonly codexClaimer: CodexSessionClaimer;
@@ -528,6 +542,129 @@ export async function createWorkbenchCliLayer(
       }
       return { badges };
     },
+    "workbench:list-briefs": async (request) => {
+      const root = await projectRootOf(request.projectId);
+      const listed = await listBriefFiles(root);
+      if (!listed.ok) {
+        throw new Error(listed.error);
+      }
+      return { briefs: listed.briefs };
+    },
+    "workbench:read-brief": async (request) => {
+      const root = await projectRootOf(request.projectId);
+      const read = await readBriefFile(root, request.relativePath);
+      if (!read.ok) {
+        throw new Error(read.error);
+      }
+      return {
+        relativePath: read.relativePath,
+        content: read.content,
+        truncated: read.truncated,
+      };
+    },
+    "workbench:read-threads": async (request) => {
+      const root = await projectRootOf(request.projectId);
+      const index = await readPanelThreadIndex(root);
+      if (!index.ok) {
+        throw new Error(index.error);
+      }
+      const limit =
+        typeof request.limit === "number" && Number.isFinite(request.limit)
+          ? request.limit
+          : PANEL_INDEX_PAGE_LIMIT;
+      const offset =
+        typeof request.offset === "number" && Number.isFinite(request.offset) ? request.offset : 0;
+      const page = pageNewestFirst(index.records, offset, limit);
+      return {
+        records: page.page.map((record) => ({
+          id: record.id,
+          ts: record.ts,
+          from: record.from,
+          to: record.to,
+          kind: record.kind,
+          ...(record.status !== undefined ? { status: record.status } : {}),
+          text: record.text,
+          ...(record.briefPath !== undefined && record.briefPath.trim() !== ""
+            ? { briefPath: record.briefPath }
+            : {}),
+          threadFile: record.threadFile,
+        })),
+        hasMore: page.hasMore,
+        capped: index.capped,
+      };
+    },
+    "workbench:open-ffpane": async (request) => {
+      const root = await projectRootOf(request.projectId);
+      const resolved = await resolveFfPaneFile(root, request.relativePath);
+      if (!resolved.ok) {
+        throw new Error(resolved.error);
+      }
+      const markdown = await assertOpenableMarkdown(resolved.absolute);
+      if (!markdown.ok) {
+        throw new Error(markdown.error);
+      }
+      const opened = await shell.openPath(resolved.absolute);
+      if (opened !== "") {
+        throw new Error(opened);
+      }
+      return { ok: true as const };
+    },
+    "workbench:panel-activity": async (request) => {
+      const root = await projectRootOf(request.projectId);
+      const index = await readPanelThreadIndex(root);
+      if (!index.ok) {
+        throw new Error(index.error);
+      }
+      const reports: Record<
+        string,
+        {
+          readonly status: "done" | "blocked" | "failed" | "progress";
+          readonly summary: string;
+          readonly ts: string;
+          readonly briefPath?: string;
+        }
+      > = {};
+      for (const record of index.records) {
+        if (
+          record.kind !== "report" ||
+          record.status === undefined ||
+          (record.status !== "done" &&
+            record.status !== "blocked" &&
+            record.status !== "failed" &&
+            record.status !== "progress")
+        ) {
+          continue;
+        }
+        reports[record.from.windowId] = {
+          status: record.status,
+          summary: record.text,
+          ts: record.ts,
+          ...(record.briefPath !== undefined && record.briefPath.trim() !== ""
+            ? { briefPath: record.briefPath }
+            : {}),
+        };
+      }
+      const runningWindowIds: string[] = [];
+      for (const record of options.manager.list()) {
+        if (record.exited) {
+          continue;
+        }
+        const windowId = record.metadata?.["windowId"];
+        if (typeof windowId === "string" && windowId.trim() !== "") {
+          runningWindowIds.push(windowId);
+        }
+      }
+      return { runningWindowIds, reports };
+    },
+  };
+
+  const projectRootOf = async (projectId: string): Promise<string> => {
+    const listed = await projects.listProjects();
+    const project = listed.find((item) => item.id === projectId);
+    if (project === undefined) {
+      throw new Error("找不到这个项目。");
+    }
+    return project.rootPath;
   };
 
   onTool = async (context) => {
@@ -725,12 +862,16 @@ export async function createWorkbenchCliLayer(
           });
         },
       },
-      openPanel: (panel, openerTitle) => {
+      openPanel: (panel, openerTitle, projectId) => {
         const browser = options.getWindow();
         if (browser === null || browser.isDestroyed()) {
           return;
         }
-        publishEvent(browser.webContents, "workbench:open-panel", { panel, openerTitle });
+        publishEvent(browser.webContents, "workbench:open-panel", {
+          panel,
+          openerTitle,
+          projectId: projectId as ProjectId,
+        });
       },
     });
     return { ok: true, result };

@@ -13,6 +13,7 @@ import { useSubscription } from "../../ipc/useSubscription";
 import { cn } from "../../lib/cn";
 import { useTheme } from "../../theme";
 import { forgetLiveTerminal, peekLiveTerminal, rememberLiveTerminal } from "./live-terminals";
+import { createRelaunchGuard } from "./relaunch-guard";
 import "@xterm/xterm/css/xterm.css";
 
 export interface TerminalViewProps {
@@ -315,53 +316,71 @@ export function TerminalView({
     await spawnTerminal();
   }, [spawnTerminal, windowId]);
 
+  const relaunchGuardRef = useRef(createRelaunchGuard());
+  const relaunchBusyRef = useRef(false);
+  const [launching, setLaunching] = useState(false);
+
   const relaunchWith = useCallback(
     async (override: Partial<NonNullable<typeof cliLaunch>>) => {
+      if (!relaunchGuardRef.current.tryEnter()) {
+        return;
+      }
+      relaunchBusyRef.current = true;
+      setLaunching(true);
       const host = hostRef.current;
       const term = termRef.current;
       const fit = fitRef.current;
       if (host === null || term === null || fit === null) {
+        relaunchGuardRef.current.leave();
+        relaunchBusyRef.current = false;
+        setLaunching(false);
         return;
       }
-      const previous = infoRef.current;
-      if (previous !== null) {
-        forgetLiveTerminal(windowId);
-        await invokeQuery("terminal:kill", { id: previous.id });
-      }
-      infoRef.current = null;
-      setInfo(null);
-      setError(undefined);
-      setExitCode(undefined);
-      setStopped(false);
-      setResumePickerHint(false);
-      onExitCodeChangeRef.current?.(undefined);
-      onTerminalIdChangeRef.current?.(undefined);
-      term.reset();
-      fit.fit();
-      const cols = Math.max(term.cols, 2);
-      const rows = Math.max(term.rows, 2);
-      const settled = await launchCli(cols, rows, override);
-      if (settled.status === "error") {
-        setError(settled.error.message);
-        setStopped(true);
-        return;
-      }
-      rememberLiveTerminal(windowId, settled.data.terminal.id);
-      infoRef.current = settled.data.terminal;
-      setInfo(settled.data.terminal);
-      onTerminalIdChangeRef.current?.(settled.data.terminal.id);
-      if (settled.data.nativeSessionId !== undefined) {
-        nativeSessionIdRef.current = settled.data.nativeSessionId;
-        onNativeSessionIdRef.current?.(settled.data.nativeSessionId);
-      }
-      if (settled.data.permissionCapped === true) {
-        onPermissionCappedRef.current?.(settled.data.effectivePermission);
-      }
-      onTurnSignalRef.current?.(settled.data.turnSignal);
-      setResumePickerHint(settled.data.resumePicker === true);
-      const replay = await invokeQuery("terminal:get-replay", { id: settled.data.terminal.id });
-      if (replay.status === "success" && replay.data.data.length > 0) {
-        term.write(replay.data.data);
+      try {
+        const previous = infoRef.current;
+        if (previous !== null) {
+          forgetLiveTerminal(windowId);
+          await invokeQuery("terminal:kill", { id: previous.id });
+        }
+        infoRef.current = null;
+        setInfo(null);
+        setError(undefined);
+        setExitCode(undefined);
+        setStopped(false);
+        setResumePickerHint(false);
+        onExitCodeChangeRef.current?.(undefined);
+        onTerminalIdChangeRef.current?.(undefined);
+        term.reset();
+        fit.fit();
+        const cols = Math.max(term.cols, 2);
+        const rows = Math.max(term.rows, 2);
+        const settled = await launchCli(cols, rows, override);
+        if (settled.status === "error") {
+          setError(settled.error.message);
+          setStopped(true);
+          return;
+        }
+        rememberLiveTerminal(windowId, settled.data.terminal.id);
+        infoRef.current = settled.data.terminal;
+        setInfo(settled.data.terminal);
+        onTerminalIdChangeRef.current?.(settled.data.terminal.id);
+        if (settled.data.nativeSessionId !== undefined) {
+          nativeSessionIdRef.current = settled.data.nativeSessionId;
+          onNativeSessionIdRef.current?.(settled.data.nativeSessionId);
+        }
+        if (settled.data.permissionCapped === true) {
+          onPermissionCappedRef.current?.(settled.data.effectivePermission);
+        }
+        onTurnSignalRef.current?.(settled.data.turnSignal);
+        setResumePickerHint(settled.data.resumePicker === true);
+        const replay = await invokeQuery("terminal:get-replay", { id: settled.data.terminal.id });
+        if (replay.status === "success" && replay.data.data.length > 0) {
+          term.write(replay.data.data);
+        }
+      } finally {
+        relaunchGuardRef.current.leave();
+        relaunchBusyRef.current = false;
+        setLaunching(false);
       }
     },
     [launchCli, windowId],
@@ -591,18 +610,29 @@ export function TerminalView({
             size="sm"
             variant="secondary"
             data-testid="cli-resume"
+            disabled={launching}
             onClick={() => {
+              if (relaunchBusyRef.current) {
+                return;
+              }
+              relaunchBusyRef.current = true;
+              setLaunching(true);
               void (async () => {
-                if (beforeUserRelaunch !== undefined && !(await beforeUserRelaunch())) {
-                  return;
+                let accepted = true;
+                try {
+                  if (beforeUserRelaunch !== undefined) {
+                    accepted = await beforeUserRelaunch();
+                  }
+                  if (!accepted) {
+                    return;
+                  }
+                  onResume?.();
+                } finally {
+                  if (!accepted) {
+                    relaunchBusyRef.current = false;
+                    setLaunching(false);
+                  }
                 }
-                onResume?.();
-                void relaunchWith({
-                  resume: true,
-                  ...(nativeSessionIdRef.current !== undefined
-                    ? { nativeSessionId: nativeSessionIdRef.current }
-                    : {}),
-                });
               })();
             }}
           >
@@ -612,14 +642,29 @@ export function TerminalView({
             size="sm"
             variant="secondary"
             data-testid="cli-restart-fresh"
+            disabled={launching}
             onClick={() => {
+              if (relaunchBusyRef.current) {
+                return;
+              }
+              relaunchBusyRef.current = true;
+              setLaunching(true);
               void (async () => {
-                if (beforeUserRelaunch !== undefined && !(await beforeUserRelaunch())) {
-                  return;
+                let accepted = true;
+                try {
+                  if (beforeUserRelaunch !== undefined) {
+                    accepted = await beforeUserRelaunch();
+                  }
+                  if (!accepted) {
+                    return;
+                  }
+                  onRestartFresh?.();
+                } finally {
+                  if (!accepted) {
+                    relaunchBusyRef.current = false;
+                    setLaunching(false);
+                  }
                 }
-                nativeSessionIdRef.current = undefined;
-                onRestartFresh?.();
-                void relaunchWith({ resume: false });
               })();
             }}
           >

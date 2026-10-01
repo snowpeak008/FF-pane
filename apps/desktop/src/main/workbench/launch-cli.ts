@@ -54,6 +54,7 @@ import {
   resolveWorkbenchHookScriptPath,
 } from "./hook-launch";
 import type { IdleDeliverQueue } from "./idle-deliver";
+import { createWindowLaunchGate } from "./launch-gate";
 import { buildWorkbenchMcpSpec, WORKBENCH_MCP_SERVER_NAME } from "./mcp-server-spec";
 import {
   type WorkbenchMcpTempFile,
@@ -246,10 +247,20 @@ async function resolveKnowledgeServers(
   }
 }
 
+const cliLaunchGate = createWindowLaunchGate();
+
 /**
  * 组装并启动 CLI 窗口。返回的 args 可供单测快照；密钥不在其中。
+ * 同一 windowId 已有启动在飞时，后来的调用复用那一次，不再开第二个 PTY。
  */
-export async function launchCliWindow(
+export function launchCliWindow(
+  input: LaunchCliWindowInput,
+  deps: LaunchCliWindowDeps,
+): Promise<LaunchCliWindowResult> {
+  return cliLaunchGate.run(input.windowId, () => launchCliWindowBody(input, deps));
+}
+
+async function launchCliWindowBody(
   input: LaunchCliWindowInput,
   deps: LaunchCliWindowDeps,
 ): Promise<LaunchCliWindowResult> {

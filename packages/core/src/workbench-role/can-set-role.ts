@@ -36,7 +36,7 @@ function effectiveTarget(
 /**
  * 谁可以把 target 设成 newRole。
  * - 用户（界面）可设任意窗口的任意角色。
- * - 窗口把自己设为 manager：仅 openedBy=user 且没有父窗口的顶层窗口。
+ * - 窗口把自己设为 manager：仅 openedBy=user、没有父窗口、且没有被冷启动清洗锁住的顶层窗口。
  * - 窗口可设定自己后代的角色（任意角色）。
  * - 其它一律拒绝。环上的“后代”关系不成立。
  */
@@ -57,6 +57,9 @@ export function canSetRole(
   }
   if (actor.windowId === targetWindow.id) {
     const info = effectiveTarget(targetWindow, tree);
+    if (tree[targetWindow.id]?.sanitizeLocked === true) {
+      return false;
+    }
     return newRole === "manager" && info.openedBy === "user" && isTopLevel(info.parentWindowId);
   }
   return isDescendantOf(actor.windowId, targetWindow.id, tree);

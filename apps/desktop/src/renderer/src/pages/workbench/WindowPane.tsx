@@ -194,6 +194,7 @@ export function WindowPane({
       data-testid="workbench-window"
       data-window-id={window.id}
       data-window-kind={window.kind}
+      data-focused={focused ? "true" : "false"}
       onMouseDown={onFocus}
     >
       <div

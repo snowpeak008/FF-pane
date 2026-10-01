@@ -28,19 +28,20 @@ export const PAGE_KEYS = [
 export type PageKey = (typeof PAGE_KEYS)[number];
 
 /**
- * Ctrl+1 ~ Ctrl+N 的页面顺序（设计系统 §7 快捷键表；T10.1 起含工作台共 8 项）。
+ * Ctrl+1 ~ Ctrl+N 的页面顺序（设计系统 §7）。
+ * T10.9 起计划 / 任务 / 执行记录不再占键位，路由仍保留到 T10.11。
  * 设置页不在其中——它走 Ctrl+,。
  */
 export const PAGE_SHORTCUT_ORDER = [
   "projects",
   "workbench",
   "session",
-  "plan",
-  "tasks",
-  "runs",
   "memory",
   "knowledge",
 ] as const satisfies readonly PageKey[];
+
+/** 旧后台页面：不进侧栏、不占 Ctrl+N，路由与命令面板仍保留。 */
+export const LEGACY_PAGE_KEYS = ["plan", "tasks", "runs"] as const satisfies readonly PageKey[];
 
 const PAGE_KEY_SET: ReadonlySet<string> = new Set(PAGE_KEYS);
 

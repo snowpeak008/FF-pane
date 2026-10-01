@@ -85,6 +85,9 @@ export const COMMAND_TABLE: readonly CommandDescriptor[] = [
   { id: "workbench-close-tab", group: "action", requiresHandler: true },
   { id: "workbench-maximize-window", group: "action", requiresHandler: true },
   { id: "workbench-set-manager", group: "action", requiresHandler: true },
+  { id: "workbench-open-plan", group: "action", requiresHandler: true },
+  { id: "workbench-open-tasks", group: "action", requiresHandler: true },
+  { id: "workbench-open-runs", group: "action", requiresHandler: true },
 
   // 设置组
   {

@@ -1,4 +1,5 @@
 import { defineConfig } from "vitest/config";
+import { workspaceSrcAlias } from "./apps/desktop/vitest.workspace-alias.ts";
 
 /**
  * 根级聚合配置：Vitest 4 以 test.projects 取代已移除的 vitest.workspace 文件。
@@ -7,7 +8,9 @@ import { defineConfig } from "vitest/config";
  * scripts 为内联项目（T0.3 起）：仓库级工具脚本（如 check-i18n）的单测。
  */
 export default defineConfig({
+  resolve: { alias: workspaceSrcAlias },
   test: {
+    alias: workspaceSrcAlias,
     projects: [
       "packages/*",
       "apps/*",

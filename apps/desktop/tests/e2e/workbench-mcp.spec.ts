@@ -259,9 +259,13 @@ test("管理者读取并关闭子窗口，再打开任务页", async () => {
     const replay = await readReplayForWindowId(page, managerId ?? "");
     expect(replay).toContain("FFPANE_MCP_READ=yes");
     expect(replay).toContain("FFPANE_MCP_CLOSE=ok");
-    await expect(page).toHaveURL(/#\/tasks/);
+    await expect(page).toHaveURL(/#\/workbench/);
+    await expect(page.getByTestId("workbench-drawer")).toBeVisible();
+    await expect(page.getByTestId("workbench-drawer-tab-tasks")).toHaveAttribute(
+      "data-state",
+      "active",
+    );
     await expect(page.getByText(/Opened from /)).toBeVisible();
-    await gotoRoute(page, "/workbench");
     await expect(page.getByText("前端关")).toHaveCount(0);
     await expect(page.getByTestId("workbench-window")).toHaveCount(1);
   } finally {
@@ -344,6 +348,138 @@ test("重启后子窗口仍被封顶，续接管理者可以再开窗口", async
     await restoredManager.getByTestId("cli-resume").click({ force: true });
     await restarted.getByRole("dialog").getByRole("button", { name: "Start" }).click();
     await expect(restarted.getByText("前端B")).toBeVisible({ timeout: 90_000 });
+  } finally {
+    await launched.cleanup();
+  }
+});
+
+test("隐藏面板：看板、计划预览、记录筛选，侧栏不再有旧页面", async () => {
+  test.setTimeout(180_000);
+  const fakeBinDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-mcp-panel-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-mcp-panel-proj-"));
+  seedFakeClaude(fakeBinDir);
+  const launched = await launchApp({
+    pathPrepend: fakeBinDir,
+    extraEnv: { FFPANE_WB_SCRIPT: "panel" },
+  });
+  try {
+    const { app, page } = launched;
+    await createProject(app, page, projectDir, "E2E Panel");
+    await page.getByRole("button", { name: /^E2E Panel/ }).click();
+    await seedClaudeProfile(page);
+    await gotoRoute(page, "/workbench");
+    await page.getByTestId("workbench-new-tab").click();
+    await expect(page.getByTestId("workbench-new-window-dialog")).toBeVisible();
+    await page.getByTestId("workbench-new-kind-claude").click();
+    await expect(page.getByTestId("workbench-new-profile")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("workbench-new-confirm")).toBeEnabled({ timeout: 15_000 });
+    await page.getByTestId("workbench-new-confirm").click();
+
+    const manager = page.getByTestId("workbench-window").first();
+    const managerId = await manager.getAttribute("data-window-id");
+    expect(managerId).toBeTruthy();
+    await expect
+      .poll(async () => readReplayForWindowId(page, managerId ?? ""), { timeout: 90_000 })
+      .toContain("FFPANE_MCP_PANEL_TASKS=ok");
+
+    await expect(page).toHaveURL(/#\/workbench/);
+    await expect(page.getByTestId("workbench-drawer")).toBeVisible();
+    await expect(page.getByTestId("workbench-drawer-tab-tasks")).toHaveAttribute(
+      "data-state",
+      "active",
+    );
+    await expect(page.getByText(/Opened from /)).toBeVisible();
+    const blocked = page.getByTestId("workbench-board-blocked");
+    const card = blocked.getByTestId("workbench-board-card").filter({ hasText: "前端板" });
+    await expect(card).toBeVisible();
+    await expect(card).toContainText("缺接口");
+    await card.click();
+    await expect(
+      page.getByTestId("workbench-window").filter({ hasText: "前端板" }),
+    ).toHaveAttribute("data-focused", "true");
+
+    await expect
+      .poll(async () => readReplayForWindowId(page, managerId ?? ""), { timeout: 30_000 })
+      .toContain("FFPANE_MCP_PANEL_PLAN=ok");
+    await expect(page.getByTestId("workbench-drawer-tab-plan")).toHaveAttribute(
+      "data-state",
+      "active",
+    );
+    await expect(page.getByTestId("workbench-brief").filter({ hasText: "board.md" })).toBeVisible();
+    await expect(page.getByTestId("workbench-brief-preview")).toContainText("接口清单");
+
+    await expect
+      .poll(async () => readReplayForWindowId(page, managerId ?? ""), { timeout: 30_000 })
+      .toContain("FFPANE_MCP_PANEL_RUNS=ok");
+    await expect(page.getByTestId("workbench-drawer-tab-runs")).toHaveAttribute(
+      "data-state",
+      "active",
+    );
+    await expect(
+      page.getByTestId("workbench-thread-row").filter({ hasText: "开始吧" }),
+    ).toBeVisible();
+    await page.getByTestId("workbench-thread-filter-kind").selectOption("report");
+    await expect(
+      page.getByTestId("workbench-thread-row").filter({ hasText: "缺接口" }),
+    ).toBeVisible();
+    await expect(
+      page.getByTestId("workbench-thread-row").filter({ hasText: "开始吧" }),
+    ).toHaveCount(0);
+
+    await expect(page.getByRole("link", { name: "Plan", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Tasks", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Runs", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Workbench", exact: true })).toBeVisible();
+  } finally {
+    await launched.cleanup();
+  }
+});
+
+test("从会话页收到打开任务面板后，切到工作台并打开抽屉", async () => {
+  test.setTimeout(120_000);
+  const fakeBinDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-mcp-away-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-mcp-away-proj-"));
+  const triggerFile = join(fakeBinDir, "open-panel.trigger");
+  seedFakeClaude(fakeBinDir);
+  const launched = await launchApp({
+    pathPrepend: fakeBinDir,
+    extraEnv: { FFPANE_WB_SCRIPT: "panel-away", FFPANE_WB_TRIGGER: triggerFile },
+  });
+  try {
+    const { app, page } = launched;
+    await createProject(app, page, projectDir, "E2E Away");
+    await page.getByRole("button", { name: /^E2E Away/ }).click();
+    await seedClaudeProfile(page);
+    await gotoRoute(page, "/workbench");
+    await page.getByTestId("workbench-new-tab").click();
+    await expect(page.getByTestId("workbench-new-window-dialog")).toBeVisible();
+    await page.getByTestId("workbench-new-kind-claude").click();
+    await expect(page.getByTestId("workbench-new-profile")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("workbench-new-confirm")).toBeEnabled({ timeout: 15_000 });
+    await page.getByTestId("workbench-new-confirm").click();
+
+    const manager = page.getByTestId("workbench-window").first();
+    const managerId = await manager.getAttribute("data-window-id");
+    expect(managerId).toBeTruthy();
+    await expect
+      .poll(async () => readReplayForWindowId(page, managerId ?? ""), { timeout: 90_000 })
+      .toContain("FFPANE_MCP_HOLD=1");
+
+    await gotoRoute(page, "/session");
+    await expect(page).toHaveURL(/#\/session/);
+    await expect(page.getByTestId("workbench-drawer")).toHaveCount(0);
+
+    writeFileSync(triggerFile, "go\n", "utf8");
+    await expect(page).toHaveURL(/#\/workbench/, { timeout: 30_000 });
+    await expect(page.getByTestId("workbench-drawer")).toBeVisible();
+    await expect(page.getByTestId("workbench-drawer-tab-tasks")).toHaveAttribute(
+      "data-state",
+      "active",
+    );
+    await expect(page.getByText(/Opened from /)).toBeVisible();
+    await expect
+      .poll(async () => readReplayForWindowId(page, managerId ?? ""), { timeout: 30_000 })
+      .toContain("FFPANE_MCP_PANEL_TASKS=ok");
   } finally {
     await launched.cleanup();
   }
