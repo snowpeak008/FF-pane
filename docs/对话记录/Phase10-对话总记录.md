@@ -1942,7 +1942,7 @@ Claude 带参数的 `/model` 在已有对话时会不会再要一次确认，官
 - `vitest run apps/desktop/tests/client-server.test.ts apps/desktop/tests/command-ipc.test.ts`：2 个文件，73 过。
 - 提交信息：`chore: T10.13 清理旧会话残留`
 - 轻量 tag `v0.10.15`，未 push
-- 提交哈希：待本提交完成后补记
+- 提交哈希：`6c111d0bcaedc8416a7a8ffafe9f114a843eb2f5`
 
 ### 问题与遗留
 
