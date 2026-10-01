@@ -2196,7 +2196,7 @@ Claude 带参数的 `/model` 在已有对话时会不会再要一次确认，官
 - `vitest run apps/desktop/tests/client-server.test.ts apps/desktop/tests/command-ipc.test.ts`：2 个文件，73 过。
 - 提交信息：`feat: T10.14 语言习惯注入、自配置改起草配置、总结沉淀`
 - 轻量 tag `v0.10.16`，未 push
-- 提交哈希：见下一条补记
+- 提交哈希：`305f05ba66cbac1446f0fa31070e108e12fbe3d7`
 
 ### 问题与遗留
 
