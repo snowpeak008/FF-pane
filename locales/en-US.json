@@ -834,11 +834,11 @@
     },
     "configTool": {
       "title": "Workbench self-configuration tool",
-      "subtitle": "Lets the agent list providers/profiles (sanitized) and submit configuration drafts. Nothing is saved without your confirmation.",
-      "safetyNote": "API keys never pass through the model: the tool physically has no key field. After you confirm a draft that needs a key, you enter it yourself in a secure input.",
+      "subtitle": "The switch saves the setting. It does not enter any workbench window and is not registered with the agent.",
+      "safetyNote": "There is no confirmation dialog. A submitted draft is not saved after confirmation, and calls are not written to the execution log.",
       "label": "Enable for the current project",
-      "hint": "Applies to project \"{{project}}\" only. Off by default; when off, the tool is not even registered with the agent.",
-      "enabledNote": "Enabled: every write goes through draft validation and your confirmation dialog. All calls are audited in Runs.",
+      "hint": "Applies to project \"{{project}}\" only. Turning it on or off saves this setting. It is not registered with the agent and does not enter any workbench window.",
+      "enabledNote": "Saved. There is no confirmation dialog, and calls are not written to the execution log.",
       "needProject": "Select a project first — this switch is per-project.",
       "saveError": "Could not save the switch"
     },

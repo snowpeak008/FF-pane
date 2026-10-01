@@ -501,3 +501,166 @@ T10.11：
 - [Phase 10 计划 §7.5](../Phase10-多窗口终端工作台计划.md)
 - [开发进度](../开发进度.md)
 - [T10.10 验收记录](../验收记录/T10.10-验收.md)
+
+## 2026-10-01 12:55 · Phase 10 · 统一验收 · 检查员
+
+### 任务要点
+
+独立验收 `v0.10.9`..`v0.10.11`（T10.10 记忆 MCP 及其修复、T10.11 下线旧流程）。只写本验收记录并向总记录追加本条。未改其它文件，未 commit / stash / checkout / reset。打包写在系统临时目录，冒烟后已删除。未读未改 `~/.aiworkbench`，未改 `~/.claude` / `~/.codex`。
+
+### 结论
+
+**有条件通过，必须修复 1 项。** 需要主控把这一项交回去修。待 Tony 确认的决定在验收记录里，本条下面有建议。
+
+T10.10 首验两项已真正解决：同一窗口在写文件前占住 10 秒（写失败也占，空标题不占）；检索回读后丢掉 archived。单测走 `executeWorkbenchTool`，8 项通过。
+
+T10.11 没有误删工作台 / 记忆 / 知识库 / Provider / Profile / 密钥 / 设置仍依赖的代码。启动进工作台，侧栏只剩四页加底部设置。旧磁盘数据没有删除或迁移逻辑。安全原则没有被这三笔提交改坏。工作台、记忆、知识库、Provider 的测试文件相对 v0.10.9 没有减少，并多了记忆单测。
+
+必须修复：设置页「工作台自配置工具」的 subtitle / hint / enabledNote（中英）仍说打开后会注册给 Agent、写入走确认对话框、调用记入执行记录。`configToolEnabled` 只在设置页和项目设置里读写，工作台启动不看它；确认对话框和执行记录页已删。开关可以留着，文案必须改成「会保存，当前不会进入任何窗口」。
+
+### 改动文件
+
+- `docs/验收记录/Phase10-统一验收.md`（新建）
+- `docs/对话记录/Phase10-对话总记录.md`（本条）
+
+### 命令结果
+
+- `pnpm lint` 通过（Biome 737 个文件；check-i18n PASS）
+- `pnpm --filter @ff-pane/desktop run typecheck` 通过
+- 记忆单测 8 过
+- `pnpm test` 第三次整套：**2384 过 / 1 跳过**（135 个文件）。前两次在负载下有命令面板超时、适配器树杀 flake、PTY 清理 EPERM；相关文件相对 v0.10.9 无改动，单独重跑 PTY 通过
+- `pnpm smoke`：**11 项 ALL PASS**（FF-pane v0.10.11，含 PTY、hook、角色说明书、workbench-mcp）
+- `pnpm test:e2e`：**45 过**（约 5.1 分钟）
+- `electron-builder --dir` 输出到 `%TEMP%\ffpane-p10-accept-pack`。解包目录里 PTY 的 conpty / OpenConsole、`resources\workbench-hook.mjs`、asar 内 `workbench-mcp.js` 都在。`FF-pane.exe --smoke`（数据根在临时目录）**ALL PASS**，v0.10.11。临时目录已删。pdfjs 缺 canvas 的警告不记失败
+
+### 问题与遗留
+
+必须修复 1 项，见结论。
+
+建议不挡：删掉已下线页面的无用语言包（`session.*`、`nav.session/plan/tasks/runs`、`knowledge.sendToSession` 等）；README「不再读取」改成「界面和启动不读，查询通道还在」。直接改记忆文件仍可变成 active；检索仍先读完整文件。
+
+待 Tony 确认（建议都写在验收记录）：写入失败也占 10 秒，建议同意。手改记忆文件、检索先读整文件，建议先维持。项目卡片和 B 栏去掉旧计划/任务信息，建议同意。快捷键 Ctrl+1~4，建议同意（Ctrl+3 从会话变成记忆）。知识库只留复制引用，建议同意。配置开关先留着但文案必须说当前无效。习惯桥删除、习惯管理留在记忆页，建议同意。旧地址进找不到页面，建议同意。
+
+### 相关文件链接
+
+- [Phase 10 统一验收](../验收记录/Phase10-统一验收.md)
+- [T10.10 验收记录](../验收记录/T10.10-验收.md)
+- [Phase 10 计划 §7](../Phase10-多窗口终端工作台计划.md)
+
+## 2026-10-01 13:04 · Phase10 统一验收 · 修复 · 自配置开关文案
+
+### 任务要点
+
+把设置页「工作台自配置工具」里仍把「注册给 Agent / 确认对话框 / 记入执行记录 / 提交草案经确认才保存」写成当前能力的说明，改成现在的实话，中英文同步。实话：开关会保存设置，但当前不会进入任何工作台窗口、不会注册给 Agent，也没有确认对话框和执行记录。开关和实现保留。未提交。未改 `apps/desktop/scripts/real-config-probe.mjs`。未读写 `~/.aiworkbench`，未改 `~/.claude` / `~/.codex`。
+
+### 结论
+
+`settings.configTool.subtitle`、`hint`、`enabledNote`，以及同区块仍把「确认后才保存 / 记入执行记录」写成当前能力的 `safetyNote`，中英都已改成上述实话。单测和 e2e 没有断言旧文案，测试未改。不需要主控决策。
+
+### 改动文件
+
+- `locales/zh-CN.json`
+- `locales/en-US.json`
+- `docs/对话记录/Phase10-对话总记录.md`（本条）
+
+### 命令结果
+
+- `pnpm lint` 通过（Biome 737 个文件，无修正；`check-i18n` PASS）
+- `pnpm --filter @ff-pane/desktop run typecheck` 通过
+- grep：`apps/desktop/tests` 没有断言旧的 configTool 说明文案
+- `pnpm exec vitest run apps/desktop/tests/locales-parity.test.ts`：2 过
+
+### 问题与遗留
+
+无。开关与配置工具实现未删。已下线页面语言包里仍有「未经确认不会保存」一类句子（如 `session.configDraft`），验收记为建议，不在本步。
+
+### 相关文件链接
+
+- [Phase 10 统一验收](../验收记录/Phase10-统一验收.md)
+- [设置页自配置区块](../../apps/desktop/src/renderer/src/pages/settings/ConfigToolSection.tsx)
+- [中文语言包](../../locales/zh-CN.json)
+- [英文语言包](../../locales/en-US.json)
+
+## 2026-10-01 13:13 · Phase10 统一验收 · 复验 · 自配置开关文案
+
+### 任务要点
+
+独立复验设置页「工作台自配置工具」文案修复。用 git diff 核对未提交改动；反向核对 `ConfigToolSection` 用到的键、开关和实现是否还在；完整跑 lint、desktop typecheck、test、smoke、test:e2e。只追加验收记录和本总记录。未提交。未改 `apps/desktop/scripts/real-config-probe.mjs`。未读写 `~/.aiworkbench`，未改 `~/.claude` / `~/.codex`。未运行消耗 AI 额度的命令。
+
+### 结论
+
+通过。`settings.configTool.subtitle`、`safetyNote`、`hint`、`enabledNote` 中英文都如实写成：开关会保存；当前不进任何工作台窗口、不注册给 Agent；没有确认对话框，调用不记入执行记录。渲染层 8 个键都被这两份语言包覆盖，没有仍在显示的旧句子。开关和 `configToolEnabled` 写入还在。五条命令首跑全过，已知偶发没有出现，没有单独重跑。不需要主控决策。
+
+### 改动文件
+
+- `docs/验收记录/Phase10-统一验收.md`（末尾追加「复验（必须项）」，旧内容未改）
+- `docs/对话记录/Phase10-对话总记录.md`（本条）
+
+核对过、本步未改：`locales/zh-CN.json`、`locales/en-US.json`（修复者未提交改动，各 4 句）。
+
+### 命令结果
+
+- `pnpm lint` 通过（Biome 737 个文件，无修正；`check-i18n` PASS）
+- `pnpm --filter @ff-pane/desktop run typecheck` 通过
+- `pnpm test`：2384 过 / 1 跳过（135 个文件，约 20 秒）
+- `pnpm smoke`：11 项 ALL PASS（FF-pane v0.10.11；pdfjs 缺 canvas 的警告在 PASS 之前，不记失败）
+- `pnpm test:e2e`：45 过（约 4.8 分钟），含设置页开关可打开并保持选中
+
+### 问题与遗留
+
+无。必须项关闭。已下线页面语言包里的旧句子（如 `session.configDraft`、`runs.configTool`）仍在语言包中，原验收记为建议，设置页不显示它们，本步未改。开关要不要以后接到工作台，仍是验收原文「待你确认的决定」里的产品选择，不挡这次通过。
+
+### 相关文件链接
+
+- [Phase 10 统一验收](../验收记录/Phase10-统一验收.md)
+- [设置页自配置区块](../../apps/desktop/src/renderer/src/pages/settings/ConfigToolSection.tsx)
+- [中文语言包](../../locales/zh-CN.json)
+- [英文语言包](../../locales/en-US.json)
+
+## 2026-10-01 13:18 · Phase10 统一验收 · 提交 · v0.10.12
+
+### 任务要点
+
+按计划 §7.2 第 4 步提交统一验收。版本 `0.10.11` → `0.10.12`（根与 desktop 的 `package.json`、README 状态行、测试里的假 AppInfo）。开发进度登记 Phase 10 统一验收通过（含自配置开关文案必须项），并把建议（非阻断）与【待你确认的决定】写成移交事项。计划 §7.5 同步为已通过、当前版本 0.10.12。轻量 tag `v0.10.12`，不 push。未改 `apps/desktop/scripts/real-config-probe.mjs`。未读写 `~/.aiworkbench`，未改 `~/.claude` / `~/.codex`。
+
+### 结论
+
+已提交并打轻量 tag `v0.10.12`，未 push。文案修复、复验记录、版本号和进度文档在同一笔提交。不需要主控决策。移交事项等 Tony 确认。
+
+### 改动文件
+
+暂存并提交：
+
+- `package.json`
+- `apps/desktop/package.json`
+- `README.md`
+- `apps/desktop/tests/client-server.test.ts`
+- `apps/desktop/tests/command-ipc.test.ts`
+- `locales/zh-CN.json`
+- `locales/en-US.json`
+- `docs/开发进度.md`
+- `docs/开发计划.md`（索引状态改为统一验收通过；实现 tag 仍是 `v0.10.11`）
+- `docs/Phase10-多窗口终端工作台计划.md`
+- `docs/验收记录/Phase10-统一验收.md`
+- `docs/对话记录/Phase10-对话总记录.md`（本条，以及此前未提交的修复与复验条目）
+
+未暂存：`apps/desktop/scripts/real-config-probe.mjs`。没有加入 `apps/desktop/out` 或其它构建产物。
+
+### 命令结果
+
+- `pnpm lint` 通过（Biome 737 个文件，无修正；`check-i18n` PASS）
+- `pnpm --filter @ff-pane/desktop run typecheck` 通过
+- `pnpm exec vitest run apps/desktop/tests/command-ipc.test.ts apps/desktop/tests/client-server.test.ts`：2 个文件，73 过
+- 提交信息：`fix: Phase 10 统一验收 自配置开关文案改为实话`
+- 轻量 tag `v0.10.12`，未 push
+- 提交哈希：`PENDING`
+
+### 问题与遗留
+
+移交事项已写入 `docs/开发进度.md`，本提交没有顺手做那些建议。验收记录、总记录旧条目、T10.11 自查段落里的 `0.10.11` 是当时的事实，没有改成 0.10.12。
+
+### 相关文件链接
+
+- [Phase 10 统一验收](../验收记录/Phase10-统一验收.md)
+- [开发进度](../开发进度.md)
+- [Phase 10 计划 §7.5](../Phase10-多窗口终端工作台计划.md)
