@@ -68,30 +68,6 @@ export {
   withSettled,
 } from "./project-alerts";
 export {
-  type ActiveTurnView,
-  currentSessionTurns,
-  type EndedTurnMarker,
-  type EndedTurnView,
-  INITIAL_SESSION_UI_STATE,
-  type PendingPermission,
-  pendingPermissionsOf,
-  type SessionSidePanelTab,
-  type SessionStore,
-  type SessionUiActions,
-  type SessionUiState,
-  sessionBusy,
-  sessionStatusView,
-  type TurnStatus,
-  useSessionStore,
-} from "./session";
-export {
-  INITIAL_TASKS_UI_STATE,
-  type RunProgressSnapshot,
-  type TasksStore,
-  type TasksUiActions,
-  type TasksUiState,
-} from "./tasks";
-export {
   LEGACY_SIDEBAR_COLLAPSED_KEY,
   type ListDensity,
   migrateUiState,

@@ -7,7 +7,7 @@
  *
  * 唯一的依赖是 stores/pages.ts（零依赖的页面注册表）：**页面顺序只此一份**（T8.1 收敛）。
  */
-import { LEGACY_PAGE_KEYS, PAGE_SHORTCUT_ORDER } from "../stores/pages";
+import { PAGE_SHORTCUT_ORDER } from "../stores/pages";
 
 /**
  * 七个主页面的 id，顺序即侧栏顺序，也是 Ctrl+1 ~ Ctrl+7 的顺序（设计系统 §7）。
@@ -17,12 +17,10 @@ export const NAV_IDS = PAGE_SHORTCUT_ORDER;
 
 export type NavId = (typeof NAV_IDS)[number];
 
-/** 设置页不占 Ctrl+1~7 的位置：它挂在侧栏底部，全局键位是 Ctrl+,（归 W3.1c 注册）。 */
+/** 设置页不占 Ctrl+1~N 的位置：它挂在侧栏底部，全局键位是 Ctrl+,。 */
 export type SettingsNavId = "settings";
 
-export type LegacyNavId = (typeof LEGACY_PAGE_KEYS)[number];
-
-export type AnyNavId = NavId | LegacyNavId | SettingsNavId;
+export type AnyNavId = NavId | SettingsNavId;
 
 export interface NavItem {
   readonly id: AnyNavId;
@@ -42,15 +40,8 @@ export interface NavItem {
 const NAV_TICKETS: Readonly<Record<NavId, string>> = {
   projects: "W3.3",
   workbench: "T10.1",
-  session: "W3.4a",
   memory: "W3.8a",
   knowledge: "T6.5",
-};
-
-const LEGACY_TICKETS: Readonly<Record<LegacyNavId, string>> = {
-  plan: "W3.5a",
-  tasks: "W3.6a",
-  runs: "W3.7a",
 };
 
 /**
@@ -76,15 +67,6 @@ export const NAV_ITEMS: readonly NavItem[] = NAV_IDS.map((id, index) => ({
   shortcut: index + 1,
 }));
 
-/** 旧 plan / tasks / runs：路由保留，不进侧栏，也不占快捷键。 */
-export const LEGACY_NAV_ITEMS: readonly NavItem[] = LEGACY_PAGE_KEYS.map((id) => ({
-  id,
-  path: `/${id}`,
-  labelKey: `nav.${id}.label`,
-  questionKey: `nav.${id}.question`,
-  ticket: LEGACY_TICKETS[id],
-}));
-
 /** 设置入口，固定在侧栏底部。 */
 export const SETTINGS_NAV_ITEM: NavItem = {
   id: "settings",
@@ -94,15 +76,11 @@ export const SETTINGS_NAV_ITEM: NavItem = {
   ticket: "W3.2a",
 };
 
-/** 全部可路由条目（侧栏页面 + 旧页面 + 设置），路由表按此生成。 */
-export const ALL_NAV_ITEMS: readonly NavItem[] = [
-  ...NAV_ITEMS,
-  ...LEGACY_NAV_ITEMS,
-  SETTINGS_NAV_ITEM,
-];
+/** 全部可路由条目（侧栏页面 + 设置），路由表按此生成。 */
+export const ALL_NAV_ITEMS: readonly NavItem[] = [...NAV_ITEMS, SETTINGS_NAV_ITEM];
 
-/** 应用落地页：项目列表（§11.1「我有哪些项目，各自到哪了」）。 */
-export const DEFAULT_ROUTE_PATH = "/projects";
+/** 应用落地页：工作台。 */
+export const DEFAULT_ROUTE_PATH = "/workbench";
 
 /** 按 id 取条目；id 是字面量联合，故必定命中。 */
 export function navItemById(id: AnyNavId): NavItem {

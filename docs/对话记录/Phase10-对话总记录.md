@@ -348,3 +348,96 @@
 
 - [T10.10 验收记录](../验收记录/T10.10-验收.md)
 - [Phase 10 计划 §7.5](../Phase10-多窗口终端工作台计划.md)
+
+## 2026-10-01 12:26 · T10.11 · 下线旧后台会话 · 连续开发者
+
+### 任务要点
+
+按 Tony 已同意的范围下线旧后台会话。先把范围写进计划任务表，再改代码。不确定是否可删的保留，并记在本条。
+
+### 结论
+
+旧页面、旧命令、只服务旧流程的编排已删除。启动进入工作台。侧栏剩项目、工作台、记忆、知识库，设置仍在底部。旧磁盘数据不删不迁。工作台、记忆、知识库、Provider 仍在。
+
+### 改动文件
+
+删除：会话 / 计划 / 任务 / 记录页面与路由；命令面板旧版入口；`session` 下的 orchestrator、settlement、task-settled、repair、interrupted、event-map、registry、barrel；对应单测与只覆盖旧流程的 E2E。
+
+保留并仍被工作台用到：npm shim、进程环境清洗、Job Object、provider 注入、Profile、`session/env.ts`、`session/knowledge-tool.ts`、`session/quit.ts`、适配器包。
+
+保留但界面不再调用：领域与 storage 的 Plan / Task / Run / Session 类型；`data.ts` 里的 plans / tasks / runs / sessions 查询通道；配置 MCP 实现、`session/config-tool.ts`、`session/config-draft-hub.ts`、设置页开关。退出时只 flush 工作台布局，不再等待旧编排器。
+
+产品文档：`README.md`、`docs/技术选型.md`、`docs/项目设计计划-v1.0.md` 已改成现行形态。历史设计章节留着。
+
+### 供 Tony 事后确认
+
+1. 项目卡片不再显示计划版本、进行中任务数、最后活动。只留路径、登记时间，以及数据目录缺失警告。
+2. B 栏不再显示任务落定圆点。点项目进入工作台。
+3. 侧栏快捷键改为 Ctrl+1~4：项目、工作台、记忆、知识库。设置仍是 Ctrl+,。
+4. 知识库去掉「发送到当前会话」，只留复制引用。
+5. 配置 MCP 开关还在设置页，但不再注入任何窗口。没有把它接到工作台。
+6. 习惯建议桥随会话页删除。记忆页里的习惯管理保留。
+7. 直接打开旧地址（例如 `#/session`）会落到「找不到页面」，不会再读旧数据。
+
+### 相关文件链接
+
+- [Phase 10 计划 T10.11](../Phase10-多窗口终端工作台计划.md)
+- [开发进度](../开发进度.md)
+
+## 2026-10-01 12:28 · T10.11 · 自查 · 连续开发者
+
+### 任务要点
+
+完整跑 lint、desktop typecheck、`pnpm test`、`pnpm smoke`、`pnpm test:e2e`，并 `electron-builder --dir` 后用打包产物启动。删除旧流程测试是允许的。工作台、记忆、知识库、Provider 的测试文件仍在套件里。
+
+### 结论
+
+全绿。打包目录能启动，`--smoke` 通过。产物不提交。
+
+### 命令结果
+
+- `pnpm lint` 通过（Biome；check-i18n PASS）
+- `pnpm --filter @ff-pane/desktop run typecheck` 通过
+- `pnpm test`：**2384 过 / 1 跳过**（135 个文件）。相对 T10.10 的 2643，少掉的是已删除的旧流程测试
+- `pnpm smoke`：11 项 ALL PASS（当时版本 v0.10.10）
+- `pnpm test:e2e`：首轮 40 过 / 5 失败。失败是默认页已改为工作台，以及项目卡片不再报旧计划。修测试后整套 **45 过**（约 4.5 分钟）。config-tool 未 flake
+- `pnpm exec electron-builder --dir`：成功，输出 `apps/desktop/release/win-unpacked/`
+- 打包产物 `FF-pane.exe --smoke`（`FF_PANE_DATA_ROOT` 指向临时目录）：ALL PASS，应用信息为 **FF-pane v0.10.11**
+
+### 问题与遗留
+
+打包日志里 pdfjs 仍提示缺 `@napi-rs/canvas`，与本次删除无关，smoke 仍过。其它平台的可选原生包未打进 Windows 目录，属 electron-builder 的既有提示。
+
+### 相关文件链接
+
+- [Phase 10 计划 §7.5](../Phase10-多窗口终端工作台计划.md)
+
+## 2026-10-01 12:30 · T10.11 · 提交 · 连续开发者
+
+### 任务要点
+
+版本 `0.10.10` → `0.10.11`。开发进度标已实现，计划任务表与 §7.5、开发计划索引同步。轻量 tag `v0.10.11` 打在收尾记录提交上（见下一条）。不 push。本条不写哈希，避免提交后再 amend。
+
+### 结论
+
+代码与本条一并提交。tag 在写入「开发完成」条目的下一笔提交上。未 push。`apps/desktop/scripts/real-config-probe.mjs` 未纳入。`apps/desktop/release/` 不提交。
+
+### 改动文件
+
+- 版本：根 `package.json`、`apps/desktop/package.json`、`README.md` 状态行、`command-ipc.test.ts` 与 `client-server.test.ts` 里的假 AppInfo
+- 旧流程下线、测试与文案、三份产品文档
+- `docs/开发进度.md`、`docs/Phase10-多窗口终端工作台计划.md`、`docs/开发计划.md`、本条
+
+### 命令结果
+
+- 版本相关单测 `command-ipc.test.ts`、`client-server.test.ts`、`project-summary.test.ts`：76 过
+- 未 push
+
+### 问题与遗留
+
+供 Tony 确认的七条见上一条「下线旧后台会话」。配置 MCP 开关目前没有运行时效果。
+
+### 相关文件链接
+
+- [Phase 10 计划 §7.5](../Phase10-多窗口终端工作台计划.md)
+- [开发进度](../开发进度.md)

@@ -73,22 +73,6 @@
         "title": "转到工作台",
         "keywords": "workbench terminal pty shell 工作台 终端"
       },
-      "nav-session": {
-        "title": "转到会话页",
-        "keywords": "session chat conversation 会话 对话 聊天"
-      },
-      "nav-plan": {
-        "title": "转到计划页（旧版）",
-        "keywords": "plan version legacy 计划 版本 方案 旧版"
-      },
-      "nav-tasks": {
-        "title": "转到任务页（旧版）",
-        "keywords": "tasks board legacy 任务 看板 进度 旧版"
-      },
-      "nav-runs": {
-        "title": "转到执行记录页（旧版）",
-        "keywords": "runs diff log legacy 执行 记录 改动 日志 旧版"
-      },
       "nav-memory": {
         "title": "转到记忆页",
         "keywords": "memory habits 记忆 习惯 候选"
@@ -112,26 +96,6 @@
       "list-open": {
         "title": "打开焦点项详情",
         "keywords": "open detail enter 打开 详情"
-      },
-      "session-send": {
-        "title": "会话：发送消息",
-        "keywords": "send message 发送 消息 会话"
-      },
-      "session-insert-knowledge": {
-        "title": "会话：从知识库插入",
-        "keywords": "insert knowledge 插入 知识库 引用"
-      },
-      "session-switch-role": {
-        "title": "会话：切换角色",
-        "keywords": "switch role profile 切换 角色"
-      },
-      "tasks-dispatch": {
-        "title": "任务：派发焦点任务",
-        "keywords": "dispatch task run 派发 任务 执行"
-      },
-      "tasks-accept": {
-        "title": "任务：接受焦点任务",
-        "keywords": "accept task 接受 任务 验收"
       },
       "memory-approve": {
         "title": "记忆候选：通过",
@@ -513,7 +477,7 @@
     "empty": "还没有项目。选一个目录，创建第一个项目。",
     "loadError": "读取项目列表失败",
     "opened": "已切换到项目「{{name}}」",
-    "goToSession": "去会话页",
+    "goToWorkbench": "去工作台",
     "card": {
       "createdAt": "登记于 {{time}}",
       "removeLabel": "从工作台移除「{{name}}」",
@@ -1149,9 +1113,6 @@
       "global": "全局",
       "page": "页面",
       "list": "列表",
-      "session": "会话页",
-      "session-input": "会话页输入框",
-      "tasks": "任务页",
       "memory-review": "记忆审核",
       "workbench": "工作台"
     },
@@ -1168,11 +1129,6 @@
       "list-move-up": "列表内上移焦点",
       "list-move-down": "列表内下移焦点",
       "list-open": "打开焦点项详情",
-      "session-send": "会话：发送消息",
-      "session-insert-knowledge": "会话：从知识库插入",
-      "session-switch-role": "会话：切换角色",
-      "tasks-dispatch": "任务：派发焦点任务",
-      "tasks-accept": "任务：接受（通过）",
       "memory-approve": "记忆候选：通过",
       "memory-reject": "记忆候选：拒绝",
       "workbench-new-tab": "工作台：新建标签页",

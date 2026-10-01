@@ -11,7 +11,7 @@
  * 此处不重复——E2E 里 UI 建的 Profile 必带配置（表单 + core 校验双重保证）。
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
@@ -21,32 +21,6 @@ let launched: LaunchedApp;
 let projectDir: string;
 
 const SENTINEL = "E2E-GX-OK";
-const TASK_ID = "task-gx-echo";
-
-/** 预写一个 pending 任务（无 verifyCmd：done 门槛走「报告非空」路径）。 */
-function seedTask(projectRoot: string): void {
-  const tasksDir = join(projectRoot, ".workbench", "tasks");
-  mkdirSync(tasksDir, { recursive: true });
-  writeFileSync(
-    join(tasksDir, `task-${TASK_ID}.json`),
-    JSON.stringify(
-      {
-        id: TASK_ID,
-        planVersion: 1,
-        goal: "echo sentinel via generic-exec",
-        writeScope: [],
-        forbidden: [],
-        dependsOn: [],
-        contextRefs: [],
-        acceptance: ["sentinel printed"],
-        status: "pending",
-      },
-      null,
-      2,
-    ),
-    "utf8",
-  );
-}
 
 test.beforeAll(async () => {
   launched = await launchApp();
@@ -73,7 +47,6 @@ test.beforeAll(async () => {
       JSON.stringify({ state: { activeProjectId: entry.id }, version: 1 }),
     );
   }, projectDir);
-  seedTask(projectDir);
   await launched.page.reload();
   await launched.page.waitForLoadState("domcontentloaded");
 });
@@ -104,50 +77,4 @@ test("设置页建 generic-exec Profile：runtime 选中即出现命令配置区
 
   // 保存成功：行出现（exact 匹配行内名称，排除 toast 的 Saved "…"）
   await expect(page.getByText("E2E GX Runner", { exact: true })).toBeVisible();
-});
-
-test("派发 Worker 任务真跑通：Run(completed) 落库且 report 含哨兵，任务 done", async () => {
-  const { page } = launched;
-
-  const ack = await page.evaluate(
-    async (args: { dir: string; taskId: string }) => {
-      const invoke = (channel: string, req?: unknown) =>
-        // biome-ignore lint/suspicious/noExplicitAny: E2E 里按通道字符串调用，类型在契约层已保证
-        (window as any).ffpane.invoke(channel, req);
-      const profiles = await invoke("profiles:list");
-      const gx = profiles.find((p: { runtime: string }) => p.runtime === "generic-exec");
-      return invoke("session:start", {
-        turnId: "e2e-gx-turn-1",
-        projectRoot: args.dir,
-        profileId: gx.id,
-        input: { kind: "worker-task", taskId: args.taskId },
-      });
-    },
-    { dir: projectDir, taskId: TASK_ID },
-  );
-  expect(ack.accepted).toBe(true);
-
-  // 轮次收尾后 Run 落库：completed + report 含哨兵（node 进程几百 ms 内退出，宽限给足）
-  await expect
-    .poll(
-      () =>
-        page.evaluate(async (dir: string) => {
-          // biome-ignore lint/suspicious/noExplicitAny: E2E 里按通道字符串调用，类型在契约层已保证
-          const runs = await (window as any).ffpane.invoke("runs:list", { projectRoot: dir });
-          const run = runs.find(
-            (r: { taskId: string; endReason?: string }) => r.taskId === "task-gx-echo",
-          );
-          return run === undefined ? undefined : { endReason: run.endReason, report: run.report };
-        }, projectDir),
-      { timeout: 20_000 },
-    )
-    .toMatchObject({ endReason: "completed", report: SENTINEL });
-
-  // 任务推进 done（无 verifyCmd → 报告即证据，doneEvidence: report-unverified）
-  const task = await page.evaluate(async (dir: string) => {
-    // biome-ignore lint/suspicious/noExplicitAny: E2E 里按通道字符串调用，类型在契约层已保证
-    const tasks = await (window as any).ffpane.invoke("tasks:list", { projectRoot: dir });
-    return tasks.find((t: { id: string }) => t.id === "task-gx-echo");
-  }, projectDir);
-  expect(task).toMatchObject({ status: "done", doneEvidence: "report-unverified" });
 });

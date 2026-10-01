@@ -44,10 +44,6 @@ export const COMMAND_TABLE: readonly CommandDescriptor[] = [
   // 导航组：主页面 + 前进后退 + 切换项目
   pageCommand("nav-projects", "projects"),
   pageCommand("nav-workbench", "workbench"),
-  pageCommand("nav-session", "session"),
-  pageCommand("nav-plan", "plan"),
-  pageCommand("nav-tasks", "tasks"),
-  pageCommand("nav-runs", "runs"),
   pageCommand("nav-memory", "memory"),
   pageCommand("nav-knowledge", "knowledge"),
   {
@@ -70,11 +66,6 @@ export const COMMAND_TABLE: readonly CommandDescriptor[] = [
 
   // 操作组：全部由对应页面工单注入 handler
   { id: "page-focus-search", group: "action", requiresHandler: true },
-  { id: "session-send", group: "action", requiresHandler: true },
-  { id: "session-insert-knowledge", group: "action", requiresHandler: true },
-  { id: "session-switch-role", group: "action", requiresHandler: true },
-  { id: "tasks-dispatch", group: "action", requiresHandler: true },
-  { id: "tasks-accept", group: "action", requiresHandler: true },
   { id: "memory-approve", group: "action", requiresHandler: true },
   { id: "memory-reject", group: "action", requiresHandler: true },
   { id: "workbench-new-tab", group: "action", requiresHandler: true },

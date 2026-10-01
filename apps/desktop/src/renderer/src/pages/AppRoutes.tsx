@@ -5,12 +5,8 @@ import { KnowledgePage } from "./knowledge";
 import { MemoryPage } from "./memory";
 import { NotFoundPage } from "./NotFoundPage";
 import { PlaceholderPage } from "./PlaceholderPage";
-import { PlanPage } from "./plan";
 import { ProjectsPage } from "./projects";
-import { RunsPage } from "./runs";
-import { SessionPage } from "./session";
 import { SettingsPage } from "./settings";
-import { TasksPage } from "./tasks";
 import { WorkbenchPage } from "./workbench";
 
 /**
@@ -24,12 +20,8 @@ import { WorkbenchPage } from "./workbench";
 const PAGE_ELEMENTS: Partial<Record<string, ReactElement>> = {
   knowledge: <KnowledgePage />,
   memory: <MemoryPage />,
-  plan: <PlanPage />,
   projects: <ProjectsPage />,
-  runs: <RunsPage />,
-  session: <SessionPage />,
   settings: <SettingsPage />,
-  tasks: <TasksPage />,
   workbench: <WorkbenchPage />,
 };
 

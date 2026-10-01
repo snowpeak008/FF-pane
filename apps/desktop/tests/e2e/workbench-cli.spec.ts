@@ -290,6 +290,7 @@ test("Claude 窗口启动参数正确，退出后可续接，重启不自动开"
     await page.waitForTimeout(600);
     await launched.cleanup();
     launched = await launchApp({ dataRoot, pathPrepend: fakeBinDir, retainDataRoot: false });
+    await gotoRoute(launched.page, "/projects");
     await launched.page.getByRole("button", { name: /^E2E WB CLI/ }).click();
     await gotoRoute(launched.page, "/workbench");
     await expect(launched.page.getByTestId("workbench-window").first()).toBeVisible({
@@ -875,7 +876,9 @@ test("T10.6：Codex notify 的 agent-turn-complete 之后才自动投递", async
     await expect
       .poll(async () => readReplayForWindow(page, windowId), { timeout: 20_000 })
       .toContain("manager.md");
-    expect(await readReplayForWindow(page, windowId)).toContain("FAKE_CODEX_HOOK_EXIT=");
+    await expect
+      .poll(async () => readReplayForWindow(page, windowId), { timeout: 20_000 })
+      .toContain("FAKE_CODEX_HOOK_EXIT=");
     expect(existsSync(pwned)).toBe(false);
   } finally {
     await launched.cleanup();

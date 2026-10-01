@@ -8,7 +8,7 @@ import { createDataHandlers } from "./data";
 import { resolveGlobalRoot } from "./data-root";
 import { createKnowledgeHandlers } from "./knowledge";
 import type { MemoryIndexService } from "./memory-index";
-import { createQuitCoordinator, createSessionLayer, type QuitCoordinatorDeps } from "./session";
+import { createQuitCoordinator, type QuitCoordinatorDeps } from "./session/quit";
 import { startSmokeMode } from "./smoke";
 import { runSqliteCheck } from "./sqlite-check";
 import { createTerminalLayer, runPtyCheck, type TerminalLayer } from "./terminal";
@@ -213,9 +213,8 @@ async function bootstrap(): Promise<void> {
   });
   registerInvokeHandlers(ipcMain, layoutFlush.handlers);
 
-  // 会话执行层接线（T4.2）：适配器注册表 + 编排器 + 流式事件推送。
-  // 独立 try：装配失败只让会话执行不可用，不牵连数据层与窗口。
-  let quitDeps: QuitCoordinatorDeps = {
+  // T10.11：旧会话编排已下线。退出只 flush 工作台布局。
+  const quitDeps: QuitCoordinatorDeps = {
     hasInflight: () => false,
     prepare: async () => undefined,
     hasRuntimeResources: () => false,
@@ -224,25 +223,6 @@ async function bootstrap(): Promise<void> {
     quit: () => app.quit(),
     log: (message: string) => console.log(`[main] ${message}`),
   };
-  try {
-    const sessionLayer = await createSessionLayer(() => mainWindow);
-    registerInvokeHandlers(ipcMain, sessionLayer.handlers);
-    quitDeps = {
-      hasInflight: () => sessionLayer.orchestrator.activeCount() > 0,
-      prepare: () => sessionLayer.orchestrator.prepareForQuit(),
-      hasRuntimeResources: () => sessionLayer.registry.hasRuntimeResources(),
-      closeRuntimes: () => sessionLayer.registry.closeRuntimes(),
-      flushLayouts: () => layoutFlush.requestFlush(),
-      quit: () => app.quit(),
-      log: (message: string) => console.log(`[main] ${message}`),
-    };
-    // 启动修正（T8.2b）：对已登记项目各扫一遍上次被中断的轮次。后台进行、不挡窗口；
-    // 会话层 handlers 首次触碰某项目时还会按项目再保证一次（幂等）。
-    void sessionLayer.repairRegisteredProjects();
-  } catch (thrown) {
-    const message = thrown instanceof Error ? thrown.message : String(thrown);
-    console.error(`[main] session layer init failed: ${message}`);
-  }
 
   // 退出钩子（T8.2b / T8.5c / T10.2'）：flush 布局 → 在飞收尾 → 关 opencode server。
   const quitCoordinator = createQuitCoordinator(quitDeps);

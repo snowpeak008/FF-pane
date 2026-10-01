@@ -6,23 +6,17 @@
  * 面板根本没挂进 App.tsx。键位跳几次更是只有真实 DOM 上按一下才知道。
  */
 
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { gotoRoute, type LaunchedApp, launchApp } from "./_launch";
 
 let launched: LaunchedApp;
-let projectDir: string;
 
 test.beforeAll(async () => {
   launched = await launchApp();
-  projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-palette-"));
 });
 
 test.afterAll(async () => {
   await launched.cleanup();
-  rmSync(projectDir, { recursive: true, force: true });
 });
 
 /** 当前路由（去掉 HashRouter 的 "#" 前缀）。 */
@@ -58,7 +52,7 @@ test("面板里选中一条导航命令即跳转（命令项经注入的 navigat
   await expect.poll(currentRoute).toBe("/memory");
 });
 
-test("Ctrl+1~5 逐个落在对应页面，Alt+← 退回上一页", async () => {
+test("Ctrl+1~4 逐个落在对应页面，Alt+← 退回上一页", async () => {
   const { page } = launched;
   // 页面切换键位现在由注册表独家处理（AppLayout 那条自建监听已删）。
   //
@@ -73,9 +67,8 @@ test("Ctrl+1~5 逐个落在对应页面，Alt+← 退回上一页", async () => 
   const expected = [
     ["Control+1", "/projects"],
     ["Control+2", "/workbench"],
-    ["Control+3", "/session"],
-    ["Control+4", "/memory"],
-    ["Control+5", "/knowledge"],
+    ["Control+3", "/memory"],
+    ["Control+4", "/knowledge"],
   ] as const;
 
   for (const [key, route] of expected) {
@@ -87,41 +80,4 @@ test("Ctrl+1~5 逐个落在对应页面，Alt+← 退回上一页", async () => 
   // （若某天有人再引入第二个处理者且它走冒泡侧仍能收到事件，这里会停在 /knowledge）。
   await page.keyboard.press("Alt+ArrowLeft");
   await expect.poll(currentRoute).toBe("/memory");
-});
-
-test("「从知识库插入」在会话页不再是「待接入」，执行后对话框真的打开", async () => {
-  const { page } = launched;
-
-  // 该命令的 handler 由会话输入区（Composer）在挂载时自报，而输入区只在选中项目后
-  // 才渲染（未选项目时会话页是 NoActiveProject 空态）。故先建一个项目并设为当前项目。
-  await page.evaluate(async (rootPath: string) => {
-    // biome-ignore lint/suspicious/noExplicitAny: E2E 里按通道字符串调用，类型在契约层已保证
-    const entry = await (window as any).ffpane.invoke("projects:create", {
-      name: "E2E Palette",
-      rootPath,
-    });
-    // 当前项目存在 ui store 的 persist 分片里（stores/ui.ts 的 UI_STORE_STORAGE_KEY）
-    window.localStorage.setItem(
-      "ffpane.ui-state",
-      JSON.stringify({ state: { activeProjectId: entry.id }, version: 1 }),
-    );
-  }, projectDir);
-  await page.reload();
-  await page.waitForLoadState("domcontentloaded");
-  await gotoRoute(page, "/session");
-
-  // 输入区已挂载（它就是自报 handler 的那个组件）
-  await expect(page.getByRole("button", { name: /Insert from knowledge base/i })).toBeVisible();
-
-  await page.keyboard.press("Control+K");
-  await page.getByPlaceholder(/Search commands/i).fill("knowledge");
-  const item = page.getByRole("option", { name: /insert from knowledge base/i }).first();
-  await expect(item).toBeVisible();
-  // 未接入的命令会被渲染成 disabled 并带一行「待接入」说明（CommandPalette 的 hint）
-  await expect(item).not.toHaveAttribute("data-disabled", "true");
-
-  // 执行它：命令真的通到了页面的动作上，而不只是"看起来可点"
-  await item.click();
-  await expect(page.getByRole("dialog")).toBeVisible();
-  await page.keyboard.press("Escape");
 });

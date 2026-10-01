@@ -327,14 +327,11 @@ describe("错误原文提取（设计系统 §6.2：禁止把错误吞掉）", (
 
 describe("导航表与路由表结构（项目设计计划 §11 / 设计系统 §7）", () => {
   it("五个侧栏页面 + 三个旧路由 + 设置，共九条路由", () => {
-    expect(NAV_ITEMS).toHaveLength(5);
-    expect(ALL_NAV_ITEMS).toHaveLength(9);
-    expect(NAV_IDS).toHaveLength(5);
-    expect(NAV_ITEMS.map((item) => item.id)).not.toEqual(
-      expect.arrayContaining(["plan", "tasks", "runs"]),
-    );
-    expect(ALL_NAV_ITEMS.map((item) => item.id)).toEqual(
-      expect.arrayContaining(["plan", "tasks", "runs"]),
+    expect(NAV_ITEMS).toHaveLength(4);
+    expect(ALL_NAV_ITEMS).toHaveLength(5);
+    expect(NAV_IDS).toHaveLength(4);
+    expect(ALL_NAV_ITEMS.map((item) => item.id)).not.toEqual(
+      expect.arrayContaining(["plan", "tasks", "runs", "session"]),
     );
     expect(NAV_ITEMS.map((item) => item.id)).toEqual([...NAV_IDS]);
     expect(SETTINGS_NAV_ITEM.id).toBe("settings");
@@ -351,9 +348,8 @@ describe("导航表与路由表结构（项目设计计划 §11 / 设计系统 �
     }
   });
 
-  it("Ctrl+1~5 连续覆盖侧栏页面，旧页面和设置页不占键位", () => {
-    expect(NAV_ITEMS.map((item) => item.shortcut)).toEqual([1, 2, 3, 4, 5]);
-    expect(ALL_NAV_ITEMS.find((item) => item.id === "plan")?.shortcut).toBeUndefined();
+  it("Ctrl+1~4 连续覆盖侧栏页面，设置页不占键位", () => {
+    expect(NAV_ITEMS.map((item) => item.shortcut)).toEqual([1, 2, 3, 4]);
     expect(SETTINGS_NAV_ITEM.shortcut).toBeUndefined();
   });
 
@@ -367,13 +363,13 @@ describe("导航表与路由表结构（项目设计计划 §11 / 设计系统 �
     expect(Object.keys(NAV_ICONS)).toHaveLength(ALL_NAV_ITEMS.length);
   });
 
-  it("默认落地页是项目列表，且在路由表内", () => {
-    expect(DEFAULT_ROUTE_PATH).toBe("/projects");
+  it("默认落地页是工作台，且在路由表内", () => {
+    expect(DEFAULT_ROUTE_PATH).toBe("/workbench");
     expect(ALL_NAV_ITEMS.some((item) => item.path === DEFAULT_ROUTE_PATH)).toBe(true);
   });
 
   it("navItemById 按 id 命中", () => {
-    expect(navItemById("runs").path).toBe("/runs");
+    expect(navItemById("workbench").path).toBe("/workbench");
     expect(navItemById("settings")).toBe(SETTINGS_NAV_ITEM);
   });
 });

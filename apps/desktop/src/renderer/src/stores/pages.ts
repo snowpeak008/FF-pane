@@ -12,36 +12,21 @@
  * 改一份忘了另一份不会有任何检查报错——与界面语言那两份清单同一形状的隐患。
  */
 
-/** 七个页面（§11.1~§11.7）+ 工作台（T10.1）+ 设置页。顺序即侧栏顺序。 */
-export const PAGE_KEYS = [
-  "projects",
-  "workbench",
-  "session",
-  "plan",
-  "tasks",
-  "runs",
-  "memory",
-  "knowledge",
-  "settings",
-] as const;
+/** 侧栏页面 + 设置页。旧会话 / 计划 / 任务 / 记录已在 T10.11 下线。 */
+export const PAGE_KEYS = ["projects", "workbench", "memory", "knowledge", "settings"] as const;
 
 export type PageKey = (typeof PAGE_KEYS)[number];
 
 /**
- * Ctrl+1 ~ Ctrl+N 的页面顺序（设计系统 §7）。
- * T10.9 起计划 / 任务 / 执行记录不再占键位，路由仍保留到 T10.11。
+ * Ctrl+1 ~ Ctrl+N 的页面顺序。
  * 设置页不在其中——它走 Ctrl+,。
  */
 export const PAGE_SHORTCUT_ORDER = [
   "projects",
   "workbench",
-  "session",
   "memory",
   "knowledge",
 ] as const satisfies readonly PageKey[];
-
-/** 旧后台页面：不进侧栏、不占 Ctrl+N，路由与命令面板仍保留。 */
-export const LEGACY_PAGE_KEYS = ["plan", "tasks", "runs"] as const satisfies readonly PageKey[];
 
 const PAGE_KEY_SET: ReadonlySet<string> = new Set(PAGE_KEYS);
 

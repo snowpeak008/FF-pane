@@ -13,12 +13,8 @@ import { queryData } from "./ipc/query";
 import { useInvokeQuery } from "./ipc/useInvokeQuery";
 import { AppLayout } from "./layout/AppLayout";
 import { navItemById } from "./layout/nav";
-import { ProjectAlertsBridge } from "./layout/ProjectAlertsBridge";
 import { SecondaryPanelProvider } from "./layout/secondary-panel";
 import { AppRoutes } from "./pages/AppRoutes";
-import { ConfigDraftDialog } from "./pages/session/ConfigDraftDialog";
-import { HabitSuggestionBridge } from "./pages/session/HabitSuggestionBridge";
-import { SessionEventBridge } from "./pages/session/SessionEventBridge";
 import { WorkbenchFlushBridge } from "./pages/workbench/WorkbenchFlushBridge";
 import { WorkbenchPanelBridge } from "./pages/workbench/WorkbenchPanelBridge";
 import { useUiStore } from "./stores/ui";
@@ -123,14 +119,6 @@ export function App(): ReactElement {
             </AppLayout>
           </SecondaryPanelProvider>
         </AppCommandPalette>
-        {/* 会话流式事件全局订阅桥（T4.2）：唯一订阅 session:event，归并进 store。 */}
-        <SessionEventBridge />
-        {/* 项目落定高亮桥（T9.7）：唯一订阅 tasks:settled，维护 B 栏未读状态。 */}
-        <ProjectAlertsBridge />
-        {/* 系统观察建议全局桥（T5.4 来源三）：唯一订阅 habits:suggestion，提示 observed 候选。 */}
-        <HabitSuggestionBridge />
-        {/* 配置草案确认对话框（T9.1 铁律 2）：全局模态，用户在任何页面都能裁决。 */}
-        <ConfigDraftDialog />
         {/* 工作台布局退出 flush（T10.2'）：before-quit / pagehide 落盘防抖。 */}
         <WorkbenchFlushBridge />
         <AppToaster />

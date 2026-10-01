@@ -2,7 +2,6 @@ import { AlertTriangle, Check, Trash2 } from "lucide-react";
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import type { ProjectSummaryView } from "../../../../shared-ipc/contracts";
-import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { CardButton } from "../../components/ui/Card";
 import { Tooltip } from "../../components/ui/Tooltip";
@@ -69,38 +68,6 @@ export function ProjectCard({
         </span>
         <span className="w-full truncate font-mono text-xs text-fg-muted" title={project.rootPath}>
           {project.rootPath}
-        </span>
-
-        <span className="flex w-full flex-wrap items-center gap-1.5">
-          {summary.planVersion !== undefined && summary.planStatus !== undefined ? (
-            <Badge tone="primary">
-              {t("projects.card.plan", {
-                n: summary.planVersion,
-                status: t(`plan.status.${summary.planStatus}`),
-              })}
-            </Badge>
-          ) : (
-            <Badge tone="neutral">{t("projects.card.noPlan")}</Badge>
-          )}
-          <Badge tone="neutral" title={t("projects.card.taskTotal", { n: summary.taskCount })}>
-            {t("projects.card.activeTasks", { n: summary.activeTaskCount })}
-          </Badge>
-        </span>
-
-        <span
-          className="w-full truncate text-xs text-fg-subtle"
-          title={
-            summary.lastActivityAt !== undefined
-              ? formatAbsoluteTime(summary.lastActivityAt, locale)
-              : undefined
-          }
-        >
-          {summary.lastActivityAt !== undefined && summary.lastActivitySource !== undefined
-            ? t("projects.card.lastActivity", {
-                time: formatRelativeTime(summary.lastActivityAt, locale),
-                source: t(`projects.card.activitySource.${summary.lastActivitySource}`),
-              })
-            : t("projects.card.noActivity")}
         </span>
 
         {warning !== undefined ? (

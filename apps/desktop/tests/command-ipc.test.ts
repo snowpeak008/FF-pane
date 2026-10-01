@@ -69,7 +69,7 @@ afterEach(() => {
 
 const APP_INFO: AppInfo = {
   name: "FF-pane",
-  version: "0.10.10",
+  version: "0.10.11",
   runtime: { electron: "44.0.0", chrome: "140", node: "24.0.0" },
 };
 
@@ -92,14 +92,10 @@ const EXPECTED_KEY_DISPLAYS: readonly string[] = [
   "Ctrl+2",
   "Ctrl+3",
   "Ctrl+4",
-  "Ctrl+5",
   "/",
   "\u2191",
   "\u2193",
   "Enter",
-  "Ctrl+Enter",
-  "Ctrl+I",
-  "Ctrl+Shift+R",
   "Ctrl+Shift+A",
   "Ctrl+Shift+X",
   "Ctrl+Shift+T",
@@ -124,13 +120,13 @@ function keyEvent(
   };
 }
 
-describe("快捷键表：§7 的 28 条预登记齐全（含 T10.2 工作台）", () => {
+describe("快捷键表预登记齐全（含工作台，不含已下线的会话和任务页）", () => {
   const registry = createShortcutRegistry(SHORTCUT_TABLE);
 
-  it("条目数正好 28（一个「命令 × 作用域」一条）", () => {
+  it("条目数正好 23（一个「命令 × 作用域」一条）", () => {
     expect(SHORTCUT_TABLE).toHaveLength(SHORTCUT_TABLE_SIZE);
-    expect(SHORTCUT_TABLE_SIZE).toBe(28);
-    expect(registry.entries()).toHaveLength(28);
+    expect(SHORTCUT_TABLE_SIZE).toBe(23);
+    expect(registry.entries()).toHaveLength(23);
   });
 
   it("命令 ID 全部合法且互不重复", () => {
@@ -148,18 +144,20 @@ describe("快捷键表：§7 的 28 条预登记齐全（含 T10.2 工作台）"
     }
   });
 
-  it("键位覆盖 §7 全表：32 个绑定（Ctrl+1~5 展开）", () => {
+  it("键位覆盖注册表：26 个绑定（Ctrl+1~4 展开）", () => {
     const bindings = registry.bindings();
-    expect(bindings).toHaveLength(32);
+    expect(bindings).toHaveLength(26);
     const displays = [...new Set(bindings.map((binding) => binding.display))].sort();
     expect(displays).toEqual([...EXPECTED_KEY_DISPLAYS].sort());
   });
 
-  it("Ctrl+1 ~ Ctrl+5 是一条命令、五个键位，且与侧栏页面一一对应", () => {
+  it("Ctrl+1 ~ Ctrl+4 是一条命令、四个键位，且与侧栏页面一一对应", () => {
     const indexed = registry.byCommandId("nav-page-by-index");
-    expect(indexed?.keys).toHaveLength(5);
-    expect(PAGE_SHORTCUT_ORDER).toHaveLength(5);
-    expect(PAGE_SHORTCUT_ORDER).not.toEqual(expect.arrayContaining(["plan", "tasks", "runs"]));
+    expect(indexed?.keys).toHaveLength(4);
+    expect(PAGE_SHORTCUT_ORDER).toHaveLength(4);
+    expect(PAGE_SHORTCUT_ORDER).not.toEqual(
+      expect.arrayContaining(["plan", "tasks", "runs", "session"]),
+    );
   });
 
   it("无修饰键的键位在输入框内一律失效，唯一例外是 Esc", () => {
@@ -220,10 +218,12 @@ describe("冲突检测：重复键位注册抛错", () => {
 
   it("同键位 + 作用域相交 → ShortcutConflictError", () => {
     const registry = createShortcutRegistry();
-    registry.register(entry({ commandId: "tasks-accept", keys: ["Ctrl+E"], scopes: ["tasks"] }));
+    registry.register(
+      entry({ commandId: "memory-approve", keys: ["Ctrl+E"], scopes: ["memory-review"] }),
+    );
     expect(() =>
       registry.register(
-        entry({ commandId: "tasks-dispatch", keys: ["Ctrl+E"], scopes: ["tasks"] }),
+        entry({ commandId: "memory-reject", keys: ["Ctrl+E"], scopes: ["memory-review"] }),
       ),
     ).toThrow(ShortcutConflictError);
   });
@@ -234,7 +234,7 @@ describe("冲突检测：重复键位注册抛错", () => {
     try {
       // nav-projects 尚未在 §7 表里占键位，模拟页面工单私自抢 Ctrl+K
       registry.register(
-        entry({ commandId: "nav-projects", keys: ["Ctrl+K"], scopes: ["session"] }),
+        entry({ commandId: "nav-projects", keys: ["Ctrl+K"], scopes: ["workbench"] }),
       );
     } catch (error) {
       thrown = error;
@@ -244,11 +244,16 @@ describe("冲突检测：重复键位注册抛错", () => {
     expect((thrown as ShortcutConflictError).chordId).toBe("ctrl+k");
   });
 
-  it("同键位但作用域不相交且都非全局 → 允许（Ctrl+Enter 在会话输入框与任务页各有其义）", () => {
-    expect(() => createShortcutRegistry(SHORTCUT_TABLE)).not.toThrow();
-    const registry = createShortcutRegistry(SHORTCUT_TABLE);
-    expect(registry.byCommandId("session-send")?.keys).toEqual(["Ctrl+Enter"]);
-    expect(registry.byCommandId("tasks-dispatch")?.keys).toEqual(["Ctrl+Enter"]);
+  it("同键位但作用域不相交且都非全局 → 允许", () => {
+    const registry = createShortcutRegistry();
+    registry.register(
+      entry({ commandId: "memory-approve", keys: ["Ctrl+E"], scopes: ["memory-review"] }),
+    );
+    expect(() =>
+      registry.register(
+        entry({ commandId: "workbench-new-tab", keys: ["Ctrl+E"], scopes: ["workbench"] }),
+      ),
+    ).not.toThrow();
   });
 
   it("同一命令重复登记直接抛错", () => {
@@ -297,7 +302,7 @@ describe("作用域解析：全局优先、未上报的作用域不触发", () =
   it("全局键位在输入框内依然命中（Ctrl 组合键不受输入框影响）", () => {
     const match = registry.resolve({
       event: keyEvent("k", { ctrlKey: true }),
-      activeScopes: ["session", "session-input"],
+      activeScopes: ["workbench"],
       inTextInput: true,
     });
     expect(match?.registration.commandId).toBe("palette-open");
@@ -333,24 +338,11 @@ describe("作用域解析：全局优先、未上报的作用域不触发", () =
     ).toBe("list-move-down");
   });
 
-  it("同键位按作用域分流：Ctrl+Enter 在会话输入框发消息、在任务页派发任务", () => {
-    const event = keyEvent("Enter", { ctrlKey: true });
-    expect(
-      registry.resolve({ event, activeScopes: ["session-input"], inTextInput: true })?.registration
-        .commandId,
-    ).toBe("session-send");
-    expect(
-      registry.resolve({ event, activeScopes: ["tasks"], inTextInput: false })?.registration
-        .commandId,
-    ).toBe("tasks-dispatch");
-  });
-
-  it("Ctrl+Shift+A 在任务页是接受任务、在记忆审核是通过候选", () => {
+  it("Ctrl+Shift+A 在记忆审核是通过候选，别的页面不触发", () => {
     const event = keyEvent("A", { ctrlKey: true, shiftKey: true });
     expect(
-      registry.resolve({ event, activeScopes: ["tasks"], inTextInput: false })?.registration
-        .commandId,
-    ).toBe("tasks-accept");
+      registry.resolve({ event, activeScopes: ["workbench"], inTextInput: false }),
+    ).toBeUndefined();
     expect(
       registry.resolve({ event, activeScopes: ["memory-review"], inTextInput: false })?.registration
         .commandId,
@@ -389,10 +381,8 @@ describe("命令表：面板条目与键位展示", () => {
   it("主页面导航命令的键位由 Ctrl+N 推导出来", () => {
     expect(commandShortcutDisplay(registry, "nav-projects")).toBe("Ctrl+1");
     expect(commandShortcutDisplay(registry, "nav-workbench")).toBe("Ctrl+2");
-    expect(commandShortcutDisplay(registry, "nav-session")).toBe("Ctrl+3");
-    expect(commandShortcutDisplay(registry, "nav-memory")).toBe("Ctrl+4");
-    expect(commandShortcutDisplay(registry, "nav-knowledge")).toBe("Ctrl+5");
-    expect(commandShortcutDisplay(registry, "nav-plan")).toBeUndefined();
+    expect(commandShortcutDisplay(registry, "nav-memory")).toBe("Ctrl+3");
+    expect(commandShortcutDisplay(registry, "nav-knowledge")).toBe("Ctrl+4");
     expect(commandShortcutDisplay(registry, "settings-open")).toBe("Ctrl+,");
   });
 });
@@ -417,8 +407,8 @@ describe("命令执行：导航经注入回调、未接入的动作不假装成�
 
   it("页面导航命令调用注入的 navigate（不 import router）", () => {
     const { runtime, navigate } = createRuntime();
-    expect(executeCommand("nav-tasks", runtime)).toBe(true);
-    expect(navigate).toHaveBeenCalledWith({ kind: "page", page: "tasks" });
+    expect(executeCommand("nav-memory", runtime)).toBe(true);
+    expect(navigate).toHaveBeenCalledWith({ kind: "page", page: "memory" });
   });
 
   it("Ctrl+N 按命中的数字键决定目标页面", () => {
@@ -450,13 +440,13 @@ describe("命令执行：导航经注入回调、未接入的动作不假装成�
 
   it("未注入 handler 的动作返回 false，注入后立即可用", () => {
     const { runtime } = createRuntime();
-    expect(isCommandRunnable("session-send", {})).toBe(false);
-    expect(executeCommand("session-send", runtime)).toBe(false);
+    expect(isCommandRunnable("memory-approve", {})).toBe(false);
+    expect(executeCommand("memory-approve", runtime)).toBe(false);
 
     const send = vi.fn();
-    const wired = createRuntime({ "session-send": send });
-    expect(isCommandRunnable("session-send", { "session-send": send })).toBe(true);
-    expect(executeCommand("session-send", wired.runtime)).toBe(true);
+    const wired = createRuntime({ "memory-approve": send });
+    expect(isCommandRunnable("memory-approve", { "memory-approve": send })).toBe(true);
+    expect(executeCommand("memory-approve", wired.runtime)).toBe(true);
     expect(send).toHaveBeenCalledTimes(1);
   });
 });
@@ -468,10 +458,10 @@ describe("命令执行：导航经注入回调、未接入的动作不假装成�
 describe("页面自报动作表：登记 / 注销 / 与 prop 合并", () => {
   it("登记后该命令可执行", () => {
     const open = vi.fn();
-    const handlers = withHandler({}, "session-insert-knowledge", open);
-    expect(isCommandRunnable("session-insert-knowledge", handlers)).toBe(true);
+    const handlers = withHandler({}, "memory-approve", open);
+    expect(isCommandRunnable("memory-approve", handlers)).toBe(true);
     expect(
-      executeCommand("session-insert-knowledge", {
+      executeCommand("memory-approve", {
         navigate: vi.fn(),
         handlers,
         openPalette: vi.fn(),
@@ -483,9 +473,9 @@ describe("页面自报动作表：登记 / 注销 / 与 prop 合并", () => {
 
   it("注销后回到「待接入」", () => {
     const open = vi.fn();
-    const registered = withHandler({}, "session-insert-knowledge", open);
-    const cleared = withoutHandler(registered, "session-insert-knowledge", open);
-    expect(isCommandRunnable("session-insert-knowledge", cleared)).toBe(false);
+    const registered = withHandler({}, "memory-approve", open);
+    const cleared = withoutHandler(registered, "memory-approve", open);
+    expect(isCommandRunnable("memory-approve", cleared)).toBe(false);
   });
 
   it("重挂载时「新的先挂、旧的后卸」不会把新 handler 一并注销", () => {
@@ -493,34 +483,30 @@ describe("页面自报动作表：登记 / 注销 / 与 prop 合并", () => {
     const oldHandler = vi.fn();
     const newHandler = vi.fn();
     const afterRemount = withHandler(
-      withHandler({}, "session-insert-knowledge", oldHandler),
-      "session-insert-knowledge",
+      withHandler({}, "memory-approve", oldHandler),
+      "memory-approve",
       newHandler,
     );
     // 旧实例此刻才执行它的注销
-    const settled = withoutHandler(afterRemount, "session-insert-knowledge", oldHandler);
-    expect(settled["session-insert-knowledge"]).toBe(newHandler);
-    expect(isCommandRunnable("session-insert-knowledge", settled)).toBe(true);
+    const settled = withoutHandler(afterRemount, "memory-approve", oldHandler);
+    expect(settled["memory-approve"]).toBe(newHandler);
+    expect(isCommandRunnable("memory-approve", settled)).toBe(true);
   });
 
   it("注销不认识的命令 / 不是自己那份时原样返回（引用不变，不触发无谓重渲染）", () => {
-    const handlers = withHandler({}, "session-send", vi.fn());
-    expect(withoutHandler(handlers, "tasks-accept", vi.fn())).toBe(handlers);
-    expect(withoutHandler(handlers, "session-send", vi.fn())).toBe(handlers);
+    const handlers = withHandler({}, "memory-reject", vi.fn());
+    expect(withoutHandler(handlers, "workbench-new-tab", vi.fn())).toBe(handlers);
+    expect(withoutHandler(handlers, "memory-reject", vi.fn())).toBe(handlers);
   });
 
   it("与挂载方 prop 合并时 prop 优先（集成方显式给的动作不被页面顶掉）", () => {
     const fromPage = vi.fn();
     const fromProp = vi.fn();
-    const merged = mergeHandlers({ "session-send": fromPage }, { "session-send": fromProp });
-    expect(merged["session-send"]).toBe(fromProp);
-    // 页面独有的动作照常保留
-    const both = mergeHandlers(
-      { "session-insert-knowledge": fromPage },
-      { "session-send": fromProp },
-    );
-    expect(both["session-insert-knowledge"]).toBe(fromPage);
-    expect(both["session-send"]).toBe(fromProp);
+    const merged = mergeHandlers({ "memory-reject": fromPage }, { "memory-reject": fromProp });
+    expect(merged["memory-reject"]).toBe(fromProp);
+    const both = mergeHandlers({ "memory-approve": fromPage }, { "memory-reject": fromProp });
+    expect(both["memory-approve"]).toBe(fromPage);
+    expect(both["memory-reject"]).toBe(fromProp);
   });
 });
 

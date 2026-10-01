@@ -1,6 +1,5 @@
 import { type ReactElement, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import type { KnowledgeHitView, KnowledgeOverview } from "../../../../shared-ipc/contracts";
 import { ErrorState } from "../../components/states/ErrorState";
@@ -9,7 +8,6 @@ import { Button } from "../../components/ui/Button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/Tabs";
 import { useInvokeQuery } from "../../ipc/useInvokeQuery";
 import { PageHeader } from "../../layout/PageHeader";
-import { useSessionStore } from "../../stores/session";
 import { AgentToolPanel } from "./AgentToolPanel";
 import { buildKnowledgeCitation, deriveFilterOptions } from "./knowledge-view";
 import { SearchPanel } from "./SearchPanel";
@@ -31,8 +29,6 @@ function KnowledgeView({
   readonly refetch: () => void;
 }): ReactElement {
   const { t } = useTranslation();
-  const navigate = useNavigate();
-  const appendDraft = useSessionStore((state) => state.appendComposerDraft);
   const options = useMemo(() => deriveFilterOptions(overview.entries), [overview.entries]);
   const importer = useKnowledgeImport({
     onError: (summary, message) => {
@@ -50,13 +46,6 @@ function KnowledgeView({
         ? {}
         : { pageLabel: t("knowledge.page", { page: hit.chunk.provenance.page }) }),
     });
-
-  const sendToSession = (hit: KnowledgeHitView): void => {
-    // 追加到草稿而不是覆盖：用户很可能已经写了半句话，正等着把资料垫进去
-    appendDraft(citationOf(hit));
-    toast.success(t("knowledge.sentToSession"));
-    void navigate("/session");
-  };
 
   const copyCitation = (hit: KnowledgeHitView): void => {
     void navigator.clipboard.writeText(citationOf(hit)).then(() => {
@@ -81,9 +70,6 @@ function KnowledgeView({
           options={options}
           hitActions={(hit) => (
             <>
-              <Button variant="primary" size="sm" onClick={() => sendToSession(hit)}>
-                {t("knowledge.sendToSession")}
-              </Button>
               <Button variant="ghost" size="sm" onClick={() => copyCitation(hit)}>
                 {t("knowledge.copyCitation")}
               </Button>

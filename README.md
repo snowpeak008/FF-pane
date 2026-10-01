@@ -6,20 +6,19 @@ A local-first, vendor-agnostic, pluggable multi-agent project workbench.
 
 ## 它解决什么问题
 
-用户今天用 Codex 规划、Claude Code 执行，明天全部换成 Grok 或 Gemini——项目的计划、进度、决定、记忆一条都不丢。FF-pane 不拥有模型能力，它拥有项目状态：
+FF-pane 是本地优先的多窗口终端工作台。在一个项目里并排打开多个 Agent 或普通终端（分屏、标签页），窗口之间经 MCP 通信，对话落在项目目录里。模型能力仍由你选定的 CLI 提供，本软件管理的是项目现场：
 
-- **角色与 AI 解耦**：Planner / Worker / Reviewer 三个角色，自由绑定任意 Agent（Codex、Claude Code、Gemini CLI、Grok、OpenCode、Aider…）
-- **项目状态本地化**：计划版本、任务合同、执行证据全部存在本地，Markdown 为真实数据源
-- **三层记忆体系**：
-  - 项目记忆——决定 / 规则 / 教训 / 状态，Agent 提候选、用户审核
-  - 共享记忆（用户习惯）——高权限，直接参与 Prompt 组装，实现"习惯先行"，越用越顺手
-  - 知识库——大规模文档 RAG 检索（FTS5 + sqlite-vec 混合检索），用户主动提取
-- **权限清晰**：读路径、写路径、命令、网络、危险操作五项权限，跟随角色和任务，不跟随 AI 品牌
+- **多窗口工作台**：内嵌 PTY + xterm.js。每个窗口有角色（管理者 / 规划者 / 执行者 / 审查者 / 普通终端），经 `ffpane-workbench` MCP 互相投递
+- **项目记忆**：决定 / 规则 / 教训 / 状态。Agent 可检索、可提交候选；用户在记忆页审核
+- **知识库**：大规模文档 RAG（FTS5 + sqlite-vec）。用户主动收录，Agent 经知识库 MCP 检索
+- **Provider 与启动配置**：API 或 CLI 登录、Profile、权限信封、密钥放在系统密钥库
 - **多语言**：界面语言（zh-CN / en-US）与 AI 输出语言独立设置
+
+旧的后台会话（计划 → 任务 → 执行记录那套页面）已下线。磁盘上的旧计划、任务、会话文件保留，软件不再读取、也不迁移。
 
 ## 项目状态
 
-**v0.10.10（M3 完成；Phase 10 多窗口终端工作台进行中；T10.10 记忆 MCP 已交付）。** 进度事实源见 [docs/开发进度.md](docs/开发进度.md)。
+**v0.10.11（M3 完成；Phase 10 多窗口终端工作台收尾；T10.11 已下线旧后台会话）。** 进度事实源见 [docs/开发进度.md](docs/开发进度.md)。
 
 ## 启动方式
 

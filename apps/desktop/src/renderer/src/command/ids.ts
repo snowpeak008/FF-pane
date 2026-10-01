@@ -27,10 +27,6 @@ export const COMMAND_IDS = [
   "nav-toggle-secondary-panel",
   "nav-projects",
   "nav-workbench",
-  "nav-session",
-  "nav-plan",
-  "nav-tasks",
-  "nav-runs",
   "nav-memory",
   "nav-knowledge",
   // 页面与列表通用
@@ -38,13 +34,6 @@ export const COMMAND_IDS = [
   "list-move-up",
   "list-move-down",
   "list-open",
-  // 会话页
-  "session-send",
-  "session-insert-knowledge",
-  "session-switch-role",
-  // 任务页
-  "tasks-dispatch",
-  "tasks-accept",
   // 记忆审核
   "memory-approve",
   "memory-reject",

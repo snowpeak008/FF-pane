@@ -73,22 +73,6 @@
         "title": "Go to workbench",
         "keywords": "workbench terminal pty shell 工作台 终端"
       },
-      "nav-session": {
-        "title": "Go to session",
-        "keywords": "session chat conversation 会话 对话 聊天"
-      },
-      "nav-plan": {
-        "title": "Go to plan (legacy)",
-        "keywords": "plan version legacy 计划 版本 方案 旧版"
-      },
-      "nav-tasks": {
-        "title": "Go to tasks (legacy)",
-        "keywords": "tasks board legacy 任务 看板 进度 旧版"
-      },
-      "nav-runs": {
-        "title": "Go to run records (legacy)",
-        "keywords": "runs diff log legacy 执行 记录 改动 日志 旧版"
-      },
       "nav-memory": {
         "title": "Go to memory",
         "keywords": "memory habits 记忆 习惯 候选"
@@ -112,26 +96,6 @@
       "list-open": {
         "title": "Open focused item",
         "keywords": "open detail enter 打开 详情"
-      },
-      "session-send": {
-        "title": "Session: send message",
-        "keywords": "send message 发送 消息 会话"
-      },
-      "session-insert-knowledge": {
-        "title": "Session: insert from knowledge base",
-        "keywords": "insert knowledge 插入 知识库 引用"
-      },
-      "session-switch-role": {
-        "title": "Session: switch role",
-        "keywords": "switch role profile 切换 角色"
-      },
-      "tasks-dispatch": {
-        "title": "Tasks: dispatch focused task",
-        "keywords": "dispatch task run 派发 任务 执行"
-      },
-      "tasks-accept": {
-        "title": "Tasks: accept focused task",
-        "keywords": "accept task 接受 任务 验收"
       },
       "memory-approve": {
         "title": "Memory candidate: approve",
@@ -513,7 +477,7 @@
     "empty": "No project yet. Pick a directory to create your first one.",
     "loadError": "Failed to load the project list",
     "opened": "Switched to project \"{{name}}\"",
-    "goToSession": "Go to session",
+    "goToWorkbench": "Go to workbench",
     "card": {
       "createdAt": "Added {{time}}",
       "removeLabel": "Remove \"{{name}}\" from the workspace",
@@ -1149,9 +1113,6 @@
       "global": "Global",
       "page": "Page",
       "list": "List",
-      "session": "Session page",
-      "session-input": "Session composer",
-      "tasks": "Tasks page",
       "memory-review": "Memory review",
       "workbench": "Workbench"
     },
@@ -1168,11 +1129,6 @@
       "list-move-up": "Move focus up in list",
       "list-move-down": "Move focus down in list",
       "list-open": "Open focused item detail",
-      "session-send": "Session: send message",
-      "session-insert-knowledge": "Session: insert from knowledge base",
-      "session-switch-role": "Session: switch role",
-      "tasks-dispatch": "Tasks: dispatch focused task",
-      "tasks-accept": "Tasks: accept (approve)",
       "memory-approve": "Memory candidate: approve",
       "memory-reject": "Memory candidate: reject",
       "workbench-new-tab": "Workbench: new tab",

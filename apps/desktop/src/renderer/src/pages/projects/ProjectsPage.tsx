@@ -45,7 +45,7 @@ export function ProjectsPage(): ReactElement {
       // 选中项目的下一步是去会话页开聊（T9.6 ③）：toast 补动作按钮把用户领过去，
       // 不再让「选完项目然后呢」断在这里（planGenerated toast 的同款 action 位）。
       toast.success(t("projects.opened", { name: entry.name }), {
-        action: { label: t("projects.goToSession"), onClick: () => void navigate("/session") },
+        action: { label: t("projects.goToWorkbench"), onClick: () => void navigate("/workbench") },
       });
     },
     [navigate, setActiveProjectId, t],

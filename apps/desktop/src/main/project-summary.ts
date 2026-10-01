@@ -5,7 +5,7 @@
  * 由计划 · 任务 · Run · 会话登记当场算出。**不持久化**（理由见 contracts.ts 的
  * `ProjectSummary` 注释）。
  *
- * 读取一律经注入的 `ProjectSummarySources`，与 `main/session/orchestrator.ts` 同款：
+ * 读取一律经注入的 `ProjectSummarySources`：
  * 汇总规则（哪些状态算进行中、时间取哪个、失败怎么降级）由此可以脱离 Electron 与真实
  * 磁盘单测，而不必去起一个应用。
  *
@@ -14,10 +14,8 @@
  */
 
 import type { Plan, ProjectRegistryEntry, Run, SessionRecord, Task } from "@ff-pane/shared";
-import { isTaskTerminalStatus } from "@ff-pane/shared";
 import type { ProjectLayout } from "@ff-pane/storage";
 import type {
-  ProjectActivitySource,
   ProjectSummary,
   ProjectSummaryPart,
   ProjectSummaryView,
@@ -36,11 +34,7 @@ import type {
  * 「各自到哪了」。反过来 `done` 要算进去——§6.3 写明 done ≠ accepted，一个等着用户
  * 验收的任务显然还没完事。
  */
-function isActiveTask(task: Task): boolean {
-  return !isTaskTerminalStatus(task.status);
-}
-
-/** 汇总所需的四路读取 + 一次目录探测，全部由宿主注入。 */
+/** 汇总所需的读取，全部由宿主注入。计划 / 任务 / Run / 会话不再读取。 */
 export interface ProjectSummarySources {
   /** `.workbench/` 是否存在（探测失败一律按不存在处理，见 summarizeProject 注释）。 */
   readonly workbenchPresent: (layout: ProjectLayout) => Promise<boolean>;
@@ -76,66 +70,8 @@ async function readPart<T>(read: () => Promise<T>): Promise<PartResult<T>> {
   }
 }
 
-/** 版本号最大的那份计划即"当前计划"（改计划产出下一版，§11.3）。 */
-function pickCurrentPlan(plans: readonly Plan[]): Plan | undefined {
-  let current: Plan | undefined;
-  for (const plan of plans) {
-    if (current === undefined || plan.version > current.version) {
-      current = plan;
-    }
-  }
-  return current;
-}
-
-/** 一个候选时间点及其出处。 */
-interface ActivityCandidate {
-  readonly at: number;
-  readonly source: ProjectActivitySource;
-}
-
 /**
- * 三路时间点里取最晚的一个。
- *
- * 按 plan → run → session 的固定顺序扫描且**严格大于**才替换，故并列时取先扫到的那一路
- * ——并列只会出现在人造数据里，要紧的是同样的磁盘内容永远算出同样的结果。
- */
-function pickLastActivity(
-  plans: readonly Plan[],
-  runs: readonly Run[],
-  sessions: readonly SessionRecord[],
-): ActivityCandidate | undefined {
-  const candidates: ActivityCandidate[] = [];
-  for (const plan of plans) {
-    // 计划本身不带时间戳，批准是它唯一带时刻的事件（草稿因此不贡献时间点）
-    if (plan.approvedBy !== undefined) {
-      candidates.push({ at: plan.approvedBy.at, source: "plan" });
-    }
-  }
-  for (const run of runs) {
-    // 在飞的 Run 没有 endedAt，用起始时刻；审查发生在收尾之后，故它也是一次活动
-    candidates.push({ at: run.endedAt ?? run.startedAt, source: "run" });
-    if (run.review !== undefined) {
-      candidates.push({ at: run.review.reviewedAt, source: "run" });
-    }
-  }
-  for (const session of sessions) {
-    candidates.push({ at: session.lastActiveAt, source: "session" });
-  }
-
-  let latest: ActivityCandidate | undefined;
-  for (const candidate of candidates) {
-    if (!Number.isFinite(candidate.at)) {
-      continue;
-    }
-    if (latest === undefined || candidate.at > latest.at) {
-      latest = candidate;
-    }
-  }
-  return latest;
-}
-
-/**
- * 汇总单个项目。**不抛错**：任何一路读不到都降级为 `unavailable` 里的一项。
+ * 汇总单个项目。**不抛错**。只看数据目录在不在，不读计划、任务、Run、会话。
  *
  * `.workbench/` 不存在时直接给零值摘要并短路四路读取——它们只会一路 ENOENT，而
  * "目录不在"这件事本身比四个空列表更有信息量，界面据 `workbenchPresent` 如实标注。
@@ -149,48 +85,12 @@ export async function summarizeProject(
     return emptySummary([]);
   }
 
-  const [plans, tasks, runs, sessions] = await Promise.all([
-    readPart(() => sources.listPlans(layout)),
-    readPart(() => sources.listTasks(layout)),
-    readPart(() => sources.listRuns(layout)),
-    readPart(() => sources.listSessions(layout)),
-  ]);
-
-  // 顺序固定按 PROJECT_SUMMARY_PARTS 排，不随并发完成先后变化
-  const unavailable: ProjectSummaryPart[] = [];
-  if (!plans.ok) {
-    unavailable.push("plan");
-  }
-  if (!tasks.ok) {
-    unavailable.push("task");
-  }
-  if (!runs.ok) {
-    unavailable.push("run");
-  }
-  if (!sessions.ok) {
-    unavailable.push("session");
-  }
-
-  const planList = plans.ok ? plans.value : [];
-  const taskList = tasks.ok ? tasks.value : [];
-  const runList = runs.ok ? runs.value : [];
-  const sessionList = sessions.ok ? sessions.value : [];
-
-  const currentPlan = pickCurrentPlan(planList);
-  const activity = pickLastActivity(planList, runList, sessionList);
-  const activeTaskCount = taskList.filter(isActiveTask).length;
-
+  // T10.11：不再读取计划、任务、Run、会话登记。旧文件留在磁盘上。
   return {
     workbenchPresent: true,
-    ...(currentPlan !== undefined
-      ? { planVersion: currentPlan.version, planStatus: currentPlan.status }
-      : {}),
-    activeTaskCount,
-    taskCount: taskList.length,
-    ...(activity !== undefined
-      ? { lastActivityAt: activity.at, lastActivitySource: activity.source }
-      : {}),
-    unavailable,
+    activeTaskCount: 0,
+    taskCount: 0,
+    unavailable: [],
   };
 }
 

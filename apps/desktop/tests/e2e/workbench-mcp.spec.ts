@@ -320,6 +320,7 @@ test("重启后子窗口仍被封顶，续接管理者可以再开窗口", async
       extraEnv: { FFPANE_WB_SCRIPT: "restart" },
     });
     const restarted = launched.page;
+    await gotoRoute(restarted, "/projects");
     await restarted.getByRole("button", { name: /^E2E Restart/ }).click();
     await gotoRoute(restarted, "/workbench");
     const restoredChild = restarted.getByTestId("workbench-window").filter({ hasText: "前端A" });
@@ -435,7 +436,7 @@ test("隐藏面板：看板、计划预览、记录筛选，侧栏不再有旧�
   }
 });
 
-test("从会话页收到打开任务面板后，切到工作台并打开抽屉", async () => {
+test("从项目页收到打开任务面板后，切到工作台并打开抽屉", async () => {
   test.setTimeout(120_000);
   const fakeBinDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-mcp-away-"));
   const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-mcp-away-proj-"));
@@ -465,8 +466,8 @@ test("从会话页收到打开任务面板后，切到工作台并打开抽屉",
       .poll(async () => readReplayForWindowId(page, managerId ?? ""), { timeout: 90_000 })
       .toContain("FFPANE_MCP_HOLD=1");
 
-    await gotoRoute(page, "/session");
-    await expect(page).toHaveURL(/#\/session/);
+    await gotoRoute(page, "/projects");
+    await expect(page).toHaveURL(/#\/projects/);
     await expect(page.getByTestId("workbench-drawer")).toHaveCount(0);
 
     writeFileSync(triggerFile, "go\n", "utf8");

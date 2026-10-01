@@ -41,12 +41,6 @@ export const SHORTCUT_SCOPES = [
   "page",
   /** 列表获得焦点时。 */
   "list",
-  /** 会话页。 */
-  "session",
-  /** 会话页的输入框内。 */
-  "session-input",
-  /** 任务页。 */
-  "tasks",
   /** 记忆页的待审核候选标签。 */
   "memory-review",
   /** 工作台页（T10.2 分屏 / 标签）。 */
@@ -347,7 +341,7 @@ export const SHORTCUT_TABLE: readonly ShortcutRegistration[] = [
   },
   {
     commandId: "nav-page-by-index",
-    keys: ["Ctrl+1", "Ctrl+2", "Ctrl+3", "Ctrl+4", "Ctrl+5"],
+    keys: ["Ctrl+1", "Ctrl+2", "Ctrl+3", "Ctrl+4"],
     scopes: ["global"],
     disabledInTextInput: false,
     preventDefault: true,
@@ -392,41 +386,6 @@ export const SHORTCUT_TABLE: readonly ShortcutRegistration[] = [
     keys: ["Enter"],
     scopes: ["list"],
     disabledInTextInput: true,
-    preventDefault: true,
-  },
-  {
-    commandId: "session-send",
-    keys: ["Ctrl+Enter"],
-    scopes: ["session-input"],
-    disabledInTextInput: false,
-    preventDefault: true,
-  },
-  {
-    commandId: "session-insert-knowledge",
-    keys: ["Ctrl+I"],
-    scopes: ["session"],
-    disabledInTextInput: false,
-    preventDefault: true,
-  },
-  {
-    commandId: "session-switch-role",
-    keys: ["Ctrl+Shift+R"],
-    scopes: ["session"],
-    disabledInTextInput: false,
-    preventDefault: true,
-  },
-  {
-    commandId: "tasks-dispatch",
-    keys: ["Ctrl+Enter"],
-    scopes: ["tasks"],
-    disabledInTextInput: false,
-    preventDefault: true,
-  },
-  {
-    commandId: "tasks-accept",
-    keys: ["Ctrl+Shift+A"],
-    scopes: ["tasks"],
-    disabledInTextInput: false,
     preventDefault: true,
   },
   {
@@ -494,8 +453,8 @@ export const SHORTCUT_TABLE: readonly ShortcutRegistration[] = [
   },
 ];
 
-/** §7 表格行数（= 本注册表条目数），拆分规则见文件头注。T10.2 增 7 条工作台 → 28。 */
-export const SHORTCUT_TABLE_SIZE = 28;
+/** 注册表条目数。T10.11 去掉旧会话和任务页键位后为 23。 */
+export const SHORTCUT_TABLE_SIZE = 23;
 
 export interface ShortcutRegistry {
   /** 注册一条；键位冲突抛 ShortcutConflictError。 */

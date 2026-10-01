@@ -17,12 +17,9 @@
 import {
   isTaskSettledStatus,
   TASK_SETTLED_STATUSES,
-  type Task,
-  type TaskId,
   type TaskSettledStatus,
 } from "@ff-pane/shared";
 import { beforeEach, describe, expect, it } from "vitest";
-import { taskSettledEventOf } from "../src/main/session/task-settled";
 import {
   isInstantRead,
   isReadClearingPath,
@@ -42,34 +39,7 @@ import {
 const ROOT_A = "D:\\proj\\alpha";
 const ROOT_B = "D:\\proj\\beta";
 
-function taskWith(status: Task["status"]): Task {
-  return {
-    id: "task-1" as TaskId,
-    planVersion: 1 as Task["planVersion"],
-    goal: "测试任务",
-    writeScope: ["src/**"],
-    forbidden: [],
-    dependsOn: [],
-    contextRefs: [],
-    acceptance: ["单测全绿"],
-    status,
-  };
-}
-
-describe("T9.7 落定事件派生（主进程 saveTask 落盘点）", () => {
-  it("done / failed / blocked 三态各派生一条 tasks:settled 事件", () => {
-    for (const status of TASK_SETTLED_STATUSES) {
-      const event = taskSettledEventOf(ROOT_A, taskWith(status));
-      expect(event).toEqual({ projectRoot: ROOT_A, taskId: "task-1", status });
-    }
-  });
-
-  it("非落定状态（pending / running / accepted / cancelled）不派生事件", () => {
-    for (const status of ["pending", "running", "accepted", "cancelled"] as const) {
-      expect(taskSettledEventOf(ROOT_A, taskWith(status))).toBeNull();
-    }
-  });
-
+describe("任务落定状态守卫", () => {
   it("isTaskSettledStatus 守卫与三态清单一致，拒绝其余取值", () => {
     for (const status of TASK_SETTLED_STATUSES) {
       expect(isTaskSettledStatus(status)).toBe(true);
