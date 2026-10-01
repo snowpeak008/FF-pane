@@ -43,7 +43,7 @@ import {
 } from "../src/main/workbench/thread-store";
 import { handleMcpLine } from "../src/mcp/protocol";
 import { callControlTool, createWorkbenchMcpOptions } from "../src/mcp/workbench-server";
-import { WORKBENCH_MCP_TOOL_NAMES } from "../src/mcp/workbench-tools";
+import { WORKBENCH_MCP_TOOL_NAMES, WORKBENCH_MCP_TOOLS } from "../src/mcp/workbench-tools";
 
 const roots: string[] = [];
 
@@ -103,6 +103,9 @@ function harness(
   views: Record<string, ToolWindowView>;
   tree: Record<string, WorkbenchAuthNode>;
   reminders: { windowId: string; text: string }[];
+  outputCalls: { windowId: string; maxBytes: number }[];
+  closedIds: string[];
+  panels: { panel: string; title: string }[];
   deps: WorkbenchToolDeps;
 } {
   const views: Record<string, ToolWindowView> = {
@@ -120,6 +123,9 @@ function harness(
     E: node("E", "none"),
   };
   const reminders: { windowId: string; text: string }[] = [];
+  const outputCalls: { windowId: string; maxBytes: number }[] = [];
+  const closedIds: string[] = [];
+  const panels: { panel: string; title: string }[] = [];
   const cursor = new Map<string, string>();
   const getCursor = cursorStore?.get.bind(cursorStore) ?? (async (id: string) => cursor.get(id));
   const setCursor =
@@ -140,8 +146,28 @@ function harness(
     publishInbox: () => undefined,
     getCursor,
     setCursor,
+    readOutput: async (windowId, maxBytes) => {
+      outputCalls.push({ windowId, maxBytes });
+      return { running: true, status: "运行中", text: "ok \u001b[31mRED\u001b[0m" };
+    },
+    closeDescendant: {
+      findTerminalId: () => undefined,
+      killTerminal: () => undefined,
+      dropQueue: () => undefined,
+      revokeToken: (id) => {
+        closedIds.push(id);
+      },
+      releaseRuntime: () => undefined,
+      closeRegistered: () => undefined,
+      readLayouts: async () => ({}),
+      saveLayout: async () => undefined,
+      publishClosed: () => undefined,
+    },
+    openPanel: (panel, title) => {
+      panels.push({ panel, title });
+    },
   };
-  return { views, tree, reminders, deps };
+  return { views, tree, reminders, outputCalls, closedIds, panels, deps };
 }
 
 async function call(
@@ -229,10 +255,77 @@ describe("工具授权", () => {
     ).toContain("不能设定");
   });
 
-  it("不列出 T10.7b 的三个工具", () => {
-    expect(WORKBENCH_MCP_TOOL_NAMES).not.toContain("ffpane_read_output");
-    expect(WORKBENCH_MCP_TOOL_NAMES).not.toContain("ffpane_close_window");
-    expect(WORKBENCH_MCP_TOOL_NAMES).not.toContain("ffpane_open_panel");
+  it("列出读取、关闭和打开面板，描述与说明书一致", () => {
+    expect(WORKBENCH_MCP_TOOL_NAMES).toEqual(
+      expect.arrayContaining(["ffpane_read_output", "ffpane_close_window", "ffpane_open_panel"]),
+    );
+    const byName = new Map(WORKBENCH_MCP_TOOLS.map((tool) => [tool.name, tool.description]));
+    expect(byName.get("ffpane_read_output")).toContain("仅后代");
+    expect(byName.get("ffpane_read_output")).toContain("32KB");
+    expect(byName.get("ffpane_close_window")).toContain("仅后代");
+    expect(byName.get("ffpane_close_window")).toContain("父级已关闭");
+    expect(byName.get("ffpane_open_panel")).toContain("plan");
+    expect(byName.get("ffpane_open_panel")).toContain("tasks");
+    expect(byName.get("ffpane_open_panel")).toContain("runs");
+  });
+});
+
+describe("读取、关闭与打开面板", () => {
+  it("只有祖先能读和关后代，任何人能打开面板，连点被拒绝", async () => {
+    const { deps, closedIds, panels } = harness(tempDir());
+    expect((await call(deps, "A", "ffpane_read_output", { windowId: "B" })).isError).toBe(false);
+    expect((await call(deps, "A", "ffpane_close_window", { windowId: "B" })).isError).toBe(false);
+    expect(closedIds).toEqual(["B"]);
+    for (const [caller, target] of [
+      ["B", "A"],
+      ["B", "D"],
+      ["B", "B"],
+      ["E", "B"],
+    ] as const) {
+      expect((await call(deps, caller, "ffpane_read_output", { windowId: target })).text).toContain(
+        "后代",
+      );
+      expect(
+        (await call(deps, caller, "ffpane_close_window", { windowId: target })).text,
+      ).toContain("后代");
+    }
+    expect(closedIds).toEqual(["B"]);
+    for (const caller of ["A", "B", "E"]) {
+      expect((await call(deps, caller, "ffpane_open_panel", { panel: "tasks" })).isError).toBe(
+        false,
+      );
+    }
+    expect(panels.map((item) => item.panel)).toEqual(["tasks", "tasks", "tasks"]);
+    expect((await call(deps, "A", "ffpane_open_panel", { panel: "runs" })).text).toContain("频繁");
+    expect((await call(deps, "A", "ffpane_open_panel", { panel: "nope" })).text).toContain("panel");
+  });
+
+  it("读取去掉 ANSI，并夹紧字节上限", async () => {
+    const { deps, outputCalls } = harness(tempDir());
+    const capped = await call(deps, "A", "ffpane_read_output", {
+      windowId: "B",
+      maxBytes: 100_000,
+    });
+    expect(capped.isError).toBe(false);
+    expect(outputCalls[0]).toEqual({ windowId: "B", maxBytes: 32_768 });
+    expect(capped.json).toMatchObject({ running: true, text: "ok RED" });
+    expect(String((capped.json as { text: string }).text)).not.toContain("\u001b");
+
+    const fallback = await call(deps, "A", "ffpane_read_output", { windowId: "C" });
+    expect(outputCalls[1]).toEqual({ windowId: "C", maxBytes: 8192 });
+    expect(fallback.isError).toBe(false);
+
+    const idle = await call(
+      {
+        ...deps,
+        readOutput: async () => ({ running: false, status: "该窗口的终端已退出。" }),
+      },
+      "A",
+      "ffpane_read_output",
+      { windowId: "B" },
+    );
+    expect(idle.isError).toBe(false);
+    expect(idle.json).toEqual({ running: false, status: "该窗口的终端已退出。" });
   });
 });
 

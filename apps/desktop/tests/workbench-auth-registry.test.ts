@@ -5,6 +5,7 @@
 import type { ProjectWorkbenchLayout } from "@ff-pane/shared";
 import { describe, expect, it } from "vitest";
 import { createWorkbenchAuthRegistry } from "../src/main/workbench/auth-registry";
+import { decideManagerGrantRestore } from "../src/main/workbench/manager-grant";
 
 function layoutWith(windows: ProjectWorkbenchLayout["windows"]): ProjectWorkbenchLayout {
   const ids = Object.keys(windows);
@@ -128,4 +129,207 @@ describe("createWorkbenchAuthRegistry", () => {
     expect(again.windows["w"]?.role).toBe("manager");
     expect(registry.get("w")?.role).toBe("manager");
   });
+
+  it("冷启动按磁盘父子封顶，手改的 yolo 不能当成顶层授权", () => {
+    const registry = createWorkbenchAuthRegistry();
+    const restored = registry.restoreColdLayout(
+      layoutWith({
+        parent: win("parent", { permission: "edit", role: "manager" }),
+        child: win("child", {
+          permission: "yolo",
+          role: "worker",
+          parentWindowId: "parent",
+          openedBy: { windowId: "parent" },
+        }),
+      }),
+    );
+    expect(restored.windows["child"]?.parentWindowId).toBe("parent");
+    expect(restored.windows["child"]?.permission).toBe("edit");
+    expect(restored.windows["child"]?.permissionNeedsDowngrade).toBe(true);
+    expect(registry.isManagerGranted("parent")).toBe(false);
+    expect(registry.isManagerGranted("child")).toBe(false);
+  });
+
+  it("冷读的子管理者只显示待恢复，不授予开窗口", () => {
+    const registry = createWorkbenchAuthRegistry();
+    const restored = registry.restoreColdLayout(
+      layoutWith({
+        parent: win("parent", { permission: "edit", role: "manager" }),
+        child: win("child", {
+          permission: "edit",
+          role: "manager",
+          parentWindowId: "parent",
+          openedBy: { windowId: "parent" },
+          managerGrantPending: true,
+        }),
+      }),
+    );
+    expect(registry.isManagerGranted("child")).toBe(false);
+    expect(registry.isManagerGranted("parent")).toBe(false);
+    expect(restored.windows["child"]?.managerGrantPending).toBe(true);
+    expect(restored.windows["parent"]?.managerGrantPending).toBeUndefined();
+  });
+
+  it("冷启动成环后断开父级并降为只读", () => {
+    const registry = createWorkbenchAuthRegistry();
+    const restored = registry.restoreColdLayout(
+      layoutWith({
+        A: win("A", { permission: "yolo", parentWindowId: "B", openedBy: "user" }),
+        B: win("B", { permission: "yolo", parentWindowId: "A", openedBy: "user" }),
+      }),
+    );
+    expect(restored.windows["A"]?.parentWindowId).toBeUndefined();
+    expect(restored.windows["B"]?.parentWindowId).toBeUndefined();
+    expect(restored.windows["A"]?.parentClosed).toBe(true);
+    expect(restored.windows["B"]?.parentClosed).toBe(true);
+    expect(restored.windows["A"]?.permission).toBe("read-only");
+    expect(restored.windows["B"]?.permission).toBe("read-only");
+    expect(registry.get("A")?.parentWindowId).toBeUndefined();
+  });
+
+  it("冷启动：没有父级且不是用户开启，降为只读，启动不采用请求值", () => {
+    const registry = createWorkbenchAuthRegistry();
+    const restored = registry.restoreColdLayout(
+      layoutWith({
+        child: win("child", {
+          permission: "yolo",
+          openedBy: { windowId: "gone" },
+        }),
+      }),
+    );
+    expect(restored.windows["child"]?.permission).toBe("read-only");
+    expect(restored.windows["child"]?.parentWindowId).toBeUndefined();
+    expect(registry.get("child")?.sanitizeLocked).toBe(true);
+    expect(registry.resolveLaunch("child", "yolo")).toEqual({
+      effective: "read-only",
+      capped: true,
+      cycle: false,
+    });
+  });
+
+  it("冷启动：父级 id 不在树上且不是用户开启，同样只读", () => {
+    const registry = createWorkbenchAuthRegistry();
+    const restored = registry.restoreColdLayout(
+      layoutWith({
+        child: win("child", {
+          permission: "yolo",
+          parentWindowId: "missing",
+          openedBy: { windowId: "missing" },
+        }),
+      }),
+    );
+    expect(restored.windows["child"]?.permission).toBe("read-only");
+    expect(registry.resolveLaunch("child", "yolo").effective).toBe("read-only");
+  });
+
+  it("用户开启且没有父级的 yolo 冷启动保持 yolo", () => {
+    const registry = createWorkbenchAuthRegistry();
+    const restored = registry.restoreColdLayout(
+      layoutWith({
+        top: win("top", { permission: "yolo", role: "manager" }),
+      }),
+    );
+    expect(restored.windows["top"]?.permission).toBe("yolo");
+    expect(registry.resolveLaunch("top", "yolo").effective).toBe("yolo");
+    expect(
+      decideManagerGrantRestore({
+        role: "manager",
+        openedBy: "user",
+        parentGranted: false,
+        alreadyGranted: false,
+        sanitizeLocked: registry.get("top")?.sanitizeLocked === true,
+      }),
+    ).toBe("user-reauth");
+  });
+
+  it("成环清洗后重复 syncLayout 不得用磁盘 yolo 或 openedBy=user 抬回来", () => {
+    const registry = createWorkbenchAuthRegistry();
+    const disk = layoutWith({
+      A: win("A", { permission: "yolo", role: "manager", parentWindowId: "B", openedBy: "user" }),
+      B: win("B", { permission: "yolo", role: "manager", parentWindowId: "A", openedBy: "user" }),
+    });
+    registry.restoreColdLayout(disk);
+    const again = registry.syncLayout(disk);
+    const third = registry.syncLayout(disk);
+    for (const cleaned of [again, third]) {
+      expect(cleaned.windows["A"]?.permission).toBe("read-only");
+      expect(cleaned.windows["A"]?.parentWindowId).toBeUndefined();
+      expect(cleaned.windows["B"]?.permission).toBe("read-only");
+    }
+    expect(registry.get("A")?.openedBy).toBe("user");
+    expect(registry.isManagerGranted("A")).toBe(false);
+    expect(
+      decideManagerGrantRestore({
+        role: "manager",
+        openedBy: registry.get("A")?.openedBy ?? "user",
+        parentGranted: false,
+        alreadyGranted: false,
+        sanitizeLocked: registry.get("A")?.sanitizeLocked === true,
+      }),
+    ).toBe("none");
+  });
+
+  it("父级缺失后，磁盘把 openedBy 改成 user 也不能覆盖注册表", () => {
+    const registry = createWorkbenchAuthRegistry();
+    const first = layoutWith({
+      child: win("child", {
+        permission: "yolo",
+        parentWindowId: "missing",
+        openedBy: { windowId: "missing" },
+      }),
+    });
+    registry.restoreColdLayout(first);
+    const forged = layoutWith({
+      child: win("child", { permission: "yolo", openedBy: "user", role: "manager" }),
+    });
+    const again = registry.syncLayout(forged);
+    expect(again.windows["child"]?.permission).toBe("read-only");
+    expect(again.windows["child"]?.openedBy).toEqual({ windowId: "missing" });
+    expect(registry.resolveLaunch("child", "yolo").effective).toBe("read-only");
+    expect(
+      decideManagerGrantRestore({
+        role: "manager",
+        openedBy: registry.get("child")?.openedBy ?? "user",
+        parentGranted: false,
+        alreadyGranted: false,
+        sanitizeLocked: true,
+      }),
+    ).toBe("none");
+  });
+
+  it("界面显式改权限后可以提升，未调用则重复同步仍是只读", () => {
+    const registry = createWorkbenchAuthRegistry();
+    const disk = layoutWith({
+      child: win("child", {
+        permission: "yolo",
+        openedBy: { windowId: "gone" },
+      }),
+    });
+    registry.restoreColdLayout(disk);
+    expect(registry.syncLayout(disk).windows["child"]?.permission).toBe("read-only");
+    expect(registry.applyUserPermission("child", "edit")).toBe(true);
+    expect(registry.get("child")?.sanitizeLocked).toBeUndefined();
+    const raised = registry.syncLayout(disk);
+    expect(raised.windows["child"]?.permission).toBe("edit");
+    expect(registry.resolveLaunch("child", "yolo").effective).toBe("edit");
+  });
 });
+
+function win(
+  id: string,
+  patch: Partial<ProjectWorkbenchLayout["windows"][string]>,
+): ProjectWorkbenchLayout["windows"][string] {
+  return {
+    id,
+    projectId: "proj-1" as never,
+    title: id,
+    kind: "claude",
+    cwd: "D:\\x",
+    createdAt: 0,
+    permission: "edit",
+    openedBy: "user",
+    role: "none",
+    profileId: "p1",
+    ...patch,
+  };
+}

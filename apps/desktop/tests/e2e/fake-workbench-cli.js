@@ -125,6 +125,11 @@ async function main() {
   }
   const me = JSON.parse(who.text);
   if (me.parent !== null && me.parent !== undefined) {
+    process.stdout.write("FFPANE_CHILD_MARKER=1\n");
+    if (process.env.FFPANE_WB_SCRIPT === "close") {
+      keepAlive();
+      return;
+    }
     const report = await tool("ffpane_report", { status: "done", summary: "前端完成" });
     const opened = await tool("ffpane_open_window", {
       cli: "claude",
@@ -139,6 +144,89 @@ async function main() {
     process.stdout.write(`FFPANE_MCP_WORKER_REPORT=${report.isError ? "error" : "ok"}\n`);
     process.stdout.write(`FFPANE_MCP_WORKER_OPEN=${opened.isError ? "denied" : "allowed"}\n`);
     process.stdout.write(`FFPANE_MCP_WORKER_SEND=${sent.isError ? "denied" : "allowed"}\n`);
+    keepAlive();
+    return;
+  }
+
+  if (process.env.FFPANE_WB_SCRIPT === "close") {
+    const role = await tool("ffpane_set_role", { windowId: me.windowId, role: "manager" });
+    if (role.isError) {
+      process.stdout.write(`FFPANE_MCP_ERROR=${role.text}\n`);
+      keepAlive();
+      return;
+    }
+    const opened = await tool("ffpane_open_window", {
+      cli: "claude",
+      role: "worker",
+      permission: "yolo",
+      title: "前端关",
+    });
+    if (opened.isError) {
+      process.stdout.write(`FFPANE_MCP_ERROR=${opened.text}\n`);
+      keepAlive();
+      return;
+    }
+    const child = JSON.parse(opened.text);
+    let seen = false;
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const output = await tool("ffpane_read_output", { windowId: child.windowId });
+      if (!output.isError && output.text.includes("FFPANE_CHILD_MARKER=1")) {
+        seen = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    process.stdout.write(`FFPANE_MCP_READ=${seen ? "yes" : "no"}\n`);
+    const closed = await tool("ffpane_close_window", { windowId: child.windowId });
+    process.stdout.write(`FFPANE_MCP_CLOSE=${closed.isError ? "error" : "ok"}\n`);
+    const panel = await tool("ffpane_open_panel", { panel: "tasks" });
+    process.stdout.write(`FFPANE_MCP_PANEL=${panel.isError ? "error" : "ok"}\n`);
+    keepAlive();
+    return;
+  }
+
+  if (process.env.FFPANE_WB_SCRIPT === "restart") {
+    if (me.role === "manager") {
+      let opened = await tool("ffpane_open_window", {
+        cli: "claude",
+        role: "worker",
+        permission: "edit",
+        title: "前端B",
+      });
+      for (let attempt = 0; attempt < 20 && opened.isError; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        opened = await tool("ffpane_open_window", {
+          cli: "claude",
+          role: "worker",
+          permission: "edit",
+          title: "前端B",
+        });
+      }
+      process.stdout.write(`FFPANE_MCP_REOPEN=${opened.isError ? "error" : "ok"}\n`);
+      keepAlive();
+      return;
+    }
+    const role = await tool("ffpane_set_role", { windowId: me.windowId, role: "manager" });
+    if (role.isError) {
+      process.stdout.write(`FFPANE_MCP_ERROR=${role.text}\n`);
+      keepAlive();
+      return;
+    }
+    const opened = await tool("ffpane_open_window", {
+      cli: "claude",
+      role: "worker",
+      permission: "yolo",
+      title: "前端A",
+    });
+    if (opened.isError) {
+      process.stdout.write(`FFPANE_MCP_ERROR=${opened.text}\n`);
+      keepAlive();
+      return;
+    }
+    const child = JSON.parse(opened.text);
+    await tool("ffpane_send_message", { windowId: child.windowId, text: "开始吧" });
+    process.stdout.write(`FFPANE_MCP_CHILD=${child.windowId}\n`);
+    process.stdout.write("FFPANE_MCP_READY=1\n");
     keepAlive();
     return;
   }

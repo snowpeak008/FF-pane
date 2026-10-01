@@ -365,13 +365,24 @@
       "badgeHint": "点击或右键，把这个窗口设为某个角色",
       "notAi": "当前焦点不是 AI 窗口",
       "rejected": "不能把这个窗口设成该角色",
-      "dropped": "窗口已退出，角色说明没写进去。下次启动会自动注入"
+      "dropped": "窗口已退出，角色说明没写进去。下次启动会自动注入",
+      "grantPending": "管理权待恢复"
+    },
+    "resumeConfirm": {
+      "title": "确认启动这个窗口？",
+      "body": "权限是「{{permission}}」，角色是「{{role}}」。YOLO 会完全放开命令审批；管理者启动后可以再开子窗口。取消则不会启动。",
+      "confirm": "启动",
+      "cancel": "取消"
+    },
+    "panel": {
+      "openedBy": "由 {{title}} 打开"
     },
     "deliver": {
       "pending": "有 {{count}} 条待投递",
       "send": "立即发送",
       "cancel": "取消",
-      "blocked": "正在等待权限确认，暂不发送",
+      "cancelHint": "取消只丢掉还没发出的队列，不会清掉未完成的权限确认。",
+      "blocked": "正在等待权限确认，暂不发送。确认框已经关掉的话，在这个窗口再发一句，或关掉重开。",
       "busy": "本回合还没结束，暂不发送",
       "noNode": "没有可用的 node.exe，收不到回合结束信号。有待投递内容时请点立即发送。",
       "codexManualHint": "若画面上有确认框请勿点击"

@@ -78,6 +78,8 @@ export interface LaunchOptions {
    * 缺省则新建空临时目录。
    */
   readonly codexHome?: string;
+  /** 追加到 Electron 进程环境。子进程会继承，供假 CLI 选择脚本。 */
+  readonly extraEnv?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -109,6 +111,11 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
       existing === undefined
         ? options.pathPrepend
         : `${options.pathPrepend}${delimiter}${existing}`;
+  }
+  if (options.extraEnv !== undefined) {
+    for (const [key, value] of Object.entries(options.extraEnv)) {
+      env[key] = value;
+    }
   }
 
   const app = await _electron.launch({

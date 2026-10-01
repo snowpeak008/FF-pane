@@ -42,9 +42,11 @@ import { releaseWindowHooks } from "./hook-launch";
 import { createIdleDeliverQueue, type IdleDeliverQueue } from "./idle-deliver";
 import { createInboxCursorStore, inboxCursorPath } from "./inbox-cursor";
 import { assertLaunchCliIpcSafe, launchCliWindow, WorkbenchMcpTempRegistry } from "./launch-cli";
+import { decideManagerGrantRestore } from "./manager-grant";
 import { cleanupStaleWorkbenchMcpDirs } from "./mcp-temp";
 import { executeWorkbenchTool } from "./mcp-tools";
 import { openChildWindow } from "./open-child";
+import { clampReadOutputBytes, takeUtf8Tail } from "./output-text";
 import {
   composeWindowRolePrompt,
   listRoleManuals,
@@ -59,17 +61,20 @@ import {
   resolveWorkbenchRoleResourcesDir,
 } from "./role-resources";
 import { setWindowRole } from "./set-role";
+import { readThreadIndexTail, summarizeInboxBadges } from "./thread-store";
 
 export interface WorkbenchCliLayer {
   readonly handlers: Pick<
     InvokeHandlers,
     | "workbench:launch-cli"
     | "workbench:set-role"
+    | "workbench:set-permission"
     | "workbench:deliver-now"
     | "workbench:deliver-cancel"
     | "workbench:list-role-manuals"
     | "workbench:save-role-manual"
     | "workbench:reset-role-manual"
+    | "workbench:inbox-badges"
   >;
   readonly mcpRegistry: WorkbenchMcpTempRegistry;
   readonly codexClaimer: CodexSessionClaimer;
@@ -218,11 +223,10 @@ export async function createWorkbenchCliLayer(
       if (terminalId === undefined) {
         return;
       }
-      idleQueue.noteHook(
-        terminalId,
-        signal,
-        meta?.toolUseId !== undefined ? { toolUseId: meta.toolUseId } : undefined,
-      );
+      idleQueue.noteHook(terminalId, signal, {
+        ...(meta?.toolUseId !== undefined ? { toolUseId: meta.toolUseId } : {}),
+        ...(meta?.toolDigest !== undefined ? { toolDigest: meta.toolDigest } : {}),
+      });
     },
     log: (message) => {
       console.error(`[wb-control] ${message}`);
@@ -232,6 +236,85 @@ export async function createWorkbenchCliLayer(
   const lastProfileByRuntime = new Map<string, string>();
   const projects = createProjectRegistry(layout.projectsFile);
   const cursors = createInboxCursorStore(inboxCursorPath(layout.rootDir));
+  const roleDeps = () => ({
+    authRegistry,
+    readLayouts: () => layouts.readAll(),
+    saveLayout: (next: import("@ff-pane/shared").ProjectWorkbenchLayout) =>
+      layouts.saveProject(next),
+    findLiveTerminalId,
+    idleQueue,
+    manualPath: (role: import("@ff-pane/shared").WorkbenchRole) =>
+      resolveRoleSwitchManualPath(resourcesDir, overridesDir, role),
+  });
+  const publishManagerGrant = (projectId: string, windowId: string, pending: boolean): void => {
+    const browser = options.getWindow();
+    if (browser === null || browser.isDestroyed()) {
+      return;
+    }
+    publishEvent(browser.webContents, "workbench:manager-grant", {
+      projectId: projectId as ProjectId,
+      windowId,
+      managerGrantPending: pending,
+    });
+  };
+  const setManagerPending = async (windowId: string, pending: boolean): Promise<void> => {
+    const all = await layouts.readAll();
+    for (const current of Object.values(all)) {
+      const window = current.windows[windowId];
+      if (window === undefined) {
+        continue;
+      }
+      const nextWindow = pending
+        ? { ...window, managerGrantPending: true as const }
+        : (() => {
+            const { managerGrantPending: _flag, ...rest } = window;
+            void _flag;
+            return rest;
+          })();
+      await layouts.saveProject({
+        ...current,
+        windows: { ...current.windows, [windowId]: nextWindow },
+      });
+      publishManagerGrant(current.projectId, windowId, pending);
+      return;
+    }
+  };
+  const reconcileManagerGrant = async (windowId: string): Promise<void> => {
+    const node = authRegistry.get(windowId);
+    if (node === undefined) {
+      return;
+    }
+    const parentId = node.parentWindowId;
+    const parent = parentId !== undefined ? authRegistry.get(parentId) : undefined;
+    const action = decideManagerGrantRestore({
+      role: node.role,
+      openedBy: node.openedBy,
+      ...(parentId !== undefined ? { parentWindowId: parentId } : {}),
+      ...(parent?.role !== undefined ? { parentRole: parent.role } : {}),
+      parentGranted: parentId !== undefined && authRegistry.isManagerGranted(parentId),
+      alreadyGranted: authRegistry.isManagerGranted(windowId),
+      sanitizeLocked: node.sanitizeLocked === true,
+      userRoleSet: node.userRoleSet === true,
+    });
+    if (action === "user-reauth") {
+      await setWindowRole({ kind: "user" }, windowId, "manager", roleDeps(), { deliver: false });
+      await setManagerPending(windowId, false);
+      return;
+    }
+    if (action === "inherit") {
+      authRegistry.grantManager(windowId);
+      await setManagerPending(windowId, false);
+      return;
+    }
+    if (action === "pending") {
+      authRegistry.clearManagerGrant(windowId);
+      await setManagerPending(windowId, true);
+      return;
+    }
+    if (action === "already") {
+      await setManagerPending(windowId, false);
+    }
+  };
   const launchDeps = () => ({
     manager: options.manager,
     getProfile: (id: string) => profiles.getProfile(id as never),
@@ -302,6 +385,10 @@ export async function createWorkbenchCliLayer(
         nativeSessionId,
       });
     },
+    onWindowLaunched: (windowId: string) =>
+      reconcileManagerGrant(windowId).catch((error: unknown) => {
+        console.error(`[wb-grant] ${String(error)}`);
+      }),
   });
 
   const handlers: WorkbenchCliLayer["handlers"] = {
@@ -349,18 +436,26 @@ export async function createWorkbenchCliLayer(
       if (!isWorkbenchRole(request.role)) {
         throw new Error("invalid workbench role");
       }
-      const result = await setWindowRole({ kind: "user" }, request.windowId, request.role, {
-        authRegistry,
-        readLayouts: () => layouts.readAll(),
-        saveLayout: (next) => layouts.saveProject(next),
-        findLiveTerminalId,
-        idleQueue,
-        manualPath: (role) => resolveRoleSwitchManualPath(resourcesDir, overridesDir, role),
-      });
+      const result = await setWindowRole(
+        { kind: "user" },
+        request.windowId,
+        request.role,
+        roleDeps(),
+      );
       if (!result.ok) {
         throw new Error(`set-role ${result.reason}`);
       }
       return { ok: true as const, role: result.role, delivery: result.delivery };
+    },
+    "workbench:set-permission": (request) => {
+      if (!isWorkbenchPermissionLevel(request.permission)) {
+        throw new Error("invalid workbench permission");
+      }
+      const applied = authRegistry.applyUserPermission(request.windowId, request.permission);
+      if (!applied) {
+        throw new Error("set-permission unknown-window");
+      }
+      return { ok: true as const, permission: request.permission };
     },
     "workbench:deliver-now": (request) => {
       const terminalId = findLiveTerminalId(request.windowId);
@@ -402,6 +497,36 @@ export async function createWorkbenchCliLayer(
       const manuals = await listRoleManuals(resourcesDir, overridesDir);
       const manual = manuals.find((item) => item.id === request.id);
       return { ok: true as const, content: manual?.defaultContent ?? "" };
+    },
+    "workbench:inbox-badges": async () => {
+      const all = await layouts.readAll();
+      const listed = await projects.listProjects();
+      const badges: Record<
+        string,
+        {
+          readonly unread: number;
+          readonly lastReportStatus?: "done" | "blocked" | "failed" | "progress";
+        }
+      > = {};
+      for (const current of Object.values(all)) {
+        const project = listed.find((item) => item.id === current.projectId);
+        if (project === undefined) {
+          continue;
+        }
+        const records = await readThreadIndexTail(project.rootPath);
+        const windowIds = Object.keys(current.windows);
+        const cursorOf = new Map<string, string | undefined>();
+        for (const windowId of windowIds) {
+          cursorOf.set(windowId, await cursors.get(windowId));
+        }
+        const summary = summarizeInboxBadges(records, windowIds, (windowId) =>
+          cursorOf.get(windowId),
+        );
+        for (const [windowId, badge] of Object.entries(summary)) {
+          badges[windowId] = badge;
+        }
+      }
+      return { badges };
     },
   };
 
@@ -467,15 +592,7 @@ export async function createWorkbenchCliLayer(
         };
       },
       setRole: (callerId, targetId, role) =>
-        setWindowRole({ kind: "window", windowId: callerId }, targetId, role, {
-          authRegistry,
-          readLayouts: () => layouts.readAll(),
-          saveLayout: (next) => layouts.saveProject(next),
-          findLiveTerminalId,
-          idleQueue,
-          manualPath: (manualRole) =>
-            resolveRoleSwitchManualPath(resourcesDir, overridesDir, manualRole),
-        }),
+        setWindowRole({ kind: "window", windowId: callerId }, targetId, role, roleDeps()),
       openChild: (callerId, childArgs) =>
         openChildWindow(callerId, childArgs, {
           authRegistry,
@@ -549,6 +666,72 @@ export async function createWorkbenchCliLayer(
       },
       getCursor: (windowId) => cursors.get(windowId),
       setCursor: (windowId, lastReadId) => cursors.set(windowId, lastReadId),
+      readOutput: async (windowId, maxBytes) => {
+        const bytes = clampReadOutputBytes(maxBytes);
+        let exited = false;
+        let liveId: string | undefined;
+        for (const record of options.manager.list()) {
+          if (record.metadata?.["windowId"] !== windowId) {
+            continue;
+          }
+          if (record.exited) {
+            exited = true;
+            continue;
+          }
+          liveId = record.id;
+        }
+        if (liveId === undefined) {
+          return {
+            running: false as const,
+            status: exited ? "该窗口的终端已退出。" : "该窗口还没有启动。",
+          };
+        }
+        return {
+          running: true as const,
+          status: "运行中",
+          text: takeUtf8Tail(options.manager.getReplayBuffer(liveId), bytes),
+        };
+      },
+      closeDescendant: {
+        findTerminalId: findLiveTerminalId,
+        killTerminal: (terminalId) => {
+          options.manager.kill(terminalId);
+        },
+        dropQueue: (terminalId) => {
+          idleQueue.drop(terminalId);
+        },
+        revokeToken: (windowId) => {
+          tokenRegistry.revoke(windowId);
+        },
+        releaseRuntime: (windowId) => {
+          void mcpRegistry.release(windowId);
+          codexClaimer.cancel(windowId);
+          releaseWindowHooks(windowId);
+          void rolePromptTemps.release(windowId);
+        },
+        closeRegistered: (windowId) => {
+          authRegistry.closeRegistered(windowId);
+        },
+        readLayouts: () => layouts.readAll(),
+        saveLayout: (next) => layouts.saveProject(next),
+        publishClosed: (projectId, windowId) => {
+          const browser = options.getWindow();
+          if (browser === null || browser.isDestroyed()) {
+            return;
+          }
+          publishEvent(browser.webContents, "workbench:window-closed", {
+            projectId: projectId as ProjectId,
+            windowId,
+          });
+        },
+      },
+      openPanel: (panel, openerTitle) => {
+        const browser = options.getWindow();
+        if (browser === null || browser.isDestroyed()) {
+          return;
+        }
+        publishEvent(browser.webContents, "workbench:open-panel", { panel, openerTitle });
+      },
     });
     return { ok: true, result };
   };

@@ -12,9 +12,11 @@
  * - 正文不含换行；正文与回车分两次 write。写出回车后记为忙，下一条要等下一次回合结束。
  * - 手动“立即发送”一次只发队首。其余继续等下一次回合结束或用户再次点击。
  * - PermissionRequest 使未决权限计数 +1。计数 > 0 时 Stop 与“立即发送”都不写入。
- *   只有带上同一 tool_use_id 的 PostToolUse / PostToolUseFailure 才能 −1。
- *   对不上的工具结束信号不减计数。没有 id 的请求无法配对，只有 UserPromptSubmit
- *   或窗口重启（丢掉该终端会话）才把计数清零。减到 0 后记为 busy，还要再等一次 Stop 才投递。
+ *   有合法 tool_use_id 时优先用它配对。没有 id 时按 tool_name + 规范化 tool_input
+ *   的摘要计入多重集，同摘要的 PostToolUse / PostToolUseFailure 才 −1。
+ *   摘要对不上（例如批准时改了输入）不减计数。两者都没有时无法配对，只有
+ *   UserPromptSubmit 或窗口重启才清零。权限被拒绝且没有结束事件时继续闩住。
+ *   伪造的 Stop 在计数 > 0 时不解锁。减到 0 后记为 busy，还要再等一次 Stop 才投递。
  */
 
 export const DEFAULT_OUTPUT_QUIET_MS = 1500;
@@ -90,9 +92,10 @@ export interface IdleDeliverAttachOptions {
   readonly windowId?: string;
 }
 
-/** hook 上报里只带配对用的 id，不带工具正文。 */
+/** hook 上报里只带配对用的 id 或摘要，不带工具正文。 */
 export interface HookNoteMeta {
   readonly toolUseId?: string;
+  readonly toolDigest?: string;
 }
 
 export interface IdleDeliverQueue {
@@ -126,9 +129,11 @@ interface QueuedItem {
 
 interface Session {
   phase: DeliverPhase;
-  /** 能配对的未决权限（tool_use_id）。 */
+  /** 能按 tool_use_id 配对的未决权限。 */
   pendingPermissionIds: Set<string>;
-  /** 没有 id、无法配对的未决权限。只由用户新提交或窗口重启清零。 */
+  /** 没有 id 时按摘要计入的多重集。同一次输入可以叠多次。 */
+  pendingPermissionDigests: Map<string, number>;
+  /** 没有 id 也没有摘要、无法配对的未决权限。只由用户新提交或窗口重启清零。 */
   unpairedPermissions: number;
   initialPromptPending: boolean;
   lastInputAt: number;
@@ -137,14 +142,30 @@ interface Session {
 }
 
 const TOOL_USE_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
+const TOOL_DIGEST = /^[a-f0-9]{64}$/;
 
 function cleanToolUseId(value: string | undefined): string | undefined {
   const trimmed = value?.trim() ?? "";
   return TOOL_USE_ID.test(trimmed) ? trimmed : undefined;
 }
 
+function cleanToolDigest(value: string | undefined): string | undefined {
+  const trimmed = value?.trim() ?? "";
+  return TOOL_DIGEST.test(trimmed) ? trimmed : undefined;
+}
+
+function digestOutstanding(session: Session): number {
+  let total = 0;
+  for (const count of session.pendingPermissionDigests.values()) {
+    total += count;
+  }
+  return total;
+}
+
 function permissionOutstanding(session: Session): number {
-  return session.pendingPermissionIds.size + session.unpairedPermissions;
+  return (
+    session.pendingPermissionIds.size + digestOutstanding(session) + session.unpairedPermissions
+  );
 }
 
 function isSingleLine(text: string): boolean {
@@ -192,6 +213,7 @@ export function createIdleDeliverQueue(deps: IdleDeliverDeps): IdleDeliverQueue 
     const created: Session = {
       phase: "unknown",
       pendingPermissionIds: new Set(),
+      pendingPermissionDigests: new Map(),
       unpairedPermissions: 0,
       initialPromptPending: false,
       lastInputAt: 0,
@@ -342,20 +364,32 @@ export function createIdleDeliverQueue(deps: IdleDeliverDeps): IdleDeliverQueue 
     noteHook(terminalId, signal, meta) {
       const session = ensure(terminalId);
       const toolUseId = cleanToolUseId(meta?.toolUseId);
+      const toolDigest = cleanToolDigest(meta?.toolDigest);
       if (signal === "permission-request") {
         if (toolUseId !== undefined) {
           session.pendingPermissionIds.add(toolUseId);
+        } else if (toolDigest !== undefined) {
+          const count = session.pendingPermissionDigests.get(toolDigest) ?? 0;
+          session.pendingPermissionDigests.set(toolDigest, count + 1);
         } else {
           session.unpairedPermissions += 1;
         }
         session.phase = "blocked";
       } else if (signal === "post-tool-use" || signal === "post-tool-use-failure") {
-        if (toolUseId !== undefined) {
-          session.pendingPermissionIds.delete(toolUseId);
+        const pairedById =
+          toolUseId !== undefined && session.pendingPermissionIds.delete(toolUseId);
+        if (!pairedById && toolDigest !== undefined) {
+          const count = session.pendingPermissionDigests.get(toolDigest) ?? 0;
+          if (count > 1) {
+            session.pendingPermissionDigests.set(toolDigest, count - 1);
+          } else if (count === 1) {
+            session.pendingPermissionDigests.delete(toolDigest);
+          }
         }
         session.phase = permissionOutstanding(session) > 0 ? "blocked" : "busy";
       } else if (signal === "user-prompt-submit") {
         session.pendingPermissionIds.clear();
+        session.pendingPermissionDigests.clear();
         session.unpairedPermissions = 0;
         session.initialPromptPending = false;
         session.phase = "busy";

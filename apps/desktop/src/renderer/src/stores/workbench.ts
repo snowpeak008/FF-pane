@@ -20,10 +20,10 @@ import {
   WORKBENCH_PERMISSION_RANK,
 } from "@ff-pane/shared";
 import { create } from "zustand";
+import { detachWindowFromLayout } from "../../../shared/workbench/detach-window";
 import {
   collectWindowIds,
   leafPane,
-  removeLeaf,
   splitLeaf,
   updateSplitSizesByKey,
 } from "../../../shared/workbench/pane-tree";
@@ -114,6 +114,7 @@ export interface WorkbenchStoreActions {
       role: WorkbenchRole;
       permissionNeedsDowngrade: boolean;
       parentClosed: boolean;
+      managerGrantPending: boolean;
     }>,
   ) => void;
   /** 用户调整权限：封顶后代并标记需重启。 */
@@ -163,6 +164,8 @@ export interface WorkbenchStoreActions {
   readonly dropProject: (projectId: ProjectId) => void;
   /** 主进程已经启动的子窗口：先记住 PTY，再放进当前布局。 */
   readonly acceptOpenedWindow: (event: WorkbenchChildWindowEvent) => void;
+  /** ffpane_close_window 已杀 PTY 并落盘；渲染端只同步布局。 */
+  readonly acceptClosedWindow: (projectId: ProjectId, windowId: string) => void;
   readonly applyInboxNotice: (event: WorkbenchInboxNoticeEvent) => void;
 }
 
@@ -332,7 +335,12 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
       return;
     }
     const reconciled = await reconcileWithLiveTerminals(settled.data);
-    set({ layoutsByProject: reconciled, hydrated: true });
+    const badges = await invokeQuery("workbench:inbox-badges");
+    set({
+      layoutsByProject: reconciled,
+      hydrated: true,
+      ...(badges.status === "success" ? { inboxByWindow: badges.data.badges } : {}),
+    });
   },
 
   getProjectLayout(projectId) {
@@ -519,6 +527,17 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
       if (patch.parentClosed !== undefined) {
         Object.assign(next, { parentClosed: patch.parentClosed });
       }
+      if (patch.managerGrantPending === false) {
+        const { managerGrantPending: _flag, ...rest } = next;
+        void _flag;
+        return {
+          ...current,
+          windows: { ...current.windows, [windowId]: rest },
+        };
+      }
+      if (patch.managerGrantPending === true) {
+        Object.assign(next, { managerGrantPending: true });
+      }
       return {
         ...current,
         windows: { ...current.windows, [windowId]: next },
@@ -642,42 +661,7 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
       await invokeQuery("terminal:kill", { id: window.terminalId });
     }
     forgetLiveTerminals([windowId]);
-    patchProject(set, get, projectId, (current) => {
-      const nextWindows: Record<string, WorkbenchWindow> = {};
-      for (const [id, node] of Object.entries(current.windows)) {
-        if (id === windowId) {
-          continue;
-        }
-        if (node.parentWindowId === windowId) {
-          nextWindows[id] = { ...node, parentClosed: true };
-        } else {
-          nextWindows[id] = node;
-        }
-      }
-      const tabs: WorkbenchTab[] = [];
-      for (const tab of current.tabs) {
-        const nextRoot = removeLeaf(tab.root, windowId);
-        if (nextRoot === null) {
-          continue;
-        }
-        tabs.push({ ...tab, root: nextRoot });
-      }
-      const activeTabId = tabs.some((tab) => tab.id === current.activeTabId)
-        ? current.activeTabId
-        : (tabs[0]?.id ?? null);
-      return {
-        ...current,
-        windows: nextWindows,
-        tabs,
-        activeTabId,
-        focusedWindowId:
-          current.focusedWindowId === windowId
-            ? (Object.keys(nextWindows)[0] ?? null)
-            : current.focusedWindowId,
-        maximizedWindowId:
-          current.maximizedWindowId === windowId ? null : current.maximizedWindowId,
-      };
-    });
+    patchProject(set, get, projectId, (current) => detachWindowFromLayout(current, windowId));
   },
 
   async closeTab(projectId, tabId) {
@@ -846,6 +830,16 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
     const { [projectId]: _dropped, ...rest } = get().layoutsByProject;
     void _dropped;
     set({ layoutsByProject: rest });
+  },
+
+  acceptClosedWindow(projectId, windowId) {
+    forgetLiveTerminals([windowId]);
+    patchProject(set, get, projectId, (current) => {
+      if (current.windows[windowId] === undefined) {
+        return current;
+      }
+      return detachWindowFromLayout(current, windowId);
+    });
   },
 
   acceptOpenedWindow(event) {

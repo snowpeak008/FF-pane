@@ -4,7 +4,7 @@
  * 主进程按项目串行追加。最后一行半写时读取会跳过。
  */
 
-import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { appendFile, mkdir, open, readFile } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import type { WorkbenchAuthNode } from "@ff-pane/core";
 import { walkAncestors } from "@ff-pane/core";
@@ -32,7 +32,7 @@ export interface ThreadRecord {
   readonly projectId: string;
   readonly from: ThreadParty;
   readonly to: ThreadParty;
-  readonly kind: "message" | "report";
+  readonly kind: "message" | "report" | "system";
   readonly status?: ReportStatus;
   readonly text: string;
   readonly files?: readonly string[];
@@ -116,9 +116,17 @@ export function formatThreadBlock(record: ThreadRecord, date: Date): string {
   const { clock } = localParts(date);
   const fromRole = WORKBENCH_ROLE_LABEL[record.from.role];
   const toRole = WORKBENCH_ROLE_LABEL[record.to.role];
-  const kind = record.kind === "report" ? `汇报:${record.status ?? "progress"}` : "消息";
   const fromTitle = sanitizeThreadText(record.from.title) || "窗口";
   const toTitle = sanitizeThreadText(record.to.title) || "窗口";
+  if (record.kind === "system") {
+    return [
+      `### ${clock} · 系统 · ${fromRole}「${fromTitle}」关闭了「${toTitle}」`,
+      "",
+      quoteThreadBody(record.text),
+      "",
+    ].join("\n");
+  }
+  const kind = record.kind === "report" ? `汇报:${record.status ?? "progress"}` : "消息";
   const lines = [
     `### ${clock} · ${fromRole}「${fromTitle}」→ ${toRole}「${toTitle}」· ${kind}`,
     "",
@@ -170,7 +178,7 @@ export function parseThreadLine(line: string): ThreadRecord | undefined {
     ) {
       return undefined;
     }
-    if (raw["kind"] !== "message" && raw["kind"] !== "report") {
+    if (raw["kind"] !== "message" && raw["kind"] !== "report" && raw["kind"] !== "system") {
       return undefined;
     }
     return parsed as ThreadRecord;
@@ -198,6 +206,81 @@ export async function readThreadIndex(projectRoot: string): Promise<readonly Thr
   } catch {
     return [];
   }
+}
+
+/** 启动重算徽章时只读尾部，避免大文件卡住。 */
+export const THREAD_INDEX_TAIL_MAX_BYTES = 256 * 1024;
+export const THREAD_INDEX_TAIL_MAX_LINES = 400;
+
+export async function readThreadIndexTail(projectRoot: string): Promise<readonly ThreadRecord[]> {
+  const path = join(threadsDir(projectRoot), "index.jsonl");
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    handle = await open(path, "r");
+    const stat = await handle.stat();
+    if (stat.size === 0) {
+      return [];
+    }
+    const readSize = Math.min(stat.size, THREAD_INDEX_TAIL_MAX_BYTES);
+    const start = stat.size - readSize;
+    const buf = Buffer.alloc(readSize);
+    await handle.read(buf, 0, readSize, start);
+    let text = buf.toString("utf8");
+    if (start > 0) {
+      const newline = text.indexOf("\n");
+      text = newline >= 0 ? text.slice(newline + 1) : "";
+    }
+    const lines = text.split("\n");
+    const limited =
+      lines.length > THREAD_INDEX_TAIL_MAX_LINES
+        ? lines.slice(lines.length - THREAD_INDEX_TAIL_MAX_LINES)
+        : lines;
+    return readThreadIndexText(limited.join("\n"));
+  } catch {
+    return [];
+  } finally {
+    await handle?.close();
+  }
+}
+
+/** 发给某窗口、且还没读过的消息和汇报。系统记录不计入未读。 */
+export function recordsAddressedTo(
+  records: readonly ThreadRecord[],
+  windowId: string,
+  lastReadId: string | undefined,
+): readonly ThreadRecord[] {
+  const mine = records.filter(
+    (record) =>
+      record.to.windowId === windowId && (record.kind === "message" || record.kind === "report"),
+  );
+  if (lastReadId === undefined) {
+    return mine;
+  }
+  const index = mine.findIndex((record) => record.id === lastReadId);
+  if (index < 0) {
+    return mine;
+  }
+  return mine.slice(index + 1);
+}
+
+export function summarizeInboxBadges(
+  records: readonly ThreadRecord[],
+  windowIds: readonly string[],
+  cursorOf: (windowId: string) => string | undefined,
+): Readonly<Record<string, { readonly unread: number; readonly lastReportStatus?: ReportStatus }>> {
+  const out: Record<string, { unread: number; lastReportStatus?: ReportStatus }> = {};
+  for (const windowId of windowIds) {
+    const unread = recordsAddressedTo(records, windowId, cursorOf(windowId)).length;
+    const lastReportStatus = latestReportStatus(records, windowId);
+    if (unread === 0 && lastReportStatus === undefined) {
+      continue;
+    }
+    out[windowId] = {
+      unread,
+      ...(lastReportStatus !== undefined ? { lastReportStatus } : {}),
+    };
+  }
+  return out;
 }
 
 export function appendThreadRecord(

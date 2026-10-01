@@ -615,6 +615,7 @@ test("T10.5：只读 Claude 权限参数 + 令牌 env 存在 + 改 yolo 重启",
     );
 
     await page.getByTestId("cli-restart-fresh").click({ force: true });
+    await page.getByRole("dialog").getByRole("button", { name: "Start" }).click();
     await expect
       .poll(
         async () => {

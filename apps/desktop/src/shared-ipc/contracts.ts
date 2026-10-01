@@ -293,6 +293,17 @@ export interface SetWorkbenchRoleRequest {
   readonly role: WorkbenchRole;
 }
 
+/** 界面用户显式修改窗口权限。清洗锁只在这条路径上解开。 */
+export interface SetWorkbenchPermissionRequest {
+  readonly windowId: string;
+  readonly permission: WorkbenchPermissionLevel;
+}
+
+export interface SetWorkbenchPermissionResponse {
+  readonly ok: true;
+  readonly permission: WorkbenchPermissionLevel;
+}
+
 /** workbench:set-role 响应。manual/held 的按钮走 workbench:deliver-pending。 */
 export interface SetWorkbenchRoleResponse {
   readonly ok: true;
@@ -351,6 +362,40 @@ export interface WorkbenchInboxNoticeEvent {
   readonly windowId: string;
   readonly unread?: number;
   readonly lastReportStatus?: "done" | "blocked" | "failed" | "progress";
+}
+
+/** 冷启动后从线程索引尾部重算的标题栏徽章。 */
+export interface WorkbenchInboxBadgesResponse {
+  readonly badges: Readonly<
+    Record<
+      string,
+      {
+        readonly unread: number;
+        readonly lastReportStatus?: "done" | "blocked" | "failed" | "progress";
+      }
+    >
+  >;
+}
+
+export type WorkbenchPanelId = "plan" | "tasks" | "runs";
+
+/** ffpane_open_panel：打开对应页面并 toast。 */
+export interface WorkbenchOpenPanelEvent {
+  readonly panel: WorkbenchPanelId;
+  readonly openerTitle: string;
+}
+
+/** ffpane_close_window：渲染端从布局拿掉该窗口。 */
+export interface WorkbenchWindowClosedEvent {
+  readonly projectId: ProjectId;
+  readonly windowId: string;
+}
+
+/** 管理权显示位。true 表示标题栏「管理权待恢复」，不授予开窗口能力。 */
+export interface WorkbenchManagerGrantEvent {
+  readonly projectId: ProjectId;
+  readonly windowId: string;
+  readonly managerGrantPending: boolean;
 }
 
 /** 某窗口待投递条数。manual 才显示立即发送；blocked 绝不发送。 */
@@ -1397,6 +1442,11 @@ export interface IpcInvokeContracts {
     request: SetWorkbenchRoleRequest;
     response: SetWorkbenchRoleResponse;
   };
+  /** 界面用户显式修改窗口权限（解开清洗锁）。 */
+  "workbench:set-permission": {
+    request: SetWorkbenchPermissionRequest;
+    response: SetWorkbenchPermissionResponse;
+  };
   /** 未知 hook 状态下，用户确认立即投递队列（T10.6'）。 */
   "workbench:deliver-now": {
     request: DeliverWorkbenchPendingRequest;
@@ -1419,6 +1469,11 @@ export interface IpcInvokeContracts {
   "workbench:reset-role-manual": {
     request: ResetWorkbenchRoleManualRequest;
     response: { readonly ok: true; readonly content: string };
+  };
+  /** 冷启动后重算标题栏未读与最近汇报（T10.7b）。 */
+  "workbench:inbox-badges": {
+    request: undefined;
+    response: WorkbenchInboxBadgesResponse;
   };
   /** 列出工作台已登记的全部项目（注册表原样，只读 projects.json，不碰任何项目目录）。 */
   "projects:list": { request: undefined; response: readonly ProjectRegistryEntry[] };
@@ -1676,6 +1731,9 @@ export interface IpcEventContracts {
   "workbench:deliver-pending": { payload: WorkbenchDeliverPendingEvent };
   "workbench:child-window": { payload: WorkbenchChildWindowEvent };
   "workbench:inbox-notice": { payload: WorkbenchInboxNoticeEvent };
+  "workbench:open-panel": { payload: WorkbenchOpenPanelEvent };
+  "workbench:window-closed": { payload: WorkbenchWindowClosedEvent };
+  "workbench:manager-grant": { payload: WorkbenchManagerGrantEvent };
 }
 
 export type InvokeChannel = keyof IpcInvokeContracts;
@@ -1712,11 +1770,13 @@ export const INVOKE_CHANNELS = [
   "workbench:flush-ack",
   "workbench:launch-cli",
   "workbench:set-role",
+  "workbench:set-permission",
   "workbench:deliver-now",
   "workbench:deliver-cancel",
   "workbench:list-role-manuals",
   "workbench:save-role-manual",
   "workbench:reset-role-manual",
+  "workbench:inbox-badges",
   "projects:list",
   "projects:summary",
   "projects:create",
@@ -1800,6 +1860,9 @@ export const EVENT_CHANNELS = [
   "workbench:deliver-pending",
   "workbench:child-window",
   "workbench:inbox-notice",
+  "workbench:open-panel",
+  "workbench:window-closed",
+  "workbench:manager-grant",
 ] as const satisfies readonly EventChannel[];
 
 type AssertNever<T extends never> = T;

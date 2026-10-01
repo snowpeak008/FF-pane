@@ -18,8 +18,10 @@ import {
   type WorkbenchRole,
 } from "@ff-pane/shared";
 import { resolveBriefPath, writeBriefFile } from "./brief-files";
+import { type CloseDescendantDeps, closeDescendantWindow } from "./close-descendant";
 import type { OpenChildArgs, OpenChildSuccess } from "./open-child";
 import { openChildWindow } from "./open-child";
+import { clampReadOutputBytes, stripTerminalControls } from "./output-text";
 import {
   buildCoalescedReminder,
   buildNewMessageReminder,
@@ -33,6 +35,7 @@ import {
   assertProjectFiles,
   latestReportStatus,
   readThreadIndex,
+  recordsAddressedTo,
   type ThreadRecord,
   teamAnchorId,
   teamFileSlug,
@@ -40,6 +43,9 @@ import {
 
 export const MESSAGE_MAX_BYTES = 8 * 1024;
 export const TOOL_CALLS_PER_SECOND = 30;
+export const OPEN_PANEL_MIN_INTERVAL_MS = 3000;
+const PANEL_NAMES = ["plan", "tasks", "runs"] as const;
+export type WorkbenchPanelName = (typeof PANEL_NAMES)[number];
 const INBOX_DEFAULT_LIMIT = 20;
 const INBOX_MAX_LIMIT = 50;
 
@@ -83,9 +89,16 @@ export interface WorkbenchToolDeps {
   }) => void;
   readonly getCursor: (windowId: string) => Promise<string | undefined>;
   readonly setCursor: (windowId: string, lastReadId: string) => Promise<void>;
+  readonly readOutput: (
+    windowId: string,
+    maxBytes: number,
+  ) => Promise<{ readonly running: boolean; readonly status: string; readonly text?: string }>;
+  readonly closeDescendant: CloseDescendantDeps;
+  readonly openPanel: (panel: WorkbenchPanelName, openerTitle: string) => void;
 }
 
 const buckets = new Map<string, { t: number; n: number }>();
+const panelOpenedAt = new Map<string, number>();
 
 export function allowToolCall(windowId: string, now: number): boolean {
   const bucket = buckets.get(windowId);
@@ -97,8 +110,18 @@ export function allowToolCall(windowId: string, now: number): boolean {
   return bucket.n <= TOOL_CALLS_PER_SECOND;
 }
 
+export function allowOpenPanel(windowId: string, now: number): boolean {
+  const previous = panelOpenedAt.get(windowId);
+  if (previous !== undefined && now - previous < OPEN_PANEL_MIN_INTERVAL_MS) {
+    return false;
+  }
+  panelOpenedAt.set(windowId, now);
+  return true;
+}
+
 export function resetToolCallBuckets(): void {
   buckets.clear();
+  panelOpenedAt.clear();
 }
 
 function fail(text: string): ToolTextResult {
@@ -137,15 +160,7 @@ function inboxAfter(
   windowId: string,
   lastReadId: string | undefined,
 ): readonly ThreadRecord[] {
-  const mine = records.filter((record) => record.to.windowId === windowId);
-  if (lastReadId === undefined) {
-    return mine;
-  }
-  const index = mine.findIndex((record) => record.id === lastReadId);
-  if (index < 0) {
-    return mine;
-  }
-  return mine.slice(index + 1);
+  return recordsAddressedTo(records, windowId, lastReadId);
 }
 
 export async function executeWorkbenchTool(
@@ -193,6 +208,12 @@ export async function executeWorkbenchTool(
       return report(caller, args, tree, deps);
     case "ffpane_read_inbox":
       return readInbox(caller, args, deps);
+    case "ffpane_read_output":
+      return readOutput(caller, args, tree, deps);
+    case "ffpane_close_window":
+      return closeWindow(caller, args, tree, deps);
+    case "ffpane_open_panel":
+      return openPanel(caller, args, deps);
     default:
       return fail(`未知工具：${name}`);
   }
@@ -493,6 +514,92 @@ async function readInbox(
     })),
     unreadRemaining: unread,
   });
+}
+
+async function readOutput(
+  caller: ToolWindowView,
+  args: Readonly<Record<string, unknown>>,
+  tree: Readonly<Record<string, WorkbenchAuthNode>>,
+  deps: WorkbenchToolDeps,
+): Promise<ToolTextResult> {
+  const targetId = args["windowId"];
+  if (typeof targetId !== "string" || targetId.trim() === "") {
+    return fail("ffpane_read_output 需要 windowId。");
+  }
+  const decision = authorize({
+    actor: { kind: "window", windowId: caller.id },
+    action: "read-output",
+    targetWindowId: targetId,
+    tree,
+  });
+  if (!decision.ok) {
+    return fail("只能读取自己后代窗口的终端输出。");
+  }
+  const maxBytes = clampReadOutputBytes(args["maxBytes"]);
+  const output = await deps.readOutput(targetId, maxBytes);
+  if (!output.running) {
+    return ok({ running: false, status: output.status });
+  }
+  return ok({
+    running: true,
+    status: output.status,
+    text: stripTerminalControls(output.text ?? ""),
+  });
+}
+
+async function closeWindow(
+  caller: ToolWindowView,
+  args: Readonly<Record<string, unknown>>,
+  tree: Readonly<Record<string, WorkbenchAuthNode>>,
+  deps: WorkbenchToolDeps,
+): Promise<ToolTextResult> {
+  const targetId = args["windowId"];
+  if (typeof targetId !== "string" || targetId.trim() === "") {
+    return fail("ffpane_close_window 需要 windowId。");
+  }
+  if (targetId === caller.id || !isDescendantOf(caller.id, targetId, tree)) {
+    return fail("只能关闭自己的后代窗口。");
+  }
+  const decision = authorize({
+    actor: { kind: "window", windowId: caller.id },
+    action: "close",
+    targetWindowId: targetId,
+    tree,
+  });
+  if (!decision.ok) {
+    return fail("只能关闭自己的后代窗口。");
+  }
+  const target = await deps.describe(targetId);
+  if (target === undefined) {
+    return fail("找不到目标窗口。");
+  }
+  const closed = await closeDescendantWindow(
+    caller,
+    target,
+    tree,
+    deps.now(),
+    deps.closeDescendant,
+  );
+  if (!closed.ok) {
+    return fail(closed.error);
+  }
+  return ok({ ok: true, windowId: targetId });
+}
+
+function openPanel(
+  caller: ToolWindowView,
+  args: Readonly<Record<string, unknown>>,
+  deps: WorkbenchToolDeps,
+): ToolTextResult {
+  const panel = args["panel"];
+  if (panel !== "plan" && panel !== "tasks" && panel !== "runs") {
+    return fail("panel 只能是 plan、tasks 或 runs。");
+  }
+  if (!allowOpenPanel(caller.id, deps.now())) {
+    return fail("打开面板过于频繁，请稍后再试。");
+  }
+  deps.openPanel(panel, caller.title);
+  return ok({ ok: true, panel });
 }
 
 async function optionalBrief(

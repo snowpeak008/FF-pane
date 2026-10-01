@@ -180,6 +180,8 @@ export interface LaunchCliWindowDeps {
   readonly idleQueue?: IdleDeliverQueue;
   /** 启动成功后记下该 CLI 最近使用的 Profile，供 ffpane_open_window 缺省选用。 */
   readonly onProfileUsed?: (profileId: string, runtime: "claude-code" | "codex") => void;
+  /** PTY 已起来、权威表已写回之后。用来恢复管理权，失败不得当成启动失败。 */
+  readonly onWindowLaunched?: (windowId: string) => Promise<void> | void;
   /** 观察型 hook 脚本。缺省按打包态选 resources 或 moduleDir 下的 workbench-hook.mjs。 */
   readonly hookScriptPath?: string;
   readonly isPackaged?: boolean;
@@ -551,6 +553,7 @@ export async function launchCliWindow(
   }
 
   deps.onProfileUsed?.(profile.id, runtime);
+  await deps.onWindowLaunched?.(input.windowId);
   return {
     terminal,
     kind,

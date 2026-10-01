@@ -7,8 +7,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  extractHookPairing,
   extractToolUseId,
   mapNotifyArgument,
+  permissionInputDigest,
   resolveReportedHookEvent,
 } from "../src/mcp/workbench-hook";
 
@@ -82,6 +84,25 @@ describe("resolveReportedHookEvent", () => {
     expect(JSON.stringify(id)).not.toContain(body);
     expect(extractToolUseId(JSON.stringify({ tool_use_id: "含换行\n正文" }))).toBeUndefined();
     expect(extractToolUseId("")).toBeUndefined();
+  });
+
+  it("相同 tool_input 不同键序摘要相同，上报不含正文", () => {
+    const left = permissionInputDigest("Bash", { b: 1, a: { z: true, y: "secret-value" } });
+    const right = permissionInputDigest("Bash", { a: { y: "secret-value", z: true }, b: 1 });
+    expect(left).toBe(right);
+    expect(left).toMatch(/^[a-f0-9]{64}$/);
+    const pairing = extractHookPairing(
+      JSON.stringify({
+        tool_name: "Bash",
+        tool_input: { command: "secret-value", flag: true },
+        tool_response: "secret-value",
+      }),
+    );
+    expect(pairing.toolName).toBe("Bash");
+    expect(pairing.toolDigest).toBe(
+      permissionInputDigest("Bash", { flag: true, command: "secret-value" }),
+    );
+    expect(JSON.stringify(pairing)).not.toContain("secret-value");
   });
 
   it("坏 JSON 与其它 type 不上报", () => {

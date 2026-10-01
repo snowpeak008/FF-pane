@@ -14,6 +14,16 @@ export interface WorkbenchAuthNode {
   readonly parentClosed?: boolean;
   readonly openedBy: WorkbenchOpenedBy;
   readonly permissionNeedsDowngrade?: boolean;
+  /**
+   * 冷启动把父级缺失或成环降成只读后置位。
+   * 同一会话内的同步不得抬高权限或改回用户开启；续接不得因此重新授权。
+   * 只有界面用户显式改权限时才清掉。
+   */
+  readonly sanitizeLocked?: boolean;
+  /** 界面用户显式改过权限后，不再因父级缺失把这次选择降回只读。 */
+  readonly userElevated?: boolean;
+  /** 界面用户显式改过角色后，续接才允许重新授予管理权。 */
+  readonly userRoleSet?: boolean;
   /** T10.6：窗口角色。缺省视为 none。 */
   readonly role?: WorkbenchRole;
 }
@@ -241,9 +251,6 @@ export function authorize(input: AuthorizeInput): AuthorizeDecision {
   }
 
   if (CONTROL_ACTIONS.has(action)) {
-    if (targetWindowId === callerId && action === "close") {
-      return { ok: true };
-    }
     if (targetWindowId === callerId) {
       return { ok: false, reason: "control-self-denied" };
     }

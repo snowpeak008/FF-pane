@@ -4,6 +4,7 @@
  */
 
 import {
+  markChildrenParentClosed,
   resolveLaunchPermission,
   sanitizeWorkbenchAuthTree,
   type WorkbenchAuthNode,
@@ -19,6 +20,7 @@ import {
   DEFAULT_WORKBENCH_WINDOW_PERMISSION,
   isWorkbenchPermissionLevel,
   isWorkbenchRole,
+  minPermissionLevel,
   parseWorkbenchOpenedBy,
   type WorkbenchRole,
 } from "@ff-pane/shared";
@@ -66,6 +68,20 @@ function applyAuthNode(window: WorkbenchWindow, node: WorkbenchAuthNode): Workbe
   };
 }
 
+/** 有父级的 manager 在本进程尚未被授予时，标题栏显示待恢复。该标记不是授权。 */
+function withGrantPending(
+  window: WorkbenchWindow,
+  node: WorkbenchAuthNode,
+  granted: boolean,
+): WorkbenchWindow {
+  const applied = applyAuthNode(window, node);
+  const hasParent = node.parentWindowId !== undefined && node.parentWindowId.trim() !== "";
+  if (node.role === "manager" && hasParent && !granted) {
+    return { ...applied, managerGrantPending: true };
+  }
+  return applied;
+}
+
 /**
  * 合并 renderer 布局与权威登记：父子关系只认主进程已登记的 parent；
  * renderer 传入的 parentWindowId 一律忽略（防伪造 / 清父提权）。
@@ -83,9 +99,14 @@ function mergeRendererLayout(
     const existing = existingById.get(window.id);
     const openedBy = existing?.openedBy ?? base.openedBy;
     const role = existing?.role ?? base.role ?? DEFAULT_WORKBENCH_ROLE;
+    const locked = existing?.sanitizeLocked === true;
+    const permission =
+      existing !== undefined
+        ? minPermissionLevel(existing.permission, base.permission)
+        : base.permission;
     authInput[window.id] = {
       id: window.id,
-      permission: base.permission,
+      permission,
       openedBy,
       role,
       ...(existing?.parentWindowId !== undefined
@@ -94,7 +115,14 @@ function mergeRendererLayout(
       ...(existing?.parentClosed === true || base.parentClosed === true
         ? { parentClosed: true }
         : {}),
-      ...(base.permissionNeedsDowngrade === true ? { permissionNeedsDowngrade: true } : {}),
+      ...(locked ||
+      existing?.permissionNeedsDowngrade === true ||
+      base.permissionNeedsDowngrade === true
+        ? { permissionNeedsDowngrade: true }
+        : {}),
+      ...(locked ? { sanitizeLocked: true } : {}),
+      ...(existing?.userElevated === true ? { userElevated: true } : {}),
+      ...(existing?.userRoleSet === true ? { userRoleSet: true } : {}),
     };
   }
   return authInput;
@@ -103,6 +131,14 @@ function mergeRendererLayout(
 export interface WorkbenchAuthRegistry {
   /** 用布局窗口表重建本项目登记（先剥离伪造父级，再 sanitize）。返回清洗后的布局。 */
   syncLayout(layout: ProjectWorkbenchLayout): ProjectWorkbenchLayout;
+  /**
+   * 冷启动：按磁盘上的父子关系重建登记，断环后再按祖先封顶。
+   * 不把磁盘权限当成顶层用户授权，也不授予 manager。
+   */
+  restoreColdLayout(layout: ProjectWorkbenchLayout): ProjectWorkbenchLayout;
+  hasProject(projectId: ProjectId): boolean;
+  /** 关闭窗口：直接子级标记 parentClosed，自身移出登记并吊销管理权授予。 */
+  closeRegistered(windowId: string): void;
   /** 登记 / 更新单个 AI 窗口（T10.7 开子窗时由主进程调用）。 */
   upsert(node: WorkbenchAuthNode, projectId: ProjectId): void;
   /**
@@ -130,6 +166,11 @@ export interface WorkbenchAuthRegistry {
   snapshot(): Readonly<Record<string, WorkbenchAuthNode>>;
   /** 更新已登记窗口的角色。窗口不存在时返回 false。 */
   setRole(windowId: string, role: WorkbenchRole): boolean;
+  /**
+   * 界面用户显式改权限。清掉清洗锁，允许高于当前登记值。
+   * 有父级时，随后的 sync 仍按祖先封顶。
+   */
+  applyUserPermission(windowId: string, permission: WorkbenchPermissionLevel): boolean;
   clear(): void;
 }
 
@@ -167,9 +208,75 @@ export function createWorkbenchAuthRegistry(): WorkbenchAuthRegistry {
       const nextWindows: Record<string, WorkbenchWindow> = {};
       for (const [id, window] of Object.entries(layout.windows)) {
         const node = sanitized.windows[id];
-        nextWindows[id] = node !== undefined ? applyAuthNode(window, node) : window;
+        nextWindows[id] =
+          node !== undefined
+            ? withGrantPending(window, node, managerGranted.has(id) && node.role === "manager")
+            : window;
       }
       return { ...layout, windows: nextWindows };
+    },
+    restoreColdLayout(layout) {
+      const authInput: Record<string, WorkbenchAuthNode> = {};
+      for (const window of Object.values(layout.windows)) {
+        const base = toAuthNode(window);
+        if (base !== undefined) {
+          authInput[window.id] = base;
+        }
+      }
+      const sanitized = sanitizeWorkbenchAuthTree(authInput);
+      for (const [id, stored] of [...byId.entries()]) {
+        if (stored.projectId === layout.projectId && !pinned.has(id)) {
+          byId.delete(id);
+        }
+      }
+      for (const [id, node] of Object.entries(sanitized.windows)) {
+        if (!pinned.has(id)) {
+          byId.set(id, { ...node, projectId: layout.projectId });
+        }
+      }
+      for (const [id, node] of pinned) {
+        if (node.projectId === layout.projectId) {
+          byId.set(id, node);
+        }
+      }
+      const nextWindows: Record<string, WorkbenchWindow> = {};
+      for (const [id, window] of Object.entries(layout.windows)) {
+        const node = sanitized.windows[id];
+        if (node === undefined) {
+          nextWindows[id] = window;
+          continue;
+        }
+        const granted = managerGranted.has(id) && node.role === "manager";
+        nextWindows[id] = withGrantPending(window, node, granted);
+      }
+      return { ...layout, windows: nextWindows };
+    },
+    hasProject(projectId) {
+      for (const stored of byId.values()) {
+        if (stored.projectId === projectId) {
+          return true;
+        }
+      }
+      return false;
+    },
+    closeRegistered(windowId) {
+      const tree: Record<string, WorkbenchAuthNode> = {};
+      for (const [id, stored] of byId.entries()) {
+        const { projectId: _project, ...node } = stored;
+        void _project;
+        tree[id] = node;
+      }
+      const next = markChildrenParentClosed(tree, windowId);
+      byId.delete(windowId);
+      pinned.delete(windowId);
+      managerGranted.delete(windowId);
+      for (const [id, node] of Object.entries(next)) {
+        const stored = byId.get(id);
+        if (stored === undefined || node.parentClosed !== true) {
+          continue;
+        }
+        remember(id, { ...stored, parentClosed: true });
+      }
     },
     upsert(node, projectId) {
       remember(node.id, { ...node, projectId });
@@ -238,7 +345,18 @@ export function createWorkbenchAuthRegistry(): WorkbenchAuthRegistry {
       if (stored === undefined) {
         return false;
       }
-      remember(windowId, { ...stored, role });
+      remember(windowId, { ...stored, role, userRoleSet: true });
+      return true;
+    },
+    applyUserPermission(windowId, permission) {
+      const stored = byId.get(windowId);
+      if (stored === undefined || !isWorkbenchPermissionLevel(permission)) {
+        return false;
+      }
+      const { sanitizeLocked: _locked, permissionNeedsDowngrade: _down, ...rest } = stored;
+      void _locked;
+      void _down;
+      remember(windowId, { ...rest, permission, userElevated: true });
       return true;
     },
     clear() {

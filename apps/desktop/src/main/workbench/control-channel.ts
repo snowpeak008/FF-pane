@@ -48,7 +48,11 @@ export interface WorkbenchControlServerOptions {
   readonly onHook: (
     windowId: string,
     signal: HookSignal,
-    meta?: { readonly hookEvent?: string; readonly toolUseId?: string },
+    meta?: {
+      readonly hookEvent?: string;
+      readonly toolUseId?: string;
+      readonly toolDigest?: string;
+    },
   ) => void;
   /**
    * T10.7：hook 以外的请求类型。未提供或返回 unsupported 时拒绝该条，不断开
@@ -75,10 +79,15 @@ export interface WorkbenchControlServer {
 }
 
 const TOOL_USE_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
+const TOOL_DIGEST = /^[a-f0-9]{64}$/;
 
 /** 只接受短 id。其它字段（工具参数、正文）不读取。 */
 function readToolUseId(value: unknown): string | undefined {
   return typeof value === "string" && TOOL_USE_ID.test(value) ? value : undefined;
+}
+
+function readToolDigest(value: unknown): string | undefined {
+  return typeof value === "string" && TOOL_DIGEST.test(value) ? value : undefined;
 }
 
 export function mapHookEvent(event: string, hookEvent?: string): HookSignal | "ignore" {
@@ -229,13 +238,15 @@ export function createWorkbenchControlServer(
         const event = typeof body["event"] === "string" ? body["event"] : "";
         const hookEvent = typeof body["hookEvent"] === "string" ? body["hookEvent"] : undefined;
         const toolUseId = readToolUseId(body["toolUseId"]);
+        const toolDigest = readToolDigest(body["toolDigest"]);
         const signal = mapHookEvent(event, hookEvent);
         if (signal !== "ignore") {
           const meta =
-            hookEvent !== undefined || toolUseId !== undefined
+            hookEvent !== undefined || toolUseId !== undefined || toolDigest !== undefined
               ? {
                   ...(hookEvent !== undefined ? { hookEvent } : {}),
                   ...(toolUseId !== undefined ? { toolUseId } : {}),
+                  ...(toolDigest !== undefined ? { toolDigest } : {}),
                 }
               : undefined;
           options.onHook(windowId, signal, meta);

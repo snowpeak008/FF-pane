@@ -1,8 +1,7 @@
 /**
- * 工作台 MCP 工具声明（T10.7a）。
+ * 工作台 MCP 工具声明（T10.7a / T10.7b）。
  * 描述与参数与 Phase 10 §3.2.1 及角色说明书一致。
  * sidecar 只列出并转发这些工具，不做授权判断。
- * read_output / close_window / open_panel 留到 T10.7b，这里不列出。
  */
 
 import type { McpToolDefinition } from "./protocol";
@@ -18,6 +17,9 @@ export const WORKBENCH_MCP_TOOL_NAMES = [
   "ffpane_send_message",
   "ffpane_report",
   "ffpane_read_inbox",
+  "ffpane_read_output",
+  "ffpane_close_window",
+  "ffpane_open_panel",
 ] as const;
 
 export type WorkbenchMcpToolName = (typeof WORKBENCH_MCP_TOOL_NAMES)[number];
@@ -25,6 +27,7 @@ export type WorkbenchMcpToolName = (typeof WORKBENCH_MCP_TOOL_NAMES)[number];
 const ROLE_ENUM = ["manager", "planner", "worker", "reviewer", "none"] as const;
 const PERMISSION_ENUM = ["read-only", "edit", "edit-exec", "yolo"] as const;
 const REPORT_STATUS_ENUM = ["done", "blocked", "failed", "progress"] as const;
+const PANEL_ENUM = ["plan", "tasks", "runs"] as const;
 
 export const WORKBENCH_MCP_TOOLS: readonly McpToolDefinition[] = [
   {
@@ -149,6 +152,53 @@ export const WORKBENCH_MCP_TOOLS: readonly McpToolDefinition[] = [
         },
         limit: { type: "number", description: "最多返回条数，缺省 20，最大 50。" },
       },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "ffpane_read_output",
+    description:
+      "读取后代窗口最近的终端输出。仅后代。返回环形缓冲尾部，已去掉 ANSI 和控制序列。默认最后 8KB，可用 maxBytes 调整，上限 32KB。窗口未运行时返回状态说明，而不是终端正文。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        windowId: { type: "string", description: "后代窗口 id。" },
+        maxBytes: {
+          type: "number",
+          description: "读取尾部的字节数，缺省 8192，最大 32768。",
+        },
+      },
+      required: ["windowId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "ffpane_close_window",
+    description:
+      "关闭后代窗口。仅后代。会结束该窗口的终端、吊销它的身份令牌，并把它从布局里移除。它的子窗口保留，并标记为父级已关闭，权限仍按开启时的上限封顶。不能用来关闭自己、上级或兄弟。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        windowId: { type: "string", description: "要关闭的后代窗口 id。" },
+      },
+      required: ["windowId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "ffpane_open_panel",
+    description:
+      "在界面打开计划、任务看板或运行记录。任何窗口都可以调用。参数为 plan、tasks 或 runs。当前会打开对应页面，并提示是由哪个窗口打开的。调用过于频繁会被拒绝。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        panel: {
+          type: "string",
+          enum: [...PANEL_ENUM],
+          description: "plan、tasks 或 runs。",
+        },
+      },
+      required: ["panel"],
       additionalProperties: false,
     },
   },

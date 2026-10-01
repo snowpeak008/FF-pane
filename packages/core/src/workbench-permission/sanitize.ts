@@ -12,6 +12,23 @@ import {
 import type { WorkbenchAuthNode } from "./authorize.js";
 import { MAX_ANCESTOR_WALK_DEPTH, walkAncestors } from "./authorize.js";
 
+function isOpenedByUser(node: WorkbenchAuthNode): boolean {
+  return node.openedBy === "user";
+}
+
+/** 父级缺失：与断环一样降为只读，并锁住，避免下一次同步把磁盘权限抬回来。 */
+function detachAsReadOnly(node: WorkbenchAuthNode): WorkbenchAuthNode {
+  const { parentWindowId: _parent, ...rest } = node;
+  void _parent;
+  return {
+    ...rest,
+    parentClosed: true,
+    permission: "read-only",
+    permissionNeedsDowngrade: true,
+    sanitizeLocked: true,
+  };
+}
+
 export interface SanitizeWindowsResult {
   readonly windows: Record<string, WorkbenchAuthNode>;
   /** 因环被断开 parent 的窗口 id。 */
@@ -49,15 +66,22 @@ export function sanitizeWorkbenchAuthTree(
     if (node === undefined) {
       continue;
     }
-    const { parentWindowId: _p, ...rest } = node;
-    void _p;
-    windows[id] = {
-      ...rest,
-      parentClosed: true,
-      permission: "read-only",
-      permissionNeedsDowngrade: true,
-    };
+    windows[id] = detachAsReadOnly(node);
     brokenCycleIds.push(id);
+  }
+
+  for (const [id, node] of Object.entries(windows)) {
+    if (node.sanitizeLocked === true || node.userElevated === true || isOpenedByUser(node)) {
+      continue;
+    }
+    const parentId = node.parentWindowId?.trim() ?? "";
+    if (parentId !== "" && windows[parentId] !== undefined) {
+      continue;
+    }
+    windows[id] = detachAsReadOnly(node);
+    if (!brokenCycleIds.includes(id)) {
+      brokenCycleIds.push(id);
+    }
   }
 
   // 按拓扑近似：多轮封顶直到稳定（深度有限）
@@ -138,8 +162,27 @@ export function resolveLaunchPermission(input: {
 } {
   const self = input.tree[input.windowId];
   const requested = input.requested ?? self?.permission ?? DEFAULT_WORKBENCH_WINDOW_PERMISSION;
-  const hasParent = self?.parentWindowId !== undefined && self.parentWindowId.trim() !== "";
-  if (!hasParent) {
+  const parentId = self?.parentWindowId?.trim() ?? "";
+  const parentInTree = parentId !== "" && input.tree[parentId] !== undefined;
+  if (self?.sanitizeLocked === true) {
+    return {
+      effective: "read-only",
+      capped: requested !== "read-only",
+      cycle: false,
+    };
+  }
+  if (self !== undefined && !parentInTree && self.openedBy !== "user") {
+    if (self.userElevated === true) {
+      const effective = minPermissionLevel(requested, self.permission);
+      return { effective, capped: effective !== requested, cycle: false };
+    }
+    return {
+      effective: "read-only",
+      capped: requested !== "read-only",
+      cycle: false,
+    };
+  }
+  if (!parentInTree) {
     return { effective: requested, capped: false, cycle: false };
   }
   const { ceiling, cycle, truncated } = resolveEffectivePermissionCeiling(

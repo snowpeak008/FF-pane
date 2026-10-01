@@ -276,6 +276,49 @@ describe("createIdleDeliverQueue", () => {
     expect(h.queue.deliverNow("t1")).toEqual({ status: "refused", reason: "blocked" });
   });
 
+  it("相同摘要的结束事件配对解锁，不同摘要不解锁", () => {
+    const same = "a".repeat(64);
+    const other = "b".repeat(64);
+    const matched = harness();
+    matched.queue.attach("t1");
+    matched.queue.noteHook("t1", "permission-request", { toolDigest: same });
+    matched.queue.enqueue({ terminalId: "t1", text: "hello" });
+    matched.queue.noteHook("t1", "post-tool-use", { toolUseId: "toolu_post", toolDigest: same });
+    expect(matched.queue.phaseOf("t1")).toBe("busy");
+    expect(matched.writes).toEqual([]);
+    matched.queue.noteHook("t1", "stop");
+    expect(matched.writes).toEqual(["hello", "\r"]);
+
+    const mismatched = harness();
+    mismatched.queue.attach("t1");
+    mismatched.queue.noteHook("t1", "permission-request", { toolDigest: same });
+    mismatched.queue.enqueue({ terminalId: "t1", text: "hello" });
+    mismatched.queue.noteHook("t1", "post-tool-use", { toolDigest: other });
+    mismatched.queue.noteHook("t1", "stop");
+    expect(mismatched.queue.phaseOf("t1")).toBe("blocked");
+    expect(mismatched.writes).toEqual([]);
+    expect(mismatched.queue.deliverNow("t1")).toEqual({ status: "refused", reason: "blocked" });
+  });
+
+  it("两次同摘要请求只结束一次时仍闩住，伪造 Stop 不解锁", () => {
+    const digest = "c".repeat(64);
+    const h = harness();
+    h.queue.attach("t1");
+    h.queue.noteHook("t1", "permission-request", { toolDigest: digest });
+    h.queue.noteHook("t1", "permission-request", { toolDigest: digest });
+    h.queue.enqueue({ terminalId: "t1", text: "hello" });
+    h.queue.noteHook("t1", "post-tool-use-failure", { toolDigest: digest });
+    expect(h.queue.phaseOf("t1")).toBe("blocked");
+    h.queue.noteHook("t1", "stop");
+    expect(h.queue.phaseOf("t1")).toBe("blocked");
+    expect(h.writes).toEqual([]);
+    expect(h.queue.deliverNow("t1")).toEqual({ status: "refused", reason: "blocked" });
+    h.queue.noteHook("t1", "post-tool-use", { toolDigest: digest });
+    expect(h.queue.phaseOf("t1")).toBe("busy");
+    h.queue.noteHook("t1", "stop");
+    expect(h.writes).toEqual(["hello", "\r"]);
+  });
+
   it("没有 id 的权限请求只有用户新提交或窗口重启才清零", () => {
     const h = harness();
     h.queue.attach("t1");

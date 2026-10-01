@@ -100,6 +100,11 @@ export interface WorkbenchWindow {
    * 正在运行的进程无法热改 CLI 参数。
    */
   readonly permissionNeedsDowngrade?: boolean;
+  /**
+   * 有父级的 manager 在本进程里还没被重新授予。
+   * 只驱动标题栏文案，不授予开窗口能力。
+   */
+  readonly managerGrantPending?: boolean;
 }
 
 /** 分屏方向：horizontal = 左右；vertical = 上下。 */

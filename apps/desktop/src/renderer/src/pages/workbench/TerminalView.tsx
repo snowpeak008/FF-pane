@@ -53,6 +53,8 @@ export interface TerminalViewProps {
   readonly onTurnSignal?: (signal: "auto" | "manual") => void;
   /** 外部触发启动（续接 / 重新开始）。 */
   readonly launchNonce?: number;
+  /** 用户点续接或重新开始之前。返回 false 则不启动。 */
+  readonly beforeUserRelaunch?: () => boolean | Promise<boolean>;
 }
 
 interface ThemeColors {
@@ -111,6 +113,7 @@ export function TerminalView({
   onPermissionCapped,
   onTurnSignal,
   launchNonce = 0,
+  beforeUserRelaunch,
 }: TerminalViewProps): ReactElement {
   const { t } = useTranslation();
   const { resolvedTheme } = useTheme();
@@ -589,13 +592,18 @@ export function TerminalView({
             variant="secondary"
             data-testid="cli-resume"
             onClick={() => {
-              onResume?.();
-              void relaunchWith({
-                resume: true,
-                ...(nativeSessionIdRef.current !== undefined
-                  ? { nativeSessionId: nativeSessionIdRef.current }
-                  : {}),
-              });
+              void (async () => {
+                if (beforeUserRelaunch !== undefined && !(await beforeUserRelaunch())) {
+                  return;
+                }
+                onResume?.();
+                void relaunchWith({
+                  resume: true,
+                  ...(nativeSessionIdRef.current !== undefined
+                    ? { nativeSessionId: nativeSessionIdRef.current }
+                    : {}),
+                });
+              })();
             }}
           >
             {t("workbench.terminal.resume")}
@@ -605,9 +613,14 @@ export function TerminalView({
             variant="secondary"
             data-testid="cli-restart-fresh"
             onClick={() => {
-              nativeSessionIdRef.current = undefined;
-              onRestartFresh?.();
-              void relaunchWith({ resume: false });
+              void (async () => {
+                if (beforeUserRelaunch !== undefined && !(await beforeUserRelaunch())) {
+                  return;
+                }
+                nativeSessionIdRef.current = undefined;
+                onRestartFresh?.();
+                void relaunchWith({ resume: false });
+              })();
             }}
           >
             {t("workbench.terminal.restartFresh")}

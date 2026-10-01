@@ -472,7 +472,13 @@ export async function createDataHandlers(
       }
       const next: Record<string, (typeof all)[string]> = {};
       for (const [projectId, layout] of Object.entries(all)) {
-        next[projectId] = authRegistry.syncLayout(layout);
+        if (authRegistry.hasProject(layout.projectId)) {
+          next[projectId] = authRegistry.syncLayout(layout);
+        } else {
+          const restored = authRegistry.restoreColdLayout(layout);
+          await workbenchLayouts.saveProject(restored);
+          next[projectId] = restored;
+        }
       }
       return next;
     },

@@ -3,12 +3,33 @@
  */
 
 import { type ReactElement, useEffect } from "react";
+import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import { invokeQuery } from "../../ipc/query";
 import { useSubscription } from "../../ipc/useSubscription";
 import { flushWorkbenchLayouts, useWorkbenchStore } from "../../stores/workbench";
 import { rememberLiveTerminal } from "./live-terminals";
 
 export function WorkbenchFlushBridge(): ReactElement | null {
+  const navigate = useNavigate();
+  const { t } = useTranslation();
+
+  useSubscription("workbench:open-panel", (payload) => {
+    navigate(`/${payload.panel}`);
+    toast.message(t("workbench.panel.openedBy", { title: payload.openerTitle }));
+  });
+
+  useSubscription("workbench:window-closed", (payload) => {
+    useWorkbenchStore.getState().acceptClosedWindow(payload.projectId, payload.windowId);
+  });
+
+  useSubscription("workbench:manager-grant", (payload) => {
+    useWorkbenchStore.getState().patchWindow(payload.projectId, payload.windowId, {
+      managerGrantPending: payload.managerGrantPending,
+    });
+  });
+
   useSubscription("workbench:child-window", (payload) => {
     if (payload.window.terminalId !== undefined) {
       rememberLiveTerminal(payload.window.id, payload.window.terminalId);

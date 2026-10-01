@@ -135,6 +135,7 @@ function parseWindow(value: unknown, projectId: ProjectId): WorkbenchWindow | nu
     ...(raw["parentClosed"] === true ? { parentClosed: true } : {}),
     ...(openedBy !== undefined ? { openedBy } : {}),
     ...(raw["permissionNeedsDowngrade"] === true ? { permissionNeedsDowngrade: true } : {}),
+    ...(raw["managerGrantPending"] === true ? { managerGrantPending: true } : {}),
   };
   return window;
 }

@@ -4,7 +4,7 @@
  * 正在运行的窗口不重启：空闲队列投递一行说明；下次启动再走系统提示。
  */
 
-import { canSetRole, type WorkbenchAuthActor } from "@ff-pane/core";
+import { canSetRole, type WorkbenchAuthActor, type WorkbenchAuthNode } from "@ff-pane/core";
 import {
   DEFAULT_WORKBENCH_ROLE,
   DEFAULT_WORKBENCH_WINDOW_PERMISSION,
@@ -65,6 +65,7 @@ export async function setWindowRole(
   windowId: string,
   role: WorkbenchRole,
   deps: SetWindowRoleDeps,
+  options?: { readonly deliver?: boolean },
 ): Promise<SetWindowRoleResult> {
   if (!isWorkbenchRole(role)) {
     return { ok: false, reason: "invalid-role" };
@@ -102,6 +103,9 @@ export async function setWindowRole(
       return { ok: false, reason: "unknown-window" };
     }
     applyManagerGrant(deps.authRegistry, windowId, role);
+    if (options?.deliver === false) {
+      return { ok: true, role, delivery: "skipped" };
+    }
     return deliverRoleSwitch(windowId, role, deps);
   }
 
@@ -132,16 +136,47 @@ export async function setWindowRole(
     applyManagerGrant(deps.authRegistry, windowId, role);
   }
 
-  const nextWindow: WorkbenchWindow = { ...found.window, role };
+  const nextWindow = withRegisteredAuth({ ...found.window, role }, deps.authRegistry.get(windowId));
   await deps.saveLayout({
     ...found.layout,
     windows: { ...found.layout.windows, [windowId]: nextWindow },
   });
 
-  if (!isAi) {
+  if (!isAi || options?.deliver === false) {
     return { ok: true, role, delivery: "skipped" };
   }
   return deliverRoleSwitch(windowId, role, deps);
+}
+
+/** 写回布局时用注册表里已经清洗过的权限和父子，不用磁盘上更高的原值。 */
+function withRegisteredAuth(
+  window: WorkbenchWindow,
+  node: WorkbenchAuthNode | undefined,
+): WorkbenchWindow {
+  if (node === undefined) {
+    return window;
+  }
+  const {
+    parentWindowId: _parent,
+    parentClosed: _closed,
+    permissionNeedsDowngrade: _down,
+    ...rest
+  } = window;
+  void _parent;
+  void _closed;
+  void _down;
+  return {
+    ...rest,
+    permission: node.permission,
+    openedBy: node.openedBy,
+    ...(node.parentWindowId !== undefined && node.parentWindowId.trim() !== ""
+      ? { parentWindowId: node.parentWindowId }
+      : {}),
+    ...(node.parentClosed === true ? { parentClosed: true } : {}),
+    ...(node.permissionNeedsDowngrade === true || node.sanitizeLocked === true
+      ? { permissionNeedsDowngrade: true }
+      : {}),
+  };
 }
 
 function applyManagerGrant(

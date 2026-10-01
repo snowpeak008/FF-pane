@@ -43,10 +43,23 @@ export function createLayoutFlushBridge(
       }
       const requestId = randomUUID();
       return new Promise<void>((resolve) => {
-        pending = { requestId, resolve };
+        const timer = setTimeout(() => {
+          if (pending?.requestId === requestId) {
+            pending = null;
+          }
+          resolve();
+        }, WORKBENCH_LAYOUT_FLUSH_BUDGET_MS);
+        pending = {
+          requestId,
+          resolve: () => {
+            clearTimeout(timer);
+            resolve();
+          },
+        };
         try {
           publishEvent(target, "workbench:flush-request", { requestId });
         } catch {
+          clearTimeout(timer);
           pending = null;
           resolve();
         }

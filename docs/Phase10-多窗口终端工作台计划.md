@@ -1,6 +1,6 @@
 # Phase 10 · 多窗口终端工作台 改造计划
 
-> 状态：v1.0（Tony 已确认，执行中；**T10.0 / T10.1 / T10.2 / T10.3 / T10.4 / T10.5 / T10.6 / T10.7a 已验收通过**，见 `docs/验收记录/T10.0-验收.md` / `T10.1-验收.md` / `T10.2-验收.md` / `T10.3-验收.md` / `T10.4-验收.md` / `T10.5-验收.md` / `T10.6-验收.md` / `T10.7a-验收.md`，tag `v0.10.0` / `v0.10.1` / `v0.10.2` / `v0.10.3` / `v0.10.4` / `v0.10.5` / `v0.10.6` / `v0.10.7`）
+> 状态：v1.0（Tony 已确认，执行中；**T10.0 / T10.1 / T10.2 / T10.3 / T10.4 / T10.5 / T10.6 / T10.7a / T10.7b 已验收通过**，见 `docs/验收记录/T10.0-验收.md` / `T10.1-验收.md` / `T10.2-验收.md` / `T10.3-验收.md` / `T10.4-验收.md` / `T10.5-验收.md` / `T10.6-验收.md` / `T10.7a-验收.md` / `T10.7b-验收.md`，tag `v0.10.0` / `v0.10.1` / `v0.10.2` / `v0.10.3` / `v0.10.4` / `v0.10.5` / `v0.10.6` / `v0.10.7` / `v0.10.8`）
 > 编写：主控（只写计划、派活、验收）；执行与检查均由子 agent（Grok 4.7 High Fast）完成
 > 依据：本仓调研（FF-pane v0.9.2，最新任务 T9.11）、cc-pane 参考调研、终端/CLI 可行性调研
 
@@ -88,9 +88,9 @@
 | `ffpane_send_message` | 给后代发消息/指令（正文或 brief 路径） | 仅后代 |
 | `ffpane_report` | 向上级汇报（状态 done/blocked/failed/progress + 摘要 + 可选文件路径） | 仅上级链 |
 | `ffpane_read_inbox` | 读取本窗口收件箱（未读/全部） | 仅自己 |
-| `ffpane_read_output` | 读取后代窗口最近终端输出 | 仅后代 |
-| `ffpane_close_window` | 关闭后代窗口 | 仅后代 |
-| `ffpane_open_panel` | 在界面打开隐藏面板（plan/tasks/runs） | 任何窗口（只影响 UI 显示） |
+| `ffpane_read_output` | 读取后代窗口环形缓冲尾部。默认最后 8KB，`maxBytes` 可调，硬顶 32KB。先按字节取尾再去掉 ANSI / 控制序列。窗口未运行时返回状态说明 | 仅后代 |
+| `ffpane_close_window` | 关闭后代窗口：杀 PTY、吊销令牌、清投递队列、从布局移除。直接子窗口标记 `parentClosed`，权限仍按原上限封顶。关闭者的团队记录追加一条系统行。不能关自己 | 仅后代 |
+| `ffpane_open_panel` | 参数 `plan` / `tasks` / `runs`。向渲染端发事件，打开对应路由（T10.9 才改成隐藏面板），并 toast「由 &lt;窗口标题&gt; 打开」。同一窗口至少间隔 3 秒，过频拒绝且不发事件 | 任何窗口 |
 
 角色默认建议权限：管理者 `edit`（实际由 Tony 设定）、规划 `read-only`、执行 `edit-exec`、检查 `edit-exec`（说明书约束不改代码，只跑检查）。
 
@@ -108,8 +108,13 @@
 - **Codex 局限**：`workspace-write` **无法单独禁止命令执行**；`edit` 与 `edit-exec` 的差异主要靠审批策略。0.159.2 已移除 `-a untrusted`（仅 `on-request` / `never`）。续接时沙箱/审批**不自动继承**，须每次重给。
 - **规则**：子窗口等级 ≤ 开启它的窗口；只有界面用户能任意设定顶层窗口等级；MCP 不给下级修改上级的工具；每次调用凭窗口身份令牌在主进程裁决（`authorize` / `canDelegate`）。
 - **窗口身份令牌**：每次启动/续接由主进程签发 ≥32 字节高熵令牌，仅存内存注册表，不落盘、不进布局、不进 renderer、**不进 argv**。经 `FF_PANE_WINDOW_TOKEN` 注入 CLI 进程环境；Claude 临时 `--mcp-config` 的 `env` **只写** `${FF_PANE_WINDOW_TOKEN}` 占位符（官方环境变量展开，真实值不落盘）；Codex 用 `mcp_servers.<name>.env_vars` 白名单从父进程转发（值不进 `-c`）。
-- **启动封顶**：主进程权威权限表；`workbench:launch-cli` 对有父级的窗口取 `min(请求, 祖先链上限)`；renderer 不得传 `parentWindowId`（父子关系仅主进程在 T10.7 建立）；布局读写时断环并封顶。
+- **启动封顶**：主进程权威权限表；`workbench:launch-cli` 对有父级的窗口取 `min(请求, 祖先链上限)`；renderer 不得传 `parentWindowId`（父子关系仅主进程在 T10.7 建立）；热同步继续忽略 renderer 伪造的父级。
+- **冷启动**：本项目第一次读布局走 `restoreColdLayout`：按磁盘上的父子关系重建主进程注册表，断环后再按祖先链封顶。`openedBy` 不是 user、且父级缺失或不在树上时，与断环一样降为 read-only 并锁住；清洗结果写回磁盘。同一会话再次 `syncLayout` 不得用磁盘上更高的权限或 `openedBy=user` 盖掉。不得把冷读到的权限当成顶层用户授权。
+- **管理权**：磁盘上的 `manager` 只用于显示，不授予开窗口。用户在界面续接或重新开始一个顶层（`openedBy=user`、无父级）且角色为 manager 的窗口时，视为重新授权（`setWindowRole` 用户身份，不因角色未变再投递切换行）。有父级的 manager 仅当其父级当前已是被授予的 manager 才继承授权，否则标题栏显示「管理权待恢复」。`managerGrantPending` 只驱动显示。父级被断环去掉、`openedBy` 仍不是 user 的，续接不当成用户重新授权。被清洗锁住的窗口也不能靠续接重新授权，除非界面显式改过该窗口角色。权限为 yolo 或角色为 manager 时，续接 / 重新开始先弹一次确认，取消则不启动。
+- **徽章**：重启后从 `.ffpane/threads/index.jsonl` 尾部（最多 256KB 且最多 400 行）加已读游标重算未读数与最近汇报状态，随布局 hydrate 一次取回。系统记录不计入未读。
+- **权限请求配对**：真实 Claude `PermissionRequest` 没有 `tool_use_id`。hook 从 stdin 计算 `tool_name` + 规范化 `tool_input` 的 SHA-256，只上报工具名与摘要。有 `tool_use_id` 时优先按 id 配对；否则按摘要多重集配对。批准时若用户改了输入，摘要不同，继续闩住直到 `UserPromptSubmit`。权限被拒绝且没有结束事件时继续闩住。伪造 Stop 在未决计数大于 0 时不解锁。
 - **父窗口关闭**：保留子窗口，标记 `parentClosed`；仍受开启时封顶约束。祖先降级后，超限后代标记 `permissionNeedsDowngrade`，下次启动/续接自动封顶（热改 CLI 参数不可能，界面提示重启）。
+- **关掉窗口**：点窗口 X 时在 `BrowserWindow` `close` 上先 flush 布局（最多 800ms）再关闭。`before-quit` 仍会再 flush 一次。
 
 ### 3.4 Provider 填表化
 
@@ -135,7 +140,7 @@
 | T10.5 | 窗口身份令牌 + 权限等级 + 自上而下下放规则 | ✅ 已验收（`docs/验收记录/T10.5-验收.md`，tag `v0.10.5`；移交 T10.7 三条见 `docs/开发进度.md`） |
 | T10.6 | 内置角色说明书 + 「设为管理者」 | ✅ 已验收（`docs/验收记录/T10.6-验收.md`，tag `v0.10.6`；移交 T10.7 四条见 `docs/开发进度.md`） |
 | T10.7a | 工作台 MCP 主链路：sidecar + 控制通道工具调用；`whoami`/`list_windows`/`set_role`/`write_brief`/`open_window`（先登记父级再启动、封顶）/`send_message`/`report`/`read_inbox`；消息落盘 `.ffpane/threads`；新消息空闲提醒 | ✅ 已验收（`docs/验收记录/T10.7a-验收.md`，tag `v0.10.7`；移交 T10.7b 三条见 `docs/开发进度.md`） |
-| T10.7b | 工作台 MCP 补全：`read_output`/`close_window`/`open_panel`；重启后团队关系恢复（先恢复父子再封顶、冷读 manager 校验）；未读/状态徽章等界面补全 | 管理者能查看、收尾子窗口；重启后团队仍在。开工前遵守 T10.7a 移交：按 `tool_name` + `tool_input` 摘要配对权限请求；横幅补「框已关掉就再发一句或关掉重开」；取消按钮只丢队列不清计数。同时遵守 T10.5 / T10.6 移交（见开发进度）。工作台 Codex 窗口暂时替换用户自定义 notify |
+| T10.7b | 工作台 MCP 补全：`read_output`/`close_window`/`open_panel`；冷启动先恢复父子再封顶；管理权恢复与「管理权待恢复」；未读/汇报徽章从线程索引尾部重算；权限请求按工具名 + 输入摘要配对；横幅与取消说明；窗口 X 先 flush 布局 | ✅ 已验收（`docs/验收记录/T10.7b-验收.md`，tag `v0.10.8`；移交 T10.9 两条见 `docs/开发进度.md`） |
 | T10.8 | ~~Grok 的 MCP 接入~~ **挂起**（Tony 决定本阶段不做 Grok） | — |
 | T10.9 | 计划 / 任务看板 / 运行记录 改为隐藏面板，数据改接工作台，可由 MCP `open_panel` 呼出 | 说一声就能打开看板 |
 | T10.10 | 记忆 MCP（检索/新增），让窗口能主动用记忆 | AI 窗口能查项目记忆 |

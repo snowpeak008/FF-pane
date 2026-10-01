@@ -365,13 +365,24 @@
       "badgeHint": "Click or right-click to set this window's role",
       "notAi": "The focused window is not an AI window",
       "rejected": "This window cannot be given that role",
-      "dropped": "The window had exited, so the role note was not written. The next launch injects it"
+      "dropped": "The window had exited, so the role note was not written. The next launch injects it",
+      "grantPending": "Manager authority not restored"
+    },
+    "resumeConfirm": {
+      "title": "Start this window?",
+      "body": "Permission is \"{{permission}}\" and role is \"{{role}}\". YOLO skips approval checks; a manager can open child windows after it starts. Cancel does not start it.",
+      "confirm": "Start",
+      "cancel": "Cancel"
+    },
+    "panel": {
+      "openedBy": "Opened from {{title}}"
     },
     "deliver": {
       "pending": "{{count}} waiting to be sent",
       "send": "Send now",
       "cancel": "Cancel",
-      "blocked": "Waiting on a permission prompt — not sending",
+      "cancelHint": "Cancel only drops the unsent queue. It does not clear an unfinished permission prompt.",
+      "blocked": "Waiting on a permission prompt — not sending. If the dialog is already gone, send another line in this window, or close and reopen it.",
       "busy": "This turn has not finished — not sending",
       "noNode": "No node.exe is available, so turn-complete signals cannot arrive. Use Send now for anything waiting.",
       "codexManualHint": "If a confirmation dialog is on screen, do not click it."

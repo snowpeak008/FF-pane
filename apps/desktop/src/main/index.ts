@@ -18,7 +18,7 @@ import {
   releaseMcpForTerminalMetadata,
   type WorkbenchCliLayer,
 } from "./workbench";
-import { createLayoutFlushBridge } from "./workbench-flush";
+import { createLayoutFlushBridge, WORKBENCH_LAYOUT_FLUSH_BUDGET_MS } from "./workbench-flush";
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 const isSmokeMode = process.argv.includes("--smoke");
@@ -32,7 +32,10 @@ let terminalLayer: TerminalLayer | null = null;
 /** 工作台 CLI 启动层（T10.4）；退出时清临时 MCP。 */
 let workbenchCliLayer: WorkbenchCliLayer | null = null;
 
-function createMainWindow(options: { readonly hidden: boolean }): BrowserWindow {
+function createMainWindow(options: {
+  readonly hidden: boolean;
+  readonly flushLayouts?: () => Promise<void>;
+}): BrowserWindow {
   const state = loadWindowState();
   const window = new BrowserWindow({
     title: "FF-pane",
@@ -54,6 +57,41 @@ function createMainWindow(options: { readonly hidden: boolean }): BrowserWindow 
   window.on("closed", () => {
     mainWindow = null;
   });
+  if (options.flushLayouts !== undefined) {
+    let allowClose = false;
+    let closing = false;
+    window.on("close", (event) => {
+      if (allowClose) {
+        return;
+      }
+      event.preventDefault();
+      if (closing) {
+        return;
+      }
+      closing = true;
+      const flush = options.flushLayouts;
+      const finish = (): void => {
+        if (window.isDestroyed()) {
+          return;
+        }
+        allowClose = true;
+        window.close();
+      };
+      if (flush === undefined) {
+        finish();
+        return;
+      }
+      void Promise.race([
+        flush().then(
+          () => undefined,
+          () => undefined,
+        ),
+        new Promise<void>((resolve) => {
+          setTimeout(resolve, WORKBENCH_LAYOUT_FLUSH_BUDGET_MS);
+        }),
+      ]).then(finish);
+    });
+  }
 
   trackWindowState(window);
   window.on("ready-to-show", () => {
@@ -281,7 +319,10 @@ async function bootstrap(): Promise<void> {
     console.error(`[main] terminal layer init failed: ${message}`);
   }
 
-  createMainWindow({ hidden: false });
+  createMainWindow({
+    hidden: false,
+    flushLayouts: () => layoutFlush.requestFlush(),
+  });
 }
 
 app

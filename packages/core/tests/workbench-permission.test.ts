@@ -108,15 +108,15 @@ describe("authorize 穷举", () => {
     ).toBe(true);
   });
 
-  it("自己：可关自己；不可调自己权；不可对自己发控制指令", () => {
+  it("自己：不可关自己；不可调自己权；不可对自己发控制指令", () => {
     expect(
       authorize({
         actor: { kind: "window", windowId: "W" },
         action: "close",
         targetWindowId: "W",
         tree,
-      }).ok,
-    ).toBe(true);
+      }),
+    ).toEqual({ ok: false, reason: "control-self-denied" });
     expect(
       authorize({
         actor: { kind: "window", windowId: "W" },
@@ -420,13 +420,50 @@ describe("sanitizeWorkbenchAuthTree / resolveLaunchPermission", () => {
     expect(resolveLaunchPermission({ windowId: "P", requested: "yolo", tree }).capped).toBe(false);
   });
 
-  it("伪造父级（缺失节点）不抬权：按自身登记", () => {
+  it("父级不在树上且不是用户开启：启动降为只读，不采用请求值", () => {
     const tree: Record<string, WorkbenchAuthNode> = {
-      C: node("C", "edit", "ghost-parent"),
+      C: node("C", "yolo", "ghost-parent"),
     };
     const launch = resolveLaunchPermission({ windowId: "C", requested: "yolo", tree });
-    // 有 parentWindowId 字段 → 走封顶路径；父缺失时 ceiling=自身 edit
-    expect(launch.effective).toBe("edit");
+    expect(launch.effective).toBe("read-only");
     expect(launch.capped).toBe(true);
+    const sanitized = sanitizeWorkbenchAuthTree(tree);
+    expect(sanitized.windows["C"]?.permission).toBe("read-only");
+    expect(sanitized.windows["C"]?.parentWindowId).toBeUndefined();
+    expect(sanitized.windows["C"]?.sanitizeLocked).toBe(true);
+  });
+
+  it("没有父级字段且不是用户开启：同样降为只读", () => {
+    const tree: Record<string, WorkbenchAuthNode> = {
+      C: node("C", "yolo", undefined, { openedBy: { windowId: "gone" } }),
+    };
+    const sanitized = sanitizeWorkbenchAuthTree(tree);
+    expect(sanitized.windows["C"]?.permission).toBe("read-only");
+    expect(sanitized.windows["C"]?.sanitizeLocked).toBe(true);
+    expect(
+      resolveLaunchPermission({ windowId: "C", requested: "yolo", tree: sanitized.windows })
+        .effective,
+    ).toBe("read-only");
+  });
+
+  it("用户开启且没有父级：保持请求的 yolo", () => {
+    const tree: Record<string, WorkbenchAuthNode> = {
+      C: node("C", "yolo"),
+    };
+    const sanitized = sanitizeWorkbenchAuthTree(tree);
+    expect(sanitized.windows["C"]?.permission).toBe("yolo");
+    expect(sanitized.windows["C"]?.sanitizeLocked).toBeUndefined();
+    expect(resolveLaunchPermission({ windowId: "C", requested: "yolo", tree }).effective).toBe(
+      "yolo",
+    );
+  });
+
+  it("清洗锁住后，请求 yolo 仍是只读", () => {
+    const tree: Record<string, WorkbenchAuthNode> = {
+      C: node("C", "read-only", undefined, { sanitizeLocked: true, openedBy: "user" }),
+    };
+    expect(resolveLaunchPermission({ windowId: "C", requested: "yolo", tree }).effective).toBe(
+      "read-only",
+    );
   });
 });

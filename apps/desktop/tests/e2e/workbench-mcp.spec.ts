@@ -51,6 +51,24 @@ async function createProject(
   await expect(page.getByRole("button", { name: new RegExp(`^${name}`) })).toBeVisible();
 }
 
+async function readReplayForWindowId(page: LaunchedApp["page"], windowId: string): Promise<string> {
+  return page.evaluate(async (wid) => {
+    // biome-ignore lint/suspicious/noExplicitAny: E2E
+    const list = await (window as any).ffpane.invoke("terminal:list");
+    const rows = Array.isArray(list) ? list : [];
+    const match =
+      rows.find((row) => row?.metadata?.windowId === wid && row.exited !== true) ??
+      rows.find((row) => row?.metadata?.windowId === wid);
+    const id = match?.id;
+    if (typeof id !== "string" || id.length === 0) {
+      return "";
+    }
+    // biome-ignore lint/suspicious/noExplicitAny: E2E
+    const replay = await (window as any).ffpane.invoke("terminal:get-replay", { id });
+    return typeof replay?.data === "string" ? replay.data : "";
+  }, windowId);
+}
+
 async function readReplayForWindow(page: LaunchedApp["page"], windowId: string): Promise<string> {
   return page.evaluate(async (wid) => {
     const host = document.querySelector(`[data-window-id="${wid}"]`);
@@ -170,6 +188,162 @@ test("管理者开窗口，执行者汇报，越权被拒，记录落盘", async
     expect(md).toContain("前端A");
     expect(md).toContain("汇报:done");
     expect(md).toContain("消息");
+  } finally {
+    await launched.cleanup();
+  }
+});
+
+async function seedClaudeProfile(page: LaunchedApp["page"]): Promise<void> {
+  await page.evaluate(async () => {
+    const invoke = (channel: string, req?: unknown) =>
+      // biome-ignore lint/suspicious/noExplicitAny: E2E
+      (window as any).ffpane.invoke(channel, req);
+    const provider = await invoke("providers:create", {
+      draft: {
+        name: "Local Claude",
+        templateId: "local-login",
+        models: [{ id: "sonnet", label: "Sonnet", kind: "chat" }],
+        defaultModelId: "sonnet",
+        enabled: true,
+      },
+    });
+    await invoke("profiles:create", {
+      draft: {
+        name: "Claude WB",
+        runtime: "claude-code",
+        providerId: provider.id,
+        defaultRole: "worker",
+        permissionPreset: {
+          readPaths: ["**"],
+          writePaths: ["**"],
+          shell: "allowed",
+          network: false,
+          dangerousOpsRequireApproval: true,
+        },
+        connectionMode: "local_cli",
+        model: "sonnet",
+        reasoningEffort: "medium",
+      },
+    });
+  });
+}
+
+test("管理者读取并关闭子窗口，再打开任务页", async () => {
+  test.setTimeout(120_000);
+  const fakeBinDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-mcp-close-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-mcp-close-proj-"));
+  seedFakeClaude(fakeBinDir);
+  const launched = await launchApp({
+    pathPrepend: fakeBinDir,
+    extraEnv: { FFPANE_WB_SCRIPT: "close" },
+  });
+  try {
+    const { app, page } = launched;
+    await createProject(app, page, projectDir, "E2E Close");
+    await page.getByRole("button", { name: /^E2E Close/ }).click();
+    await seedClaudeProfile(page);
+    await gotoRoute(page, "/workbench");
+    await page.getByTestId("workbench-new-tab").click();
+    await expect(page.getByTestId("workbench-new-window-dialog")).toBeVisible();
+    await page.getByTestId("workbench-new-kind-claude").click();
+    await expect(page.getByTestId("workbench-new-profile")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("workbench-new-confirm")).toBeEnabled({ timeout: 15_000 });
+    await page.getByTestId("workbench-new-confirm").click();
+
+    const manager = page.getByTestId("workbench-window").first();
+    const managerId = await manager.getAttribute("data-window-id");
+    expect(managerId).toBeTruthy();
+    await expect
+      .poll(async () => readReplayForWindowId(page, managerId ?? ""), { timeout: 90_000 })
+      .toContain("FFPANE_MCP_PANEL=ok");
+    const replay = await readReplayForWindowId(page, managerId ?? "");
+    expect(replay).toContain("FFPANE_MCP_READ=yes");
+    expect(replay).toContain("FFPANE_MCP_CLOSE=ok");
+    await expect(page).toHaveURL(/#\/tasks/);
+    await expect(page.getByText(/Opened from /)).toBeVisible();
+    await gotoRoute(page, "/workbench");
+    await expect(page.getByText("前端关")).toHaveCount(0);
+    await expect(page.getByTestId("workbench-window")).toHaveCount(1);
+  } finally {
+    await launched.cleanup();
+  }
+});
+
+test("重启后子窗口仍被封顶，续接管理者可以再开窗口", async () => {
+  test.setTimeout(120_000);
+  const fakeBinDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-mcp-restart-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-mcp-restart-proj-"));
+  seedFakeClaude(fakeBinDir);
+  let launched = await launchApp({
+    pathPrepend: fakeBinDir,
+    retainDataRoot: true,
+    extraEnv: { FFPANE_WB_SCRIPT: "restart" },
+  });
+  const dataRoot = launched.dataRoot;
+  try {
+    const { app, page } = launched;
+    await createProject(app, page, projectDir, "E2E Restart");
+    await page.getByRole("button", { name: /^E2E Restart/ }).click();
+    await seedClaudeProfile(page);
+    await gotoRoute(page, "/workbench");
+    await page.getByTestId("workbench-new-tab").click();
+    await expect(page.getByTestId("workbench-new-window-dialog")).toBeVisible();
+    await page.getByTestId("workbench-new-kind-claude").click();
+    await expect(page.getByTestId("workbench-new-profile")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("workbench-new-confirm")).toBeEnabled({ timeout: 15_000 });
+    await page.getByTestId("workbench-new-confirm").click();
+
+    const manager = page.getByTestId("workbench-window").filter({ hasText: "Opened by you" });
+    const managerId = await manager.getAttribute("data-window-id");
+    expect(managerId).toBeTruthy();
+    await expect
+      .poll(async () => readReplayForWindow(page, managerId ?? ""), { timeout: 90_000 })
+      .toContain("FFPANE_MCP_READY=1");
+    const child = page.getByTestId("workbench-window").filter({ hasText: "前端A" });
+    await expect(child).toBeVisible({ timeout: 30_000 });
+    await expect(child.locator("[data-report-status]")).toHaveAttribute(
+      "data-report-status",
+      "done",
+      { timeout: 30_000 },
+    );
+    await expect(manager.getByTestId("workbench-unread-badge")).toBeVisible({ timeout: 15_000 });
+
+    await launched.cleanup();
+    launched = await launchApp({
+      dataRoot,
+      pathPrepend: fakeBinDir,
+      retainDataRoot: false,
+      extraEnv: { FFPANE_WB_SCRIPT: "restart" },
+    });
+    const restarted = launched.page;
+    await restarted.getByRole("button", { name: /^E2E Restart/ }).click();
+    await gotoRoute(restarted, "/workbench");
+    const restoredChild = restarted.getByTestId("workbench-window").filter({ hasText: "前端A" });
+    await expect(restoredChild).toBeVisible();
+    await expect(restoredChild.getByTestId("workbench-opened-by")).toContainText(/Opened by /);
+    await expect(restoredChild.locator("[data-permission]")).toHaveAttribute(
+      "data-permission",
+      "edit",
+    );
+    await expect(restoredChild).toContainText("Restart required");
+    await expect(restoredChild.locator("[data-report-status]")).toHaveAttribute(
+      "data-report-status",
+      "done",
+    );
+    const restoredManager = restarted
+      .getByTestId("workbench-window")
+      .filter({ hasText: "Opened by you" });
+    await expect(restoredManager.getByTestId("workbench-unread-badge")).toBeVisible();
+    await restoredManager.getByTestId("cli-resume").click({ force: true });
+    const confirm = restarted.getByRole("dialog");
+    await expect(confirm).toBeVisible();
+    await expect(confirm).toContainText("Start this window?");
+    await confirm.getByRole("button", { name: "Cancel" }).click();
+    await expect(restarted.getByText("前端B")).toHaveCount(0);
+    await expect(restoredManager.getByTestId("cli-resume")).toBeVisible();
+    await restoredManager.getByTestId("cli-resume").click({ force: true });
+    await restarted.getByRole("dialog").getByRole("button", { name: "Start" }).click();
+    await expect(restarted.getByText("前端B")).toBeVisible({ timeout: 90_000 });
   } finally {
     await launched.cleanup();
   }

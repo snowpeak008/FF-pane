@@ -10,16 +10,18 @@ import {
   WORKBENCH_ROLES,
 } from "@ff-pane/shared";
 import { Bot, Columns2, Maximize2, Minimize2, Rows2, SquareTerminal, X } from "lucide-react";
-import { type ReactElement, useMemo, useState } from "react";
+import { type ReactElement, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Button } from "../../components/ui/Button";
+import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
 import { Tooltip } from "../../components/ui/Tooltip";
 import { invokeQuery, queryData } from "../../ipc/query";
 import { useInvokeQuery } from "../../ipc/useInvokeQuery";
 import { useSubscription } from "../../ipc/useSubscription";
 import { cn } from "../../lib/cn";
 import { useWorkbenchStore } from "../../stores/workbench";
+import { needsSensitiveLaunchConfirm, rememberSensitiveLaunchConfirm } from "./sensitive-launch";
 import { TerminalView } from "./TerminalView";
 
 export interface WindowPaneProps {
@@ -57,6 +59,7 @@ export function WindowPane({
   const [exitCode, setExitCode] = useState<number | undefined>(undefined);
   const [permissionCappedHint, setPermissionCappedHint] = useState(false);
   const [resumeNext, setResumeNext] = useState(false);
+  const [sensitiveOpen, setSensitiveOpen] = useState(false);
   const patchWindow = useWorkbenchStore((s) => s.patchWindow);
   const setWindowPermission = useWorkbenchStore((s) => s.setWindowPermission);
   const applyWindowRole = useWorkbenchStore((s) => s.applyWindowRole);
@@ -85,6 +88,29 @@ export function WindowPane({
   const running = exitCode === undefined && window.terminalId !== undefined;
   const autoStart = wasCreatedThisSession(window.id);
   const initialPrompt = useMemo(() => takeInitialPrompt(window.id), [takeInitialPrompt, window.id]);
+  const sensitiveResolvers = useRef<Array<(accepted: boolean) => void>>([]);
+
+  const askSensitiveLaunch = (): Promise<boolean> => {
+    if (!needsSensitiveLaunchConfirm(window.id, permission, role)) {
+      return Promise.resolve(true);
+    }
+    return new Promise((resolve) => {
+      sensitiveResolvers.current.push(resolve);
+      setSensitiveOpen(true);
+    });
+  };
+
+  const finishSensitiveLaunch = (accepted: boolean): void => {
+    if (accepted) {
+      rememberSensitiveLaunchConfirm(window.id);
+    }
+    setSensitiveOpen(false);
+    const pending = sensitiveResolvers.current;
+    sensitiveResolvers.current = [];
+    for (const resolve of pending) {
+      resolve(accepted);
+    }
+  };
 
   const openedByLabel = useMemo(() => {
     if (!isCli) {
@@ -306,6 +332,14 @@ export function WindowPane({
                 {openedByLabel}
               </span>
             ) : null}
+            {window.managerGrantPending === true ? (
+              <span
+                className="shrink-0 text-2xs text-warning-text"
+                data-testid="workbench-manager-grant-pending"
+              >
+                {t("workbench.role.grantPending")}
+              </span>
+            ) : null}
             {window.permissionNeedsDowngrade === true ? (
               <span className="shrink-0 text-2xs text-warning-text">
                 {t("workbench.permission.needsRestart")}
@@ -431,12 +465,22 @@ export function WindowPane({
             data-testid="workbench-permission-apply"
             disabled={pendingPermission === "yolo" && !yoloConfirm}
             onClick={() => {
-              setWindowPermission(window.projectId, window.id, pendingPermission);
-              setEditingPermission(false);
-              if (running) {
-                setResumeNext(true);
-                setLaunchNonce((n) => n + 1);
-              }
+              void (async () => {
+                const settled = await invokeQuery("workbench:set-permission", {
+                  windowId: window.id,
+                  permission: pendingPermission,
+                });
+                if (settled.status === "error") {
+                  toast.error(settled.error.message);
+                  return;
+                }
+                setWindowPermission(window.projectId, window.id, pendingPermission);
+                setEditingPermission(false);
+                if (running) {
+                  setResumeNext(true);
+                  setLaunchNonce((n) => n + 1);
+                }
+              })();
             }}
           >
             {running ? t("workbench.permission.applyAndRestart") : t("workbench.permission.apply")}
@@ -501,6 +545,9 @@ export function WindowPane({
           >
             {t("workbench.deliver.cancel")}
           </button>
+          <span className="text-fg-muted" data-testid="workbench-deliver-cancel-hint">
+            {t("workbench.deliver.cancelHint")}
+          </span>
         </div>
       ) : null}
       <TerminalView
@@ -553,6 +600,26 @@ export function WindowPane({
               },
             }
           : {})}
+        beforeUserRelaunch={askSensitiveLaunch}
+      />
+      <ConfirmDialog
+        open={sensitiveOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            finishSensitiveLaunch(false);
+          }
+        }}
+        title={t("workbench.resumeConfirm.title")}
+        description={t("workbench.resumeConfirm.body", {
+          permission: t(`workbench.permission.level.${permission}`),
+          role: t(`workbench.role.level.${role}`),
+        })}
+        tone="primary"
+        confirmLabel={t("workbench.resumeConfirm.confirm")}
+        cancelLabel={t("workbench.resumeConfirm.cancel")}
+        onConfirm={() => {
+          finishSensitiveLaunch(true);
+        }}
       />
     </section>
   );
