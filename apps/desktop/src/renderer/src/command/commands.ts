@@ -100,7 +100,7 @@ export function commandsInGroup(group: CommandGroup): readonly CommandDescriptor
 
 /**
  * 命令在面板里展示的键位。
- * 七个页面导航命令自身没有独立登记，键位来自 §7 的 Ctrl+N（按页面序号推导），
+ * 页面导航命令自身没有独立登记，键位来自 §7 的 Ctrl+N（按页面序号推导），
  * 这样面板里每个页面条目都能显示自己的键位。
  */
 export function commandShortcutDisplay(

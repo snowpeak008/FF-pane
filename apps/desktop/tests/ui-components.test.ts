@@ -1,5 +1,4 @@
 import { readFileSync } from "node:fs";
-import { TASK_STATUSES } from "@ff-pane/shared";
 import { describe, expect, it } from "vitest";
 import {
   formatErrorDetail,
@@ -9,7 +8,6 @@ import {
 import {
   CAPABILITY_BADGE,
   CAPABILITY_LEVELS,
-  TASK_STATUS_BADGE,
 } from "../src/renderer/src/components/ui/badge.variants";
 import {
   BUTTON_ICON_SIZE,
@@ -73,9 +71,6 @@ function allVariantClassNames(): readonly string[] {
   output.push(textareaVariants({ invalid: true }), textareaVariants({ invalid: false }));
   output.push(tableRowVariants({ density: "compact", interactive: true, selected: true }));
   output.push(tableCellVariants({ align: "right", mono: true, truncate: true }));
-  for (const style of Object.values(TASK_STATUS_BADGE)) {
-    output.push(style.badge, style.dot);
-  }
   for (const style of Object.values(CAPABILITY_BADGE)) {
     output.push(style.badge, style.dot);
   }
@@ -157,46 +152,7 @@ describe("Button 变体（设计系统 §5.1）", () => {
   });
 });
 
-describe("Badge 状态映射完整性（设计系统 §3.3 / §3.4 / §5.7）", () => {
-  it("任务 7 态全枚举，键集合与领域层 TASK_STATUSES 完全一致", () => {
-    expect(Object.keys(TASK_STATUS_BADGE).sort()).toEqual([...TASK_STATUSES].sort());
-    expect(TASK_STATUSES).toHaveLength(7);
-  });
-
-  it("每一态都有徽章底色与圆点，且底色两两不同", () => {
-    const badges = new Set<string>();
-    for (const status of TASK_STATUSES) {
-      const style = TASK_STATUS_BADGE[status];
-      expect(style.badge.length, `${status} 缺徽章类名`).toBeGreaterThan(0);
-      expect(style.dot.length, `${status} 缺圆点类名`).toBeGreaterThan(0);
-      expect(style.badge).toContain(`text-status-${status}-text`);
-      badges.add(style.badge);
-    }
-    expect(badges.size).toBe(TASK_STATUSES.length);
-  });
-
-  it("done ≠ accepted：两者必须是不同色源（产品核心规则）", () => {
-    expect(TASK_STATUS_BADGE.done.badge).not.toBe(TASK_STATUS_BADGE.accepted.badge);
-    expect(TASK_STATUS_BADGE.done.dot).not.toBe(TASK_STATUS_BADGE.accepted.dot);
-    expect(TASK_STATUS_BADGE.done.badge).toContain("status-done");
-    expect(TASK_STATUS_BADGE.accepted.badge).toContain("status-accepted");
-  });
-
-  it("cancelled 与 pending 同为中性灰，靠形状区分：虚线边框 + 空心圆环", () => {
-    expect(TASK_STATUS_BADGE.cancelled.badge).toContain("border-dashed");
-    expect(TASK_STATUS_BADGE.cancelled.dot).toContain("border");
-    expect(TASK_STATUS_BADGE.cancelled.dot).not.toContain("bg-status-cancelled");
-    expect(TASK_STATUS_BADGE.pending.badge).not.toContain("border-dashed");
-    expect(TASK_STATUS_BADGE.pending.dot).toContain("bg-status-pending");
-  });
-
-  it("只有 running 带动效（徽章上唯一允许的动画）", () => {
-    for (const status of TASK_STATUSES) {
-      const hasPulse = TASK_STATUS_BADGE[status].dot.includes("animate-pulse");
-      expect(hasPulse, `${status} 的动效状态不符`).toBe(status === "running");
-    }
-  });
-
+describe("Badge 能力三态（设计系统 §3.4 / §5.7）", () => {
   it("能力三态全枚举，并复用 success / warning / cancelled 三族（不新增 token）", () => {
     expect(Object.keys(CAPABILITY_BADGE).sort()).toEqual([...CAPABILITY_LEVELS].sort());
     expect(CAPABILITY_LEVELS).toHaveLength(3);
@@ -429,7 +385,6 @@ const REQUIRED_LOCALE_KEYS: readonly string[] = [
   "page.notFound.message",
   "page.notFound.action",
   ...ALL_NAV_ITEMS.flatMap((item) => [item.labelKey, item.questionKey]),
-  ...TASK_STATUSES.map((status) => `task.status.${status}`),
   ...CAPABILITY_LEVELS.map((level) => `capability.level.${level}`),
 ];
 

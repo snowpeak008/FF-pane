@@ -2,17 +2,12 @@
  * 冒烟 10：多项目并存（T7.4，§11.1）。
  *
  * 两件事在这里同时取证，因为它们本就是同一个场景的两面：
- * 1. 项目间数据隔离——两个项目同时登记在工作台里时，项目记忆互不可见、`.workbench/`
- *    各自独立、会话登记不串项目；而知识库与共享记忆（习惯）确为全局，两个项目同见。
- *    经真实 preload → 主进程 → storage 链路取证，并辅以磁盘落点核对。
- * 2. 项目卡片的派生信息——当前计划版本与状态 / 进行中任务数 / 最后活动时间，由查询层
- *    当场汇总（不持久化），两个项目各算各的，缺数据如实降级。
+ * 1. 项目间数据隔离——项目记忆互不可见；知识库与共享记忆（习惯）确为全局。
+ *    磁盘上可以留着旧计划 / 任务 / Run / 会话文件，摘要和卡片不把它们显示出来。
+ * 2. 项目卡片只报告数据目录在不在。缺目录如实降级。
  *
- * 数据用直接落盘的方式种进去：计划 / 任务 / Run / 会话登记都没有"凭空创建"的 IPC——
- * 它们是 §12 十步流程跑出来的产物，起真流程需要可用 Provider。落盘格式即 W1.2b/c 的
- * 持久层约定，由主进程真实读回，读链路与生产完全一致。
- *
- * hermetic：不联网、不起任何 Agent 进程；数据根与 userData 均在临时区（见 _launch.ts）。
+ * 数据用直接落盘的方式种进去。hermetic：不联网、不起任何 Agent 进程；
+ * 数据根与 userData 均在临时区（见 _launch.ts）。
  */
 
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -152,7 +147,7 @@ test.afterAll(async () => {
   }
 });
 
-test("两项目并存：项目记忆 / .workbench / 会话登记三处互不串，知识库与共享记忆确为全局", async () => {
+test("两项目并存：项目记忆互不可见，旧文件留在各自目录，知识库与共享记忆是全局的", async () => {
   const { page, dataRoot } = launched;
 
   // 三个项目都经 projects:create 登记（顺带生成各自的 .workbench/ 全套目录）
@@ -208,18 +203,6 @@ test("两项目并存：项目记忆 / .workbench / 会话登记三处互不串�
         memory: (await invoke("memory:list", { projectRoot: dir })).map(
           (entry: { id: string }) => entry.id,
         ),
-        plans: (await invoke("plans:list", { projectRoot: dir })).map(
-          (plan: { version: number }) => plan.version,
-        ),
-        tasks: (await invoke("tasks:list", { projectRoot: dir })).map(
-          (task: { id: string }) => task.id,
-        ),
-        runs: (await invoke("runs:list", { projectRoot: dir })).map(
-          (run: { id: string }) => run.id,
-        ),
-        sessions: (await invoke("sessions:list", { projectRoot: dir })).map(
-          (session: { id: string }) => session.id,
-        ),
       });
 
       return {
@@ -238,18 +221,6 @@ test("两项目并存：项目记忆 / .workbench / 会话登记三处互不串�
   // 项目记忆互不可见（§8.1 项目记忆是项目作用域）
   expect(result.alpha.memory).toEqual(["rule-alpha"]);
   expect(result.beta.memory).toEqual(["rule-beta"]);
-
-  // `.workbench/` 边界：Alpha 的计划 / 任务 / Run 一个都没漏进 Beta
-  expect(result.alpha.plans).toEqual([1]);
-  expect(result.alpha.tasks).toEqual(["task-alpha-1", "task-alpha-2"]);
-  expect(result.alpha.runs).toEqual(["run-alpha-1"]);
-  expect(result.beta.plans).toEqual([]);
-  expect(result.beta.tasks).toEqual([]);
-  expect(result.beta.runs).toEqual([]);
-
-  // 会话登记不串项目（sessions.json 在各自 .workbench/ 下，§10.2 规则 3）
-  expect(result.alpha.sessions).toEqual(["ls-alpha"]);
-  expect(result.beta.sessions).toEqual([]);
 
   // 共享记忆与知识库是全局的：同一份内容，两个项目都看得见（通道本身就不带项目作用域）
   expect(result.habits).toContain("跨项目共享的习惯：改动前先看验收标准。");

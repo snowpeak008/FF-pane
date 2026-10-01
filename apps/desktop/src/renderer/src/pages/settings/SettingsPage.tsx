@@ -4,7 +4,6 @@ import { Separator } from "../../components/ui/Separator";
 import { PageHeader } from "../../layout/PageHeader";
 import { AppearanceSection } from "./AppearanceSection";
 import { ConfigToolSection } from "./ConfigToolSection";
-import { ContextWarnSection } from "./ContextWarnSection";
 import { ConfigsSection } from "./configs/ConfigsSection";
 import { KnowledgeToolSection } from "./KnowledgeToolSection";
 import { LanguageSection } from "./LanguageSection";
@@ -29,8 +28,6 @@ export function SettingsPage(): ReactElement {
           <AppearanceSection />
           <Separator />
           <LanguageSection />
-          <Separator />
-          <ContextWarnSection />
           <Separator />
           <WorkbenchLimitSection />
           <Separator />

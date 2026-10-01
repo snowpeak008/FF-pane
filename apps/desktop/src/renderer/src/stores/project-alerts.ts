@@ -15,8 +15,7 @@
  *    重启后读回的就是移除后的集合）；
  * 3. 与 ui store 同一迁移路径（Phase 3 暂存 localStorage，后续统一入 config.json）。
  *
- * 键用 projectRoot 而非 projectId：事件源（主进程 saveTask 落盘点）手里只有
- * projectRoot（见 contracts.ts TaskSettledEvent 注释），两端同源字符串直接相等比较，
+ * 键用 projectRoot 而非 projectId：落定记录按项目根路径比对，
  * 不引入一次注册表反查。项目被移除再恢复（projects:restore 原样放回）root 不变，
  * 未读状态自然延续。
  *

@@ -19,7 +19,7 @@ import { useKnowledgeImport } from "./useKnowledgeImport";
  *
  * **作用域是全局而不是当前项目**：知识库与共享记忆一样跨项目复用（§10.1 落在
  * `~/.aiworkbench` 下），故本页不需要当前项目，也不显示 NoActiveProject 空态。
- * 只有「发送到当前会话」这一个动作与项目/会话有关，那由会话页自己处理。
+ * 检索命中只提供复制引用。
  */
 function KnowledgeView({
   overview,

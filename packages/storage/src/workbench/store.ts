@@ -124,9 +124,6 @@ function parseWindow(value: unknown, projectId: ProjectId): WorkbenchWindow | nu
     kind,
     cwd: raw["cwd"],
     createdAt: raw["createdAt"],
-    ...(typeof raw["profileId"] === "string" && raw["profileId"].trim() !== ""
-      ? { profileId: raw["profileId"] }
-      : {}),
     ...(isConnectionMode(raw["routeMode"]) ? { routeMode: raw["routeMode"] } : {}),
     ...(typeof raw["routeProviderName"] === "string" && raw["routeProviderName"].trim() !== ""
       ? { routeProviderName: raw["routeProviderName"] }
@@ -233,12 +230,13 @@ function parseLayout(projectId: string, value: unknown): ProjectWorkbenchLayout 
   };
 }
 
-/** 持久化前剥离运行期字段（terminalId）。 */
+/** 持久化前剥离运行期字段（terminalId）和旧档案 id。 */
 export function stripRuntimeFields(layout: ProjectWorkbenchLayout): ProjectWorkbenchLayout {
   const windows: Record<string, WorkbenchWindow> = {};
   for (const [id, window] of Object.entries(layout.windows)) {
-    const { terminalId: _terminalId, ...rest } = window;
+    const { terminalId: _terminalId, profileId: _profileId, ...rest } = window;
     void _terminalId;
+    void _profileId;
     windows[id] = rest;
   }
   return { ...layout, windows };

@@ -1,8 +1,5 @@
 /**
- * T9.4b Profile 编辑器：推理强度下拉按 Runtime 条件显示。
- *
- * 设置页新建 Profile —— 选 claude-code 或 grok-build 出现 #profile-reasoning-effort；
- * 选 gemini-cli 不出现。
+ * 设置页新建配置：Claude 与 Codex 各有思考强度，不再出现档案运行时下拉。
  */
 
 import { mkdtempSync, rmSync } from "node:fs";

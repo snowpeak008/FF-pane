@@ -79,7 +79,6 @@ export interface WorkbenchStoreActions {
     readonly projectRoot: string;
     readonly title?: string;
     readonly kind?: WorkbenchWindow["kind"];
-    readonly profileId?: string;
     readonly initialPrompt?: string;
     readonly permission?: WorkbenchPermissionLevel;
     readonly role?: WorkbenchRole;
@@ -92,7 +91,6 @@ export interface WorkbenchStoreActions {
     readonly targetWindowId: string;
     readonly direction: PaneSplitDirection;
     readonly kind?: WorkbenchWindow["kind"];
-    readonly profileId?: string;
     readonly initialPrompt?: string;
     readonly permission?: WorkbenchPermissionLevel;
     readonly role?: WorkbenchRole;
@@ -106,7 +104,6 @@ export interface WorkbenchStoreActions {
     windowId: string,
     patch: Partial<{
       nativeSessionId: string | null;
-      profileId: string;
       kind: WorkbenchWindow["kind"];
       title: string;
       terminalId: string | undefined;
@@ -373,7 +370,6 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
     projectRoot,
     title,
     kind = "shell",
-    profileId,
     initialPrompt,
     permission,
     role,
@@ -398,7 +394,6 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
         kind: resolvedKind,
         cwd: projectRoot,
         createdAt: Date.now(),
-        ...(profileId !== undefined ? { profileId } : {}),
         ...(isAi
           ? {
               permission: permission ?? DEFAULT_WORKBENCH_WINDOW_PERMISSION,
@@ -431,7 +426,6 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
     targetWindowId,
     direction,
     kind = "shell",
-    profileId,
     initialPrompt,
     permission,
     role,
@@ -461,7 +455,6 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
         kind,
         cwd: projectRoot,
         createdAt: Date.now(),
-        ...(profileId !== undefined ? { profileId } : {}),
         ...(isAi
           ? {
               permission: permission ?? DEFAULT_WORKBENCH_WINDOW_PERMISSION,
@@ -505,9 +498,6 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
       }
       if (patch.kind !== undefined) {
         Object.assign(next, { kind: patch.kind });
-      }
-      if (patch.profileId !== undefined) {
-        Object.assign(next, { profileId: patch.profileId });
       }
       if (patch.terminalId !== undefined) {
         Object.assign(next, { terminalId: patch.terminalId });

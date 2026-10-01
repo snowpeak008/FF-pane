@@ -1,19 +1,13 @@
 /**
- * 项目摘要汇总（T7.4，设计文档 §11.1）。
+ * 项目摘要（T7.4）。
  *
- * 项目卡片上的三项派生信息——当前计划版本与状态 / 进行中任务数 / 最后活动时间——在这里
- * 由计划 · 任务 · Run · 会话登记当场算出。**不持久化**（理由见 contracts.ts 的
- * `ProjectSummary` 注释）。
+ * 卡片只回答数据目录在不在。计划、任务、Run、会话登记不在这里读取，旧文件留在磁盘上。
  *
- * 读取一律经注入的 `ProjectSummarySources`：
- * 汇总规则（哪些状态算进行中、时间取哪个、失败怎么降级）由此可以脱离 Electron 与真实
- * 磁盘单测，而不必去起一个应用。
- *
- * 本文件不产出任何面向用户的文案：出错时给的是源码枚举（`ProjectSummaryPart`），
- * 措辞由渲染层按语言包取。
+ * 读取一律经注入的 `ProjectSummarySources`，汇总规则可以脱离 Electron 单测。
+ * 本文件不产出面向用户的文案：出错时给的是源码枚举（`ProjectSummaryPart`）。
  */
 
-import type { Plan, ProjectRegistryEntry, Run, SessionRecord, Task } from "@ff-pane/shared";
+import type { ProjectRegistryEntry } from "@ff-pane/shared";
 import type { ProjectLayout } from "@ff-pane/storage";
 import type {
   ProjectSummary,
@@ -21,28 +15,10 @@ import type {
   ProjectSummaryView,
 } from "../shared-ipc/contracts";
 
-/**
- * 「进行中任务数」= 非终态任务数，终态判定直接用领域层的 `isTaskTerminalStatus`
- * （`shared/domain/task.ts` 的 `TASK_TERMINAL_STATUSES`，§6.3）。
- *
- * 本文件曾自带一份同内容的 `["accepted","cancelled"]`。两份逐字相同时结果当然是对的，
- * 但日后领域侧增删终态，这里不会跟着变，症状是「任务看板认它是终态、项目卡片仍把它算成
- * 进行中」——一处静默的口径分叉。故改为复用领域守卫：终态集合只有一个定义处。
- *
- * 口径本身（T7.4 主管理员裁定）：只排除终态而不是"只数 running"——`running` 仅在一轮
- * Worker 在飞时为真，闭着应用时它恒为 0，那样的数字回答不了 §11.1 要项目列表回答的
- * 「各自到哪了」。反过来 `done` 要算进去——§6.3 写明 done ≠ accepted，一个等着用户
- * 验收的任务显然还没完事。
- */
-/** 汇总所需的读取，全部由宿主注入。计划 / 任务 / Run / 会话不再读取。 */
+/** 汇总所需的读取，全部由宿主注入。 */
 export interface ProjectSummarySources {
   /** `.workbench/` 是否存在（探测失败一律按不存在处理，见 summarizeProject 注释）。 */
   readonly workbenchPresent: (layout: ProjectLayout) => Promise<boolean>;
-  /** 全部计划版本（顺序不限，本模块按 version 自行取最大者）。 */
-  readonly listPlans: (layout: ProjectLayout) => Promise<readonly Plan[]>;
-  readonly listTasks: (layout: ProjectLayout) => Promise<readonly Task[]>;
-  readonly listRuns: (layout: ProjectLayout) => Promise<readonly Run[]>;
-  readonly listSessions: (layout: ProjectLayout) => Promise<readonly SessionRecord[]>;
   /** 项目根路径 → 布局（纯路径解析）。 */
   readonly resolveLayout: (projectRootDir: string) => ProjectLayout;
 }
@@ -71,10 +47,9 @@ async function readPart<T>(read: () => Promise<T>): Promise<PartResult<T>> {
 }
 
 /**
- * 汇总单个项目。**不抛错**。只看数据目录在不在，不读计划、任务、Run、会话。
+ * 汇总单个项目。**不抛错**。只看数据目录在不在。
  *
- * `.workbench/` 不存在时直接给零值摘要并短路四路读取——它们只会一路 ENOENT，而
- * "目录不在"这件事本身比四个空列表更有信息量，界面据 `workbenchPresent` 如实标注。
+ * `.workbench/` 不存在时直接给零值摘要。界面据 `workbenchPresent` 如实标注。
  */
 export async function summarizeProject(
   layout: ProjectLayout,

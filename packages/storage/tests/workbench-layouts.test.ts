@@ -138,7 +138,7 @@ describe("workbench layout store", () => {
       layouts: Record<string, ProjectWorkbenchLayout>;
     };
     expect(raw.version).toBe(WORKBENCH_LAYOUTS_FILE_VERSION);
-    expect(raw.layouts["proj-a"]?.windows["win-2"]?.profileId).toBe("prof-1");
+    expect(raw.layouts["proj-a"]?.windows["win-2"]?.profileId).toBeUndefined();
     expect(raw.layouts["proj-a"]?.windows["win-2"]?.nativeSessionId).toBe(
       "11111111-1111-4111-8111-111111111111",
     );
@@ -189,8 +189,10 @@ describe("workbench layout store", () => {
     const store = createWorkbenchLayoutStore(file);
     const all = await store.readAll();
     expect(all["proj-a"]?.windows["win-1"]?.role).toBeUndefined();
+    expect(all["proj-a"]?.windows["win-1"]?.profileId).toBeUndefined();
     expect(all["proj-a"]?.windows["win-2"]?.kind).toBe("codex");
     expect(all["proj-a"]?.windows["win-2"]?.role).toBeUndefined();
+    expect(all["proj-a"]?.windows["win-2"]?.profileId).toBeUndefined();
   });
 
   it("removeProject 删条目", async () => {

@@ -59,7 +59,6 @@ function applyAuthNode(window: WorkbenchWindow, node: WorkbenchAuthNode): Workbe
     permission: node.permission,
     openedBy: node.openedBy,
     ...(window.terminalId !== undefined ? { terminalId: window.terminalId } : {}),
-    ...(window.profileId !== undefined ? { profileId: window.profileId } : {}),
     ...(window.nativeSessionId !== undefined ? { nativeSessionId: window.nativeSessionId } : {}),
     role: node.role ?? (isWorkbenchRole(window.role) ? window.role : DEFAULT_WORKBENCH_ROLE),
     ...(node.parentWindowId !== undefined ? { parentWindowId: node.parentWindowId } : {}),

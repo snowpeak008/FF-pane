@@ -9,7 +9,6 @@ import { ChevronDown, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { type ReactElement, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  CLI_LOGIN_RUNTIME_WIRES,
   type CliLoginProbeView,
   type CliLoginRuntimeWire,
   supportsLocalModelsWire,
@@ -45,6 +44,9 @@ import {
 } from "./provider-form";
 
 const MODEL_KINDS: readonly ModelKind[] = ["chat", "embedding"];
+
+/** 探测下拉只列出 Claude 与 Codex。其余运行时的探测代码仍保留。 */
+const VISIBLE_CLI_LOGIN_RUNTIMES: readonly CliLoginRuntimeWire[] = ["claude-code", "codex"];
 
 const LOGIN_STATUS_TONE = {
   logged_in: "success",
@@ -131,7 +133,7 @@ function CliLoginSection({
               setProbeTick({ force: false });
             }}
           >
-            {CLI_LOGIN_RUNTIME_WIRES.map((rt) => (
+            {VISIBLE_CLI_LOGIN_RUNTIMES.map((rt) => (
               <option key={rt} value={rt}>
                 {rt}
               </option>

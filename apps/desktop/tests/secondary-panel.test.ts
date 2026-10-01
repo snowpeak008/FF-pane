@@ -14,11 +14,7 @@
  * 6. A/B 独立收展（store action 层面：toggle 互不影响）。
  */
 
-import {
-  isTaskSettledStatus,
-  TASK_SETTLED_STATUSES,
-  type TaskSettledStatus,
-} from "@ff-pane/shared";
+import { isTaskSettledStatus, TASK_SETTLED_STATUSES } from "@ff-pane/shared";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   isInstantRead,
@@ -196,16 +192,5 @@ describe("T9.7 A/B 独立收展（store action 层面）", () => {
     useUiStore.getState().bumpProjectsRefresh();
     useUiStore.getState().bumpProjectsRefresh();
     expect(useUiStore.getState().projectsRefreshSeq).toBe(before + 2);
-  });
-});
-
-describe("T9.7 B 栏未读圆点的状态色区分（视觉上失败/阻塞/完成三色各异）", () => {
-  it("三态取三个不同的状态色 token（§3.3）", async () => {
-    const { TASK_STATUS_BADGE } = await import("../src/renderer/src/components/ui/badge.variants");
-    const dots = (TASK_SETTLED_STATUSES as readonly TaskSettledStatus[]).map(
-      (status) => TASK_STATUS_BADGE[status].dot,
-    );
-    expect(new Set(dots).size).toBe(3);
-    expect(dots).toEqual(["bg-status-done", "bg-status-failed", "bg-status-blocked"]);
   });
 });

@@ -77,7 +77,7 @@ export interface WorkbenchWindow {
   readonly terminalId?: string;
   readonly createdAt: number;
   /**
-   * 旧布局上的档案 id。新开窗口不再写入，重启 / 续接也不再读取。
+   * 旧布局上的档案 id。读入时忽略，写入布局文件时剥离。
    */
   readonly profileId?: string;
   /** 本次启动实际走的连法。已开窗口不热改，下次启动时按当时的项目配置重写。 */

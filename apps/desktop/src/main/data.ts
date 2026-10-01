@@ -20,16 +20,10 @@ import {
   readOpenCodeEffortValues,
 } from "@ff-pane/adapters";
 import {
-  acceptTask,
-  approvePlan,
-  buildHandoff,
   CustomRoleValidationError,
-  cancelTask,
-  deriveAcceptanceCandidates,
   detectHabitConflicts,
   fetchModels,
   ProfileValidationError,
-  renderHandoff,
   testConnection,
   validateCustomRoleDraft,
   validateProfileDraft,
@@ -40,10 +34,6 @@ import {
   type HabitEntryId,
   isProjectConfigScopeOpen,
   isProjectConfigVisibleTo,
-  isReasoningEffortLevel,
-  type MemoryEntryId,
-  type Plan,
-  type PlanVersion,
   projectNamesOutsideScope,
   resolveReasoningEffortOptions,
 } from "@ff-pane/shared";
@@ -56,7 +46,6 @@ import {
   createProjectSettingsStore,
   createProviderStore,
   createRoleStore,
-  createSessionStore,
   createWorkbenchLayoutStore,
   deleteEntry,
   deleteHabit,
@@ -64,14 +53,9 @@ import {
   initProjectLayout,
   listEntries,
   listHabits,
-  listRuns,
-  listTasks,
-  loadPlan,
-  loadTask,
   type ProfileDraftValidator,
   ProjectConfigDraftInvalidError,
   ProjectConfigScopeBlockedError,
-  type ProjectLayout,
   type ProviderDraft,
   profileReferencesProvider,
   profileReferencesRole,
@@ -79,8 +63,6 @@ import {
   resolveProjectLayout,
   saveEntry,
   saveHabit,
-  savePlan,
-  saveTask,
   setHabitEnabled,
   updateEntryStatus,
   updateHabitStatus,
@@ -120,7 +102,6 @@ type DataChannel =
   | "config:update"
   | "workbench:get-layouts"
   | "workbench:save-layout"
-  | "workbench:remove-layout"
   | "profiles:list"
   | "configs:list"
   | "configs:create"
@@ -134,11 +115,6 @@ type DataChannel =
   | "roles:create"
   | "roles:update"
   | "roles:remove"
-  | "tasks:list"
-  | "tasks:accept"
-  | "tasks:cancel"
-  | "tasks:set-reasoning-effort"
-  | "runs:list"
   | "memory:list"
   | "memory:approve"
   | "memory:reject"
@@ -150,11 +126,7 @@ type DataChannel =
   | "habits:approve"
   | "habits:reject"
   | "habits:set-enabled"
-  | "habits:check-conflicts"
-  | "plans:list"
-  | "plans:approve"
-  | "sessions:list"
-  | "handoff:generate";
+  | "habits:check-conflicts";
 
 /** 目录选择器挂靠的父窗口取值器（窗口在数据层装配后才创建，故惰性取用）。 */
 export type MainWindowGetter = () => BrowserWindow | null;
@@ -262,30 +234,7 @@ export async function createDataHandlers(
     return undefined;
   }
 
-  // 全部计划版本（v1..vN 连续，逐版加载到 not-found 为止，按版本升序）。与 session 层的
-  // 同名逻辑是两份同形代码：那份绑在编排器依赖注入上，这份服务查询通道，跨进程边界不共享闭包。
-  async function loadAllPlans(projectLayout: ProjectLayout): Promise<readonly Plan[]> {
-    const plans: Plan[] = [];
-    for (let v = 1; ; v += 1) {
-      const result = await loadPlan(projectLayout, v as PlanVersion);
-      if (!result.ok) {
-        if (result.error.code === "not-found") {
-          break;
-        }
-        throw result.error;
-      }
-      plans.push(result.value.plan);
-    }
-    return plans;
-  }
-
-  /** 最新计划版本（= 版本号最大的那份，见 loadAllPlans）。 */
-  async function loadLatestPlan(projectLayout: ProjectLayout): Promise<Plan | undefined> {
-    return (await loadAllPlans(projectLayout)).at(-1);
-  }
-
-  // 项目摘要（T7.4）的四路读取：一律用查询通道自己那套「缺目录视为空集」的处置，
-  // 其余读错误照常抛出，由 summarizeProject 降级为对应源的 unavailable。
+  // 项目摘要只看数据目录在不在。计划、任务、Run、会话登记留在磁盘上，这里不读。
   const summarySources: ProjectSummarySources = {
     resolveLayout: resolveProjectLayout,
     workbenchPresent: async (projectLayout) => {
@@ -296,28 +245,6 @@ export async function createDataHandlers(
         return false;
       }
     },
-    listPlans: loadAllPlans,
-    listTasks: async (projectLayout) => {
-      const result = await listTasks(projectLayout);
-      if (!result.ok) {
-        if (result.error.code === "not-found") {
-          return [];
-        }
-        throw result.error;
-      }
-      return result.value;
-    },
-    listRuns: async (projectLayout) => {
-      const result = await listRuns(projectLayout);
-      if (!result.ok) {
-        if (result.error.code === "not-found") {
-          return [];
-        }
-        throw result.error;
-      }
-      return result.value;
-    },
-    listSessions: (projectLayout) => createSessionStore(projectLayout.sessionsFile).listSessions(),
   };
 
   const assertConfigDraft = async (
@@ -613,10 +540,6 @@ export async function createDataHandlers(
       await workbenchLayouts.saveProject(layout);
       return { ok: true as const };
     },
-    "workbench:remove-layout": async (request) => {
-      await workbenchLayouts.removeProject(request.projectId);
-      return { ok: true as const };
-    },
 
     "profiles:list": () => profiles.listProfiles(),
 
@@ -667,94 +590,6 @@ export async function createDataHandlers(
         profileReferencesRole(await profiles.listProfiles(), roleId),
       );
       return { removed: true } as const;
-    },
-
-    "tasks:list": async (request) => {
-      const layout = resolveProjectLayout(request.projectRoot);
-      const result = await listTasks(layout);
-      if (!result.ok) {
-        // tasks 目录缺失（未初始化的项目）视为空集，其余读错误上抛
-        if (result.error.code === "not-found") {
-          return [];
-        }
-        throw result.error;
-      }
-      return result.value;
-    },
-
-    "tasks:accept": async (request) => {
-      const layout = resolveProjectLayout(request.projectRoot);
-      const loaded = await loadTask(layout, request.id);
-      if (!loaded.ok) {
-        throw loaded.error;
-      }
-      const accepted = acceptTask(loaded.value, "user");
-      await saveTask(layout, accepted);
-      // T4.4：验收即从任务沉淀派生记忆候选（§8.1）。落库失败不回滚验收——任务已 accepted
-      // 是事实，候选缺失可由用户后续手写补，不该让记忆派生阻断验收终态。
-      let candidateCount = 0;
-      try {
-        const runsResult = await listRuns(layout);
-        const runs = runsResult.ok ? runsResult.value : [];
-        const candidates = deriveAcceptanceCandidates({
-          task: accepted,
-          runs,
-          now: Date.now(),
-          newId: () => `mem-${randomUUID()}` as MemoryEntryId,
-        });
-        for (const candidate of candidates) {
-          await saveEntry(layout, candidate);
-          await memoryIndex.entrySaved(request.projectRoot, candidate);
-        }
-        candidateCount = candidates.length;
-      } catch {
-        candidateCount = 0;
-      }
-      return { task: accepted, candidateCount };
-    },
-
-    "tasks:cancel": async (request) => {
-      const layout = resolveProjectLayout(request.projectRoot);
-      const loaded = await loadTask(layout, request.id);
-      if (!loaded.ok) {
-        throw loaded.error;
-      }
-      const cancelled = cancelTask(loaded.value);
-      await saveTask(layout, cancelled);
-      return cancelled;
-    },
-
-    "tasks:set-reasoning-effort": async (request) => {
-      const projectLayout = resolveProjectLayout(request.projectRoot);
-      const loaded = await loadTask(projectLayout, request.id);
-      if (!loaded.ok) {
-        throw loaded.error;
-      }
-      const raw = request.reasoningEffort?.trim() ?? "";
-      if (raw.length > 0 && !isReasoningEffortLevel(raw)) {
-        throw new Error(`未知思考强度：${raw}`);
-      }
-      if (raw.length > 0) {
-        const next = { ...loaded.value, reasoningEffort: raw };
-        await saveTask(projectLayout, next);
-        return next;
-      }
-      const { reasoningEffort: unusedEffort, ...cleared } = loaded.value;
-      void unusedEffort;
-      await saveTask(projectLayout, cleared);
-      return cleared;
-    },
-
-    "runs:list": async (request) => {
-      const layout = resolveProjectLayout(request.projectRoot);
-      const result = await listRuns(layout);
-      if (!result.ok) {
-        if (result.error.code === "not-found") {
-          return [];
-        }
-        throw result.error;
-      }
-      return result.value;
     },
 
     "memory:list": async (request) => {
@@ -858,67 +693,6 @@ export async function createDataHandlers(
         },
         relevant,
       );
-    },
-
-    "sessions:list": async (request) => {
-      const layout = resolveProjectLayout(request.projectRoot);
-      return createSessionStore(layout.sessionsFile).listSessions();
-    },
-
-    "handoff:generate": async (request) => {
-      // 跨 Agent 交接包（T7.1，§10.4）。取材只有本项目的计划 / 任务 / 项目记忆三样——
-      // 不读 Run（raw.log 的宿主）、不碰密钥模块、不触别的项目，红线在取材面上落实（§4.3 规则 2）。
-      const layout = resolveProjectLayout(request.projectRoot);
-      const [plan, tasksResult, memoryResult] = await Promise.all([
-        loadLatestPlan(layout),
-        listTasks(layout),
-        listEntries(layout),
-      ]);
-      // 未初始化的项目（无 tasks 目录）视为空集，与 tasks:list 同一处置；其余读错误上抛。
-      if (!tasksResult.ok && tasksResult.error.code !== "not-found") {
-        throw tasksResult.error;
-      }
-      const tasks = tasksResult.ok ? tasksResult.value : [];
-      const handoff = buildHandoff({
-        ...(plan !== undefined ? { plan } : {}),
-        tasks,
-        memory: memoryResult.entries,
-      });
-      return {
-        text: renderHandoff(handoff),
-        ...(handoff.plan !== undefined ? { planVersion: handoff.plan.version } : {}),
-        taskCount: handoff.progress.length,
-        decisionCount: handoff.decisions.length,
-        ruleCount: handoff.rules.length,
-        lessonCount: handoff.recentLessons.length,
-        openIssueCount: handoff.openIssues.length,
-      };
-    },
-
-    "plans:list": (request) => loadAllPlans(resolveProjectLayout(request.projectRoot)),
-
-    "plans:approve": async (request) => {
-      const layout = resolveProjectLayout(request.projectRoot);
-      const loaded = await loadPlan(layout, request.version);
-      if (!loaded.ok) {
-        throw loaded.error;
-      }
-      // 批准只能由用户触发；core 运行时强制 approval.by === "user"
-      const approved = approvePlan(loaded.value.plan, { by: "user", at: Date.now() });
-      await savePlan(layout, approved);
-      // §12 步骤 5：批准后把计划内的任务合同物化为 pending 任务记录（幂等：已存在的跳过，
-      // 不覆盖其运行态）。任务看板据此有可派发的条目。
-      for (const contract of approved.tasks) {
-        const existing = await loadTask(layout, contract.id);
-        if (existing.ok) {
-          continue;
-        }
-        if (existing.error.code !== "not-found") {
-          throw existing.error;
-        }
-        await saveTask(layout, { ...contract, status: "pending" });
-      }
-      return approved;
     },
   };
 }

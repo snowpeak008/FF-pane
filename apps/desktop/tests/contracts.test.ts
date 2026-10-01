@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  DEFAULT_TRANSCRIPT_LIMIT,
-  EVENT_CHANNELS,
-  INVOKE_CHANNELS,
-  isValidChannelName,
-} from "../src/shared-ipc/contracts";
+import { EVENT_CHANNELS, INVOKE_CHANNELS, isValidChannelName } from "../src/shared-ipc/contracts";
 
 describe("IPC 通道契约", () => {
   it("全部登记通道符合 <域>:<动作> 命名规范", () => {
@@ -44,17 +39,6 @@ describe("IPC 通道契约", () => {
     }
   });
 
-  it("T8.2b 会话续接通道已登记到运行时清单（preload 据此放行）", () => {
-    expect(INVOKE_CHANNELS).toContain("sessions:latest");
-    expect(INVOKE_CHANNELS).toContain("sessions:transcript");
-    // 尾部缺省 200 条 ≈ 60 轮 × 3 条，百条消息级会话一次取齐
-    expect(DEFAULT_TRANSCRIPT_LIMIT).toBe(200);
-  });
-
-  it("T8.3a 并发轮次查询通道已登记到运行时清单", () => {
-    expect(INVOKE_CHANNELS).toContain("sessions:active-turns");
-  });
-
   it("T8.4 自定义角色 CRUD 四通道已登记到运行时清单（preload 据此放行）", () => {
     for (const channel of ["roles:list", "roles:create", "roles:update", "roles:remove"]) {
       expect(INVOKE_CHANNELS, `缺通道：${channel}`).toContain(channel);
@@ -76,9 +60,5 @@ describe("IPC 通道契约", () => {
 
   it("T9.4b 推理强度档通道已登记到运行时清单", () => {
     expect(INVOKE_CHANNELS).toContain("runtimes:reasoning-effort-levels");
-  });
-
-  it("T9.7 任务落定事件通道已登记到运行时清单（preload 据此放行订阅）", () => {
-    expect(EVENT_CHANNELS).toContain("tasks:settled");
   });
 });

@@ -1,5 +1,5 @@
 /**
- * 应用导航表（项目设计计划 §11 的七个页面 + 设置页）。
+ * 应用导航表（侧栏四个页面：项目、工作台、记忆、知识库，另加设置页）。
  *
  * 本文件是纯数据：路由表、侧栏顺序、快捷键映射、占位页文案全部由它派生，
  * 因此 tests/ui-components.test.ts 可以在 node 环境里直接断言结构完整性。
@@ -10,8 +10,8 @@
 import { PAGE_SHORTCUT_ORDER } from "../stores/pages";
 
 /**
- * 七个主页面的 id，顺序即侧栏顺序，也是 Ctrl+1 ~ Ctrl+7 的顺序（设计系统 §7）。
- * 直接取自页面注册表——此前这里手抄了一份同样的七个 id，与注册表各自维护。
+ * 侧栏页面的 id，顺序即侧栏顺序，也是 Ctrl+1 ~ Ctrl+4 的顺序（设计系统 §7）。
+ * 直接取自页面注册表，不再另抄一份。
  */
 export const NAV_IDS = PAGE_SHORTCUT_ORDER;
 
@@ -32,7 +32,7 @@ export interface NavItem {
   readonly questionKey: string;
   /** 实现该页面的工单号，占位页据此说明"这里归谁做"。 */
   readonly ticket: string;
-  /** 页面切换快捷键的序号（1~7）；设置页为 undefined。 */
+  /** 页面切换快捷键的序号（1~4）；设置页为 undefined。 */
   readonly shortcut?: number;
 }
 
@@ -45,7 +45,7 @@ const NAV_TICKETS: Readonly<Record<NavId, string>> = {
 };
 
 /**
- * 七个主页面。
+ * 侧栏主页面。
  *
  * 顺序与快捷键序号一律由 stores/pages.ts 的注册表派生（T8.1 收敛）——
  * 此前 shortcut 是手写的 1~7，与注册表的 PAGE_SHORTCUT_ORDER 是两份同形清单：

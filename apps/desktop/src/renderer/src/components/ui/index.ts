@@ -5,7 +5,7 @@
  * （例如给 react-router 的 <Link> 套按钮样式），用变体函数生成类名，
  * 不要手抄类名串，也不要在 JSX 里拼三元表达式。
  */
-export { Badge, type BadgeProps, CapabilityBadge, TaskStatusBadge } from "./Badge";
+export { Badge, type BadgeProps, CapabilityBadge } from "./Badge";
 export { Button, type ButtonProps } from "./Button";
 export {
   BADGE_DOT_BASE,
@@ -13,9 +13,6 @@ export {
   CAPABILITY_BADGE,
   CAPABILITY_LEVELS,
   type CapabilityLevel,
-  TASK_STATUS_BADGE,
-  TASK_STATUSES,
-  type TaskStatus,
 } from "./badge.variants";
 export {
   BUTTON_ICON_SIZE,

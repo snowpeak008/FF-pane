@@ -5,7 +5,7 @@
 
 import type { ProjectRegistryEntry } from "@ff-pane/shared";
 import type { ProjectLayout } from "@ff-pane/storage";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   type ProjectSummarySources,
   summarizeProject,
@@ -31,34 +31,20 @@ function sources(
 ): ProjectSummarySources {
   return {
     workbenchPresent,
-    listPlans: vi.fn(async () => {
-      throw new Error("不应读取计划");
-    }),
-    listTasks: vi.fn(async () => {
-      throw new Error("不应读取任务");
-    }),
-    listRuns: vi.fn(async () => {
-      throw new Error("不应读取记录");
-    }),
-    listSessions: vi.fn(async () => {
-      throw new Error("不应读取会话");
-    }),
     resolveLayout: layoutOf,
   };
 }
 
 describe("summarizeProject", () => {
-  it("没有 .workbench 时如实标缺失，且不打开旧文件", async () => {
-    const listPlans = vi.fn();
-    const summary = await summarizeProject(layoutOf("/tmp/p1"), {
-      ...sources(async () => false),
-      listPlans,
-    });
+  it("没有 .workbench 时如实标缺失", async () => {
+    const summary = await summarizeProject(
+      layoutOf("/tmp/p1"),
+      sources(async () => false),
+    );
     expect(summary.workbenchPresent).toBe(false);
     expect(summary.planVersion).toBeUndefined();
     expect(summary.activeTaskCount).toBe(0);
     expect(summary.unavailable).toEqual([]);
-    expect(listPlans).not.toHaveBeenCalled();
   });
 
   it("有 .workbench 时只报告目录在，不把旧计划当成当前工作", async () => {

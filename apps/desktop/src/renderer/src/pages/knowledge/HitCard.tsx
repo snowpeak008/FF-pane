@@ -23,7 +23,7 @@ function ContextChunks({ chunks }: { readonly chunks: readonly KnowledgeChunk[] 
 
 export interface HitCardProps {
   readonly hit: KnowledgeHitView;
-  /** 行内操作（发送到会话 / 复制引用 / 插入）。 */
+  /** 行内操作（复制引用）。由调用方传入。 */
   readonly actions?: ReactNode;
   /** 勾选态；提供 onToggle 才渲染复选框。 */
   readonly selected?: boolean;

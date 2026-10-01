@@ -1679,3 +1679,278 @@ Claude 带参数的 `/model` 在已有对话时会不会再要一次确认，官
 - [开发进度](../开发进度.md)
 - 复验：[2026-10-01 17:03 · T10.12b · 复验 · 改模型强度](./Phase10-对话总记录.md)
 
+## 2026-10-01 17:31 · T10.13 · 执行 · 清理
+
+### 任务要点
+
+按计划 §9.1、§9.5、§9.6、§9.4 和 §7.3、§7.4 做清理。不提交。不碰 `apps/desktop/scripts/real-config-probe.mjs`。不读写 `~/.aiworkbench`，不改 `~/.claude`、`~/.codex`。不跑消耗额度的命令。磁盘上的旧计划 / 任务 / 会话文件不删、不迁。领域类型 Plan / Task / Run / Session 和 storage 读写保留。
+
+「AI 输出语言」按 §9.5 第 3 条留给 T10.14，这次不藏。自配置工具和它的开关不动。
+
+### 结论
+
+清理已落地，未提交。界面、启动和主进程都不再读取旧计划 / 任务 / 会话文件；文件仍留在磁盘上。
+
+顺手做了的验收遗留：布局不再写入旧 `profileId`，读入时忽略、不报错（T10.12a / T10.12b 都提到的那条）。
+
+没做的验收遗留（拿不准，不是小清理）：
+
+1. 计划 §8 决定 3 里「往窗口输入切换命令」的旧句子。§9.9 已经取代它。改计划归主控，这次没动。
+2. 界面上标注「手动改过可能和显示不一致」。那是被 §9.9 换掉的旧做法，这次不加。
+3. 被清洗锁住的后代窗口，已授权管理者仍可改它的模型和强度。这是权限行为，不是清理。
+
+### 改动文件
+
+**删除的通道和契约**
+
+- 有 handler 的：`plans:list`、`plans:approve`、`tasks:list`、`tasks:accept`、`tasks:cancel`、`tasks:set-reasoning-effort`、`runs:list`、`sessions:list`、`handoff:generate`、`workbench:remove-layout`
+- 只有契约的：`sessions:latest`、`sessions:transcript`、`sessions:active-turns`、事件 `tasks:settled`
+- 一并删掉只服务这些通道的契约类型：`RemoveWorkbenchLayoutRequest`、`TaskActionRequest`、`SetTaskReasoningEffortRequest`、`AcceptTaskResult`、`ApprovePlanRequest`、`HandoffPreview`、`SessionTranscriptRequest`、`SessionTranscriptView`、`DEFAULT_TRANSCRIPT_LIMIT`、`TaskSettledEvent`
+- 删项目摘要里计划 / 任务 / Run / 会话四路读取（`project-summary.ts` 的类型和 `data.ts` 的装配）。汇总仍只看 `.workbench/` 在不在
+- 删项目时仍直接调 layout store 的 `removeProject`，不走已删的 `workbench:remove-layout`
+
+**删除的语言包键（中英同步，各 241 个叶子键）**
+
+- `nav.session` / `nav.plan` / `nav.tasks` / `nav.runs`（各 label + question）
+- 整段 `session.*`、`plan.*`、`tasks.*`、`runs.*`
+- `knowledge.sendToSession`
+- `task.status.*`（7 个）。只被已删的任务状态徽章使用，徽章删掉后没有引用
+- 未动 `workbench.drawer.*`
+
+**删除的文件**
+
+- `apps/desktop/src/renderer/src/hooks/useRoleProfile.ts`（`useRoleProfile` / `useDiscussionProfiles`，没有调用方）
+- `apps/desktop/src/renderer/src/pages/settings/ContextWarnSection.tsx`（设置页不再挂这一块）
+
+**其它**
+
+- 知识库页和 HitCard 注释改为只留复制引用。导航注释改为侧栏四个页面（项目、工作台、记忆、知识库）加设置
+- 设置页隐藏「上下文阈值」。`contextWarnPercent` 仍在 `GlobalConfig` / `config.json`，`config:get` 能读出默认 70。e2e 改为断言页面上没有这一项，并且字段仍能读到。AI 输出语言仍在
+- 「本机登录」探测下拉只留 `claude-code`、`codex`。`CLI_LOGIN_RUNTIME_WIRES` 和适配器没删。档案页已整页隐藏，Qwen / iFlow / Aider / 通用命令不会出现。新开窗口和配置编辑本来就只有 Claude、Codex
+- 工作台 store 新建 / 拆分 / 补丁不再写 `profileId`。布局读入忽略该字段；`stripRuntimeFields` 落盘时剥掉。权威表同步也不再把它抄回去
+- `TASK_STATUS_BADGE`、`TaskStatusBadge` 连同只测它们的单测删除。能力徽章保留
+- README 改为：界面、启动和主进程都不再读取旧计划 / 任务 / 会话文件；文件保留，不删不迁
+
+文件：
+
+- `README.md`
+- `locales/zh-CN.json`、`locales/en-US.json`
+- `apps/desktop/src/main/data.ts`
+- `apps/desktop/src/main/project-summary.ts`
+- `apps/desktop/src/main/workbench/auth-registry.ts`
+- `apps/desktop/src/shared-ipc/contracts.ts`
+- `apps/desktop/src/renderer/src/stores/workbench.ts`
+- `apps/desktop/src/renderer/src/stores/pages.ts`
+- `apps/desktop/src/renderer/src/stores/project-alerts.ts`
+- `apps/desktop/src/renderer/src/layout/nav.ts`
+- `apps/desktop/src/renderer/src/layout/Sidebar.tsx`
+- `apps/desktop/src/renderer/src/command/commands.ts`
+- `apps/desktop/src/renderer/src/pages/knowledge/KnowledgePage.tsx`
+- `apps/desktop/src/renderer/src/pages/knowledge/HitCard.tsx`
+- `apps/desktop/src/renderer/src/pages/settings/SettingsPage.tsx`
+- `apps/desktop/src/renderer/src/pages/settings/providers/ProviderEditorDialog.tsx`
+- `apps/desktop/src/renderer/src/components/ui/Badge.tsx`
+- `apps/desktop/src/renderer/src/components/ui/badge.variants.ts`
+- `apps/desktop/src/renderer/src/components/ui/index.ts`
+- `packages/shared/src/domain/workbench.ts`
+- `packages/storage/src/workbench/store.ts`
+- `apps/desktop/tests/contracts.test.ts`
+- `apps/desktop/tests/project-summary.test.ts`
+- `apps/desktop/tests/secondary-panel.test.ts`
+- `apps/desktop/tests/ui-components.test.ts`
+- `apps/desktop/tests/e2e/context-warn.spec.ts`
+- `apps/desktop/tests/e2e/multi-project.spec.ts`
+- `apps/desktop/tests/e2e/provider-config-ux.spec.ts`
+- `apps/desktop/tests/e2e/reasoning-effort.spec.ts`（只改过时的文件头注释）
+- `packages/storage/tests/workbench-layouts.test.ts`
+- `docs/对话记录/Phase10-对话总记录.md`（本条，只追加）
+
+### 命令结果
+
+- `pnpm lint`：通过（Biome 751 个文件，check-i18n PASS）。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- `pnpm test`：140 个文件，2399 过 / 1 跳过。
+- 受影响 e2e：`context-warn.spec.ts`、`multi-project.spec.ts`、`provider-config-ux.spec.ts`，6 过。
+- 改过的文件没有 CRLF。未跑 `pnpm smoke`、全量 `pnpm test:e2e`。未调用模型。
+
+### 问题与遗留
+
+- 未纳入 `apps/desktop/scripts/real-config-probe.mjs`。e2e 构建刷新了 `apps/desktop/out/`，那是构建产物，不是这次要交的源码。
+- 历史脚本仍调用已删通道，不在 `pnpm test` 里，这次没改：`apps/desktop/scripts/live-ten-step.mjs`、`live-knowledge-tool.mjs`、`human-walk.mjs`、`human-walk-continue.mjs`、`dirty-walk.mjs`。`config-click-audit.mjs` 还会去点已隐藏的阈值下拉和已不存在的会话页。
+- 契约里还留着 `session:start`、`session:cancel`、`session:respond-permission`、`session:respond-config-draft`、事件 `session:event`。主进程和渲染层都没有调用。派活清单没列，没删。
+- 计划 §9.1 第 2 条仍写「主进程查询通道还留着」。README 已按删通道之后的事实改过。计划正文归主控，这次没改。
+- `project-alerts` store 还在，只剩测试在用，界面不再订阅落定事件。没删，避免扩大范围。
+- 上面三条验收遗留（计划旧句子、显示不一致标注、清洗锁）未做。
+
+### 相关文件链接
+
+- [Phase 10 计划 §7.3、§7.4、§9.1、§9.4、§9.5、§9.6](../Phase10-多窗口终端工作台计划.md)
+- 审计：[2026-10-01 14:03 · Phase10 · T10.12-0 · 调研 · 串联审计](./Phase10-对话总记录.md)
+- [开发进度](../开发进度.md)（T10.12a / T10.12b 验收遗留建议）
+
+## 2026-10-01 17:47 · T10.13 · 修复 · 补删旧通道
+
+### 任务要点
+
+按主控补充的计划 §9.1 第 3 条，把契约里其它只服务旧会话、没有 handler、也没有调用方的通道一并删掉。删前逐个确认主进程、渲染层和类型引用。工作台、记忆、知识库、来源、配置、终端在用的通道不动。领域类型和存储读写保留。拿不准的不删。不提交。
+
+### 结论
+
+删了 4 条。留了 2 条，因为自配置工具的草案中枢还引用它们的类型。
+
+### 删掉的通道
+
+- `session:start`
+- `session:respond-permission`
+- `session:cancel`
+- 事件 `habits:suggestion`（旧会话「反复纠正就弹习惯建议」。没有 handler，渲染层不订阅。习惯页用的 `habits:list` / `create` / `update` / `approve` / `reject` / `set-enabled` / `check-conflicts` 都还在）
+
+只被这些通道用的类型一并删了：`SessionInput`、`StartSessionRequest`、`StartSessionAck`、`RespondPermissionRequest`、`CancelSessionRequest`、`SessionActionAck`、`HabitSuggestionEvent`。
+
+确认过：主进程没有这些 handler；`apps/desktop/src` 里没有 invoke / subscribe。历史走查脚本还在调用 `session:start` / `session:event`，那些脚本不在 `pnpm test` 里，上一轮已登记，这次仍不改。
+
+### 保留的通道及理由
+
+- `session:respond-config-draft`：主进程没有注册 handler，渲染层也不调用。但 `apps/desktop/src/main/session/config-draft-hub.ts` 使用 `RespondConfigDraftRequest` / `ConfigDraftAck`。这是自配置工具的生产代码，T10.14 要改造，不是测试里的假引用。
+- 事件 `session:event`：同一份草案中枢用 `SessionStreamEvent` 发布 `config-draft`。删通道就要改自配置工具，这次不动。
+
+工作台、记忆、知识库、来源、配置、终端、档案、角色、冒烟通道都没有动。
+
+### 改动文件
+
+- `apps/desktop/src/shared-ipc/contracts.ts`
+- `docs/对话记录/Phase10-对话总记录.md`（本条，只追加）
+
+### 命令结果
+
+- `pnpm lint`：通过（Biome 751 个文件，check-i18n PASS）。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- `pnpm test`：140 个文件，2399 过 / 1 跳过。
+- 未跑 e2e / smoke。未调用模型。未改 `real-config-probe.mjs`。
+
+### 问题与遗留
+
+- `session:respond-config-draft` 和 `session:event` 仍无 IPC handler，只被草案中枢的类型引用撑着。要不要在 T10.14 改造自配置工具时一起收口，等那一单。
+- 历史脚本 `live-ten-step.mjs`、`live-knowledge-tool.mjs`、`human-walk.mjs`、`human-walk-continue.mjs`、`dirty-walk.mjs`、`config-click-audit.mjs` 仍会调用已删的 `session:start`。
+
+### 相关文件链接
+
+- [Phase 10 计划 §9.1](../Phase10-多窗口终端工作台计划.md)
+- 上一轮：[2026-10-01 17:31 · T10.13 · 执行 · 清理](./Phase10-对话总记录.md)
+- 草案中枢：`apps/desktop/src/main/session/config-draft-hub.ts`
+
+## 2026-10-01 18:00 · T10.13 · 检查 · 清理
+
+### 任务要点
+
+独立检查未提交的 T10.13。对照计划 §9.1、§9.4、§9.5、§4.1、§7.3、§7.4，以及总记录里的审计清单、执行条目和补删通道条目。审查 diff，做反向探针，首验完整跑 lint / desktop typecheck / `pnpm test` / `pnpm smoke` / `pnpm test:e2e`。不改实现，不提交。
+
+### 结论
+
+**通过。** 没有必须修复。AI 输出语言、自配置开关、工作台抽屉语言键和在用通道都还在。旧计划 / 任务 / 会话文件没有被删或迁移。
+
+### 改动文件
+
+- `docs/验收记录/T10.13-验收.md`（新建）
+- `docs/对话记录/Phase10-对话总记录.md`（本条，只追加）
+
+未改实现。未改 `apps/desktop/scripts/real-config-probe.mjs`。
+
+### 命令结果
+
+- `pnpm lint`：通过。Biome 751 个文件。`check-i18n` PASS。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- `pnpm test`：**2399 过 / 1 跳过**（140 个文件）。
+- `pnpm smoke`：**11 项 ALL PASS**。FF-pane v0.10.14。pdfjs 缺 canvas 的警告不记失败。
+- `pnpm test:e2e`：**51 过**（约 5.0 分钟）。
+- 反向探针（临时数据根，跑完已删）：旧 `contextWarnPercent`、检查员字段、计划文件读入不崩且仍在磁盘上；`plans:list` 与 `session:start` 返回「通道未在契约中登记」，没有崩溃。
+
+### 问题与遗留
+
+- 建议，不挡：档案列表还在用已删除的 `session.role.*`，但档案页没挂上，界面到不了。
+- 建议，不挡：冷启动 `workbench:get-layouts` 写回布局时会丢掉 `routeMode` / `routeModel`。`applyAuthNode` 本来就不抄这两项，这次 diff 只少了 `profileId`。标题、权限、会话 id 还在。
+- `session:respond-config-draft` 和 `session:event` 按执行者的理由保留，检查同意：草案中枢还引用它们的类型。
+- 计划 §7.5 和开发进度里 T10.11 那节仍写「查询通道还留着」。README 和 §9.1 已与事实一致。提交时对齐进度快照即可。
+
+### 相关文件链接
+
+- [T10.13 验收记录](../验收记录/T10.13-验收.md)
+- [Phase 10 计划 §9.1](../Phase10-多窗口终端工作台计划.md)
+- 执行：[2026-10-01 17:31 · T10.13 · 执行 · 清理](./Phase10-对话总记录.md)
+- 补删：[2026-10-01 17:47 · T10.13 · 修复 · 补删旧通道](./Phase10-对话总记录.md)
+
+## 2026-10-01 18:04 · T10.13 · 提交 · v0.10.15
+
+### 任务要点
+
+按计划 §7.2 第 4 步提交 T10.13。版本 `0.10.14` → `0.10.15`（根与 desktop 的 `package.json`、README 状态行、测试里的假 AppInfo）。开发进度登记 T10.13 已验收和验收建议，并标明 T10.12a / T10.12b 里已做掉的 `profileId` 遗留。计划 §4、§9、§7.5 同步。轻量 tag `v0.10.15`，不 push。
+
+### 结论
+
+已提交并打轻量 tag `v0.10.15`，未 push。不需要主控决策。下一步 T10.14 串联。
+
+### 改动文件
+
+暂存并提交（不含 `apps/desktop/scripts/real-config-probe.mjs`，不含 `apps/desktop/out`）：
+
+- `package.json`
+- `apps/desktop/package.json`
+- `README.md`
+- `locales/zh-CN.json`
+- `locales/en-US.json`
+- `apps/desktop/src/main/data.ts`
+- `apps/desktop/src/main/project-summary.ts`
+- `apps/desktop/src/main/workbench/auth-registry.ts`
+- `apps/desktop/src/shared-ipc/contracts.ts`
+- `apps/desktop/src/renderer/src/stores/workbench.ts`
+- `apps/desktop/src/renderer/src/stores/pages.ts`
+- `apps/desktop/src/renderer/src/stores/project-alerts.ts`
+- `apps/desktop/src/renderer/src/layout/nav.ts`
+- `apps/desktop/src/renderer/src/layout/Sidebar.tsx`
+- `apps/desktop/src/renderer/src/command/commands.ts`
+- `apps/desktop/src/renderer/src/pages/knowledge/KnowledgePage.tsx`
+- `apps/desktop/src/renderer/src/pages/knowledge/HitCard.tsx`
+- `apps/desktop/src/renderer/src/pages/settings/SettingsPage.tsx`
+- `apps/desktop/src/renderer/src/pages/settings/ContextWarnSection.tsx`（删除）
+- `apps/desktop/src/renderer/src/pages/settings/providers/ProviderEditorDialog.tsx`
+- `apps/desktop/src/renderer/src/components/ui/Badge.tsx`
+- `apps/desktop/src/renderer/src/components/ui/badge.variants.ts`
+- `apps/desktop/src/renderer/src/components/ui/index.ts`
+- `apps/desktop/src/renderer/src/hooks/useRoleProfile.ts`（删除）
+- `packages/shared/src/domain/workbench.ts`
+- `packages/storage/src/workbench/store.ts`
+- `apps/desktop/tests/client-server.test.ts`
+- `apps/desktop/tests/command-ipc.test.ts`
+- `apps/desktop/tests/contracts.test.ts`
+- `apps/desktop/tests/project-summary.test.ts`
+- `apps/desktop/tests/secondary-panel.test.ts`
+- `apps/desktop/tests/ui-components.test.ts`
+- `apps/desktop/tests/e2e/context-warn.spec.ts`
+- `apps/desktop/tests/e2e/multi-project.spec.ts`
+- `apps/desktop/tests/e2e/provider-config-ux.spec.ts`
+- `apps/desktop/tests/e2e/reasoning-effort.spec.ts`
+- `packages/storage/tests/workbench-layouts.test.ts`
+- `docs/Phase10-多窗口终端工作台计划.md`
+- `docs/开发进度.md`
+- `docs/验收记录/T10.13-验收.md`
+- `docs/对话记录/Phase10-对话总记录.md`
+
+### 命令结果
+
+- `pnpm lint`：通过。Biome 751 个文件。`check-i18n` PASS。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- `vitest run apps/desktop/tests/client-server.test.ts apps/desktop/tests/command-ipc.test.ts`：2 个文件，73 过。
+- 提交信息：`chore: T10.13 清理旧会话残留`
+- 轻量 tag `v0.10.15`，未 push
+- 提交哈希：待本提交完成后补记
+
+### 问题与遗留
+
+未纳入 `apps/desktop/scripts/real-config-probe.mjs`。验收建议仍是：档案列表还引用已删的 `session.role.*`（页面未挂上）；冷启动写回布局会丢掉 `routeMode` / `routeModel`（T10.12 起就有）。T10.12b 另外三条遗留未做。
+
+### 相关文件链接
+
+- [T10.13 验收记录](../验收记录/T10.13-验收.md)
+- [开发进度](../开发进度.md)
+- 检查：[2026-10-01 18:00 · T10.13 · 检查 · 清理](./Phase10-对话总记录.md)
+

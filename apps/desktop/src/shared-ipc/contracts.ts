@@ -12,12 +12,10 @@
  */
 
 import type {
-  ActiveTurnRecord,
   ConnectionTestResult,
   FetchModelsResult,
   HabitConflict,
   ProbeProviderInput,
-  WritePathsConflict,
 } from "@ff-pane/core";
 import type {
   AgentProfile,
@@ -40,7 +38,6 @@ import type {
   MemoryEntryId,
   MemoryStatus,
   ModelId,
-  Plan,
   PlanStatus,
   PlanVersion,
   ProfileId,
@@ -54,15 +51,9 @@ import type {
   ProviderId,
   ReviewVerdict,
   RoleRef,
-  Run,
   RunEndReason,
   RunId,
-  SessionRecord,
   SessionResumeKind,
-  Task,
-  TaskId,
-  TaskSettledStatus,
-  TranscriptEntry,
   WorkbenchPermissionLevel,
   WorkbenchRole,
   WorkbenchRoleManualId,
@@ -225,11 +216,6 @@ export interface TerminalReplayResponse {
 /** workbench:save-layout 请求（T10.2）：单项目布局整表覆盖。 */
 export interface SaveWorkbenchLayoutRequest {
   readonly layout: ProjectWorkbenchLayout;
-}
-
-/** workbench:remove-layout 请求。 */
-export interface RemoveWorkbenchLayoutRequest {
-  readonly projectId: ProjectId;
 }
 
 /** workbench:flush-request 事件：主进程请渲染端立刻落盘防抖中的布局。 */
@@ -808,23 +794,6 @@ export interface RemoveRoleRequest {
   readonly id: CustomRoleId;
 }
 
-/** 任务操作请求（接受 / 取消）：项目根 + 任务 ID。 */
-export interface TaskActionRequest extends ProjectScopedRequest {
-  readonly id: TaskId;
-}
-
-/** T9.11 —— 用户改一条任务的执行者思考强度。空串 / 缺省 = 清回跟随档案。 */
-export interface SetTaskReasoningEffortRequest extends TaskActionRequest {
-  readonly reasoningEffort?: string;
-}
-
-/** 接受任务的结果（T4.4）：迁移后的任务 + 本次派生的记忆候选条数。 */
-export interface AcceptTaskResult {
-  readonly task: Task;
-  /** 本次从任务沉淀派生的记忆候选数（0 = 无 Run 报告可沉淀）。 */
-  readonly candidateCount: number;
-}
-
 /** 记忆条目操作请求（通过 / 拒绝）：项目根 + 条目 ID。 */
 export interface MemoryActionRequest extends ProjectScopedRequest {
   readonly id: MemoryEntryId;
@@ -871,11 +840,6 @@ export interface MemorySearchResponse {
   readonly usedVector: boolean;
   /** 向量路缺席的原因码；usedVector 为真时缺席（复用知识库的原因码集合）。 */
   readonly embeddingBlocker?: KnowledgeEmbeddingBlocker;
-}
-
-/** 计划批准请求：项目根 + 版本号（批准只能由用户触发）。 */
-export interface ApprovePlanRequest extends ProjectScopedRequest {
-  readonly version: PlanVersion;
 }
 
 /**
@@ -1175,166 +1139,7 @@ export type KnowledgeExportResult =
     };
 
 /**
- * handoff:generate 应答（T7.1，§10.4）：预览文本 + 一份计数摘要。
- *
- * 文本是权威产物（用户编辑它、确认后注入的就是它）；摘要只供预览界面在正文之上
- * 交代"这份交接包里有什么、有多少"——交接包动辄上百行，用户不该靠通读来判断它是否完整。
- * 摘要里全是数字与版本号，**不含任何面向用户的文案**：主进程不产出中文（check-i18n 的
- * 约束在渲染层，但事实源在这里），措辞由渲染层按界面语言取语言包。
- */
-export interface HandoffPreview {
-  /** 渲染后的交接包正文（Markdown；用户可编辑后原样注入）。 */
-  readonly text: string;
-  /** 当前计划版本；缺省 = 尚无计划（§10.4 plan 字段为空的诚实表达）。 */
-  readonly planVersion?: number;
-  /** 交接的任务条数。 */
-  readonly taskCount: number;
-  /** active 的 decision 记忆条数。 */
-  readonly decisionCount: number;
-  /** active 的 rule 记忆条数。 */
-  readonly ruleCount: number;
-  /** 本次取样的 lesson 记忆条数（见 core DEFAULT_RECENT_LESSONS）。 */
-  readonly lessonCount: number;
-  /** 阻塞与未决问题条数。 */
-  readonly openIssueCount: number;
-}
-
-/**
- * sessions:transcript 请求（T8.2b）：读某会话对话回放本的尾部。
- * 尾部而不是全量：回放是打开会话页时的一次性加载，先给最近的、再按需翻更早的
- * （b 单若要翻页，加 `before` 游标即可，契约形状不必推翻）。
- */
-export interface SessionTranscriptRequest extends ProjectScopedRequest {
-  readonly sessionId: LocalSessionId;
-  /** 尾部条数上限（含 turn_end 元数据条目）；缺省 DEFAULT_TRANSCRIPT_LIMIT。 */
-  readonly limit?: number;
-}
-
-/** sessions:transcript 的缺省尾部条数（≈ 60 轮 × 3 条，百条消息级的会话一次取齐）。 */
-export const DEFAULT_TRANSCRIPT_LIMIT = 200;
-
-/**
- * sessions:transcript 响应：条目 + 被跳过的坏行数。
- * 坏行数单列而不是吞掉：一份读出 3 条、跳过 2 行的回放本，界面该如实说"有 2 条读不出来"，
- * 而不是让用户以为对话就那么短。
- */
-export interface SessionTranscriptView {
-  /** 按写入顺序（升序）的尾部条目。 */
-  readonly entries: readonly TranscriptEntry[];
-  /** 整个文件里无法解析而被跳过的行数（0 = 完好）。 */
-  readonly skippedLines: number;
-}
-
-/**
- * 会话执行输入（§12 十步流程）：Planner 讨论消息 或 Worker 任务派发。
- * role 由输入类别隐含：planner-message → planner；worker-task → worker。
- */
-export type SessionInput =
-  | {
-      readonly kind: "planner-message";
-      readonly text: string;
-      /**
-       * 习惯先行（T5.3，§8.2.3）：本轮请求「直接做」，跳过据 workflow 流程约束的整形。
-       * 单次生效，不影响习惯档案。缺省 = 不跳过（有 workflow 习惯时 Planner 先给整形方案）。
-       */
-      readonly directExecute?: boolean;
-    }
-  /**
-   * 生成/更新结构化计划（T4.6，§12 步骤"出计划"）：Planner 角色，提示词追加结构化输出合同，
-   * 轮结束时主进程解析答复中的计划块 → 落 draft 计划。text 为可选补充指令（缺省即"据讨论出计划"）。
-   */
-  | { readonly kind: "planner-plan"; readonly text?: string }
-  | { readonly kind: "worker-task"; readonly taskId: TaskId }
-  /**
-   * 审查一次执行（T7.2，§3.1）：Reviewer 角色，注入任务合同的验收标准 + 该 Run 的
-   * 证据，权限为角色默认的只读 + verify_only。结论写回 `runId` 指向的那条 Run。
-   *
-   * 带 runId 而不是只带 taskId：一个任务可以有多条 Run（失败重试，§6.3），
-   * "审查这个任务"是有歧义的，"审查这一次尝试"才不是。
-   */
-  | { readonly kind: "reviewer-review"; readonly taskId: TaskId; readonly runId: RunId };
-
-/**
- * session:start 请求：启动一轮会话执行。结果与增量内容不走应答，
- * 一律经 session:event 事件流推送（turnId 关联）。
- */
-export interface StartSessionRequest extends ProjectScopedRequest {
-  /** 渲染层生成的关联 ID，贯穿本轮全部 session:event。 */
-  readonly turnId: string;
-  /** 用哪个 Agent Profile 执行（决定 runtime / provider / 模型 / 权限预设）。 */
-  readonly profileId: ProfileId;
-  readonly input: SessionInput;
-  /**
-   * 续接的本地会话 ID（T4.3 会话恢复）。缺省 = 开新会话（主进程生成新 ID）；
-   * 提供且该会话已登记 = 续接（据登记的原生绑定与适配器能力判定 native / context_rebuild）。
-   */
-  readonly sessionId?: LocalSessionId;
-  /**
-   * 跨 Agent 交接包正文（T7.1，§10.4）。给出即表示本轮是一次**迁移**：
-   * 主进程强制开新会话（换了 Agent，旧会话的原生绑定对新 Agent 无意义）、
-   * 把这段文本前置到提示词、并把本轮的会话类型标注为 `handoff`。
-   *
-   * 传的是**文本**而不是 Handoff 结构体：用户在预览框里改过的那一份才是要注入的那一份
-   * （§10.4"预览可编辑，确认后注入"）。若传结构体再由主进程渲染，用户的编辑会被静默丢弃。
-   */
-  readonly handoffText?: string;
-  /**
-   * T9.11 —— 本轮思考强度覆盖（会话顶栏）。缺省 = 跟随档案默认。
-   * Worker 轮若任务合同已写 reasoningEffort，本字段仍优先（用户当场改）。
-   */
-  readonly reasoningEffort?: string;
-}
-
-/**
- * session:start 应答：仅表示已受理（true）或拒绝受理（false + reason）。
- *
- * 多轮在飞语义（T8.3a 定稿）：不同 turnId 的多轮可同时在飞（编排器按 turnId 隔离，
- * 同 turnId 重复 start 拒绝）；writePaths 互斥核查（core `checkWritePathsExclusive`）
- * 在 T8.3b 接入本通道的受理路径——候选轮与在飞轮的可写范围相交即拒绝，拒绝时
- * `conflicts` 携带结构化明细（哪两个任务、哪两条路径、何种关系），任务页据此呈现
- * 「因相交被拒绝并行及原因」；reason 仍为一句话概括，既有消费方不必理解新字段。
- */
-export type StartSessionAck =
-  | {
-      readonly accepted: true;
-      readonly turnId: string;
-      /** 本轮所属的本地会话 ID（新建时为主进程生成值，供渲染层登记为当前会话）。 */
-      readonly sessionId: LocalSessionId;
-    }
-  | {
-      readonly accepted: false;
-      readonly reason: string;
-      /**
-       * writePaths 互斥拒绝的结构化明细（T8.3a 契约预留，T8.3b 产出）。
-       * 仅并行互斥这一种拒绝携带；Profile 不存在等其他拒绝只有 reason。
-       */
-      readonly conflicts?: readonly WritePathsConflict[];
-    };
-
-/** session:respond-permission 请求：回执一条上浮的权限请求（§7 用户二选一）。 */
-export interface RespondPermissionRequest {
-  readonly turnId: string;
-  readonly requestId: string;
-  readonly decision: "allow" | "deny";
-}
-
-/** session:cancel 请求：取消在飞的一轮。 */
-export interface CancelSessionRequest {
-  readonly turnId: string;
-}
-
-/** 会话动作应答（回执权限 / 取消）：ok=false 表示未找到该在飞轮次。 */
-export interface SessionActionAck {
-  readonly ok: boolean;
-}
-
-/**
- * 会话流式事件（main → renderer，§11.2 会话页 + §7 权限交互）。
- * 扁平判别联合：渲染层直接按 kind 分支，无需理解适配器 AgentEvent 内部形态。
- *
- * 并发路由核实（T8.3a）：每个变体都带 turnId，`started` 额外带 sessionId / role——
- * 多轮在飞时渲染层足以把任意事件归属到轮与会话，**契约无需补字段**。
- * 今日渲染层 store 是单活跃轮模型（非当前轮事件被忽略），多轮归并属 T8.3b 呈现层。
+ * 旧会话的流式事件形状。自配置工具草案中枢用其中的 config-draft 变体发布草案。
  */
 export type SessionStreamEvent =
   | {
@@ -1497,11 +1302,6 @@ export interface IpcInvokeContracts {
   /** 原子写入单项目布局（剥离 terminalId）。 */
   "workbench:save-layout": {
     request: SaveWorkbenchLayoutRequest;
-    response: { readonly ok: true };
-  };
-  /** 删除单项目布局（项目移除时）。 */
-  "workbench:remove-layout": {
-    request: RemoveWorkbenchLayoutRequest;
     response: { readonly ok: true };
   };
   /** 渲染端确认布局 flush 完成（T10.2' 退出协调）。 */
@@ -1681,19 +1481,6 @@ export interface IpcInvokeContracts {
   "roles:update": { request: UpdateRoleRequest; response: CustomRole };
   /** 删除自定义角色（被 Profile 引用时拒删——先解绑再删）。 */
   "roles:remove": { request: RemoveRoleRequest; response: { readonly removed: true } };
-  /** 列出当前项目的全部任务（§11.4 任务看板）。 */
-  "tasks:list": { request: ProjectScopedRequest; response: readonly Task[] };
-  /**
-   * 接受任务（done → accepted，走 core 任务状态机）。
-   * T4.4：验收即从任务沉淀派生记忆候选，返回本次生成的候选条数（供"去审核"提示）。
-   */
-  "tasks:accept": { request: TaskActionRequest; response: AcceptTaskResult };
-  /** 取消任务（→ cancelled 终态）。 */
-  "tasks:cancel": { request: TaskActionRequest; response: Task };
-  /** T9.11 —— 改任务合同上的执行者思考强度（不改档案默认）。 */
-  "tasks:set-reasoning-effort": { request: SetTaskReasoningEffortRequest; response: Task };
-  /** 列出当前项目的全部执行记录（§11.5，含 file_changes/commands/verify_result）。 */
-  "runs:list": { request: ProjectScopedRequest; response: readonly Run[] };
   /** 列出当前项目的全部记忆条目（§11.6；含 active / candidate / archived）。 */
   "memory:list": { request: ProjectScopedRequest; response: readonly MemoryEntry[] };
   /** 通过候选（candidate → active，走 updateEntryStatus 迁移文件）。 */
@@ -1724,29 +1511,6 @@ export interface IpcInvokeContracts {
     request: CheckHabitConflictsRequest;
     response: readonly HabitConflict[];
   };
-  /** 列出当前项目的全部计划版本（§11.3，按版本升序）。 */
-  "plans:list": { request: ProjectScopedRequest; response: readonly Plan[] };
-  /** 批准计划（draft → approved，只能由用户触发，走 core 计划状态机）。 */
-  "plans:approve": { request: ApprovePlanRequest; response: Plan };
-  /** 列出当前项目已登记的会话（T4.3 会话恢复；按最近活跃降序，供恢复选择）。 */
-  "sessions:list": { request: ProjectScopedRequest; response: readonly SessionRecord[] };
-  /**
-   * 当前项目最近活跃的一条会话登记（T8.2b；按 lastActiveAt 取最大，无会话为 null）。
-   * 与 `sessions:list` 分开：进入项目时自动选中最近会话只要这一条，不必把整表搬过去再取首项。
-   */
-  "sessions:latest": { request: ProjectScopedRequest; response: SessionRecord | null };
-  /** 读某会话对话回放本的尾部（T8.2b，text-only：用户提示词 / assistant 文本 / 轮次收尾）。 */
-  "sessions:transcript": { request: SessionTranscriptRequest; response: SessionTranscriptView };
-  /**
-   * 当前项目在飞的全部轮次（T8.3a 契约定稿）：编排器在飞轮次表的快照（core
-   * `ActiveTurnRecord`：turnId / sessionId / role / taskId? / writePaths / startedAt，
-   * 按 startedAt 升序），不触碰磁盘。任务页并行状态呈现（T8.3b）据此回答
-   * 「哪些在飞、各自占着哪些写范围」。projectRoot 过滤：轮次归属项目由编排器
-   * 登记时的请求 projectRoot 决定（Windows 路径大小写不敏感比较归实现层）。
-   */
-  "sessions:active-turns": { request: ProjectScopedRequest; response: readonly ActiveTurnRecord[] };
-  /** 生成跨 Agent 交接包（T7.1，§10.4）：8 字段组装 + 渲染成可编辑的预览文本。 */
-  "handoff:generate": { request: ProjectScopedRequest; response: HandoffPreview };
   /** 知识库总览（§8.3.6 来源管理：条目 + 文档数/块数 + 索引状态 + 嵌入能力）。 */
   "knowledge:list": { request: undefined; response: KnowledgeOverview };
   /** 打开文件 / 目录选择器（按支持的扩展名过滤），返回选定路径。 */
@@ -1777,14 +1541,8 @@ export interface IpcInvokeContracts {
   };
   /** 导出选中条目为单个 Markdown 文件（含出处元数据）。 */
   "knowledge:export": { request: KnowledgeExportRequest; response: KnowledgeExportResult };
-  /** 启动一轮会话执行（Planner 讨论 / Worker 派发）；增量经 session:event 推送。 */
-  "session:start": { request: StartSessionRequest; response: StartSessionAck };
-  /** 回执一条上浮的权限请求（§7）。 */
-  "session:respond-permission": { request: RespondPermissionRequest; response: SessionActionAck };
   /** 回执一份配置草案的用户裁决（T9.1 铁律 2：确认才落盘；可随手补填密钥）。 */
   "session:respond-config-draft": { request: RespondConfigDraftRequest; response: ConfigDraftAck };
-  /** 取消在飞的一轮。 */
-  "session:cancel": { request: CancelSessionRequest; response: SessionActionAck };
   /** 仅冒烟模式注册：请求主进程向本窗口推送一条 smoke:event。 */
   "smoke:emit-event": { request: { readonly seq: number }; response: { readonly emitted: true } };
   /** 仅冒烟模式注册：上报渲染层检查结果，主进程据此决定退出码。 */
@@ -1801,42 +1559,14 @@ export interface IpcInvokeContracts {
  */
 export type { TaskSettledStatus } from "@ff-pane/shared";
 
-/**
- * tasks:settled 事件载荷（T9.7）：某项目内一个任务进入落定状态。
- *
- * 携带 projectRoot 而非 projectId：事实源是主进程 saveTask 落盘点，那里只有
- * ProjectLayout（按 projectRoot 解析而来）；而渲染层发起项目级请求时传的正是
- * 注册表条目的 rootPath——两端字符串同源，渲染层无需再查一次注册表做映射。
- */
-export interface TaskSettledEvent {
-  /** 项目根路径（与 ProjectRegistryEntry.rootPath 同源同串）。 */
-  readonly projectRoot: string;
-  readonly taskId: TaskId;
-  readonly status: TaskSettledStatus;
-}
-
-/** habits:suggestion 事件载荷（来源三，§8.2.4）：系统据反复纠正生成的 observed 候选。 */
-export interface HabitSuggestionEvent {
-  /** 已落库的 observed 候选 ID（供渲染层跳转/高亮）。 */
-  readonly habitId: HabitEntryId;
-  /** 候选正文（提示文案用）。 */
-  readonly content: string;
-  /** 触发建议时的累计纠正次数。 */
-  readonly count: number;
-}
-
 /** 事件（main → renderer 推送）通道契约表。 */
 export interface IpcEventContracts {
   /** 仅冒烟模式使用：验证订阅链路的回声事件。 */
   "smoke:event": { payload: { readonly seq: number; readonly emittedAt: number } };
-  /** 会话执行流式事件（一轮的 started / text / file-change / command / permission / end）。 */
+  /** 自配置工具草案事件（config-draft / config-draft-resolved 等）。 */
   "session:event": { payload: SessionStreamEvent };
-  /** 系统观察建议（来源三，§8.2.4）：据反复纠正生成的 observed 习惯候选，非阻塞提示。 */
-  "habits:suggestion": { payload: HabitSuggestionEvent };
   /** 知识库导入 / 重建进度（T6.5 / §8.3.2「导入进度」）。 */
   "knowledge:import-progress": { payload: KnowledgeImportProgressEvent };
-  /** 任务落定通知（T9.7 B 栏落定高亮）：done / failed / blocked 时推送。 */
-  "tasks:settled": { payload: TaskSettledEvent };
   /** 终端批量输出（T10.1，约 8–16ms 合并一批）。 */
   "terminal:output": { payload: TerminalOutputEvent };
   /** 终端进程退出（T10.1）。 */
@@ -1886,7 +1616,6 @@ export const INVOKE_CHANNELS = [
   "terminal:get-replay",
   "workbench:get-layouts",
   "workbench:save-layout",
-  "workbench:remove-layout",
   "workbench:flush-ack",
   "workbench:launch-cli",
   "workbench:set-role",
@@ -1935,11 +1664,6 @@ export const INVOKE_CHANNELS = [
   "roles:create",
   "roles:update",
   "roles:remove",
-  "tasks:list",
-  "tasks:accept",
-  "tasks:cancel",
-  "tasks:set-reasoning-effort",
-  "runs:list",
   "memory:list",
   "memory:approve",
   "memory:reject",
@@ -1952,13 +1676,6 @@ export const INVOKE_CHANNELS = [
   "habits:reject",
   "habits:set-enabled",
   "habits:check-conflicts",
-  "plans:list",
-  "plans:approve",
-  "sessions:list",
-  "sessions:latest",
-  "sessions:transcript",
-  "sessions:active-turns",
-  "handoff:generate",
   "knowledge:list",
   "knowledge:pick-paths",
   "knowledge:import",
@@ -1968,10 +1685,7 @@ export const INVOKE_CHANNELS = [
   "knowledge:search",
   "knowledge:remove-entry",
   "knowledge:export",
-  "session:start",
-  "session:respond-permission",
   "session:respond-config-draft",
-  "session:cancel",
   "smoke:emit-event",
   "smoke:report",
 ] as const satisfies readonly InvokeChannel[];
@@ -1980,9 +1694,7 @@ export const INVOKE_CHANNELS = [
 export const EVENT_CHANNELS = [
   "smoke:event",
   "session:event",
-  "habits:suggestion",
   "knowledge:import-progress",
-  "tasks:settled",
   "terminal:output",
   "terminal:exit",
   "workbench:flush-request",

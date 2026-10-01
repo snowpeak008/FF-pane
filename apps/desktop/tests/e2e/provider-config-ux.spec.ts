@@ -94,6 +94,7 @@ test("local-login 建档流：登录状态显示 + 本地模型枚举 + 手填�
 
   const section = page.getByTestId("cli-login-section");
   await expect(section).toBeVisible();
+  await expect(page.locator("#provider-cli-runtime option")).toHaveText(["claude-code", "codex"]);
   await expect(page.getByTestId("cli-login-status")).toContainText("Logged in");
 
   await expect(page.getByRole("button", { name: "Add model" })).toHaveCount(0);

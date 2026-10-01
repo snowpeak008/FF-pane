@@ -8,9 +8,6 @@ import {
   CAPABILITY_BADGE,
   CAPABILITY_LABEL_PREFIX,
   type CapabilityLevel,
-  TASK_STATUS_BADGE,
-  TASK_STATUS_LABEL_PREFIX,
-  type TaskStatus,
 } from "./badge.variants";
 
 export type BadgeProps = ComponentPropsWithRef<"span"> &
@@ -34,30 +31,6 @@ export function Badge({
       ) : null}
       {children}
     </span>
-  );
-}
-
-export interface TaskStatusBadgeProps {
-  readonly status: TaskStatus;
-  readonly className?: string;
-}
-
-/**
- * 任务状态徽章（§3.3 / §5.7）：7 态各一色，文案走 `task.status.<state>`。
- * done 与 accepted 必须不同色；cancelled 用虚线框 + 空心圆环与 pending 区分。
- */
-export function TaskStatusBadge({ status, className }: TaskStatusBadgeProps): ReactElement {
-  const { t } = useTranslation();
-  const style = TASK_STATUS_BADGE[status];
-  return (
-    <Badge
-      tone="unstyled"
-      className={cn(style.badge, className)}
-      dotClassName={style.dot}
-      title={t(`${TASK_STATUS_LABEL_PREFIX}.${status}`)}
-    >
-      {t(`${TASK_STATUS_LABEL_PREFIX}.${status}`)}
-    </Badge>
   );
 }
 
