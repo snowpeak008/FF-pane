@@ -2,10 +2,20 @@
  * T10.5'：权威权限注册表 — 忽略伪造父级、启动封顶。
  */
 
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ProjectWorkbenchLayout } from "@ff-pane/shared";
-import { describe, expect, it } from "vitest";
+import { createWorkbenchLayoutStore } from "@ff-pane/storage";
+import { afterEach, describe, expect, it } from "vitest";
 import { createWorkbenchAuthRegistry } from "../src/main/workbench/auth-registry";
 import { decideManagerGrantRestore } from "../src/main/workbench/manager-grant";
+
+const tempRoots: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(tempRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
 
 function layoutWith(windows: ProjectWorkbenchLayout["windows"]): ProjectWorkbenchLayout {
   const ids = Object.keys(windows);
@@ -295,6 +305,60 @@ describe("createWorkbenchAuthRegistry", () => {
         sanitizeLocked: true,
       }),
     ).toBe("none");
+  });
+
+  it("冷启动和再次同步都留下连法、覆盖和对话历史", async () => {
+    const registry = createWorkbenchAuthRegistry();
+    const disk = layoutWith({
+      child: win("child", {
+        permission: "edit",
+        role: "worker",
+        routeMode: "relay",
+        routeProviderName: "中转甲",
+        routeModel: "from-config",
+        routeEffort: "low",
+        modelOverride: "opus",
+        effortOverride: "high",
+        nativeSessionId: "sess-current",
+        sessionUnidentified: true,
+        conversations: [
+          { id: "sess-old", startedAt: 1, lastActiveAt: 2 },
+          { id: "sess-current", startedAt: 3, lastActiveAt: 4 },
+        ],
+      }),
+    });
+    const restored = registry.restoreColdLayout(disk);
+    const cold = restored.windows["child"];
+    expect(cold?.routeMode).toBe("relay");
+    expect(cold?.routeProviderName).toBe("中转甲");
+    expect(cold?.routeModel).toBe("from-config");
+    expect(cold?.routeEffort).toBe("low");
+    expect(cold?.modelOverride).toBe("opus");
+    expect(cold?.effortOverride).toBe("high");
+    expect(cold?.nativeSessionId).toBe("sess-current");
+    expect(cold?.sessionUnidentified).toBe(true);
+    expect(cold?.conversations?.map((item) => item.id)).toEqual(["sess-old", "sess-current"]);
+    expect(cold?.profileId).toBeUndefined();
+    expect(cold?.permission).toBe("edit");
+
+    const again = registry.syncLayout(restored);
+    expect(again.windows["child"]?.modelOverride).toBe("opus");
+    expect(again.windows["child"]?.effortOverride).toBe("high");
+    expect(again.windows["child"]?.conversations).toHaveLength(2);
+    expect(again.windows["child"]?.routeMode).toBe("relay");
+
+    const root = await mkdtemp(join(tmpdir(), "ffpane-auth-layout-"));
+    tempRoots.push(root);
+    const store = createWorkbenchLayoutStore(join(root, "layouts.json"));
+    await store.saveProject(restored);
+    const reread = await store.readProject("proj-1" as never);
+    const saved = reread?.windows["child"];
+    expect(saved?.modelOverride).toBe("opus");
+    expect(saved?.effortOverride).toBe("high");
+    expect(saved?.conversations?.map((item) => item.id)).toEqual(["sess-old", "sess-current"]);
+    expect(saved?.sessionUnidentified).toBe(true);
+    expect(saved?.routeMode).toBe("relay");
+    expect(saved?.profileId).toBeUndefined();
   });
 
   it("界面显式改权限后可以提升，未调用则重复同步仍是只读", () => {

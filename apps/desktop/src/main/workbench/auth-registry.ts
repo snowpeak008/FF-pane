@@ -49,6 +49,12 @@ function toAuthNode(window: WorkbenchWindow): WorkbenchAuthNode | undefined {
 }
 
 function applyAuthNode(window: WorkbenchWindow, node: WorkbenchAuthNode): WorkbenchWindow {
+  const routeProviderName = window.routeProviderName?.trim();
+  const routeModel = window.routeModel?.trim();
+  const routeEffort = window.routeEffort?.trim();
+  const modelOverride = window.modelOverride?.trim();
+  const effortOverride = window.effortOverride?.trim();
+  const conversations = window.conversations;
   return {
     id: window.id,
     projectId: window.projectId,
@@ -59,7 +65,15 @@ function applyAuthNode(window: WorkbenchWindow, node: WorkbenchAuthNode): Workbe
     permission: node.permission,
     openedBy: node.openedBy,
     ...(window.terminalId !== undefined ? { terminalId: window.terminalId } : {}),
+    ...(window.routeMode !== undefined ? { routeMode: window.routeMode } : {}),
+    ...(routeProviderName !== undefined && routeProviderName !== "" ? { routeProviderName } : {}),
+    ...(routeModel !== undefined && routeModel !== "" ? { routeModel } : {}),
+    ...(routeEffort !== undefined && routeEffort !== "" ? { routeEffort } : {}),
+    ...(modelOverride !== undefined && modelOverride !== "" ? { modelOverride } : {}),
+    ...(effortOverride !== undefined && effortOverride !== "" ? { effortOverride } : {}),
     ...(window.nativeSessionId !== undefined ? { nativeSessionId: window.nativeSessionId } : {}),
+    ...(window.sessionUnidentified === true ? { sessionUnidentified: true as const } : {}),
+    ...(conversations !== undefined && conversations.length > 0 ? { conversations } : {}),
     role: node.role ?? (isWorkbenchRole(window.role) ? window.role : DEFAULT_WORKBENCH_ROLE),
     ...(node.parentWindowId !== undefined ? { parentWindowId: node.parentWindowId } : {}),
     ...(node.parentClosed === true ? { parentClosed: true } : {}),

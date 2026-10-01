@@ -2563,3 +2563,140 @@ Claude 带参数的 `/model` 在已有对话时会不会再要一次确认，官
 
 - [T10.15b 验收记录](../验收记录/T10.15b-验收.md)
 - 复验：[2026-10-01 22:51 · T10.15b · 复验 · 记号撞车](./Phase10-对话总记录.md)
+
+## 2026-10-02 02:30 · Phase10 · 终验
+
+### 任务要点
+
+独立终验，范围 `v0.10.12` 到 HEAD `487ace5`（tag `v0.10.18`）。对照计划 §8、§9 和 §7.4，重跑关键反向探针，完整跑 lint / typecheck / test / smoke / e2e，并做临时目录打包冒烟。不改实现，不改版本，不打 tag，不提交。
+
+### 结论
+
+有条件通过。1 项必须修：保存布局和冷启动写回会丢掉窗口上的模型 / 思考强度覆盖，以及本窗口的对话历史。忙时排队的自动续接因此带不上新值。不需要另选产品方案。未提交。
+
+### 改动文件
+
+- 新增 `docs/验收记录/Phase10-终验.md`
+- 本条追加进 `docs/对话记录/Phase10-对话总记录.md`
+
+未改 `docs/开发进度.md` 和计划。未纳入 `apps/desktop/scripts/real-config-probe.mjs`。探针文件已删。
+
+### 命令结果
+
+- `pnpm lint`：通过。Biome 762 个文件。`check-i18n` PASS。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- `pnpm test`：**2428 过 / 1 跳过**。首跑通过。
+- `pnpm smoke`：11 项 ALL PASS。FF-pane v0.10.18。
+- `pnpm test:e2e`：首跑 52 过 / 1 失败。失败项是管理者起草配置的排队确认框超时。单独重跑该文件 1 过。
+- 反向探针：6 项通过，冷启动保住覆盖和历史失败。探针已删。
+- `electron-builder --dir` 到系统临时目录：成功。`FF-pane.exe --smoke` ALL PASS，版本 0.10.18。临时目录已删。
+
+### 问题与遗留
+
+必须修：`applyAuthNode` 写回布局时丢掉 `modelOverride`、`effortOverride`、`conversations`、`sessionUnidentified` 和连法显示字段。`keepModelEffortOverrides` 补回去之后又被剥掉。详见验收记录。
+
+e2e 偶发：`config-tool-workbench.spec.ts` 排队草案取消后 15 秒内对话框没有换到下一份。安静重跑通过。
+
+各任务未做掉的建议已去重写进验收记录。没有要主控拍板的产品分叉。
+
+### 相关文件链接
+
+- [Phase 10 终验](../验收记录/Phase10-终验.md)
+
+## 2026-10-02 04:15 · Phase10 · 终验 · 修复 · 布局写回保留覆盖与历史
+
+### 任务要点
+
+终验必须修：冷启动和保存布局写回时，把窗口上的连法、模型与思考强度覆盖、对话历史留在原窗口上。权限和父子关系仍以主进程登记为准。旧档案 id 继续不写入。不提交。
+
+### 结论
+
+写回已保留这些字段。相关单测和这次点名的 e2e 通过。终验裁定仍是有条件通过，这次没有改验收记录，也没有重跑全套 test / smoke。未提交。
+
+### 改动文件
+
+- `apps/desktop/src/main/workbench/auth-registry.ts`
+- `apps/desktop/tests/workbench-auth-registry.test.ts`
+
+### 命令结果
+
+- `pnpm lint`：通过。Biome 762 个文件，无修复。`check-i18n` PASS。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- 受影响 e2e（先 `electron-vite build`）：4 过。
+  - `model-effort.spec.ts`：管理者改工作者强度，空闲后自动续接并带上新强度。
+  - `model-effort.spec.ts`：改管理者自己时先确认，点确认后才续接。
+  - `workbench-cli.spec.ts`：Codex 按记号认领会话，续接 argv 为 resume \<id\>。
+  - `workbench-cli.spec.ts`：同目录三个 Codex 各自认出编号，开新对话后能从历史续接。
+- 此前 `workbench-auth-registry.test.ts`：14 过，含冷启动、再次同步、写入布局后再读出。
+
+### 问题与遗留
+
+没有新的必须修。终验里其余建议和已知并接受的事项没动。未提交。
+
+## 2026-10-02 04:37 · Phase10 · 终验 · 复验
+
+### 任务要点
+
+复验布局写回修复。重跑冷启动、再次同步、写入后再读出，并补「忙时排队 → 冷启动 → 空闲后续接，启动参数带新值」。查草案确认框那次失败：连续跑 5 次，并看排队代码。最后完整跑 lint、typecheck、test、smoke、e2e 和临时目录打包冒烟。另用本机命令行做一次最低消费核对。不提交。
+
+### 结论
+
+通过。覆盖、历史、未识别标记、连法显示都留在布局里。权限和父子关系仍按主进程登记。旧档案 id 不写入。忙时排队后的续接参数是新模型和新强度。草案确认失败是测试时序，不是产品缺陷。未提交。
+
+### 改动文件
+
+只追加本条和 `docs/验收记录/Phase10-终验.md` 末尾的「## 复验」。未改实现，未改上文。
+
+### 命令结果
+
+- 复验探针：2 过。已删。
+- `config-tool-workbench.spec.ts`：连续 5 次都过。
+- `pnpm lint`：通过。Biome 762。`check-i18n` PASS。
+- desktop typecheck：通过。
+- `pnpm test`：2429 过 / 1 跳过。
+- `pnpm smoke`：11 项 ALL PASS。v0.10.18。
+- `pnpm test:e2e`：53 过。
+- 打包冒烟：`FF-pane.exe --smoke` ALL PASS，v0.10.18。临时目录已删。
+- 本机 Codex 一次：`gpt-5.6-luna`，强度 `low`，回复 `ok`，约 2974 token。
+- 本机 Claude：`haiku` 与 `sonnet` 加 `--effort low` 均 403，费用 0。没有再换更贵模型。
+
+### 问题与遗留
+
+没有新的必须修。Claude 打印模式在这台机器上返回 403，登录状态仍是已登录。不挡这次裁定。未提交。
+
+### 相关文件链接
+
+- [Phase 10 终验](../验收记录/Phase10-终验.md)
+
+## 2026-10-02 04:51 · Phase10 · 终验 · 提交 · v0.10.19
+
+### 任务要点
+
+复验通过。按 §7.2 第 4 步提交。版本 `0.10.18` → `0.10.19`。轻量 tag `v0.10.19`，不 push。
+
+### 结论
+
+已提交并打轻量 tag `v0.10.19`，未 push。下一步交 Tony 试用。不需要主控决策。
+
+### 改动文件
+
+版本：根与 `apps/desktop` 的 `package.json`、README 状态行、`command-ipc.test.ts` 与 `client-server.test.ts` 里的假 AppInfo。
+实现：布局写回保留连法、模型与思考强度覆盖、对话历史和未识别标记。
+进度与计划：`docs/开发进度.md` 登记 Phase 10 终验 ✅，并写入未处理建议和已知并接受事项。计划 §7.5 当前版本改为 0.10.19，下一步交 Tony 试用。§9 总表终验标 ✅，tag `v0.10.19`。
+另含终验记录和此前的终验 / 修复 / 复验条目。未纳入 `apps/desktop/scripts/real-config-probe.mjs`。
+
+### 命令结果
+
+- `pnpm lint`：通过。Biome 762 个文件。`check-i18n` PASS。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- `vitest run tests/command-ipc.test.ts tests/client-server.test.ts tests/workbench-auth-registry.test.ts`：3 个文件，87 过。
+- 提交信息：`fix: Phase 10 终验 布局写回保留覆盖与对话历史`
+- 轻量 tag `v0.10.19`，未 push
+
+### 问题与遗留
+
+没有新的必须修。未处理建议和已知并接受事项已写入开发进度。下一步交 Tony 试用。
+
+### 相关文件链接
+
+- [Phase 10 终验](../验收记录/Phase10-终验.md)
