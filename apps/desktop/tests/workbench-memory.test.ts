@@ -3,11 +3,18 @@
  */
 
 import { mkdtempSync, rmSync } from "node:fs";
+import { appendFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { selectMemoryForRole } from "@ff-pane/core";
 import type { MemoryEntry, MemoryEntryId, WorkbenchOpenedBy } from "@ff-pane/shared";
-import { listEntries, resolveProjectLayout, saveEntry, updateEntryStatus } from "@ff-pane/storage";
+import {
+  entryFileName,
+  listEntries,
+  resolveProjectLayout,
+  saveEntry,
+  updateEntryStatus,
+} from "@ff-pane/storage";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMemoryIndexService } from "../src/main/memory-index";
 import {
@@ -19,6 +26,8 @@ import {
 import {
   MEMORY_ADD_BODY_MAX_CHARS,
   MEMORY_ADD_TITLE_MAX_CHARS,
+  MEMORY_SEARCH_FILE_CAP_NOTE,
+  MEMORY_SEARCH_FILE_MAX_BYTES,
   MEMORY_SEARCH_MAX_HITS,
   packMemorySearchHits,
 } from "../src/main/workbench/memory-policy";
@@ -524,6 +533,60 @@ describe("写入后旧注入与索引", () => {
       const viaTool = await call(deps, "B", "ffpane_memory_search", { query: "归档口令" });
       expect(viaTool.isError).toBe(false);
       expect(viaTool.text).not.toContain("归档口令");
+    } finally {
+      index.close();
+    }
+  });
+
+  it("超过读取上限的记忆只带回开头并说明，上限内的仍是整份正文", async () => {
+    const root = tempDir();
+    const index = createMemoryIndexService({
+      listProviders: async () => [],
+      revealSecret: async () => undefined,
+      log: () => undefined,
+    });
+    try {
+      await addCallerProjectMemory(index, root, {
+        id: "mem-small-cap" as MemoryEntryId,
+        category: "rule",
+        title: "普通口令",
+        body: "完整正文应原样返回",
+        status: "candidate",
+        confidence: "low",
+        source: { kind: "user_manual" },
+        createdAt: 1,
+        updatedAt: 1,
+      });
+      const largeId = await addCallerProjectMemory(index, root, {
+        id: "mem-large-cap" as MemoryEntryId,
+        category: "rule",
+        title: "超限口令",
+        body: "开头还能看见",
+        status: "candidate",
+        confidence: "low",
+        source: { kind: "user_manual" },
+        createdAt: 2,
+        updatedAt: 2,
+      });
+      const layout = resolveProjectLayout(root);
+      const marker = "OVERSIZE-TAIL-MARKER";
+      await appendFile(
+        join(layout.memoryCandidatesDir, entryFileName(largeId)),
+        `${"x".repeat(MEMORY_SEARCH_FILE_MAX_BYTES)}${marker}`,
+      );
+
+      const smallHits = await searchCallerProjectMemory(index, root, "普通口令", 20);
+      expect(smallHits).toHaveLength(1);
+      expect(smallHits[0]?.body).toBe("完整正文应原样返回");
+      expect(smallHits[0]?.body).not.toContain(MEMORY_SEARCH_FILE_CAP_NOTE);
+
+      const largeHits = await searchCallerProjectMemory(index, root, "超限口令", 20);
+      expect(largeHits).toHaveLength(1);
+      expect(largeHits[0]?.title).toBe("超限口令");
+      expect(largeHits[0]?.status).toBe("candidate");
+      expect(largeHits[0]?.body.startsWith(`${MEMORY_SEARCH_FILE_CAP_NOTE}\n\n`)).toBe(true);
+      expect(largeHits[0]?.body).toContain("开头还能看见");
+      expect(largeHits[0]?.body).not.toContain(marker);
     } finally {
       index.close();
     }

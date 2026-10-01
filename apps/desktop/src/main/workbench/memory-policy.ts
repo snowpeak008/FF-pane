@@ -11,6 +11,13 @@ import { sanitizeThreadBody, stripControls } from "./remind";
 export const MEMORY_SEARCH_MAX_HITS = 20;
 /** 一次检索返回的标题加正文，UTF-8 合计不超过这个字节数。 */
 export const MEMORY_SEARCH_MAX_BYTES = 16 * 1024;
+/**
+ * 检索回读单条 Markdown 时最多读这么多字节。
+ * 更大的手改文件只读开头，避免整份进主进程内存。条数、查询和 16KB 装箱不变。
+ */
+export const MEMORY_SEARCH_FILE_MAX_BYTES = 256 * 1024;
+/** 超限文件正文开头的说明。检索结果里能看见，模型不会把残段当成全文。 */
+export const MEMORY_SEARCH_FILE_CAP_NOTE = "（此文件超过检索读取上限，下面只是开头。）";
 /** 查询原文的码点上限。更长的句子请改短后再查。 */
 export const MEMORY_SEARCH_QUERY_MAX_CHARS = 200;
 /** 新增标题的码点上限。 */

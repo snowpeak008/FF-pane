@@ -32,14 +32,18 @@ async function probePty(): Promise<
 const probe = await probePty();
 
 describe.skipIf(!isWindows || !probe.ok)("真 PTY 集成（Windows）", () => {
-  let cwd: string;
+  let cwd = "";
 
   beforeEach(() => {
     cwd = mkdtempSync(join(tmpdir(), "ffpane-pty-it-"));
   });
 
   afterEach(() => {
-    rmSync(cwd, { recursive: true, force: true });
+    if (cwd === "") {
+      return;
+    }
+    // cmd 退出后目录句柄还会占一小会儿。重试清的是这个，echo 仍须在 8 秒内出现。
+    rmSync(cwd, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   it("spawn cmd /c echo 能拿到输出", async () => {
@@ -72,7 +76,7 @@ describe.skipIf(!isWindows || !probe.ok)("真 PTY 集成（Windows）", () => {
       await manager.killAll();
       manager.dispose();
     }
-  });
+  }, 20_000);
 });
 
 describe.skipIf(isWindows && probe.ok)("真 PTY 集成（条件跳过）", () => {

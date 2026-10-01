@@ -69,7 +69,7 @@ afterEach(() => {
 
 const APP_INFO: AppInfo = {
   name: "FF-pane",
-  version: "0.10.16",
+  version: "0.10.17",
   runtime: { electron: "44.0.0", chrome: "140", node: "24.0.0" },
 };
 
@@ -821,18 +821,34 @@ describe("bindSubscription：订阅一次、解绑幂等、迟到事件丢弃", 
 // 语言包完整性：命令面板不允许出现裸 key
 // ════════════════════════════════════════════════════════════════════════════
 
-describe("挂载入口：模块图在运行时可解析", () => {
-  // 说明符声明为 string 而非字面量：tests 归 tsconfig.node.json（未开 --jsx），
-  // 静态引用 .tsx 会让 typecheck 失败；这里只验证运行时可解析，类型面由 tsconfig.web 覆盖。
-  const tsxEntries: readonly (readonly [string, string])[] = [
-    ["../src/renderer/src/command/CommandPaletteProvider", "CommandPaletteProvider"],
-    ["../src/renderer/src/command/CommandPalette", "CommandPalette"],
-  ];
+// 说明符是 string 而不是字面量：tests 归 tsconfig.node.json（未开 --jsx），
+// 静态引用 .tsx 会让 typecheck 失败。导入放在文件加载时开始，不占这条用例自己的 5 秒。
+const commandPaletteModules: readonly (readonly [string, string])[] = [
+  ["../src/renderer/src/command/CommandPaletteProvider", "CommandPaletteProvider"],
+  ["../src/renderer/src/command/CommandPalette", "CommandPalette"],
+];
 
+let commandPaletteLoadError: unknown;
+const commandPaletteLoaded: Promise<ReadonlyMap<string, unknown>> = (async () => {
+  const loaded = new Map<string, unknown>();
+  for (const [specifier, exportName] of commandPaletteModules) {
+    const module = (await import(specifier)) as Record<string, unknown>;
+    loaded.set(exportName, module[exportName]);
+  }
+  return loaded;
+})().catch((error: unknown) => {
+  commandPaletteLoadError = error;
+  return new Map<string, unknown>();
+});
+
+describe("挂载入口：模块图在运行时可解析", () => {
   it("CommandPaletteProvider 与 CommandPalette 可被加载", async () => {
-    for (const [specifier, exportName] of tsxEntries) {
-      const loaded = (await import(specifier)) as Record<string, unknown>;
-      expect(typeof loaded[exportName], specifier).toBe("function");
+    const loaded = await commandPaletteLoaded;
+    if (commandPaletteLoadError !== undefined) {
+      throw commandPaletteLoadError;
+    }
+    for (const [specifier, exportName] of commandPaletteModules) {
+      expect(typeof loaded.get(exportName), specifier).toBe("function");
     }
   });
 

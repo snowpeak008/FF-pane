@@ -8,7 +8,7 @@
 /// <reference types="node" />
 
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -476,14 +476,38 @@ describe("取消与超时：进程树终止", () => {
   }, 40_000);
 
   it("超时自动树杀，结束方式为 timeout", async () => {
-    const handle = spawnAgentProcess({
-      command: NODE,
-      args: ["-e", "process.stdout.write('up\\n');setInterval(() => {}, 1000)"],
-      timeoutMs: 500,
-    });
-    const [stdout, exit] = await Promise.all([drain(handle.stdout), handle.exitPromise]);
-    expect(stdout.text).toBe("up\n");
-    expect(exit.kind).toBe("timeout");
+    const marker = path.join(tmpdir(), `ffpane-timeout-up-${process.pid}-${Date.now()}`);
+    const script = [
+      "const wrote = process.stdout.write('up\\n');",
+      "if (wrote !== false) {",
+      `  require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'ran');`,
+      "}",
+      "setInterval(() => {}, 1000);",
+    ].join("");
+    try {
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        await rm(marker, { force: true });
+        const handle = spawnAgentProcess({
+          command: NODE,
+          args: ["-e", script],
+          timeoutMs: 500,
+        });
+        const [stdout, exit] = await Promise.all([drain(handle.stdout), handle.exitPromise]);
+        if (stdout.text === "up\n") {
+          expect(exit.kind).toBe("timeout");
+          return;
+        }
+        // 机器忙时 node 还没执行到 write，500ms 已经树杀。空输出且标记文件不存在才重试。
+        expect(exit.kind).toBe("timeout");
+        expect(stdout.text).toBe("");
+        await expect(stat(marker)).rejects.toThrow();
+        if (attempt === 3) {
+          expect(stdout.text).toBe("up\n");
+        }
+      }
+    } finally {
+      await rm(marker, { force: true });
+    }
   }, 30_000);
 
   it("kill() 幂等：已退出进程重复 kill 无害且结论不变", async () => {

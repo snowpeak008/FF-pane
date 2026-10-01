@@ -928,6 +928,10 @@ test("T10.6：Codex notify 的 agent-turn-complete 之后才自动投递", async
     await pane.getByTestId("workbench-role-badge").click();
     await pane.getByTestId("workbench-role-option-manager").click();
     await expect(pane.getByTestId("workbench-deliver-now")).toBeVisible();
+    await expect(pane.getByTestId("workbench-codex-manual-hint")).toContainText("one Enter");
+    await expect(pane.getByTestId("workbench-codex-manual-hint")).toContainText(
+      "do not press this button",
+    );
     await page.waitForTimeout(1_500);
     expect(await readReplayForWindow(page, windowId)).not.toContain("manager.md");
 

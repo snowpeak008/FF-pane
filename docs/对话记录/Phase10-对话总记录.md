@@ -2213,6 +2213,7 @@ Claude 带参数的 `/model` 在已有对话时会不会再要一次确认，官
 
 独立复验已提交的 T10.14（`305f05ba66cbac1446f0fa31070e108e12fbe3d7`，tag `v0.10.16`）。核对 4 项必须修，重跑验收记录第 2 节的反向探针，并核对上一轮通过的探针。完整跑 lint、desktop typecheck、`pnpm test`、`pnpm smoke`、`pnpm test:e2e`，以及打包冒烟。未改实现，未提交。
 
+
 ### 结论
 
 通过。4 项必须修都成立，上一轮通过的探针没有被修坏。可以按验收记录里的手动试用步骤给 Tony 试用。建议 5 条仍未改，不挡。不需要主控决策。
@@ -2240,3 +2241,145 @@ Claude 带参数的 `/model` 在已有对话时会不会再要一次确认，官
 
 - [T10.14 验收记录](../验收记录/T10.14-验收.md)
 - 修复：[2026-10-01 19:14 · T10.14 · 修复 · 串联](./Phase10-对话总记录.md)
+
+## 2026-10-01 20:32 · T10.15 · 执行 · 加固
+
+### 任务要点
+
+按计划 §9.3 逐条分类后，只做甲、乙。丙不实现。未提交。
+
+### 结论
+
+甲 1 条、乙 3 条已做。丙 3 条留给 Tony，没有改对应代码。
+
+**1. 记忆文件可被改成已生效 — 甲。** 有编辑权的窗口可以直接改项目里的记忆 Markdown，把状态写成已生效，旧注入会收。这是 Tony 已经同意的（§9.4 第 1 条里的 T10.10 决定 2）。根因不在工具，而在记忆文件就放在项目目录里，编辑权窗口本来就能改这些文件。要挡死得挪走文件或给每条签名，那是另一项产品决定。处置：只写进计划 §9.3 第 1 条，标为已知并接受，不改代码。
+
+**2. 记忆检索先读完整文件 — 乙。** 检索命中后 `loadEntry` 会把 Markdown 整份读进内存，16KB 只限制交回给模型的字数。手改的超大文件会先占主进程。根因：`apps/desktop/src/main/workbench/project-memory.ts` 的 `searchCallerProjectMemory` 对每条命中调用 `loadEntry`。修法：单文件超过 256KB 时只读开头，正文前加一句说明；不超过的仍整份解码，条数、查询、状态过滤、16KB 装箱都不变。风险：超限文件的后半段检索结果里看不到，说明写在正文开头，装箱时不会被截掉。
+
+**3. 权限摘要多重集减穿 — 丙，未实现。** 只有一次确认，却来了一次没有对应 PermissionRequest 的同摘要 PostToolUse（例如同一次输入里，另一条相同命令被自动允许并先跑完）时，多重集会被减到 0，阶段变成 busy，下一次 Stop 可能写入。代码在 `apps/desktop/src/main/workbench/idle-deliver.ts` 的 `noteHook`。PermissionRequest 没有 tool_use_id，PostToolUse 有，两边只能按摘要配对，分不出「这是框对应的那一次」还是「另一次相同输入」。两次都在等确认的交错是安全的。真实 Claude 在确认框还开着时通常还不发 Stop。验收 T10.7b §4 已建议保持现状。
+- 推荐：已知并接受。不改配对。
+- 备选：没有 id 的摘要不再因 PostToolUse 减少，只等用户再发一句才清。更安全，但确认之后的提醒会停住，直到用户再提交。这会改变自动投递，需 Tony 拍板。
+- 不推荐：退回「任意 PostToolUse 都清零」，或去读 hook 正文来猜哪一次弹了框。
+
+**4. Codex 首轮前手动发送 — 乙（只改说明，不改投递）。** Codex 没有权限信号。第一轮还没结束时，点「立即发送」会真的把排队的字和回车写进终端。画面上已有确认框时，这一下等于在框上按了回车。回合进行中是安全的：已经提交过回车就会记成忙，直到 `agent-turn-complete`。根因：`idle-deliver.ts` 在 phase 为 unknown 时允许 `deliverNow`；§7.4 写明没有可靠信号时只允许用户手动发送。旧文案「若画面上有确认框请勿点击」没说清不要点的是这个按钮，也没说它会写回车。修法：中英文提示改成：这个按钮会写入一次回车；Codex 第一轮结束前收不到权限信号；确认框还在时不要点。不禁止手动发送，不改自动投递。风险：用户仍可能点下去，这是决定留下的残余，文案只是让人看得见。
+
+**5. 工作台 Codex 窗口替换用户 notify — 丙，未实现。** 本次进程的 `-c notify=[node.exe, 脚本]` 盖过 `config.toml` 里的 notify，不转发、不写 `~/.codex`。窗口退出后，用户自己的 notify 还在配置文件里。代码在 `apps/desktop/src/main/workbench/cli-args.ts` 与 `hook-launch.ts`。要「修好」就得读取并执行用户 `~/.codex` 里配置的 notify 命令，碰 §7.4。
+- 推荐：已知并接受。不读、不执行用户的 notify。
+- 不推荐：读 config.toml 再链式调用用户命令。
+- 不推荐：去掉 `-c notify`。Codex 窗口会失去回合结束信号，自动投递退回到全程手动。
+
+**6. 同目录极短时间双开 Codex，认领可能超时 — 丙，未实现。** 两个窗口几乎同时在同一目录打开，若只落下一个 rollout，后开的那个按启动先后贪心，等不到第二个文件，默认最多等 120 秒然后失败，续接走选择器，不静默 `--last`。代码在 `apps/desktop/src/main/workbench/codex-claim.ts` 的 `pickCodexSessionForClaim` / `CodexSessionClaimer`。两个文件都在时，现有单测能配成不同 id。只落一个文件时，分不出第二个会话，缩短等待会误伤「Codex 很久才写 session_meta」。
+- 推荐：已知并接受。超时后进选择器，不静默接最近一条。
+- 备选：同目录已经有窗口认领了唯一文件后，后开窗口把等待缩短到几秒再进选择器。更快，但第二个文件写得慢时会误判失败。需 Tony 拍板。
+- 不推荐：超时后改回 `--last`。
+
+**7. 三个偶发测试 — 乙，只加固测试。**
+- 命令面板：`command-ipc.test.ts` 在用例体内动态 import 命令面板，机器忙时超过 vitest 默认 5 秒。导入改到文件加载时开始，断言仍是导出为函数。没有加长这条用例的超时。
+- 适配器超时树杀：`process.test.ts` 的 500ms 超时在 node 还没写出 `up` 时就树杀，于是读不到 `up`。产品超时仍是 500ms。只有「结束方式是 timeout、输出为空、标记文件不存在（进程还没执行到 write）」才重试，最多 3 次；写出了 `up` 就必须是 timeout；标记已写但输出不是 `up` 会失败，不重试。
+- PTY 清理 EPERM：`terminal-pty.integration.test.ts` 的 `rmSync` 没有重试，cmd 退出后目录句柄还占着就会失败。清理改为最多 5 次、间隔 200ms。echo 仍须在 8 秒内出现。用例计时器设为 20 秒，只为盖住这 8 秒等待和清理，不把 8 秒放宽。
+
+### 改动文件
+
+- `docs/Phase10-多窗口终端工作台计划.md`（§9.3 第 1 条标为已知并接受）
+- `apps/desktop/src/main/workbench/memory-policy.ts`
+- `apps/desktop/src/main/workbench/project-memory.ts`
+- `apps/desktop/tests/workbench-memory.test.ts`
+- `locales/zh-CN.json`、`locales/en-US.json`
+- `apps/desktop/tests/workbench-deliver-hint.test.ts`
+- `apps/desktop/tests/e2e/workbench-cli.spec.ts`
+- `apps/desktop/tests/command-ipc.test.ts`
+- `packages/adapters/tests/process.test.ts`
+- `apps/desktop/tests/terminal-pty.integration.test.ts`
+- 本条
+
+未改：`idle-deliver.ts`、`cli-args.ts`、`hook-launch.ts`、`codex-claim.ts`。未改 `apps/desktop/scripts/real-config-probe.mjs`。
+
+### 命令结果
+
+- `pnpm lint`：通过。Biome 760 个文件。`check-i18n` PASS。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- 相关单测一次：`workbench-memory`、`workbench-deliver-hint`、`command-ipc`、`terminal-pty.integration`、`process` 共 5 个文件，111 过 / 1 跳过。
+- 偶发相关 3 个文件连续 5 次：每次 100 过 / 1 跳过，全部通过。
+- 受影响 e2e：`workbench-cli.spec.ts` 里「Codex notify 的 agent-turn-complete 之后才自动投递」1 过（约 16 秒，含构建）。
+
+### 问题与遗留
+
+丙类 3 条（第 3、5、6 条）需要 Tony 决定，推荐都是已知并接受。未提交。
+
+### 相关文件链接
+
+- 计划 §9.3、§7.4
+- 验收出处：`docs/验收记录/T10.10-验收.md` §7、`docs/验收记录/T10.7b-验收.md` §4、`docs/验收记录/T10.6-验收.md` §10.4 / §10.7、`docs/开发进度.md` T10.4 认领残余与统一验收偶发测试
+
+## 2026-10-01 20:58 · T10.15 · 提交 · v0.10.17
+
+### 任务要点
+
+检查通过，没有必须修。按 §7.2 第 4 步提交。版本 `0.10.16` → `0.10.17`。丙类 3 条标为待 Tony 决定，不挡这次提交。轻量 tag `v0.10.17`，不 push。
+
+### 结论
+
+已提交并打轻量 tag `v0.10.17`，未 push。丙类 3 条仍要 Tony 决定，推荐都是已知并接受。下一步 Phase 10 终验。
+
+### 改动文件
+
+版本：根与 `apps/desktop` 的 `package.json`、README 状态行、`command-ipc.test.ts` 与 `client-server.test.ts` 里的假 AppInfo。
+进度与计划：`docs/开发进度.md` 登记 T10.15 ✅；已处理的残余标为已处理；甲类标为已知并接受；丙类标为待 Tony 决定。计划 §4 增加 T10.15 行，§9 总表 T10.15 标 ✅ 并注明丙类待定，§7.5 当前版本改为 0.10.17。
+另含本任务的实现、测试、验收记录和此前的执行 / 检查条目。未纳入 `apps/desktop/scripts/real-config-probe.mjs`。
+
+### 命令结果
+
+- `pnpm lint`：通过。Biome 760 个文件。`check-i18n` PASS。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- `vitest run apps/desktop/tests/command-ipc.test.ts apps/desktop/tests/client-server.test.ts`：2 个文件，73 过。
+- 提交信息：`fix: T10.15 加固残余风险`
+- 轻量 tag `v0.10.17`，未 push
+
+### 问题与遗留
+
+丙类 3 条待 Tony 决定：权限摘要减穿；工作台 Codex 窗口替换用户 notify；同目录极短时间双开认领超时。推荐都是已知并接受。验收建议：记忆索引第一次对账仍会整份读文件，不挡。
+
+### 相关文件链接
+
+- [T10.15 验收记录](../验收记录/T10.15-验收.md)
+- 检查：[2026-10-01 20:54 · T10.15 · 检查 · 加固](./Phase10-对话总记录.md)
+- 执行：[2026-10-01 20:32 · T10.15 · 执行 · 加固](./Phase10-对话总记录.md)
+
+## 2026-10-01 20:54 · T10.15 · 检查 · 加固
+
+### 任务要点
+
+独立检查 T10.15 加固。不改实现。核对甲乙丙分类，乙类做反向探针，丙类确认没被偷偷实现，并完整跑 lint、desktop typecheck、`pnpm test`、`pnpm smoke`、`pnpm test:e2e`。版本仍是 0.10.16，未提交。
+
+### 结论
+
+裁定：**通过**。必须修复 0 条。建议 1 条，不挡：记忆索引第一次打开时的对账仍会整份读超大文件，交回窗口的正文已经截过。
+
+甲第 1 条只写了计划，没有改记忆授权或签名。乙第 2 条超限只返回开头并带说明，上限内仍是全文；拿掉上限后能读到尾部标记，还原后用例恢复。乙项目窗口用现有记忆工具检索甲项目，拿不到。乙第 4 条只改了文案，中英文都写明会写回车、确认框还在时不要点这个按钮；改回旧句后单测变红，已还原。权限等待时立即发送仍被拒绝，未知状态仍允许手动发送，没有超时强写。乙第 7 条没有删测试、没有新跳过、没有放松断言，也没有用加长超时掩盖产品问题。丙第 3、5、6 条都还在：同摘要会减到 0；Codex 仍用自己的 notify，不读用户配置；认领仍约 120 秒，失败不走静默最近一条。
+
+丙类 3 条需要 Tony 拍板。推荐都是已知并接受。
+
+### 改动文件
+
+- `docs/验收记录/T10.15-验收.md`（新建）
+- 本条
+
+未改实现。探针改过的文件已还原。探针脚本已删。未动 `apps/desktop/scripts/real-config-probe.mjs`。未把 `apps/desktop/out` 写进提交（本来也不提交）。
+
+### 命令结果
+
+- `pnpm lint`：通过。Biome 760 个文件。`check-i18n` PASS。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- `pnpm test`：通过。143 个文件，2420 过 / 1 跳过。那 1 条是原有的「非 Windows 才解释为何跳过真 PTY」。
+- `pnpm smoke`：通过。版本 0.10.16。
+- `pnpm test:e2e`：通过。52 过，约 5.4 分钟。
+
+### 问题与遗留
+
+没有必须修复。建议：索引首次对账仍整份读文件，不挡这次。丙类 3 条待 Tony 决定，推荐都是已知并接受。未提交。
+
+### 相关文件链接
+
+- `docs/验收记录/T10.15-验收.md`
+- 计划 §9.3、§7.3、§7.4
+- 总记录「2026-10-01 20:32 · T10.15 · 执行 · 加固」
