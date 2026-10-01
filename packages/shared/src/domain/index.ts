@@ -17,6 +17,7 @@ export * from "./permission.js";
 export * from "./plan.js";
 export * from "./profile.js";
 export * from "./project.js";
+export * from "./project-config.js";
 export * from "./provider.js";
 export * from "./provider-templates.js";
 export * from "./report.js";

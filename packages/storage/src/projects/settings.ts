@@ -54,7 +54,17 @@ export interface ProjectSettings {
    * 存储层在每次读取时去校验——存储层不认识 Profile 表。
    */
   readonly reviewerProfileId?: ProfileId;
+  /**
+   * 绑定的项目配置 id。缺省 = 跟着那张默认配置。
+   * 不读取、不迁移 reviewerProfileId。
+   */
+  readonly configId?: string;
 }
+
+/** 更新补丁。configId 为 null 或空串时清除绑定。 */
+export type ProjectSettingsUpdate = Partial<Omit<ProjectSettings, "configId">> & {
+  readonly configId?: string | null;
+};
 
 /** 出厂缺省：三个工具/角色开关均默认关闭，Reviewer 未绑定。 */
 export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
@@ -68,7 +78,7 @@ export interface ProjectSettingsStore {
   /** 读取本层认识的字段。文件 / 字段缺失一律补缺省，调用方拿到的永远完整。 */
   readSettings(): Promise<ProjectSettings>;
   /** 合并补丁并原子写回（保留未知键），返回合并后的完整设置。 */
-  updateSettings(patch: Partial<ProjectSettings>): Promise<ProjectSettings>;
+  updateSettings(patch: ProjectSettingsUpdate): Promise<ProjectSettings>;
 }
 
 /** 读入 `project` 对象原文（含未知键）。not-found 归一为空对象。 */
@@ -126,6 +136,9 @@ function pickSettings(raw: Record<string, unknown>): ProjectSettings {
     ...(typeof reviewerProfileId === "string" && reviewerProfileId.length > 0
       ? { reviewerProfileId: reviewerProfileId as ProfileId }
       : {}),
+    ...(typeof raw["configId"] === "string" && raw["configId"].trim() !== ""
+      ? { configId: raw["configId"].trim() }
+      : {}),
   };
 }
 
@@ -139,15 +152,29 @@ export function createProjectSettingsStore(projectFile: string): ProjectSettings
       return pickSettings(await loadRaw(projectFile));
     },
 
-    async updateSettings(patch: Partial<ProjectSettings>): Promise<ProjectSettings> {
+    async updateSettings(patch: ProjectSettingsUpdate): Promise<ProjectSettings> {
       const raw = await loadRaw(projectFile);
-      const merged: ProjectSettings = { ...pickSettings(raw), ...patch };
+      const current = pickSettings(raw);
+      const { configId: configIdPatch, ...rest } = patch;
+      const merged: ProjectSettings = { ...current, ...rest };
+      const clearing = configIdPatch === null || configIdPatch === "";
+      const { configId: _previousConfigId, ...withoutConfig } = merged;
+      void _previousConfigId;
+      const next: ProjectSettings = clearing
+        ? withoutConfig
+        : configIdPatch !== undefined
+          ? { ...withoutConfig, configId: configIdPatch }
+          : merged;
+      const project: Record<string, unknown> = { ...raw, ...next };
+      if (next.configId === undefined) {
+        delete project["configId"];
+      }
       // 未知键原样带回，只覆盖本层拥有的键（见模块注释）
       await writeJsonAtomic(projectFile, {
         version: PROJECT_SETTINGS_FILE_VERSION,
-        project: { ...raw, ...merged },
+        project,
       });
-      return merged;
+      return next;
     },
   };
 }

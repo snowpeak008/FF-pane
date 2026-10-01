@@ -15,7 +15,7 @@ import {
 } from "@ff-pane/shared";
 import {
   createConfigStore,
-  createProfileStore,
+  createProjectConfigStore,
   createProjectRegistry,
   createProjectSettingsStore,
   createProviderStore,
@@ -58,6 +58,7 @@ import {
   resolveFfPaneFile,
 } from "./panel-files";
 import { addCallerProjectMemory, searchCallerProjectMemory } from "./project-memory";
+import { resolveProjectLaunchRoute } from "./resolve-config";
 import {
   composeWindowRolePrompt,
   listRoleManuals,
@@ -119,7 +120,7 @@ function mainModuleDir(): string {
 }
 
 /**
- * 装配 workbench:launch-cli；读全局数据根上的 Profile / Provider / 密钥。
+ * 装配 workbench:launch-cli；按项目配置读来源与密钥。本机登录不注入密钥。
  */
 export async function createWorkbenchCliLayer(
   options: WorkbenchCliLayerOptions,
@@ -127,7 +128,7 @@ export async function createWorkbenchCliLayer(
   await cleanupStaleWorkbenchMcpDirs();
 
   const layout = await initGlobalLayout(resolveGlobalRoot());
-  const profiles = createProfileStore(layout.profilesFile);
+  const projectConfigs = createProjectConfigStore(layout.configsFile);
   const providers = createProviderStore(layout.providersFile);
   const config = createConfigStore(layout.configFile);
   const secrets = createSecretStore({
@@ -262,7 +263,6 @@ export async function createWorkbenchCliLayer(
     },
   });
 
-  const lastProfileByRuntime = new Map<string, string>();
   const projects = createProjectRegistry(layout.projectsFile);
   const cursors = createInboxCursorStore(inboxCursorPath(layout.rootDir));
   const roleDeps = () => ({
@@ -346,7 +346,6 @@ export async function createWorkbenchCliLayer(
   };
   const launchDeps = () => ({
     manager: options.manager,
-    getProfile: (id: string) => profiles.getProfile(id as never),
     getProvider: async (id: string) => {
       const provider = await providers.getProvider(id as never);
       return provider as Provider | undefined;
@@ -401,9 +400,6 @@ export async function createWorkbenchCliLayer(
     isPackaged: app.isPackaged,
     resourcesPath: process.resourcesPath,
     idleQueue,
-    onProfileUsed: (profileId: string, runtime: "claude-code" | "codex") => {
-      lastProfileByRuntime.set(runtime, profileId);
-    },
     onCodexSessionClaimed: (windowId: string, nativeSessionId: string) => {
       const window = options.getWindow();
       if (window === null || window.isDestroyed()) {
@@ -427,12 +423,31 @@ export async function createWorkbenchCliLayer(
         request.permission !== undefined && isWorkbenchPermissionLevel(request.permission)
           ? request.permission
           : undefined;
+      const kind =
+        request.kind === "codex" ? "codex" : request.kind === "claude" ? "claude" : undefined;
+      if (kind === undefined) {
+        throw new Error("kind must be claude or codex");
+      }
+      const resolved = await resolveProjectLaunchRoute({
+        projectRoot: request.projectRoot,
+        projectId: request.projectId,
+        kind,
+        configs: projectConfigs,
+        getProvider: async (id) => {
+          const provider = await providers.getProvider(id as never);
+          return provider === undefined ? undefined : { id: provider.id, name: provider.name };
+        },
+      });
+      if (!resolved.ok) {
+        throw new Error(resolved.error);
+      }
       const result = await launchCliWindow(
         {
           windowId: request.windowId,
           projectId: request.projectId,
           projectRoot: request.projectRoot,
-          profileId: request.profileId,
+          kind,
+          route: resolved.route,
           cols: request.cols,
           rows: request.rows,
           ...(request.cwd !== undefined ? { cwd: request.cwd } : {}),
@@ -454,8 +469,13 @@ export async function createWorkbenchCliLayer(
           : {}),
         ...(result.claimingSession === true ? { claimingSession: true } : {}),
         ...(result.resumePicker === true ? { resumePicker: true } : {}),
-        profileName: result.profileName,
+        configName: result.configName,
+        connectionMode: result.connectionMode,
+        ...(result.providerName !== undefined ? { providerName: result.providerName } : {}),
         ...(result.model !== undefined ? { model: result.model } : {}),
+        ...(result.reasoningEffort !== undefined
+          ? { reasoningEffort: result.reasoningEffort }
+          : {}),
         effectivePermission: result.effectivePermission,
         permissionCapped: result.permissionCapped,
         turnSignal: result.turnSignal,
@@ -753,24 +773,19 @@ export async function createWorkbenchCliLayer(
           readLayouts: () => layouts.readAll(),
           saveLayout: (next) => layouts.saveProject(next),
           launch: (input) => launchCliWindow(input, launchDeps()),
-          resolveProfileId: async (cli, profileId) => {
-            const runtime = cli === "claude" ? "claude-code" : "codex";
-            const all = await profiles.listProfiles();
-            if (profileId !== undefined && profileId.trim() !== "") {
-              const found = all.find((item) => item.id === profileId && item.runtime === runtime);
-              return found !== undefined
-                ? { ok: true, profileId: found.id }
-                : { ok: false, error: "找不到该 CLI 的启动配置。" };
-            }
-            const recent = lastProfileByRuntime.get(runtime);
-            if (recent !== undefined && all.some((item) => item.id === recent)) {
-              return { ok: true, profileId: recent };
-            }
-            const fallback = all.find((item) => item.runtime === runtime);
-            return fallback !== undefined
-              ? { ok: true, profileId: fallback.id }
-              : { ok: false, error: "还没有适用于该 CLI 的启动配置。" };
-          },
+          resolveRoute: (routeInput) =>
+            resolveProjectLaunchRoute({
+              projectRoot: routeInput.projectRoot,
+              projectId: routeInput.projectId,
+              kind: routeInput.cli,
+              configs: projectConfigs,
+              getProvider: async (id) => {
+                const provider = await providers.getProvider(id as never);
+                return provider === undefined
+                  ? undefined
+                  : { id: provider.id, name: provider.name };
+              },
+            }),
           describeCaller: async (windowId) => {
             const layoutsAll = await layouts.readAll();
             for (const layoutEntry of Object.values(layoutsAll)) {

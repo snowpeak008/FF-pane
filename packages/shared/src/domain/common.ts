@@ -35,6 +35,9 @@ export type ApiKeyRef = Brand<string, "ApiKeyRef">;
 /** 设计文档 §4.4 —— Agent Profile 的内部唯一 ID。 */
 export type ProfileId = Brand<string, "ProfileId">;
 
+/** 项目配置（configs.json）的内部唯一 ID。 */
+export type ProjectConfigId = Brand<string, "ProjectConfigId">;
+
 /** 设计文档 §3.1 / T8.4 —— 自定义角色的内部唯一 ID（`role-` 前缀，见 profile.ts）。 */
 export type CustomRoleId = Brand<string, "CustomRoleId">;
 

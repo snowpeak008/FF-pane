@@ -46,19 +46,12 @@ test.afterAll(async () => {
   rmSync(projectDir, { recursive: true, force: true });
 });
 
-test("claude-code / grok-build 显示 effort 下拉；gemini-cli 不显示", async () => {
+test("配置编辑器给 Claude 和 Codex 思考强度，没有其它 CLI", async () => {
   const { page } = launched;
   await gotoRoute(page, "/settings");
-  await page.getByRole("button", { name: "New profile" }).click();
-  await page.locator("#profile-connection").selectOption("local_cli");
-
-  await page.locator("#profile-runtime").selectOption("claude-code");
-  await expect(page.locator("#profile-reasoning-effort")).toBeVisible();
-
-  await page.locator("#profile-runtime").selectOption("grok-build");
-  await expect(page.locator("#profile-reasoning-effort")).toBeVisible();
-
-  await page.locator("#profile-runtime").selectOption("gemini-cli");
-  await expect(page.locator("#profile-reasoning-effort")).toHaveCount(0);
-  await page.getByRole("button", { name: "Cancel" }).click();
+  await page.getByTestId("config-new").click();
+  await expect(page.getByTestId("config-claude-effort")).toBeVisible();
+  await expect(page.getByTestId("config-codex-effort")).toBeVisible();
+  await expect(page.locator("#profile-runtime")).toHaveCount(0);
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
 });

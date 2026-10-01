@@ -25,10 +25,10 @@ import {
   MAX_INITIAL_PROMPT_CHARS,
 } from "./launch-cli";
 import { stripControls, WORKBENCH_ROLE_LABEL } from "./remind";
+import type { LaunchCliRoute } from "./resolve-config";
 
 export interface OpenChildArgs {
   readonly cli: "claude" | "codex";
-  readonly profileId?: string;
   readonly role: WorkbenchRole;
   readonly permission: WorkbenchPermissionLevel;
   readonly title: string;
@@ -50,11 +50,12 @@ export interface OpenChildDeps {
   readonly readLayouts: () => Promise<Readonly<Record<string, ProjectWorkbenchLayout>>>;
   readonly saveLayout: (layout: ProjectWorkbenchLayout) => Promise<void>;
   readonly launch: (input: LaunchCliWindowInput) => Promise<LaunchCliWindowResult>;
-  readonly resolveProfileId: (
-    cli: "claude" | "codex",
-    profileId: string | undefined,
-  ) => Promise<
-    | { readonly ok: true; readonly profileId: string }
+  readonly resolveRoute: (input: {
+    readonly cli: "claude" | "codex";
+    readonly projectId: string;
+    readonly projectRoot: string;
+  }) => Promise<
+    | { readonly ok: true; readonly route: LaunchCliRoute }
     | { readonly ok: false; readonly error: string }
   >;
   readonly describeCaller: (windowId: string) => Promise<
@@ -164,9 +165,13 @@ export async function openChildWindow(
     }
     briefRelative = brief.relativePath;
   }
-  const profile = await deps.resolveProfileId(args.cli, args.profileId);
-  if (!profile.ok) {
-    return profile;
+  const route = await deps.resolveRoute({
+    cli: args.cli,
+    projectId: described.projectId,
+    projectRoot: described.projectRoot,
+  });
+  if (!route.ok) {
+    return route;
   }
   const layouts = await deps.readLayouts();
   const layout = layouts[described.projectId];
@@ -205,7 +210,8 @@ export async function openChildWindow(
       windowId,
       projectId: described.projectId as LaunchCliWindowInput["projectId"],
       projectRoot: described.projectRoot,
-      profileId: profile.profileId,
+      kind: args.cli,
+      route: route.route,
       cols: 80,
       rows: 24,
       cwd: described.projectRoot,
@@ -230,8 +236,11 @@ export async function openChildWindow(
     cwd: described.projectRoot,
     createdAt: deps.now?.() ?? Date.now(),
     terminalId: launched.terminal.id,
-    profileId: profile.profileId,
     role: args.role,
+    routeMode: launched.connectionMode,
+    ...(launched.providerName !== undefined ? { routeProviderName: launched.providerName } : {}),
+    ...(launched.model !== undefined ? { routeModel: launched.model } : {}),
+    ...(launched.reasoningEffort !== undefined ? { routeEffort: launched.reasoningEffort } : {}),
     permission: effective,
     openedBy,
     parentWindowId: callerId,

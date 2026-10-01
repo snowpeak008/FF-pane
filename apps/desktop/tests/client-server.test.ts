@@ -76,7 +76,7 @@ describe("IPC 客户端/服务端端到端（假线路）", () => {
     registerInvokeHandlers(ipcMain, {
       "app:get-info": () => ({
         name: "FF-pane",
-        version: "0.10.12",
+        version: "0.10.13",
         runtime: { electron: "e", chrome: "c", node: "n" },
       }),
     });

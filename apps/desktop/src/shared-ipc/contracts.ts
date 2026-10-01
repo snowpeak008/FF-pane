@@ -44,6 +44,9 @@ import type {
   PlanStatus,
   PlanVersion,
   ProfileId,
+  ProjectConfig,
+  ProjectConfigDraft,
+  ProjectConfigId,
   ProjectId,
   ProjectRegistryEntry,
   ProjectWorkbenchLayout,
@@ -247,7 +250,10 @@ export interface LaunchCliWindowRequest {
   readonly windowId: string;
   readonly projectId: ProjectId;
   readonly projectRoot: string;
-  readonly profileId: string;
+  /** claude 或 codex。主进程按项目配置选路，不读档案。 */
+  readonly kind: "claude" | "codex";
+  /** 已忽略。旧客户端若仍传入，主进程不使用。 */
+  readonly profileId?: string;
   readonly cols: number;
   readonly rows: number;
   readonly cwd?: string;
@@ -271,8 +277,11 @@ export interface LaunchCliWindowResponse {
   readonly claimingSession?: boolean;
   /** Codex 续接且无 id：已打开 CLI resume 选择器。 */
   readonly resumePicker?: boolean;
-  readonly profileName: string;
+  readonly configName: string;
+  readonly connectionMode: "local_cli" | "relay";
+  readonly providerName?: string;
   readonly model?: string;
+  readonly reasoningEffort?: string;
   /** T10.5'：实际生效权限（可能被祖先封顶）。 */
   readonly effectivePermission: WorkbenchPermissionLevel;
   /** T10.5'：请求权限被祖先上限压低时为 true。 */
@@ -477,6 +486,8 @@ export interface CreateProjectRequest {
   readonly rootPath: string;
   /** 项目显示名（默认取根目录名，可改）。 */
   readonly name: string;
+  /** 可选。只接受对所有项目开放的配置；空 = 跟着默认配置。 */
+  readonly configId?: string;
 }
 
 /** projects:remove 请求。 */
@@ -501,13 +512,20 @@ export interface ProjectSettingsView {
   readonly configToolEnabled: boolean;
   /** 设计文档 §3.1 —— Reviewer 角色开关（T7.2，缺省关闭）。 */
   readonly reviewerEnabled: boolean;
-  /** 设计文档 §3.1 —— Reviewer 绑定的 Profile（T7.2；未绑定时缺省）。 */
+  /** 设计文档 §3.1 —— Reviewer 绑定的 Profile（T7.2；未绑定时缺省）。程序不读。 */
   readonly reviewerProfileId?: ProfileId;
+  /** 绑定的项目配置。缺省 = 跟着默认配置。 */
+  readonly configId?: string;
 }
+
+/** projects:update-settings 的补丁。configId 为 null 时清除绑定。 */
+export type ProjectSettingsPatch = Partial<Omit<ProjectSettingsView, "configId">> & {
+  readonly configId?: string | null;
+};
 
 /** projects:update-settings 请求：只带要改的字段。 */
 export interface UpdateProjectSettingsRequest extends ProjectScopedRequest {
-  readonly patch: Partial<ProjectSettingsView>;
+  readonly patch: ProjectSettingsPatch;
 }
 
 /**
@@ -1615,8 +1633,20 @@ export interface IpcInvokeContracts {
   "config:get": { request: undefined; response: GlobalConfig };
   /** 部分更新全局设置（浅合并），返回合并后的完整设置。 */
   "config:update": { request: UpdateConfigRequest; response: GlobalConfig };
-  /** 列出全部 Agent Profile（§4.4）。 */
+  /** 列出全部 Agent Profile（§4.4）。工作台开窗口不再读取。 */
   "profiles:list": { request: undefined; response: readonly AgentProfile[] };
+  /** 列出项目配置。文件为空时先写入默认配置。 */
+  "configs:list": { request: undefined; response: readonly ProjectConfig[] };
+  "configs:create": { request: { readonly draft: ProjectConfigDraft }; response: ProjectConfig };
+  "configs:update": {
+    request: { readonly id: ProjectConfigId; readonly draft: ProjectConfigDraft };
+    response: ProjectConfig;
+  };
+  "configs:set-default": { request: { readonly id: ProjectConfigId }; response: ProjectConfig };
+  "configs:delete": {
+    request: { readonly id: ProjectConfigId; readonly newDefaultId?: ProjectConfigId };
+    response: { readonly removed: true };
+  };
   /** 新建 Profile（经 core 校验 provider/model/角色/权限）。 */
   "profiles:create": { request: CreateProfileRequest; response: AgentProfile };
   /** 整表单更新 Profile。 */
@@ -1871,6 +1901,11 @@ export const INVOKE_CHANNELS = [
   "config:get",
   "config:update",
   "profiles:list",
+  "configs:list",
+  "configs:create",
+  "configs:update",
+  "configs:set-default",
+  "configs:delete",
   "profiles:create",
   "profiles:update",
   "profiles:remove",

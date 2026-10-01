@@ -115,6 +115,12 @@ export interface WorkbenchStoreActions {
       permissionNeedsDowngrade: boolean;
       parentClosed: boolean;
       managerGrantPending: boolean;
+      routeSnapshot: {
+        readonly connectionMode: "local_cli" | "relay";
+        readonly providerName?: string;
+        readonly model?: string;
+        readonly reasoningEffort?: string;
+      } | null;
     }>,
   ) => void;
   /** 用户调整权限：封顶后代并标记需重启。 */
@@ -537,6 +543,40 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
       }
       if (patch.managerGrantPending === true) {
         Object.assign(next, { managerGrantPending: true });
+      }
+      if (patch.routeSnapshot !== undefined) {
+        const {
+          routeMode: _mode,
+          routeProviderName: _provider,
+          routeModel: _model,
+          routeEffort: _effort,
+          ...rest
+        } = next;
+        void _mode;
+        void _provider;
+        void _model;
+        void _effort;
+        const snapshot = patch.routeSnapshot;
+        const stored =
+          snapshot === null
+            ? rest
+            : {
+                ...rest,
+                routeMode: snapshot.connectionMode,
+                ...(snapshot.providerName !== undefined && snapshot.providerName !== ""
+                  ? { routeProviderName: snapshot.providerName }
+                  : {}),
+                ...(snapshot.model !== undefined && snapshot.model !== ""
+                  ? { routeModel: snapshot.model }
+                  : {}),
+                ...(snapshot.reasoningEffort !== undefined && snapshot.reasoningEffort !== ""
+                  ? { routeEffort: snapshot.reasoningEffort }
+                  : {}),
+              };
+        return {
+          ...current,
+          windows: { ...current.windows, [windowId]: stored },
+        };
       }
       return {
         ...current,

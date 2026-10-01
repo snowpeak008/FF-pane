@@ -16,8 +16,7 @@ import { toast } from "sonner";
 import { Button } from "../../components/ui/Button";
 import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
 import { Tooltip } from "../../components/ui/Tooltip";
-import { invokeQuery, queryData } from "../../ipc/query";
-import { useInvokeQuery } from "../../ipc/useInvokeQuery";
+import { invokeQuery } from "../../ipc/query";
 import { useSubscription } from "../../ipc/useSubscription";
 import { cn } from "../../lib/cn";
 import { useWorkbenchStore } from "../../stores/workbench";
@@ -68,13 +67,6 @@ export function WindowPane({
   const takeInitialPrompt = useWorkbenchStore((s) => s.takeInitialPrompt);
   const getProjectLayout = useWorkbenchStore((s) => s.getProjectLayout);
   const inbox = useWorkbenchStore((s) => s.inboxByWindow[window.id]);
-
-  const { state: profilesState } = useInvokeQuery("profiles:list");
-  const profiles = queryData(profilesState) ?? [];
-  const profile = useMemo(
-    () => profiles.find((item) => item.id === window.profileId),
-    [profiles, window.profileId],
-  );
 
   const isCli = window.kind === "claude" || window.kind === "codex";
   const permission = window.permission ?? DEFAULT_WORKBENCH_WINDOW_PERMISSION;
@@ -266,10 +258,21 @@ export function WindowPane({
                 )}
               </span>
             ) : null}
-            {isCli && profile !== undefined ? (
-              <span className="ml-1 font-normal text-fg-muted">
-                · {profile.name}
-                {profile.model !== undefined ? ` · ${profile.model}` : ""}
+            {isCli ? (
+              <span className="ml-1 font-normal text-fg-muted" data-testid="workbench-window-route">
+                ·{" "}
+                {t("workbench.window.routeSummary", {
+                  route:
+                    window.routeMode === "relay"
+                      ? t("workbench.window.routeRelay", {
+                          name: window.routeProviderName ?? "",
+                        })
+                      : window.routeMode === "local_cli"
+                        ? t("workbench.window.routeLocal")
+                        : t("workbench.window.routePending"),
+                  model: window.routeModel ?? t("workbench.window.modelDefault"),
+                  effort: window.routeEffort ?? t("workbench.window.effortDefault"),
+                })}
               </span>
             ) : null}
           </button>
@@ -561,10 +564,10 @@ export function WindowPane({
         onExitCodeChange={setExitCode}
         onCwdFallback={onCwdFallback}
         launchNonce={launchNonce}
-        {...(isCli && window.profileId !== undefined
+        {...(isCli
           ? {
               cliLaunch: {
-                profileId: window.profileId,
+                kind: window.kind === "codex" ? "codex" : "claude",
                 projectRoot,
                 autoStart: autoStart || resumeNext,
                 permission,
@@ -598,6 +601,9 @@ export function WindowPane({
               },
               onTurnSignal: (signal) => {
                 setManualTurnSignal(signal === "manual");
+              },
+              onLaunchRoute: (route) => {
+                patchWindow(window.projectId, window.id, { routeSnapshot: route });
               },
             }
           : {})}

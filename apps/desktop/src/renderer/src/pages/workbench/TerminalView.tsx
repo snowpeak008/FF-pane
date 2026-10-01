@@ -30,7 +30,7 @@ export interface TerminalViewProps {
   readonly onCwdFallback?: () => void;
   /** AI 窗口：不自动 spawn shell，改走 workbench:launch-cli。 */
   readonly cliLaunch?: {
-    readonly profileId: string;
+    readonly kind: "claude" | "codex";
     readonly projectRoot: string;
     readonly nativeSessionId?: string;
     readonly initialPrompt?: string;
@@ -52,6 +52,12 @@ export interface TerminalViewProps {
   ) => void;
   /** 没有 node.exe 时回合信号装不上，投递一直要手动确认。 */
   readonly onTurnSignal?: (signal: "auto" | "manual") => void;
+  readonly onLaunchRoute?: (route: {
+    readonly connectionMode: "local_cli" | "relay";
+    readonly providerName?: string;
+    readonly model?: string;
+    readonly reasoningEffort?: string;
+  }) => void;
   /** 外部触发启动（续接 / 重新开始）。 */
   readonly launchNonce?: number;
   /** 用户点续接或重新开始之前。返回 false 则不启动。 */
@@ -113,6 +119,7 @@ export function TerminalView({
   onNativeSessionId,
   onPermissionCapped,
   onTurnSignal,
+  onLaunchRoute,
   launchNonce = 0,
   beforeUserRelaunch,
 }: TerminalViewProps): ReactElement {
@@ -149,6 +156,8 @@ export function TerminalView({
   onPermissionCappedRef.current = onPermissionCapped;
   const onTurnSignalRef = useRef(onTurnSignal);
   onTurnSignalRef.current = onTurnSignal;
+  const onLaunchRouteRef = useRef(onLaunchRoute);
+  onLaunchRouteRef.current = onLaunchRoute;
 
   const writeToPty = useCallback((data: string) => {
     const current = infoRef.current;
@@ -203,7 +212,7 @@ export function TerminalView({
     async (cols: number, rows: number, override?: Partial<NonNullable<typeof cliLaunch>>) => {
       const launch = { ...cliLaunchRef.current, ...override };
       if (
-        launch.profileId === undefined ||
+        launch.kind === undefined ||
         launch.projectRoot === undefined ||
         launch.projectRoot.trim() === ""
       ) {
@@ -217,7 +226,7 @@ export function TerminalView({
         windowId,
         projectId: projectId as never,
         projectRoot: launch.projectRoot,
-        profileId: launch.profileId,
+        kind: launch.kind,
         cols,
         rows,
         ...(cwd !== undefined ? { cwd } : {}),
@@ -273,6 +282,16 @@ export function TerminalView({
         onPermissionCappedRef.current?.(settled.data.effectivePermission);
       }
       onTurnSignalRef.current?.(settled.data.turnSignal);
+      onLaunchRouteRef.current?.({
+        connectionMode: settled.data.connectionMode,
+        ...(settled.data.providerName !== undefined
+          ? { providerName: settled.data.providerName }
+          : {}),
+        ...(settled.data.model !== undefined ? { model: settled.data.model } : {}),
+        ...(settled.data.reasoningEffort !== undefined
+          ? { reasoningEffort: settled.data.reasoningEffort }
+          : {}),
+      });
       setResumePickerHint(settled.data.resumePicker === true);
       const replay = await invokeQuery("terminal:get-replay", { id: settled.data.terminal.id });
       if (replay.status === "success" && replay.data.data.length > 0) {
@@ -372,6 +391,16 @@ export function TerminalView({
           onPermissionCappedRef.current?.(settled.data.effectivePermission);
         }
         onTurnSignalRef.current?.(settled.data.turnSignal);
+        onLaunchRouteRef.current?.({
+          connectionMode: settled.data.connectionMode,
+          ...(settled.data.providerName !== undefined
+            ? { providerName: settled.data.providerName }
+            : {}),
+          ...(settled.data.model !== undefined ? { model: settled.data.model } : {}),
+          ...(settled.data.reasoningEffort !== undefined
+            ? { reasoningEffort: settled.data.reasoningEffort }
+            : {}),
+        });
         setResumePickerHint(settled.data.resumePicker === true);
         const replay = await invokeQuery("terminal:get-replay", { id: settled.data.terminal.id });
         if (replay.status === "success" && replay.data.data.length > 0) {

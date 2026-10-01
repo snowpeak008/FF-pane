@@ -127,7 +127,6 @@ export function WorkbenchPage(): ReactElement {
           projectId: entry.id,
           projectRoot: entry.rootPath,
           kind: result.kind,
-          ...(result.profileId !== undefined ? { profileId: result.profileId } : {}),
           ...(result.initialPrompt !== undefined ? { initialPrompt: result.initialPrompt } : {}),
           ...(result.permission !== undefined ? { permission: result.permission } : {}),
           ...(result.role !== undefined ? { role: result.role } : {}),
@@ -140,7 +139,6 @@ export function WorkbenchPage(): ReactElement {
         targetWindowId: pending.targetWindowId,
         direction: pending.direction,
         kind: result.kind,
-        ...(result.profileId !== undefined ? { profileId: result.profileId } : {}),
         ...(result.initialPrompt !== undefined ? { initialPrompt: result.initialPrompt } : {}),
         ...(result.permission !== undefined ? { permission: result.permission } : {}),
         ...(result.role !== undefined ? { role: result.role } : {}),
@@ -366,6 +364,7 @@ export function WorkbenchPage(): ReactElement {
       />
       <NewWindowDialog
         open={newWindowOpen}
+        {...(entry !== null ? { projectId: entry.id, projectRoot: entry.rootPath } : {})}
         onOpenChange={(open) => {
           setNewWindowOpen(open);
           if (!open) {

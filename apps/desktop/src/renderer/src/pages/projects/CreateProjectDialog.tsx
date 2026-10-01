@@ -1,4 +1,5 @@
-import type { ProjectRegistryEntry } from "@ff-pane/shared";
+import type { ProjectConfig, ProjectRegistryEntry } from "@ff-pane/shared";
+import { isProjectConfigScopeOpen } from "@ff-pane/shared";
 import { FolderOpen } from "lucide-react";
 import { type ReactElement, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -11,7 +12,8 @@ import {
   DialogHeader,
 } from "../../components/ui/Dialog";
 import { Field, Input } from "../../components/ui/Input";
-import { invokeQuery } from "../../ipc/query";
+import { invokeQuery, queryData } from "../../ipc/query";
+import { useInvokeQuery } from "../../ipc/useInvokeQuery";
 
 /**
  * 从绝对路径取末段目录名，作为项目默认显示名。
@@ -47,7 +49,12 @@ export function CreateProjectDialog({
   const [nameEdited, setNameEdited] = useState(false);
   const [picking, setPicking] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [configId, setConfigId] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
+  const { state: configsState } = useInvokeQuery("configs:list");
+  const openConfigs = (queryData(configsState) ?? []).filter((config: ProjectConfig) =>
+    isProjectConfigScopeOpen(config.projectIds),
+  );
 
   // 每次打开重置表单，避免上次的残留（含错误、路径、名称）
   useEffect(() => {
@@ -57,6 +64,7 @@ export function CreateProjectDialog({
       setNameEdited(false);
       setPicking(false);
       setSubmitting(false);
+      setConfigId("");
       setErrorMessage(undefined);
     }
   }, [open]);
@@ -88,15 +96,23 @@ export function CreateProjectDialog({
     }
     setSubmitting(true);
     setErrorMessage(undefined);
-    const settled = await invokeQuery("projects:create", { rootPath, name: trimmedName });
+    const settled = await invokeQuery("projects:create", {
+      rootPath,
+      name: trimmedName,
+      ...(configId !== "" ? { configId } : {}),
+    });
     setSubmitting(false);
     if (settled.status === "error") {
-      setErrorMessage(settled.error.message);
+      setErrorMessage(
+        settled.error.code === "config-not-visible"
+          ? t("projects.configNotVisible")
+          : settled.error.message,
+      );
       return;
     }
     onCreated(settled.data);
     onOpenChange(false);
-  }, [name, rootPath, onCreated, onOpenChange]);
+  }, [configId, name, onCreated, onOpenChange, rootPath, t]);
 
   const canSubmit = rootPath !== undefined && name.trim().length > 0 && !submitting;
 
@@ -130,6 +146,28 @@ export function CreateProjectDialog({
                   : t("projects.create.changeButton")}
               </Button>
             </div>
+          </Field>
+
+          <Field
+            htmlFor="create-project-config"
+            label={t("projects.create.configLabel")}
+            hint={t("projects.create.configHint")}
+          >
+            <select
+              id="create-project-config"
+              className="rounded-sm border border-border bg-surface px-2 py-1.5 text-sm text-fg"
+              data-testid="create-project-config"
+              value={configId}
+              onChange={(event) => setConfigId(event.target.value)}
+            >
+              <option value="">{t("projects.create.configUnset")}</option>
+              {openConfigs.map((config) => (
+                <option key={config.id} value={config.id}>
+                  {config.name}
+                  {config.isDefault ? ` (${t("settings.configs.defaultBadge")})` : ""}
+                </option>
+              ))}
+            </select>
           </Field>
 
           <Field htmlFor="create-project-name" label={t("projects.create.nameLabel")} required>

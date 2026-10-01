@@ -6,13 +6,14 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { createWindowTokenRegistry } from "@ff-pane/core";
-import type { AgentProfile, ProjectWorkbenchLayout } from "@ff-pane/shared";
+import type { ProjectWorkbenchLayout } from "@ff-pane/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { PtyManager } from "../src/main/terminal/manager";
 import { createWorkbenchAuthRegistry } from "../src/main/workbench/auth-registry";
 import { releaseWindowHooks } from "../src/main/workbench/hook-launch";
 import { launchCliWindow } from "../src/main/workbench/launch-cli";
 import { WorkbenchMcpTempRegistry } from "../src/main/workbench/mcp-temp";
+import type { LaunchCliRoute } from "../src/main/workbench/resolve-config";
 
 const fakeBin = mkdtempSync(join(tmpdir(), "ffpane-launch-role-"));
 let restorePath: () => void = () => undefined;
@@ -59,23 +60,13 @@ afterAll(() => {
   rmSync(fakeBin, { recursive: true, force: true });
 });
 
-function profile(runtime: "claude-code" | "codex"): AgentProfile {
+function localRoute(): LaunchCliRoute {
   return {
-    id: "prof",
-    name: runtime,
-    runtime,
-    providerId: "prov",
-    defaultRole: "worker",
     connectionMode: "local_cli",
+    configId: "cfg" as LaunchCliRoute["configId"],
+    configName: "默认配置",
     model: "sonnet",
-    permissionPreset: {
-      readPaths: ["**"],
-      writePaths: ["**"],
-      shell: "allowed",
-      network: false,
-      dangerousOpsRequireApproval: true,
-    },
-  } as unknown as AgentProfile;
+  };
 }
 
 function layout(windowId: string, role: string): ProjectWorkbenchLayout {
@@ -116,7 +107,6 @@ describe("launchCliWindow 角色与 hooks", () => {
     const windowId = "win-role";
     const deps = {
       manager,
-      getProfile: async (id: string) => (id === "prof" ? profile("claude-code") : undefined),
       getProvider: async () => ({
         id: "prov",
         name: "Local",
@@ -145,7 +135,8 @@ describe("launchCliWindow 角色与 hooks", () => {
           windowId,
           projectId: "proj-role" as never,
           projectRoot: fakeBin,
-          profileId: "prof",
+          kind: "claude" as const,
+          route: localRoute(),
           cols: 80,
           rows: 24,
           role: "worker",
@@ -158,6 +149,7 @@ describe("launchCliWindow 角色与 hooks", () => {
       const token = first?.env["FF_PANE_WINDOW_TOKEN"] ?? "";
       expect(token.length).toBeGreaterThanOrEqual(64);
       expect(first?.env["FF_PANE_WB_PIPE"]).toBe("\\\\.\\pipe\\ff-pane-wb-test");
+      expect(first?.env["ANTHROPIC_API_KEY"]).toBeUndefined();
       expect(first?.args.join("\n")).not.toContain(token);
       const settingsFlag = first?.args.indexOf("--settings") ?? -1;
       expect(settingsFlag).toBeGreaterThanOrEqual(0);
@@ -183,7 +175,8 @@ describe("launchCliWindow 角色与 hooks", () => {
           windowId,
           projectId: "proj-role" as never,
           projectRoot: fakeBin,
-          profileId: "prof",
+          kind: "claude" as const,
+          route: localRoute(),
           cols: 80,
           rows: 24,
           role: "manager",
@@ -203,7 +196,8 @@ describe("launchCliWindow 角色与 hooks", () => {
           windowId,
           projectId: "proj-role" as never,
           projectRoot: fakeBin,
-          profileId: "prof",
+          kind: "claude" as const,
+          route: localRoute(),
           cols: 80,
           rows: 24,
           resume: true,
@@ -220,7 +214,8 @@ describe("launchCliWindow 角色与 hooks", () => {
           windowId: "win-codex",
           projectId: "proj-role" as never,
           projectRoot: fakeBin,
-          profileId: "prof",
+          kind: "codex" as const,
+          route: localRoute(),
           cols: 80,
           rows: 24,
           role: "planner",
@@ -229,7 +224,6 @@ describe("launchCliWindow 角色与 hooks", () => {
           ...deps,
           authRegistry: codexRegistry,
           tokenRegistry: codexTokens,
-          getProfile: async () => profile("codex"),
         },
       );
       expect(codexRegistry.get("win-codex")?.role).toBe("planner");

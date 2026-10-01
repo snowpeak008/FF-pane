@@ -38,15 +38,20 @@ import {
   type ApiKeyRef,
   type HabitEntry,
   type HabitEntryId,
+  isProjectConfigScopeOpen,
+  isProjectConfigVisibleTo,
   isReasoningEffortLevel,
   type MemoryEntryId,
   type Plan,
   type PlanVersion,
+  projectNamesOutsideScope,
   resolveReasoningEffortOptions,
 } from "@ff-pane/shared";
 import {
+  configReferencesProvider,
   createConfigStore,
   createProfileStore,
+  createProjectConfigStore,
   createProjectRegistry,
   createProjectSettingsStore,
   createProviderStore,
@@ -64,6 +69,8 @@ import {
   loadPlan,
   loadTask,
   type ProfileDraftValidator,
+  ProjectConfigDraftInvalidError,
+  ProjectConfigScopeBlockedError,
   type ProjectLayout,
   type ProviderDraft,
   profileReferencesProvider,
@@ -114,6 +121,11 @@ type DataChannel =
   | "workbench:save-layout"
   | "workbench:remove-layout"
   | "profiles:list"
+  | "configs:list"
+  | "configs:create"
+  | "configs:update"
+  | "configs:set-default"
+  | "configs:delete"
   | "profiles:create"
   | "profiles:update"
   | "profiles:remove"
@@ -155,6 +167,19 @@ export interface DataHandlersOptions {
   readonly shareMemoryIndex?: (service: MemoryIndexService) => void;
 }
 
+/** 绑定或新建时，配置不存在，或当前项目不在可用范围内。 */
+export class ProjectConfigNotVisibleError extends Error {
+  readonly code = "config-not-visible" as const;
+  readonly reason: string;
+
+  constructor() {
+    const message = "这张配置不存在，或只对指定项目开放";
+    super(message);
+    this.name = "ProjectConfigNotVisibleError";
+    this.reason = message;
+  }
+}
+
 /**
  * 解析全局数据根、幂等初始化布局、绑定项目注册表，返回契约化的 handler 表。
  * 在 app.whenReady 之后、注册窗口之前调用一次。
@@ -176,6 +201,7 @@ export async function createDataHandlers(
   const registry = createProjectRegistry(layout.projectsFile);
   const providers = createProviderStore(layout.providersFile);
   const profiles = createProfileStore(layout.profilesFile);
+  const projectConfigs = createProjectConfigStore(layout.configsFile);
   const roles = createRoleStore(layout.rolesFile);
   const config = createConfigStore(layout.configFile);
   const workbenchLayouts = createWorkbenchLayoutStore(layout.workbenchLayoutsFile);
@@ -293,6 +319,61 @@ export async function createDataHandlers(
     listSessions: (projectLayout) => createSessionStore(projectLayout.sessionsFile).listSessions(),
   };
 
+  const assertConfigDraft = async (
+    draft: {
+      readonly claude?: { readonly connectionMode: string; readonly providerId?: string };
+      readonly codex?: { readonly connectionMode: string; readonly providerId?: string };
+      readonly projectIds?: readonly string[];
+    },
+    configId?: string,
+  ): Promise<void> => {
+    for (const route of [draft.claude, draft.codex]) {
+      if (route?.connectionMode !== "relay") {
+        continue;
+      }
+      const providerId = route.providerId;
+      if (
+        providerId === undefined ||
+        (await providers.getProvider(providerId as never)) === undefined
+      ) {
+        throw new ProjectConfigDraftInvalidError("中转来源不存在");
+      }
+    }
+    if (configId === undefined) {
+      return;
+    }
+    const projects = await registry.listProjects();
+    const bound: { id: string; name: string }[] = [];
+    for (const project of projects) {
+      const settings = await createProjectSettingsStore(
+        resolveProjectLayout(project.rootPath).projectFile,
+      ).readSettings();
+      if (settings.configId === configId) {
+        bound.push({ id: project.id, name: project.name });
+      }
+    }
+    const names = projectNamesOutsideScope(bound, draft.projectIds);
+    if (names.length > 0) {
+      throw new ProjectConfigScopeBlockedError(names);
+    }
+  };
+
+  const assertConfigUsableByProject = async (
+    configId: string,
+    projectId: string | undefined,
+  ): Promise<void> => {
+    await projectConfigs.ensureDefaultConfig();
+    const found = (await projectConfigs.listConfigs()).find((item) => item.id === configId);
+    const visible =
+      found !== undefined &&
+      (projectId === undefined
+        ? isProjectConfigScopeOpen(found.projectIds)
+        : isProjectConfigVisibleTo(found, projectId));
+    if (!visible) {
+      throw new ProjectConfigNotVisibleError();
+    }
+  };
+
   return {
     "dialog:pick-directory": async () => {
       const window = getWindow();
@@ -319,9 +400,21 @@ export async function createDataHandlers(
     "projects:create": async (request) => {
       // 归一为绝对路径：注册表以 rootPath 唯一，接线层负责归一（见 registry 模块注释）
       const rootPath = resolve(request.rootPath);
+      const configId = request.configId?.trim() ?? "";
+      if (configId !== "") {
+        await assertConfigUsableByProject(configId, undefined);
+      }
       // 幂等生成 .workbench/ 全套目录（已存在即跳过，不动已有内容）
       await initProjectLayout(rootPath);
-      return registry.addProject({ name: request.name, rootPath });
+      const entry = await registry.addProject({ name: request.name, rootPath });
+      if (configId !== "") {
+        await createProjectSettingsStore(resolveProjectLayout(rootPath).projectFile).updateSettings(
+          {
+            configId,
+          },
+        );
+      }
+      return entry;
     },
 
     "projects:remove": async (request) => {
@@ -339,10 +432,24 @@ export async function createDataHandlers(
         resolveProjectLayout(request.projectRoot).projectFile,
       ).readSettings(),
 
-    "projects:update-settings": (request) =>
-      createProjectSettingsStore(
+    "projects:update-settings": async (request) => {
+      const configId = request.patch.configId;
+      const trimmed = typeof configId === "string" ? configId.trim() : configId;
+      if (typeof trimmed === "string" && trimmed !== "") {
+        const projects = await registry.listProjects();
+        const project = projects.find(
+          (item) => resolve(item.rootPath) === resolve(request.projectRoot),
+        );
+        await assertConfigUsableByProject(trimmed, project?.id);
+      }
+      const patch =
+        typeof trimmed === "string" && trimmed !== ""
+          ? { ...request.patch, configId: trimmed }
+          : request.patch;
+      return createProjectSettingsStore(
         resolveProjectLayout(request.projectRoot).projectFile,
-      ).updateSettings(request.patch),
+      ).updateSettings(patch);
+    },
 
     "providers:list": () => providers.listProviders(),
 
@@ -381,9 +488,12 @@ export async function createDataHandlers(
     "providers:remove": async (request) => {
       const existing = await providers.getProvider(request.id);
       // 在用保护：被任一 Profile 引用时拒删（deleteProvider 抛 ProviderInUseError）
-      await providers.deleteProvider(request.id, async (pid) =>
-        profileReferencesProvider(await profiles.listProfiles(), pid),
-      );
+      await providers.deleteProvider(request.id, async (pid) => {
+        if (profileReferencesProvider(await profiles.listProfiles(), pid)) {
+          return true;
+        }
+        return configReferencesProvider(await projectConfigs.listConfigs(), pid);
+      });
       if (existing?.apiKeyRef !== undefined) {
         await secrets.deleteSecret(existing.apiKeyRef);
       }
@@ -498,6 +608,26 @@ export async function createDataHandlers(
     },
 
     "profiles:list": () => profiles.listProfiles(),
+
+    "configs:list": async () => {
+      await projectConfigs.ensureDefaultConfig();
+      return projectConfigs.listConfigs();
+    },
+
+    "configs:create": (request) =>
+      projectConfigs.createConfig(request.draft, (draft) => assertConfigDraft(draft)),
+
+    "configs:update": (request) =>
+      projectConfigs.updateConfig(request.id, request.draft, (draft) =>
+        assertConfigDraft(draft, request.id),
+      ),
+
+    "configs:set-default": (request) => projectConfigs.setDefaultConfig(request.id),
+
+    "configs:delete": async (request) => {
+      await projectConfigs.deleteConfig(request.id, request.newDefaultId);
+      return { removed: true } as const;
+    },
 
     "profiles:create": async (request) => {
       const draft = await materializeProfileDraft(request.draft, providers);

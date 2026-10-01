@@ -170,6 +170,7 @@ describe("目录布局 resolve / init", () => {
     expect(layout.projectsFile).toBe(join(root, "projects.json"));
     expect(layout.providersFile).toBe(join(root, "providers.json"));
     expect(layout.profilesFile).toBe(join(root, "profiles.json"));
+    expect(layout.configsFile).toBe(join(root, "configs.json"));
     expect(layout.habitsDir).toBe(join(root, "habits"));
     expect(layout.habitCategoryDirs).toEqual({
       workflow: join(root, "habits", "workflow"),

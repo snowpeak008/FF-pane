@@ -308,6 +308,10 @@
       "initialPromptPlaceholder": "First message sent to the AI after launch",
       "cliMissing": "{{cli}} was not found. Install it and make sure it is on PATH.",
       "noProfile": "No launch profile for this CLI yet. Create one in Settings.",
+      "routeMissing": "Config \"{{name}}\" has no {{cli}} route, so this window cannot be opened.",
+      "routeLocal": "Local login",
+      "routeRelay": "Relay",
+      "usingConfig": "Using config \"{{name}}\" · {{route}}",
       "goSettings": "Go to Settings",
       "cancel": "Cancel",
       "confirm": "Open"
@@ -439,7 +443,13 @@
       "splitDown": "Split down",
       "maximize": "Maximize",
       "restore": "Restore",
-      "close": "Close window"
+      "close": "Close window",
+      "routeSummary": "{{route}} · {{model}} · {{effort}}",
+      "routeLocal": "Local login",
+      "routeRelay": "Relay {{name}}",
+      "routePending": "Not recorded yet",
+      "modelDefault": "CLI default model",
+      "effortDefault": "CLI default effort"
     },
     "limit": {
       "reached": "Reached the concurrent window limit ({{max}}). Close some windows, or raise the limit in Settings."
@@ -478,9 +488,14 @@
     "loadError": "Failed to load the project list",
     "opened": "Switched to project \"{{name}}\"",
     "goToWorkbench": "Go to workbench",
+    "configNotVisible": "This config does not exist, or it is limited to specific projects.",
     "card": {
       "createdAt": "Added {{time}}",
       "removeLabel": "Remove \"{{name}}\" from the workspace",
+      "configLabel": "Config",
+      "configTitle": "Config for \"{{name}}\"",
+      "configUnset": "Follow the default config",
+      "configSaved": "Project config updated",
       "plan": "Plan v{{n}} · {{status}}",
       "noPlan": "No plan yet",
       "activeTasks": "{{n}} in progress",
@@ -517,6 +532,9 @@
       "changeButton": "Change…",
       "nameLabel": "Project name",
       "namePlaceholder": "Display name",
+      "configLabel": "Config",
+      "configUnset": "Follow the default config",
+      "configHint": "Only configs available to every project are listed. Leave empty to follow the default.",
       "submit": "Create",
       "toast": "Created project \"{{name}}\""
     }
@@ -710,6 +728,61 @@
       "source": {
         "default": "Using the built-in text",
         "override": "Using your override"
+      }
+    },
+    "configs": {
+      "title": "Configs",
+      "subtitle": "Each project uses one config to choose the Claude route and the Codex route. Either route can be left unset.",
+      "new": "New config",
+      "empty": "No configs yet.",
+      "loadError": "Failed to load configs",
+      "saved": "Saved \"{{name}}\"",
+      "editLabel": "Edit \"{{name}}\"",
+      "removeLabel": "Delete \"{{name}}\"",
+      "setDefault": "Set as default",
+      "defaultBadge": "Default",
+      "lastCannotDelete": "The last config cannot be deleted",
+      "deleteDefaultTitle": "Delete the default config",
+      "deleteDefaultHint": "Choose another config to become the default. Projects that are not bound to a specific config will follow it.",
+      "deleteReplacement": "Choose the new default",
+      "deleteConfirm": "Delete",
+      "scopeBlocked": "These projects are still using this config. Rebind them first: {{names}}",
+      "defaultScopeOpen": "The default config is available to every project. Its project list cannot be narrowed.",
+      "promoteTitle": "Set as default",
+      "promoteClearsScope": "After this becomes the default, every project can use it.",
+      "field": {
+        "name": "Name",
+        "defaultPermission": "Default permission",
+        "defaultPermissionUnset": "Empty — use the global workbench default",
+        "scope": "Projects that can use it",
+        "scopeHint": "Leave every box unchecked to allow all projects. If a project outside the list is still bound, the save is rejected.",
+        "scopeAll": "There are no projects yet, so this config is available to all of them.",
+        "routeClaude": "Claude",
+        "routeCodex": "Codex",
+        "connection": "Connection",
+        "local": "Local login",
+        "relay": "Relay",
+        "provider": "Provider",
+        "model": "Model",
+        "modelHint": "Pick from the known list or type a name. Empty = the CLI default.",
+        "modelPlaceholder": "Empty uses the CLI default",
+        "listModels": "Load probed models",
+        "effort": "Reasoning effort",
+        "effortUnset": "Unset",
+        "effortLevel": {
+          "none": "none",
+          "minimal": "minimal",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "xhigh",
+          "max": "max"
+        },
+        "needRoute": "Configure at least the Claude route or the Codex route."
+      },
+      "edit": {
+        "title": "Edit config",
+        "createTitle": "New config"
       }
     },
     "profiles": {

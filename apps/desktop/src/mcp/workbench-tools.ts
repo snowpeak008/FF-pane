@@ -86,7 +86,7 @@ export const WORKBENCH_MCP_TOOLS: readonly McpToolDefinition[] = [
         cli: { type: "string", enum: ["claude", "codex"], description: "子窗口使用的 CLI。" },
         profileId: {
           type: "string",
-          description: "启动配置 id。缺省时用该 CLI 最近一次使用的配置，否则用第一条匹配的配置。",
+          description: "已忽略。子窗口按调用者所在项目的配置选路；这一路没配会失败。",
         },
         role: { type: "string", enum: [...ROLE_ENUM], description: "子窗口角色。" },
         permission: {

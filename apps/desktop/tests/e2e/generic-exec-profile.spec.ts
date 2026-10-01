@@ -20,8 +20,6 @@ import { gotoRoute, type LaunchedApp, launchApp } from "./_launch";
 let launched: LaunchedApp;
 let projectDir: string;
 
-const SENTINEL = "E2E-GX-OK";
-
 test.beforeAll(async () => {
   launched = await launchApp();
   projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-gx-"));
@@ -56,25 +54,10 @@ test.afterAll(async () => {
   rmSync(projectDir, { recursive: true, force: true });
 });
 
-test("设置页建 generic-exec Profile：runtime 选中即出现命令配置区，保存后列表出现", async () => {
+test("档案页不再出现，配置区在", async () => {
   const { page } = launched;
   await gotoRoute(page, "/settings");
-
-  await page.getByRole("button", { name: "New profile" }).click();
-  await page.locator("#profile-name").fill("E2E GX Runner");
-
-  // 选中 generic-exec 前命令配置区不存在，选中后出现（条件渲染）
-  await expect(page.locator("#profile-gx-command")).toBeHidden();
-  await page.locator("#profile-connection").selectOption("local_cli");
-  await page.locator("#profile-runtime").selectOption("generic-exec");
-  await expect(page.locator("#profile-gx-command")).toBeVisible();
-  await page.locator("#profile-gx-command").fill("node");
-  await page.locator("#profile-gx-delivery").selectOption("stdin");
-  // 一行一个参数：node -e "<脚本>"（脚本忽略 stdin，打印哨兵后自然退出）
-  await page.locator("#profile-gx-args").fill(`-e\nconsole.log("${SENTINEL}")`);
-
-  await page.getByRole("button", { name: "Save", exact: true }).click();
-
-  // 保存成功：行出现（exact 匹配行内名称，排除 toast 的 Saved "…"）
-  await expect(page.getByText("E2E GX Runner", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "New profile" })).toHaveCount(0);
+  await expect(page.locator("#profile-runtime")).toHaveCount(0);
+  await expect(page.getByTestId("settings-configs")).toBeVisible();
 });

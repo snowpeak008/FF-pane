@@ -5,12 +5,10 @@ import { PageHeader } from "../../layout/PageHeader";
 import { AppearanceSection } from "./AppearanceSection";
 import { ConfigToolSection } from "./ConfigToolSection";
 import { ContextWarnSection } from "./ContextWarnSection";
-import { DefaultPermissionSection } from "./DefaultPermissionSection";
+import { ConfigsSection } from "./configs/ConfigsSection";
 import { KnowledgeToolSection } from "./KnowledgeToolSection";
 import { LanguageSection } from "./LanguageSection";
-import { ProfilesSection } from "./profiles/ProfilesSection";
 import { ProvidersSection } from "./providers/ProvidersSection";
-import { RolesSection } from "./roles/RolesSection";
 import { WorkbenchDefaultPermissionSection } from "./WorkbenchDefaultPermissionSection";
 import { WorkbenchLimitSection } from "./WorkbenchLimitSection";
 import { WorkbenchRoleManualsSection } from "./WorkbenchRoleManualsSection";
@@ -42,11 +40,7 @@ export function SettingsPage(): ReactElement {
           <Separator />
           <ProvidersSection />
           <Separator />
-          <ProfilesSection />
-          <Separator />
-          <RolesSection />
-          <Separator />
-          <DefaultPermissionSection />
+          <ConfigsSection />
           <Separator />
           <KnowledgeToolSection />
           <Separator />

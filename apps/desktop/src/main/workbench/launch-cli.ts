@@ -23,13 +23,10 @@ import {
   type WindowTokenRegistry,
 } from "@ff-pane/core";
 import {
-  type AgentProfile,
   DEFAULT_WORKBENCH_ROLE,
   isWorkbenchRole,
   type ProjectId,
-  resolveConnectionMode,
   resolveDispatchedReasoningEffort,
-  runtimeToWorkbenchKind,
   type WorkbenchPermissionLevel,
   type WorkbenchRole,
   workbenchKindToRuntime,
@@ -61,6 +58,7 @@ import {
   WorkbenchMcpTempRegistry,
   writeWorkbenchClaudeMcpFile,
 } from "./mcp-temp";
+import type { LaunchCliRoute } from "./resolve-config";
 
 /** initialPrompt IPC 上限（字节按 UTF-16 码元计；更长内容走 T10.7 briefs）。 */
 export const MAX_INITIAL_PROMPT_CHARS = 32 * 1024;
@@ -68,6 +66,7 @@ export const MAX_INITIAL_PROMPT_CHARS = 32 * 1024;
 export class WorkbenchCliLaunchError extends Error {
   readonly code:
     | "profile-not-found"
+    | "route-missing"
     | "provider-not-found"
     | "unsupported-runtime"
     | "cli-missing"
@@ -88,7 +87,9 @@ export interface LaunchCliWindowInput {
   readonly windowId: string;
   readonly projectId: ProjectId;
   readonly projectRoot: string;
-  readonly profileId: string;
+  readonly kind: "claude" | "codex";
+  /** 已按项目配置解析好的这一路。本机登录不带 providerId。 */
+  readonly route: LaunchCliRoute;
   readonly cols: number;
   readonly rows: number;
   readonly cwd?: string;
@@ -111,8 +112,11 @@ export interface LaunchCliWindowResult {
   readonly claimingSession?: boolean;
   /** Codex 续接且无 id：已打开 resume 选择器。 */
   readonly resumePicker?: boolean;
-  readonly profileName: string;
+  readonly configName: string;
+  readonly connectionMode: "local_cli" | "relay";
+  readonly providerName?: string;
   readonly model?: string;
+  readonly reasoningEffort?: string;
   readonly command: string;
   readonly args: readonly string[];
   /** T10.5'：实际生效权限（可能被祖先封顶）。 */
@@ -125,7 +129,6 @@ export interface LaunchCliWindowResult {
 
 export interface LaunchCliWindowDeps {
   readonly manager: PtyManager;
-  readonly getProfile: (id: string) => Promise<AgentProfile | undefined>;
   readonly getProvider: (id: string) => Promise<
     | {
         readonly id: string;
@@ -179,8 +182,6 @@ export interface LaunchCliWindowDeps {
   readonly controlPipe?: string;
   /** 启动成功后登记空闲投递会话（无 initialPrompt 仍保持未知，直到 hook）。 */
   readonly idleQueue?: IdleDeliverQueue;
-  /** 启动成功后记下该 CLI 最近使用的 Profile，供 ffpane_open_window 缺省选用。 */
-  readonly onProfileUsed?: (profileId: string, runtime: "claude-code" | "codex") => void;
   /** PTY 已起来、权威表已写回之后。用来恢复管理权，失败不得当成启动失败。 */
   readonly onWindowLaunched?: (windowId: string) => Promise<void> | void;
   /** 观察型 hook 脚本。缺省按打包态选 resources 或 moduleDir 下的 workbench-hook.mjs。 */
@@ -264,24 +265,21 @@ async function launchCliWindowBody(
   input: LaunchCliWindowInput,
   deps: LaunchCliWindowDeps,
 ): Promise<LaunchCliWindowResult> {
-  const profile = await deps.getProfile(input.profileId);
-  if (profile === undefined) {
-    throw new WorkbenchCliLaunchError("profile-not-found", `profile not found: ${input.profileId}`);
-  }
-  const kind = runtimeToWorkbenchKind(profile.runtime);
-  if (kind === undefined) {
-    throw new WorkbenchCliLaunchError(
-      "unsupported-runtime",
-      `profile runtime ${profile.runtime} is not a workbench CLI`,
-    );
-  }
+  const kind = input.kind;
   const runtime = workbenchKindToRuntime(kind);
-  const provider = await deps.getProvider(profile.providerId);
-  if (provider === undefined) {
-    throw new WorkbenchCliLaunchError(
-      "provider-not-found",
-      `provider not found: ${profile.providerId}`,
-    );
+  const route = input.route;
+  let provider: Awaited<ReturnType<LaunchCliWindowDeps["getProvider"]>>;
+  if (route.connectionMode === "relay") {
+    if (route.providerId === undefined || route.providerId.trim() === "") {
+      throw new WorkbenchCliLaunchError("provider-not-found", "relay route is missing a provider");
+    }
+    provider = await deps.getProvider(route.providerId);
+    if (provider === undefined) {
+      throw new WorkbenchCliLaunchError(
+        "provider-not-found",
+        `provider not found: ${route.providerId}`,
+      );
+    }
   }
 
   const max = deps.clampMax(await deps.getMaxWorkbenchWindows());
@@ -297,39 +295,38 @@ async function launchCliWindowBody(
   }
 
   const command = resolveCliCommand(runtime);
-  const model =
-    profile.model?.trim() ||
-    (provider.defaultModelId !== undefined && provider.defaultModelId.trim() !== ""
-      ? provider.defaultModelId.trim()
-      : undefined);
+  const model = route.model?.trim() || undefined;
   const effort = resolveDispatchedReasoningEffort({
     runtime,
-    reasoningEffort: profile.reasoningEffort,
+    reasoningEffort: route.reasoningEffort,
   });
-  const connectionMode = resolveConnectionMode(profile.connectionMode, provider.templateId);
+  const connectionMode = route.connectionMode;
 
   let secret: string | undefined;
-  if (
-    connectionMode !== "local_cli" &&
-    provider.apiKeyRef !== undefined &&
-    provider.apiKeyRef.length > 0
-  ) {
-    secret = await deps.revealSecret(provider.apiKeyRef);
+  let injectEnv: Record<string, string> = {};
+  let configOverrides: Record<string, string> = {};
+  if (connectionMode === "local_cli") {
+    if (effort !== undefined && runtime === "codex") {
+      configOverrides = { model_reasoning_effort: JSON.stringify(effort) };
+    }
+  } else if (provider !== undefined) {
+    if (provider.apiKeyRef !== undefined && provider.apiKeyRef.length > 0) {
+      secret = await deps.revealSecret(provider.apiKeyRef);
+    }
+    injectEnv = resolveRuntimeEnv({
+      runtime,
+      provider: provider as never,
+      ...(secret !== undefined ? { apiKeyPlaintext: secret } : {}),
+      connectionMode,
+      ...(model !== undefined ? { model } : {}),
+    });
+    configOverrides = resolveRuntimeConfigOverrides({
+      runtime,
+      provider: provider as never,
+      ...(effort !== undefined ? { reasoningEffort: effort } : {}),
+      connectionMode,
+    });
   }
-
-  const injectEnv = resolveRuntimeEnv({
-    runtime,
-    provider: provider as never,
-    ...(secret !== undefined ? { apiKeyPlaintext: secret } : {}),
-    connectionMode,
-    ...(model !== undefined ? { model } : {}),
-  });
-  const configOverrides = resolveRuntimeConfigOverrides({
-    runtime,
-    provider: provider as never,
-    ...(effort !== undefined ? { reasoningEffort: effort } : {}),
-    connectionMode,
-  });
 
   const mcpServers: Record<string, McpStdioServerSpec> = {
     ...(await resolveKnowledgeServers(deps, input.projectRoot)),
@@ -516,7 +513,7 @@ async function launchCliWindowBody(
         windowId: input.windowId,
         projectId: input.projectId,
         kind,
-        profileId: profile.id,
+        configId: route.configId,
         ...(nativeSessionId !== undefined ? { nativeSessionId } : {}),
       },
     });
@@ -563,7 +560,6 @@ async function launchCliWindowBody(
       .catch(() => undefined);
   }
 
-  deps.onProfileUsed?.(profile.id, runtime);
   await deps.onWindowLaunched?.(input.windowId);
   return {
     terminal,
@@ -571,8 +567,11 @@ async function launchCliWindowBody(
     ...(nativeSessionId !== undefined ? { nativeSessionId } : {}),
     ...(claimingSession ? { claimingSession: true } : {}),
     ...(resumePicker ? { resumePicker: true } : {}),
-    profileName: profile.name,
+    configName: route.configName,
+    connectionMode,
+    ...(route.providerName !== undefined ? { providerName: route.providerName } : {}),
     ...(model !== undefined ? { model } : {}),
+    ...(effort !== undefined ? { reasoningEffort: effort } : {}),
     command: direct.resolvedCommand,
     args: [...direct.args],
     effectivePermission: permission,

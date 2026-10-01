@@ -5,6 +5,7 @@
  */
 
 import type { ProjectId } from "./common.js";
+import type { ConnectionMode } from "./profile.js";
 import type { WorkbenchOpenedBy, WorkbenchPermissionLevel } from "./workbench-permission.js";
 import type { WorkbenchRole } from "./workbench-role.js";
 
@@ -75,8 +76,18 @@ export interface WorkbenchWindow {
   /** 绑定的 PTY id；未启动或已杀为空。 */
   readonly terminalId?: string;
   readonly createdAt: number;
-  /** AI 窗口：启动所用 AgentProfile id。 */
+  /**
+   * 旧布局上的档案 id。新开窗口不再写入，重启 / 续接也不再读取。
+   */
   readonly profileId?: string;
+  /** 本次启动实际走的连法。已开窗口不热改，下次启动时按当时的项目配置重写。 */
+  readonly routeMode?: ConnectionMode;
+  /** 中转来源的显示名。本机登录不设。 */
+  readonly routeProviderName?: string;
+  /** 本次启动下发的模型。缺省表示用 CLI 默认。 */
+  readonly routeModel?: string;
+  /** 本次启动下发的思考强度。缺省表示不下发。 */
+  readonly routeEffort?: string;
   /**
    * AI 窗口：CLI 原生会话 id。
    * Claude = `--session-id` / `--resume` 的 UUID；Codex = `codex resume <id>`（可缺省，续接降级 `--last`）。

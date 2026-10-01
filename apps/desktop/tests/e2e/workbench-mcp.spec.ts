@@ -128,7 +128,9 @@ test("管理者开窗口，执行者汇报，越权被拒，记录落盘", async
     await page.getByTestId("workbench-new-tab").click();
     await expect(page.getByTestId("workbench-new-window-dialog")).toBeVisible();
     await page.getByTestId("workbench-new-kind-claude").click();
-    await expect(page.getByTestId("workbench-new-profile")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("workbench-new-permission-edit")).toBeVisible({
+      timeout: 10_000,
+    });
     await expect(page.getByTestId("workbench-new-confirm")).toBeEnabled({ timeout: 15_000 });
     await page.getByTestId("workbench-new-confirm").click();
 
@@ -246,7 +248,9 @@ test("管理者读取并关闭子窗口，再打开任务页", async () => {
     await page.getByTestId("workbench-new-tab").click();
     await expect(page.getByTestId("workbench-new-window-dialog")).toBeVisible();
     await page.getByTestId("workbench-new-kind-claude").click();
-    await expect(page.getByTestId("workbench-new-profile")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("workbench-new-permission-edit")).toBeVisible({
+      timeout: 10_000,
+    });
     await expect(page.getByTestId("workbench-new-confirm")).toBeEnabled({ timeout: 15_000 });
     await page.getByTestId("workbench-new-confirm").click();
 
@@ -293,7 +297,9 @@ test("重启后子窗口仍被封顶，续接管理者可以再开窗口", async
     await page.getByTestId("workbench-new-tab").click();
     await expect(page.getByTestId("workbench-new-window-dialog")).toBeVisible();
     await page.getByTestId("workbench-new-kind-claude").click();
-    await expect(page.getByTestId("workbench-new-profile")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("workbench-new-permission-edit")).toBeVisible({
+      timeout: 10_000,
+    });
     await expect(page.getByTestId("workbench-new-confirm")).toBeEnabled({ timeout: 15_000 });
     await page.getByTestId("workbench-new-confirm").click();
 
@@ -372,7 +378,9 @@ test("隐藏面板：看板、计划预览、记录筛选，侧栏不再有旧�
     await page.getByTestId("workbench-new-tab").click();
     await expect(page.getByTestId("workbench-new-window-dialog")).toBeVisible();
     await page.getByTestId("workbench-new-kind-claude").click();
-    await expect(page.getByTestId("workbench-new-profile")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("workbench-new-permission-edit")).toBeVisible({
+      timeout: 10_000,
+    });
     await expect(page.getByTestId("workbench-new-confirm")).toBeEnabled({ timeout: 15_000 });
     await page.getByTestId("workbench-new-confirm").click();
 
@@ -455,7 +463,9 @@ test("从项目页收到打开任务面板后，切到工作台并打开抽屉",
     await page.getByTestId("workbench-new-tab").click();
     await expect(page.getByTestId("workbench-new-window-dialog")).toBeVisible();
     await page.getByTestId("workbench-new-kind-claude").click();
-    await expect(page.getByTestId("workbench-new-profile")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("workbench-new-permission-edit")).toBeVisible({
+      timeout: 10_000,
+    });
     await expect(page.getByTestId("workbench-new-confirm")).toBeEnabled({ timeout: 15_000 });
     await page.getByTestId("workbench-new-confirm").click();
 
@@ -504,7 +514,9 @@ test("管理者写入记忆，子窗口能查到但不能写，记忆页可删�
     await page.getByTestId("workbench-new-tab").click();
     await expect(page.getByTestId("workbench-new-window-dialog")).toBeVisible();
     await page.getByTestId("workbench-new-kind-claude").click();
-    await expect(page.getByTestId("workbench-new-profile")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("workbench-new-permission-edit")).toBeVisible({
+      timeout: 10_000,
+    });
     await expect(page.getByTestId("workbench-new-confirm")).toBeEnabled({ timeout: 15_000 });
     await page.getByTestId("workbench-new-confirm").click();
 

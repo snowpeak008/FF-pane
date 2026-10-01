@@ -16,22 +16,9 @@ test.afterAll(async () => {
   await launched.cleanup();
 });
 
-test("新建角色出现模板下拉；选一套后 prompt 非空；编辑既有角色不出现", async () => {
+test("自定义角色入口不再出现在设置页", async () => {
   const { page } = launched;
-
   await gotoRoute(page, "/settings");
-
-  await page.getByRole("button", { name: "New role" }).click();
-  await expect(page.locator("#role-template")).toBeVisible();
-
-  await page.locator("#role-template").selectOption("docs-writer");
-  await expect(page.locator("#role-prompt")).not.toHaveValue("");
-
-  const roleName = "E2E Template Role";
-  await page.locator("#role-name").fill(roleName);
-  await page.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(page.getByText(roleName, { exact: true })).toBeVisible();
-
-  await page.getByRole("button", { name: `Edit "${roleName}"` }).click();
+  await expect(page.getByRole("button", { name: "New role" })).toHaveCount(0);
   await expect(page.locator("#role-template")).toHaveCount(0);
 });

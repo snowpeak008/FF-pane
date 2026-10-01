@@ -182,6 +182,25 @@ describe("ProjectSettingsStore", () => {
     await expect(store.readSettings()).rejects.toBeInstanceOf(ProjectSettingsFileInvalidError);
   });
 
+  it("configId 可写入、可清除，reviewerProfileId 原样保留且不被迁移", async () => {
+    await writeJsonAtomic(projectFile, {
+      version: PROJECT_SETTINGS_FILE_VERSION,
+      project: { reviewerProfileId: "prof-old", reviewerEnabled: true, customNote: "keep" },
+    });
+    const bound = await store.updateSettings({ configId: "config-1" });
+    expect(bound.configId).toBe("config-1");
+    expect(bound.reviewerProfileId).toBe("prof-old");
+    const cleared = await store.updateSettings({ configId: null });
+    expect(cleared.configId).toBeUndefined();
+    expect(cleared.reviewerProfileId).toBe("prof-old");
+    const raw = JSON.parse(await readFile(projectFile, "utf8")) as {
+      project: Record<string, unknown>;
+    };
+    expect(raw.project["configId"]).toBeUndefined();
+    expect(raw.project["reviewerProfileId"]).toBe("prof-old");
+    expect(raw.project["customNote"]).toBe("keep");
+  });
+
   it("JSON 语法损坏由 fs 层隔离并上抛", async () => {
     await writeTextAtomic(projectFile, "{ 坏掉的 json");
     await expect(store.readSettings()).rejects.toMatchObject({ code: "corrupt-json" });

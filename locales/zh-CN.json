@@ -308,6 +308,10 @@
       "initialPromptPlaceholder": "启动后发给 AI 的第一句话",
       "cliMissing": "未检测到 {{cli}}。请先安装并确保已在 PATH 中。",
       "noProfile": "还没有适用于该 CLI 的启动配置。请先到设置页新建一条 Profile。",
+      "routeMissing": "配置「{{name}}」没有 {{cli}} 这一路，不能开这个窗口。",
+      "routeLocal": "本机登录",
+      "routeRelay": "中转",
+      "usingConfig": "使用配置「{{name}}」· {{route}}",
       "goSettings": "去设置",
       "cancel": "取消",
       "confirm": "打开"
@@ -439,7 +443,13 @@
       "splitDown": "向下分屏",
       "maximize": "最大化",
       "restore": "还原",
-      "close": "关闭窗口"
+      "close": "关闭窗口",
+      "routeSummary": "{{route}} · {{model}} · {{effort}}",
+      "routeLocal": "本机登录",
+      "routeRelay": "中转 {{name}}",
+      "routePending": "尚未记录",
+      "modelDefault": "CLI 默认模型",
+      "effortDefault": "CLI 默认强度"
     },
     "limit": {
       "reached": "已达到同时运行窗口上限（{{max}}）。请先关闭一些窗口，或在设置中提高上限。"
@@ -478,9 +488,14 @@
     "loadError": "读取项目列表失败",
     "opened": "已切换到项目「{{name}}」",
     "goToWorkbench": "去工作台",
+    "configNotVisible": "这张配置不存在，或只对指定项目开放。",
     "card": {
       "createdAt": "登记于 {{time}}",
       "removeLabel": "从工作台移除「{{name}}」",
+      "configLabel": "配置",
+      "configTitle": "「{{name}}」使用的配置",
+      "configUnset": "跟随默认配置",
+      "configSaved": "已更新项目配置",
       "plan": "计划 v{{n}} · {{status}}",
       "noPlan": "尚无计划",
       "activeTasks": "进行中任务 {{n}}",
@@ -517,6 +532,9 @@
       "changeButton": "更换目录…",
       "nameLabel": "项目名称",
       "namePlaceholder": "项目显示名",
+      "configLabel": "配置",
+      "configUnset": "跟随默认配置",
+      "configHint": "只列出所有项目都能用的配置。不选则跟随默认。",
       "submit": "创建",
       "toast": "已新建项目「{{name}}」"
     }
@@ -710,6 +728,61 @@
       "source": {
         "default": "正在使用内置原文",
         "override": "正在使用你的覆盖副本"
+      }
+    },
+    "configs": {
+      "title": "配置",
+      "subtitle": "每个项目用一张配置决定 Claude 和 Codex 各走哪条路。可以只配一路。",
+      "new": "新建配置",
+      "empty": "还没有配置。",
+      "loadError": "读取配置失败",
+      "saved": "已保存「{{name}}」",
+      "editLabel": "编辑「{{name}}」",
+      "removeLabel": "删除「{{name}}」",
+      "setDefault": "设为默认",
+      "defaultBadge": "默认",
+      "lastCannotDelete": "只剩一张配置，不能删除",
+      "deleteDefaultTitle": "删除默认配置",
+      "deleteDefaultHint": "必须同时指定另一张为默认。没有单独绑定的项目会跟着新默认走。",
+      "deleteReplacement": "选择新的默认配置",
+      "deleteConfirm": "删除",
+      "scopeBlocked": "这些项目还绑着这张配置，请先换绑：{{names}}",
+      "defaultScopeOpen": "默认配置对所有项目开放，不能限制可用项目。",
+      "promoteTitle": "设为默认",
+      "promoteClearsScope": "设为默认后所有项目都能用。",
+      "field": {
+        "name": "名称",
+        "defaultPermission": "默认权限",
+        "defaultPermissionUnset": "不填，用全局工作台默认权限",
+        "scope": "可用项目",
+        "scopeHint": "不勾选 = 所有项目都能用。勾选后只这些项目能用；名单外若有项目正绑着它，不能保存。",
+        "scopeAll": "还没有项目，这张配置对以后的所有项目可用。",
+        "routeClaude": "Claude",
+        "routeCodex": "Codex",
+        "connection": "连法",
+        "local": "本机登录",
+        "relay": "中转",
+        "provider": "来源",
+        "model": "模型",
+        "modelHint": "可以从已有列表里选，也可以手打。留空 = 用 CLI 自己的默认。",
+        "modelPlaceholder": "留空则用 CLI 默认",
+        "listModels": "读取已探测的模型",
+        "effort": "思考强度",
+        "effortUnset": "不指定",
+        "effortLevel": {
+          "none": "none",
+          "minimal": "minimal",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "xhigh",
+          "max": "max"
+        },
+        "needRoute": "至少配置 Claude 或 Codex 一路。"
+      },
+      "edit": {
+        "title": "编辑配置",
+        "createTitle": "新建配置"
       }
     },
     "profiles": {

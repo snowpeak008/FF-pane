@@ -45,6 +45,8 @@ export interface GlobalLayout {
   readonly providersFile: string;
   /** profiles.json —— Agent Profile 列表。 */
   readonly profilesFile: string;
+  /** configs.json —— 项目配置（每个 CLI 一条路）。 */
+  readonly configsFile: string;
   /** roles.json —— 自定义角色列表（T8.4，§3.1「一段角色提示词 + 一套默认权限」）。 */
   readonly rolesFile: string;
   /** habits/ —— 共享记忆（用户习惯）根目录，一条一文件。 */
@@ -125,6 +127,7 @@ export function resolveGlobalLayout(rootDir: string): GlobalLayout {
     projectsFile: join(rootDir, "projects.json"),
     providersFile: join(rootDir, "providers.json"),
     profilesFile: join(rootDir, "profiles.json"),
+    configsFile: join(rootDir, "configs.json"),
     rolesFile: join(rootDir, "roles.json"),
     habitsDir,
     habitCategoryDirs,

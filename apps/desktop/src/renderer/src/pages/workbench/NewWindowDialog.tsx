@@ -1,9 +1,11 @@
 /**
- * 工作台新建窗口对话框（T10.4 / T10.5）：PowerShell / Claude / Codex + 权限。
+ * 工作台新建窗口对话框：PowerShell / Claude / Codex + 权限。
+ * AI 窗口按「项目绑定的配置 → 默认配置」选路，不再选档案。
  */
 
 import type {
-  AgentProfile,
+  ProjectConfig,
+  ProjectId,
   WorkbenchPermissionLevel,
   WorkbenchRole,
   WorkbenchWindowKind,
@@ -11,11 +13,12 @@ import type {
 import {
   DEFAULT_WORKBENCH_ROLE,
   DEFAULT_WORKBENCH_WINDOW_PERMISSION,
-  runtimeToWorkbenchKind,
+  projectConfigRoute,
+  selectEffectiveProjectConfig,
   WORKBENCH_PERMISSION_LEVELS,
   WORKBENCH_ROLES,
 } from "@ff-pane/shared";
-import { type ReactElement, useEffect, useMemo, useState } from "react";
+import { type ReactElement, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { Button } from "../../components/ui/Button";
@@ -30,13 +33,10 @@ import { Field, Textarea } from "../../components/ui/Input";
 import { invokeQuery, queryData } from "../../ipc/query";
 import { useInvokeQuery } from "../../ipc/useInvokeQuery";
 
-const LAST_PROFILE_KEY_PREFIX = "ffpane.workbench.lastProfile.";
-
 export type NewWindowKindChoice = WorkbenchWindowKind;
 
 export interface NewWindowDialogResult {
   readonly kind: NewWindowKindChoice;
-  readonly profileId?: string;
   readonly initialPrompt?: string;
   readonly permission?: WorkbenchPermissionLevel;
   readonly role?: WorkbenchRole;
@@ -44,76 +44,77 @@ export interface NewWindowDialogResult {
 
 export interface NewWindowDialogProps {
   readonly open: boolean;
+  readonly projectId?: ProjectId;
+  readonly projectRoot?: string;
   readonly onOpenChange: (open: boolean) => void;
   readonly onConfirm: (result: NewWindowDialogResult) => void;
 }
 
-function readLastProfileId(cli: "claude-code" | "codex"): string | undefined {
-  try {
-    return localStorage.getItem(`${LAST_PROFILE_KEY_PREFIX}${cli}`) ?? undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-export function rememberLastProfileId(cli: "claude-code" | "codex", profileId: string): void {
-  try {
-    localStorage.setItem(`${LAST_PROFILE_KEY_PREFIX}${cli}`, profileId);
-  } catch {
-    // ignore
-  }
-}
-
 export function NewWindowDialog({
   open,
+  projectId,
+  projectRoot,
   onOpenChange,
   onConfirm,
 }: NewWindowDialogProps): ReactElement {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { state: profilesState } = useInvokeQuery("profiles:list");
   const { state: configState } = useInvokeQuery("config:get");
-  const profiles = queryData(profilesState) ?? [];
-  const defaultPermission =
+  const globalPermission =
     queryData(configState)?.defaultWorkbenchPermission ?? DEFAULT_WORKBENCH_WINDOW_PERMISSION;
 
   const [kind, setKind] = useState<NewWindowKindChoice>("shell");
-  const [profileId, setProfileId] = useState<string>("");
   const [initialPrompt, setInitialPrompt] = useState("");
-  const [permission, setPermission] = useState<WorkbenchPermissionLevel>(defaultPermission);
+  const [permission, setPermission] = useState<WorkbenchPermissionLevel>(globalPermission);
   const [role, setRole] = useState<WorkbenchRole>(DEFAULT_WORKBENCH_ROLE);
   const [yoloConfirm, setYoloConfirm] = useState(false);
   const [cliMissing, setCliMissing] = useState(false);
   const [probing, setProbing] = useState(false);
+  const [loadingConfig, setLoadingConfig] = useState(false);
+  const [effective, setEffective] = useState<ProjectConfig | undefined>(undefined);
 
   const aiRuntime = kind === "claude" ? "claude-code" : kind === "codex" ? "codex" : undefined;
-  const matchingProfiles = useMemo(() => {
-    if (aiRuntime === undefined) {
-      return [] as AgentProfile[];
-    }
-    return profiles.filter((profile) => runtimeToWorkbenchKind(profile.runtime) === kind);
-  }, [aiRuntime, kind, profiles]);
+  const route =
+    kind === "claude" || kind === "codex"
+      ? effective === undefined
+        ? undefined
+        : projectConfigRoute(effective, kind)
+      : undefined;
+  const routeMissing = kind !== "shell" && !loadingConfig && route === undefined;
 
   useEffect(() => {
     if (!open) {
       return;
     }
-    setPermission(defaultPermission);
     setRole(DEFAULT_WORKBENCH_ROLE);
     setYoloConfirm(false);
-  }, [defaultPermission, open]);
-
-  useEffect(() => {
-    if (!open || aiRuntime === undefined) {
+    if (projectRoot === undefined || projectId === undefined) {
+      setEffective(undefined);
+      setPermission(globalPermission);
       return;
     }
-    const last = readLastProfileId(aiRuntime);
-    const preferred =
-      (last !== undefined && matchingProfiles.some((p) => p.id === last) ? last : undefined) ??
-      matchingProfiles[0]?.id ??
-      "";
-    setProfileId(preferred);
-  }, [aiRuntime, matchingProfiles, open]);
+    let cancelled = false;
+    setLoadingConfig(true);
+    void (async () => {
+      const [configsSettled, settingsSettled] = await Promise.all([
+        invokeQuery("configs:list"),
+        invokeQuery("projects:get-settings", { projectRoot }),
+      ]);
+      if (cancelled) {
+        return;
+      }
+      setLoadingConfig(false);
+      const configs = configsSettled.status === "success" ? configsSettled.data : [];
+      const boundId =
+        settingsSettled.status === "success" ? settingsSettled.data.configId : undefined;
+      const picked = selectEffectiveProjectConfig(configs, boundId, projectId);
+      setEffective(picked);
+      setPermission(picked?.defaultPermission ?? globalPermission);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [globalPermission, open, projectId, projectRoot]);
 
   useEffect(() => {
     if (!open || aiRuntime === undefined) {
@@ -141,11 +142,18 @@ export function NewWindowDialog({
 
   const canConfirm =
     kind === "shell" ||
-    (profileId !== "" &&
-      matchingProfiles.length > 0 &&
+    (!routeMissing &&
+      !loadingConfig &&
       !cliMissing &&
       !probing &&
       (permission !== "yolo" || yoloConfirm));
+
+  const routeLabel =
+    route === undefined
+      ? ""
+      : route.connectionMode === "relay"
+        ? t("workbench.newWindow.routeRelay")
+        : t("workbench.newWindow.routeLocal");
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -187,9 +195,14 @@ export function NewWindowDialog({
                   })}
                 </p>
               ) : null}
-              {matchingProfiles.length === 0 ? (
+              {routeMissing ? (
                 <div className="flex flex-col gap-2">
-                  <p className="text-sm text-fg-muted">{t("workbench.newWindow.noProfile")}</p>
+                  <p className="text-sm text-danger-text" data-testid="workbench-route-missing">
+                    {t("workbench.newWindow.routeMissing", {
+                      cli: kind === "claude" ? "Claude" : "Codex",
+                      name: effective?.name ?? "",
+                    })}
+                  </p>
                   <Button
                     type="button"
                     size="sm"
@@ -204,22 +217,14 @@ export function NewWindowDialog({
                 </div>
               ) : (
                 <>
-                  <Field htmlFor="workbench-new-profile" label={t("workbench.newWindow.profile")}>
-                    <select
-                      id="workbench-new-profile"
-                      className="rounded-sm border border-border bg-surface px-2 py-1.5 text-sm text-fg"
-                      data-testid="workbench-new-profile"
-                      value={profileId}
-                      onChange={(event) => setProfileId(event.target.value)}
-                    >
-                      {matchingProfiles.map((profile) => (
-                        <option key={profile.id} value={profile.id}>
-                          {profile.name}
-                          {profile.model !== undefined ? ` · ${profile.model}` : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
+                  {effective !== undefined && route !== undefined ? (
+                    <p className="text-sm text-fg-muted" data-testid="workbench-new-route">
+                      {t("workbench.newWindow.usingConfig", {
+                        name: effective.name,
+                        route: routeLabel,
+                      })}
+                    </p>
+                  ) : null}
                   <fieldset className="flex flex-col gap-1.5">
                     <legend className="text-xs font-medium text-fg-muted">
                       {t("workbench.newWindow.permission")}
@@ -307,12 +312,8 @@ export function NewWindowDialog({
             data-testid="workbench-new-confirm"
             disabled={!canConfirm}
             onClick={() => {
-              if (kind !== "shell" && aiRuntime !== undefined && profileId !== "") {
-                rememberLastProfileId(aiRuntime, profileId);
-              }
               onConfirm({
                 kind,
-                ...(kind !== "shell" && profileId !== "" ? { profileId } : {}),
                 ...(kind !== "shell" ? { permission, role } : {}),
                 ...(initialPrompt.trim() !== "" ? { initialPrompt: initialPrompt.trim() } : {}),
               });

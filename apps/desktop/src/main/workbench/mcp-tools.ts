@@ -361,7 +361,6 @@ async function openWindow(
     role,
     permission,
     title,
-    ...(typeof args["profileId"] === "string" ? { profileId: args["profileId"] } : {}),
     ...(typeof args["briefPath"] === "string" ? { briefPath: args["briefPath"] } : {}),
     ...(typeof args["message"] === "string" ? { message: args["message"] } : {}),
   });

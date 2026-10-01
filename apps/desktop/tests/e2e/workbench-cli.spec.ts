@@ -165,6 +165,73 @@ function parseArgvJson(replay: string, tag: "FAKE_CLAUDE" | "FAKE_CODEX"): strin
   return JSON.parse(json) as string[];
 }
 
+async function mirrorProfilesOntoDefaultConfig(page: LaunchedApp["page"]): Promise<void> {
+  await page.evaluate(async () => {
+    const invoke = (channel: string, req?: unknown) =>
+      // biome-ignore lint/suspicious/noExplicitAny: E2E
+      (window as any).ffpane.invoke(channel, req);
+    const profiles = (await invoke("profiles:list")) as Array<{
+      runtime?: string;
+      connectionMode?: string;
+      providerId?: string;
+      model?: string;
+      reasoningEffort?: string;
+    }>;
+    const configs = (await invoke("configs:list")) as Array<{
+      id: string;
+      name: string;
+      isDefault: boolean;
+      claude?: { connectionMode: string };
+      codex?: { connectionMode: string };
+    }>;
+    const current = configs.find((item) => item.isDefault) ?? configs[0];
+    if (current === undefined) {
+      return;
+    }
+    let claude: {
+      connectionMode: string;
+      providerId?: string;
+      model?: string;
+      reasoningEffort?: string;
+    } = current.claude ?? { connectionMode: "local_cli" };
+    let codex: {
+      connectionMode: string;
+      providerId?: string;
+      model?: string;
+      reasoningEffort?: string;
+    } = current.codex ?? { connectionMode: "local_cli" };
+    for (const profile of profiles) {
+      const route: {
+        connectionMode: string;
+        providerId?: string;
+        model?: string;
+        reasoningEffort?: string;
+      } = {
+        connectionMode: profile.connectionMode === "relay" ? "relay" : "local_cli",
+      };
+      if (route.connectionMode === "relay" && profile.providerId !== undefined) {
+        route.providerId = profile.providerId;
+      }
+      if (profile.model !== undefined && profile.model !== "") {
+        route.model = profile.model;
+      }
+      if (profile.reasoningEffort !== undefined && profile.reasoningEffort !== "") {
+        route.reasoningEffort = profile.reasoningEffort;
+      }
+      if (profile.runtime === "claude-code") {
+        claude = route;
+      }
+      if (profile.runtime === "codex") {
+        codex = route;
+      }
+    }
+    await invoke("configs:update", {
+      id: current.id,
+      draft: { name: current.name, isDefault: true, claude, codex },
+    });
+  });
+}
+
 async function confirmAiWindow(
   page: LaunchedApp["page"],
   kind: "claude" | "codex",
@@ -172,9 +239,10 @@ async function confirmAiWindow(
   permission?: "read-only" | "edit" | "edit-exec" | "yolo",
   role?: "manager" | "planner" | "worker" | "reviewer" | "none",
 ): Promise<void> {
+  await mirrorProfilesOntoDefaultConfig(page);
   await expect(page.getByTestId("workbench-new-window-dialog")).toBeVisible();
   await page.getByTestId(`workbench-new-kind-${kind}`).click();
-  await expect(page.getByTestId("workbench-new-profile")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId("workbench-new-permission-edit")).toBeVisible({ timeout: 10_000 });
   if (role !== undefined) {
     await page.getByTestId(`workbench-new-role-${role}`).click();
   }
@@ -448,7 +516,9 @@ test("Codex 预置假 rollout 后认领成功，续接 argv 为 resume <id>", as
     await page.getByTestId("workbench-new-tab").click();
     await expect(page.getByTestId("workbench-new-window-dialog")).toBeVisible();
     await page.getByTestId("workbench-new-kind-codex").click();
-    await expect(page.getByTestId("workbench-new-profile")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("workbench-new-permission-edit")).toBeVisible({
+      timeout: 10_000,
+    });
     await expect(page.getByTestId("workbench-new-confirm")).toBeEnabled({ timeout: 15_000 });
 
     const claimedWait = page.evaluate(() => {

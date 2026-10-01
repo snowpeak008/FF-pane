@@ -13,6 +13,7 @@ import type {
   WorkbenchWindowKind,
 } from "@ff-pane/shared";
 import {
+  isConnectionMode,
   isWorkbenchPermissionLevel,
   isWorkbenchRole,
   isWorkbenchWindowKind,
@@ -104,12 +105,6 @@ function parseWindow(value: unknown, projectId: ProjectId): WorkbenchWindow | nu
     return null;
   }
   const kind = raw["kind"] as WorkbenchWindowKind;
-  if (
-    (kind === "claude" || kind === "codex") &&
-    (typeof raw["profileId"] !== "string" || raw["profileId"].trim() === "")
-  ) {
-    return null;
-  }
   const permissionRaw = raw["permission"];
   const permission = isWorkbenchPermissionLevel(permissionRaw) ? permissionRaw : undefined;
   const openedBy =
@@ -123,6 +118,16 @@ function parseWindow(value: unknown, projectId: ProjectId): WorkbenchWindow | nu
     createdAt: raw["createdAt"],
     ...(typeof raw["profileId"] === "string" && raw["profileId"].trim() !== ""
       ? { profileId: raw["profileId"] }
+      : {}),
+    ...(isConnectionMode(raw["routeMode"]) ? { routeMode: raw["routeMode"] } : {}),
+    ...(typeof raw["routeProviderName"] === "string" && raw["routeProviderName"].trim() !== ""
+      ? { routeProviderName: raw["routeProviderName"] }
+      : {}),
+    ...(typeof raw["routeModel"] === "string" && raw["routeModel"].trim() !== ""
+      ? { routeModel: raw["routeModel"] }
+      : {}),
+    ...(typeof raw["routeEffort"] === "string" && raw["routeEffort"].trim() !== ""
+      ? { routeEffort: raw["routeEffort"] }
       : {}),
     ...(typeof raw["nativeSessionId"] === "string" && raw["nativeSessionId"].trim() !== ""
       ? { nativeSessionId: raw["nativeSessionId"] }

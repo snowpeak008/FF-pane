@@ -657,7 +657,14 @@ describe("open_window", () => {
             turnSignal: "manual",
           } as unknown as LaunchCliWindowResult;
         },
-        resolveProfileId: async () => ({ ok: true, profileId: "profile-1" }),
+        resolveRoute: async () => ({
+          ok: true as const,
+          route: {
+            connectionMode: "local_cli" as const,
+            configId: "cfg" as never,
+            configName: "默认配置",
+          },
+        }),
         describeCaller: async () => ({
           title: "总管",
           projectId: "proj-1",
@@ -702,7 +709,14 @@ describe("open_window", () => {
         launch: async () => {
           throw new Error("不应启动");
         },
-        resolveProfileId: async () => ({ ok: true, profileId: "p" }),
+        resolveRoute: async () => ({
+          ok: true as const,
+          route: {
+            connectionMode: "local_cli" as const,
+            configId: "cfg" as never,
+            configName: "默认配置",
+          },
+        }),
         describeCaller: async () => ({
           title: "子",
           projectId: "proj-1",
@@ -731,7 +745,14 @@ describe("open_window", () => {
         launch: async () => {
           throw new Error("不应启动");
         },
-        resolveProfileId: async () => ({ ok: true, profileId: "p" }),
+        resolveRoute: async () => ({
+          ok: true as const,
+          route: {
+            connectionMode: "local_cli" as const,
+            configId: "cfg" as never,
+            configName: "默认配置",
+          },
+        }),
         describeCaller: async () => ({
           title: "总管",
           projectId: "proj-1",
@@ -758,7 +779,14 @@ describe("open_window", () => {
         launch: async () => {
           throw new Error("不应启动");
         },
-        resolveProfileId: async () => ({ ok: true, profileId: "p" }),
+        resolveRoute: async () => ({
+          ok: true as const,
+          route: {
+            connectionMode: "local_cli" as const,
+            configId: "cfg" as never,
+            configName: "默认配置",
+          },
+        }),
         describeCaller: async () => ({
           title: "总管",
           projectId: "proj-1",
@@ -834,7 +862,14 @@ describe("open_window", () => {
             turnSignal: "manual",
           } as unknown as LaunchCliWindowResult;
         },
-        resolveProfileId: async () => ({ ok: true, profileId: "profile-1" }),
+        resolveRoute: async () => ({
+          ok: true as const,
+          route: {
+            connectionMode: "local_cli" as const,
+            configId: "cfg" as never,
+            configName: "默认配置",
+          },
+        }),
         describeCaller: async () => ({
           title: "子管理者",
           projectId: "proj-1",
