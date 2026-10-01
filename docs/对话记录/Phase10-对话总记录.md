@@ -1611,3 +1611,71 @@ Claude 带参数的 `/model` 在已有对话时会不会再要一次确认，官
 - [T10.12b 验收记录](../验收记录/T10.12b-验收.md)
 - 修复：[2026-10-01 16:42 · T10.12b · 修复 · 改模型强度](./Phase10-对话总记录.md)
 
+## 2026-10-01 17:12 · T10.12b · 提交 · v0.10.14
+
+### 任务要点
+
+按计划 §7.2 第 4 步提交 T10.12b。版本 `0.10.13` → `0.10.14`（根与 desktop 的 `package.json`、README 状态行、测试里的假 AppInfo）。开发进度登记 T10.12b 已验收和遗留建议。计划 §4、§9、§7.5 同步。轻量 tag `v0.10.14`，不 push。
+
+### 结论
+
+已提交并打轻量 tag `v0.10.14`，未 push。不需要主控决策。下一步 T10.13 清理。
+
+提交哈希：`ffe732d4f092b33bb9fdab34974badfb4706e788`。tag 指向这一笔。本条是后补的，所以 tag 里的总记录还没有这一节。
+
+### 改动文件
+
+暂存并提交（不含 `apps/desktop/scripts/real-config-probe.mjs`，不含 `apps/desktop/out`）：
+
+- `package.json`
+- `apps/desktop/package.json`
+- `README.md`
+- `apps/desktop/tests/client-server.test.ts`
+- `apps/desktop/tests/command-ipc.test.ts`
+- `apps/desktop/resources/workbench-roles/manager.md`
+- `apps/desktop/src/main/data.ts`
+- `apps/desktop/src/main/index.ts`
+- `apps/desktop/src/main/workbench/handlers.ts`
+- `apps/desktop/src/main/workbench/mcp-tools.ts`
+- `apps/desktop/src/main/workbench/model-effort.ts`
+- `apps/desktop/src/mcp/workbench-tools.ts`
+- `apps/desktop/src/renderer/src/pages/workbench/TerminalView.tsx`
+- `apps/desktop/src/renderer/src/pages/workbench/WindowPane.tsx`
+- `apps/desktop/src/renderer/src/stores/workbench.ts`
+- `apps/desktop/src/shared-ipc/contracts.ts`
+- `apps/desktop/tests/e2e/fake-workbench-cli.js`
+- `apps/desktop/tests/e2e/model-effort.spec.ts`
+- `apps/desktop/tests/model-effort.test.ts`
+- `apps/desktop/tests/workbench-mcp.test.ts`
+- `apps/desktop/tests/workbench-memory.test.ts`
+- `locales/zh-CN.json`
+- `locales/en-US.json`
+- `packages/shared/src/domain/index.ts`
+- `packages/shared/src/domain/model-override.ts`
+- `packages/shared/src/domain/workbench.ts`
+- `packages/shared/tests/model-override.test.ts`
+- `packages/storage/src/workbench/store.ts`
+- `docs/Phase10-多窗口终端工作台计划.md`
+- `docs/开发进度.md`
+- `docs/验收记录/T10.12b-验收.md`
+- `docs/对话记录/Phase10-对话总记录.md`（提交时含到复验；本条后补）
+
+### 命令结果
+
+- `pnpm lint`：通过（Biome 753 个文件，check-i18n PASS）。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- `vitest run apps/desktop/tests/client-server.test.ts apps/desktop/tests/command-ipc.test.ts`：2 个文件，73 过。
+- 提交信息：`feat: T10.12b 管理者改模型与思考强度`
+- 轻量 tag `v0.10.14`，未 push
+- 提交哈希：`ffe732d4f092b33bb9fdab34974badfb4706e788`
+
+### 问题与遗留
+
+未纳入 `apps/desktop/scripts/real-config-probe.mjs`。验收建议仍是：§8 决定 3 的旧句子还在；清洗锁不阻止已授权管理者改后代窗口的模型和强度。布局里的旧 `profileId` 留给 T10.13。
+
+### 相关文件链接
+
+- [T10.12b 验收记录](../验收记录/T10.12b-验收.md)
+- [开发进度](../开发进度.md)
+- 复验：[2026-10-01 17:03 · T10.12b · 复验 · 改模型强度](./Phase10-对话总记录.md)
+
