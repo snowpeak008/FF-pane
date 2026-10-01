@@ -1367,11 +1367,11 @@ T10.12a 的新配置界面只做 Claude 和 Codex 两路，不要把 `RUNTIME_OP
 - `vitest run apps/desktop/tests/command-ipc.test.ts apps/desktop/tests/client-server.test.ts`：2 个文件，73 过。
 - 提交信息：`feat: T10.12a 项目配置`
 - 轻量 tag `v0.10.13`，未 push
-- 提交哈希：`91112b469eb13a9700f580a74954432ea37379b2`
+- 提交哈希：`397e91da5b37e9130fb46c1a8253cc94bef1ea29`
 
 ### 问题与遗留
 
-验收遗留仍是：布局里的旧 `profileId` 启动已不读，留给后面清理。历史记录里的 `0.10.12` 没有改。未纳入 `apps/desktop/scripts/real-config-probe.mjs`。
+验收遗留仍是：布局里的旧 `profileId` 启动已不读，留给后面清理。历史记录里的 `0.10.12` 没有改。未纳入 `apps/desktop/scripts/real-config-probe.mjs`。上面的提交哈希是 tag `v0.10.13` 所指的那一笔；这一行是后补的，所以 tag 里的本条仍写着上一笔已被替换的哈希。
 
 ### 相关文件链接
 
