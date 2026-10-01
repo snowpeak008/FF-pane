@@ -58,6 +58,18 @@ export type AiOutputLanguage = (typeof AI_OUTPUT_LANGUAGES)[number];
 export const isAiOutputLanguage = createLiteralGuard(AI_OUTPUT_LANGUAGES);
 
 /**
+ * 设置页「AI 输出语言」的可选值。
+ * `follow` 表示不写进窗口角色提示（让 CLI 自己决定回复语言）。
+ */
+export const AI_OUTPUT_LANGUAGE_SETTINGS = ["follow", ...AI_OUTPUT_LANGUAGES] as const;
+
+/** 设置页保存的 AI 输出语言。`follow` 时启动注入不写语言要求。 */
+export type AiOutputLanguageSetting = (typeof AI_OUTPUT_LANGUAGE_SETTINGS)[number];
+
+/** AiOutputLanguageSetting 运行时守卫。 */
+export const isAiOutputLanguageSetting = createLiteralGuard(AI_OUTPUT_LANGUAGE_SETTINGS);
+
+/**
  * 设计文档 §9.2 —— AI 输出语言的三级设置（低层覆盖高层）：
  * 全局默认 → Agent Profile → 项目。
  * Profile 层与项目层为可选覆盖，字段缺省即"继承上一级"（不引入 "inherit" 字面量，

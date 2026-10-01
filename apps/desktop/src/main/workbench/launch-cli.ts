@@ -178,6 +178,15 @@ export interface LaunchCliWindowDeps {
     readonly claudePromptFile?: string;
     readonly developerInstructions?: string;
   }>;
+  /**
+   * 自配置 MCP。只在管理者且项目开关打开时返回服务器；否则返回空对象。
+   * 缺省表示这次启动不挂。
+   */
+  readonly resolveConfigTool?: (input: {
+    readonly windowId: string;
+    readonly projectRoot: string;
+    readonly role: WorkbenchRole;
+  }) => Promise<Readonly<Record<string, McpStdioServerSpec>>>;
   /** 控制通道管道名。写入 CLI 环境 FF_PANE_WB_PIPE，不进 argv。 */
   readonly controlPipe?: string;
   /** 启动成功后登记空闲投递会话（无 initialPrompt 仍保持未知，直到 hook）。 */
@@ -328,10 +337,6 @@ async function launchCliWindowBody(
     });
   }
 
-  const mcpServers: Record<string, McpStdioServerSpec> = {
-    ...(await resolveKnowledgeServers(deps, input.projectRoot)),
-    [WORKBENCH_MCP_SERVER_NAME]: buildWorkbenchMcpSpec(deps.moduleDir),
-  };
   const requestedPermission: WorkbenchPermissionLevel = input.permission ?? "edit";
   const launchAuth = deps.authRegistry?.resolveLaunch(input.windowId, requestedPermission) ?? {
     effective: requestedPermission,
@@ -359,6 +364,17 @@ async function launchCliWindowBody(
     deps.loadRoleInjection !== undefined
       ? await deps.loadRoleInjection({ windowId: input.windowId, role, runtime })
       : {};
+  const mcpServers: Record<string, McpStdioServerSpec> = {
+    ...(await resolveKnowledgeServers(deps, input.projectRoot)),
+    ...(deps.resolveConfigTool !== undefined
+      ? await deps.resolveConfigTool({
+          windowId: input.windowId,
+          projectRoot: input.projectRoot,
+          role,
+        })
+      : {}),
+    [WORKBENCH_MCP_SERVER_NAME]: buildWorkbenchMcpSpec(deps.moduleDir),
+  };
   const windowToken = deps.tokenRegistry.issue(input.windowId);
   const probed = resolveDirectCliTarget(command, [], process.env);
   const nodePath = resolveHookNodeExecutable(process.env, probed);

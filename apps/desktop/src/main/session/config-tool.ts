@@ -35,8 +35,8 @@ export const ENV_CONFIG_MAILBOX = "FF_PANE_CONFIG_MAILBOX";
 /** sidecar 只读 providers.json 的环境变量名。 */
 export const ENV_CONFIG_PROVIDERS = "FF_PANE_CONFIG_PROVIDERS";
 
-/** sidecar 只读 profiles.json 的环境变量名。 */
-export const ENV_CONFIG_PROFILES = "FF_PANE_CONFIG_PROFILES";
+/** sidecar 只读 configs.json 的环境变量名。 */
+export const ENV_CONFIG_CONFIGS = "FF_PANE_CONFIG_CONFIGS";
 
 /** sidecar 写 list 调用审计的环境变量名。 */
 export const ENV_CONFIG_AUDIT = "FF_PANE_CONFIG_AUDIT";
@@ -93,8 +93,8 @@ export interface ResolveConfigMcpInput {
   readonly mailbox: ConfigMailboxPaths;
   /** providers.json 绝对路径（sidecar 只读，list 工具的数据源）。 */
   readonly providersFile: string;
-  /** profiles.json 绝对路径（同上）。 */
-  readonly profilesFile: string;
+  /** configs.json 绝对路径（list 配置的数据源）。 */
+  readonly configsFile: string;
 }
 
 /**
@@ -111,7 +111,7 @@ export function resolveConfigMcpServer(input: ResolveConfigMcpInput): McpStdioSe
       ELECTRON_RUN_AS_NODE: "1",
       [ENV_CONFIG_MAILBOX]: input.mailbox.mailboxDir,
       [ENV_CONFIG_PROVIDERS]: input.providersFile,
-      [ENV_CONFIG_PROFILES]: input.profilesFile,
+      [ENV_CONFIG_CONFIGS]: input.configsFile,
       [ENV_CONFIG_AUDIT]: input.mailbox.auditPath,
     },
     allowedTools: [...CONFIG_TOOL_NAMES],

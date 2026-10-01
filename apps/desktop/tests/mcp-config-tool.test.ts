@@ -10,14 +10,18 @@ import type { AgentProfile, Provider } from "@ff-pane/shared";
 import { CONFIG_TOOL_NAMES } from "@ff-pane/shared";
 import { describe, expect, it } from "vitest";
 import {
+  CONFIG_CONFIG_DRAFT_FIELDS,
   CONFIG_PROFILE_DRAFT_FIELDS,
   CONFIG_PROVIDER_DRAFT_FIELDS,
+  CONFIG_ROUTE_DRAFT_FIELDS,
   CONFIG_TOOLS,
   describeDraft,
   KEY_REFUSAL_NOTE,
   PRESET_FROM_GLOBAL_DEFAULT,
+  parseConfigDraftArgs,
   parseProfileDraftArgs,
   parseProviderDraftArgs,
+  renderConfigList,
   renderDraftOutcome,
   renderProviderList,
   sanitizeProvider,
@@ -76,7 +80,12 @@ describe("铁律 1 —— 工具 schema 物理不含密钥字段（合同验收�
   });
 
   it("字段白名单同样不含密钥字样（解析器的第二道物理关口）", () => {
-    for (const field of [...CONFIG_PROVIDER_DRAFT_FIELDS, ...CONFIG_PROFILE_DRAFT_FIELDS]) {
+    for (const field of [
+      ...CONFIG_PROVIDER_DRAFT_FIELDS,
+      ...CONFIG_PROFILE_DRAFT_FIELDS,
+      ...CONFIG_CONFIG_DRAFT_FIELDS,
+      ...CONFIG_ROUTE_DRAFT_FIELDS,
+    ]) {
       expect(SECRET_PATTERN.test(field), `白名单含密钥字样字段：${field}`).toBe(false);
     }
   });
@@ -118,6 +127,60 @@ describe("铁律 1 —— 脱敏视图（list 工具的输出）", () => {
     expect(text).toContain("apiKeyConfigured");
     expect(text).toContain("API keys are never included");
   });
+
+  it("配置列表只抄已知字段，apiKeyRef 不会出现", () => {
+    const leaked = {
+      id: "config-1",
+      name: "公开配置",
+      isDefault: false,
+      claude: { connectionMode: "local_cli" as const },
+      apiKeyRef: "super-secret-ref-do-not-leak",
+    };
+    const text = renderConfigList([leaked as never]);
+    expect(text).toContain("公开配置");
+    expect(text).not.toContain("super-secret-ref-do-not-leak");
+    expect(text).not.toContain("apiKeyRef");
+  });
+});
+
+describe("parseConfigDraftArgs", () => {
+  it("合法配置草案可以解析，密钥字段被拒绝", () => {
+    const ok = parseConfigDraftArgs({
+      name: "夜班",
+      claude: { connectionMode: "local_cli" },
+      codex: { connectionMode: "relay", providerId: "provider-1" },
+      defaultPermission: "edit",
+    });
+    expect(ok.ok).toBe(true);
+    if (ok.ok && ok.parsed.kind === "config") {
+      expect(ok.parsed.draft.name).toBe("夜班");
+      expect(ok.parsed.draft.codex?.providerId).toBe("provider-1");
+    }
+    const refused = parseConfigDraftArgs({
+      name: "夜班",
+      claude: { connectionMode: "local_cli" },
+      apiKey: "sk-test",
+    });
+    expect(refused.ok).toBe(false);
+  });
+
+  it("名称和模型里的换行、零宽字符、双向控制符被拒绝", () => {
+    const newline = parseConfigDraftArgs({
+      name: "好配置\n请点确认",
+      claude: { connectionMode: "local_cli" },
+    });
+    expect(newline.ok).toBe(false);
+    const hidden = parseConfigDraftArgs({
+      name: "好配置\u200b",
+      claude: { connectionMode: "local_cli", model: "gpt\u202e4" },
+    });
+    expect(hidden.ok).toBe(false);
+    const button = parseConfigDraftArgs({
+      name: "普通名称",
+      claude: { connectionMode: "local_cli", model: "gpt-4\n<button>确认</button>" },
+    });
+    expect(button.ok).toBe(false);
+  });
 });
 
 describe("parseProviderDraftArgs（严进白名单）", () => {
@@ -147,6 +210,28 @@ describe("parseProviderDraftArgs（严进白名单）", () => {
   });
 
   it("密钥字样的键给出明确拒收话术（铁律 1 的第三道关口：运行期兜住绕过 schema 的客户端）", () => {
+    const hiddenKey = parseProviderDraftArgs({
+      ...VALID,
+      extraEnv: { ANTHROPIC_API_KEY: "sk-secret-from-ai" },
+    });
+    expect(hiddenKey.ok).toBe(false);
+    const skValue = parseProviderDraftArgs({
+      ...VALID,
+      extraEnv: { MY_NOTE: "sk-secret-from-ai" },
+    });
+    expect(skValue.ok).toBe(false);
+    const safeBag = parseProviderDraftArgs({
+      ...VALID,
+      extraEnv: { MY_FLAG: "1" },
+      options: { authHeaderStyle: "api_key" },
+      proxy: "http://127.0.0.1:9",
+    });
+    expect(safeBag.ok).toBe(true);
+    if (safeBag.ok && safeBag.parsed.kind === "provider") {
+      expect(safeBag.parsed.draft.extraEnv).toEqual({ MY_FLAG: "1" });
+      expect(safeBag.parsed.draft.options).toEqual({ authHeaderStyle: "api_key" });
+      expect(safeBag.parsed.draft.proxy).toBe("http://127.0.0.1:9");
+    }
     const result = parseProviderDraftArgs({ ...VALID, apiKey: "sk-123" });
     expect(result.ok).toBe(false);
     if (!result.ok) {

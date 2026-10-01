@@ -4,9 +4,14 @@
 
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createWindowTokenRegistry, type WindowTokenRegistry } from "@ff-pane/core";
+import {
+  composeLaunchRolePrompt,
+  createWindowTokenRegistry,
+  type WindowTokenRegistry,
+} from "@ff-pane/core";
 import {
   clampMaxWorkbenchWindows,
+  DEFAULT_CONFIG_TOOL_SERVER_NAME,
   DEFAULT_WORKBENCH_ROLE,
   DEFAULT_WORKBENCH_WINDOW_PERMISSION,
   isWorkbenchPermissionLevel,
@@ -23,6 +28,7 @@ import {
   createProviderStore,
   createWorkbenchLayoutStore,
   initGlobalLayout,
+  listHabits,
   resolveGlobalLayout,
   resolveProjectLayout,
 } from "@ff-pane/storage";
@@ -32,10 +38,18 @@ import { publishEvent } from "../../shared-ipc/server";
 import { resolveGlobalRoot } from "../data-root";
 import { createMemoryIndexService, type MemoryIndexService } from "../memory-index";
 import { createSafeStorageBackend, createSecretStore, resolveSecretsFile } from "../secrets";
+import { type ConfigDraftHub, createConfigDraftHub } from "../session/config-draft-hub";
+import {
+  CONFIG_MAILBOX_ROOT_NAME,
+  createConfigMailbox,
+  resolveConfigMcpServer,
+} from "../session/config-tool";
 import { WORKBENCH_WINDOW_LIMIT_ERROR_PREFIX } from "../terminal/handlers";
 import type { PtyManager } from "../terminal/manager";
 import { createWorkbenchAuthRegistry, type WorkbenchAuthRegistry } from "./auth-registry";
 import { CodexSessionClaimer } from "./codex-claim";
+import { createWorkbenchConfigDraftActions } from "./config-draft-apply";
+import { isConfigToolAuthorized, shouldAttachConfigTool } from "./config-tool-attach";
 import {
   createWorkbenchControlServer,
   WORKBENCH_TOOL_MAX_REQUEST_BYTES,
@@ -102,6 +116,7 @@ export interface WorkbenchCliLayer {
     | "workbench:read-threads"
     | "workbench:open-ffpane"
     | "workbench:panel-activity"
+    | "workbench:respond-config-draft"
   >;
   readonly mcpRegistry: WorkbenchMcpTempRegistry;
   readonly codexClaimer: CodexSessionClaimer;
@@ -110,6 +125,7 @@ export interface WorkbenchCliLayer {
   readonly idleQueue: IdleDeliverQueue;
   readonly modelEffort: ModelEffortController;
   readonly rolePromptTemps: RolePromptTempRegistry;
+  readonly releaseConfigHub: (windowId: string) => Promise<void>;
   readonly dispose: () => Promise<void>;
 }
 
@@ -148,6 +164,40 @@ export async function createWorkbenchCliLayer(
   });
   const mcpRegistry = new WorkbenchMcpTempRegistry();
   const rolePromptTemps = new RolePromptTempRegistry();
+  const configHubs = new Map<string, ConfigDraftHub>();
+  const projects = createProjectRegistry(layout.projectsFile);
+
+  const listBoundProjects = async (
+    configId: string,
+  ): Promise<readonly { readonly id: string; readonly name: string }[]> => {
+    const registered = await projects.listProjects();
+    const bound: { id: string; name: string }[] = [];
+    for (const project of registered) {
+      const settings = await createProjectSettingsStore(
+        resolveProjectLayout(project.rootPath).projectFile,
+      ).readSettings();
+      if (settings.configId === configId) {
+        bound.push({ id: project.id, name: project.name });
+      }
+    }
+    return bound;
+  };
+
+  const configDraftActions = createWorkbenchConfigDraftActions({
+    providers,
+    projectConfigs,
+    storeSecret: (plaintext) => secrets.storeSecret(plaintext),
+    listBoundProjects,
+  });
+
+  const disposeConfigHub = async (windowId: string): Promise<void> => {
+    const hub = configHubs.get(windowId);
+    if (hub === undefined) {
+      return;
+    }
+    configHubs.delete(windowId);
+    await hub.dispose();
+  };
   const codexClaimer = new CodexSessionClaimer();
   const tokenRegistry = createWindowTokenRegistry();
   const authRegistry = options.authRegistry ?? createWorkbenchAuthRegistry();
@@ -276,7 +326,6 @@ export async function createWorkbenchCliLayer(
     },
   });
 
-  const projects = createProjectRegistry(layout.projectsFile);
   const cursors = createInboxCursorStore(inboxCursorPath(layout.rootDir));
   const roleDeps = () => ({
     authRegistry,
@@ -398,13 +447,119 @@ export async function createWorkbenchCliLayer(
       readonly role: import("@ff-pane/shared").WorkbenchRole;
       readonly runtime: "claude-code" | "codex";
     }) => {
-      const text = await composeWindowRolePrompt(resourcesDir, overridesDir, role);
+      const roleText = await composeWindowRolePrompt(resourcesDir, overridesDir, role);
+      let outputLanguage: string | undefined;
+      try {
+        outputLanguage = (await config.readConfig()).aiOutputLanguage;
+      } catch {
+        outputLanguage = undefined;
+      }
+      let habits: Awaited<ReturnType<typeof listHabits>>["entries"] = [];
+      try {
+        habits = (await listHabits(layout)).entries;
+      } catch {
+        habits = [];
+      }
+      const text = composeLaunchRolePrompt({
+        rolePrompt: roleText,
+        ...(outputLanguage !== undefined ? { outputLanguage } : {}),
+        habits,
+      });
       if (runtime === "claude-code") {
         const filePath = writeClaudeRolePromptFile(windowId, text);
         rolePromptTemps.track(windowId, filePath);
         return { claudePromptFile: filePath };
       }
       return { developerInstructions: text };
+    },
+    resolveConfigTool: async ({
+      windowId,
+      projectRoot,
+      role,
+    }: {
+      readonly windowId: string;
+      readonly projectRoot: string;
+      readonly role: import("@ff-pane/shared").WorkbenchRole;
+    }) => {
+      let enabled = false;
+      try {
+        const settings = await createProjectSettingsStore(
+          resolveProjectLayout(projectRoot).projectFile,
+        ).readSettings();
+        enabled = settings.configToolEnabled === true;
+      } catch {
+        enabled = false;
+      }
+      const node = authRegistry.get(windowId);
+      const parentId = node?.parentWindowId;
+      const parent = parentId !== undefined ? authRegistry.get(parentId) : undefined;
+      const grant =
+        node === undefined
+          ? "none"
+          : decideManagerGrantRestore({
+              role: node.role ?? role,
+              openedBy: node.openedBy,
+              ...(parentId !== undefined && parentId.trim() !== ""
+                ? { parentWindowId: parentId }
+                : {}),
+              ...(parent?.role !== undefined ? { parentRole: parent.role } : {}),
+              parentGranted: parentId !== undefined && authRegistry.isManagerGranted(parentId),
+              alreadyGranted: authRegistry.isManagerGranted(windowId),
+              sanitizeLocked: node.sanitizeLocked === true,
+              userRoleSet: node.userRoleSet === true,
+            });
+      if (
+        !shouldAttachConfigTool({
+          role,
+          configToolEnabled: enabled,
+          managerAuthorized: isConfigToolAuthorized(grant),
+        })
+      ) {
+        await disposeConfigHub(windowId);
+        return {};
+      }
+      await disposeConfigHub(windowId);
+      const mailbox = await createConfigMailbox(join(layout.rootDir, CONFIG_MAILBOX_ROOT_NAME));
+      const hub = createConfigDraftHub({
+        turnId: windowId,
+        requestsDir: mailbox.requestsDir,
+        responsesDir: mailbox.responsesDir,
+        auditPath: mailbox.auditPath,
+        publish: (event) => {
+          const browser = options.getWindow();
+          if (browser === null || browser.isDestroyed()) {
+            return;
+          }
+          if (event.kind === "config-draft") {
+            publishEvent(browser.webContents, "workbench:config-draft", {
+              windowId: event.turnId,
+              draftId: event.draftId,
+              summary: event.summary,
+              needsApiKey: event.needsApiKey,
+              payload: event.payload,
+            });
+            return;
+          }
+          if (event.kind === "config-draft-resolved") {
+            publishEvent(browser.webContents, "workbench:config-draft-resolved", {
+              windowId: event.turnId,
+              draftId: event.draftId,
+            });
+          }
+        },
+        prepare: configDraftActions.prepare,
+        apply: configDraftActions.apply,
+        now: () => Date.now(),
+      });
+      hub.start();
+      configHubs.set(windowId, hub);
+      const spec = resolveConfigMcpServer({
+        moduleDir: join(mainModuleDir()),
+        mailbox,
+        providersFile: layout.providersFile,
+        configsFile: layout.configsFile,
+      });
+      return { [DEFAULT_CONFIG_TOOL_SERVER_NAME]: spec };
     },
     clampMax: clampMaxWorkbenchWindows,
     limitErrorPrefix: WORKBENCH_WINDOW_LIMIT_ERROR_PREFIX,
@@ -782,6 +937,19 @@ export async function createWorkbenchCliLayer(
       }
       return { runningWindowIds, reports };
     },
+    "workbench:respond-config-draft": async (request) => {
+      const hub = configHubs.get(request.windowId);
+      if (hub === undefined) {
+        return { ok: false, message: "这份草案已经不在了" };
+      }
+      return hub.respond({
+        turnId: request.windowId,
+        draftId: request.draftId,
+        decision: request.decision,
+        ...(request.apiKey !== undefined ? { apiKey: request.apiKey } : {}),
+        ...(request.reason !== undefined ? { reason: request.reason } : {}),
+      });
+    },
   };
 
   const projectRootOf = async (projectId: string): Promise<string> => {
@@ -969,6 +1137,7 @@ export async function createWorkbenchCliLayer(
           codexClaimer.cancel(windowId);
           releaseWindowHooks(windowId);
           void rolePromptTemps.release(windowId);
+          void disposeConfigHub(windowId);
         },
         closeRegistered: (windowId) => {
           authRegistry.closeRegistered(windowId);
@@ -1101,6 +1270,7 @@ export async function createWorkbenchCliLayer(
     idleQueue,
     modelEffort,
     rolePromptTemps,
+    releaseConfigHub: disposeConfigHub,
     dispose: async () => {
       await control.close();
       idleQueue.dispose();
@@ -1109,6 +1279,9 @@ export async function createWorkbenchCliLayer(
       authRegistry.clear();
       await mcpRegistry.releaseAll();
       await rolePromptTemps.releaseAll();
+      for (const windowId of [...configHubs.keys()]) {
+        await disposeConfigHub(windowId);
+      }
       if (ownsMemoryIndex) {
         memoryIndex.close();
       }

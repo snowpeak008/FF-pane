@@ -252,12 +252,30 @@ test("config MCP sidecar：拉起 → 四工具 schema 无密钥字段 → list 
     }),
     "utf8",
   );
+  const configsFile = join(dataRoot, "e2e-cfg-configs.json");
+  writeFileSync(
+    configsFile,
+    JSON.stringify({
+      version: 1,
+      configs: [
+        {
+          id: "config-e2e",
+          name: "ListedConfig",
+          isDefault: true,
+          claude: { connectionMode: "local_cli" },
+          apiKeyRef: "config-secret-ref-do-not-leak",
+        },
+      ],
+    }),
+    "utf8",
+  );
   const auditPath = join(mailboxDir, "audit.jsonl");
 
   const responses = await speakConfigMcp(
     {
       FF_PANE_CONFIG_MAILBOX: mailboxDir,
       FF_PANE_CONFIG_PROVIDERS: providersFile,
+      FF_PANE_CONFIG_CONFIGS: configsFile,
       FF_PANE_CONFIG_AUDIT: auditPath,
     },
     [
@@ -274,6 +292,12 @@ test("config MCP sidecar：拉起 → 四工具 schema 无密钥字段 → list 
         jsonrpc: "2.0",
         id: 4,
         method: "tools/call",
+        params: { name: "config_list_configs", arguments: {} },
+      },
+      {
+        jsonrpc: "2.0",
+        id: 5,
+        method: "tools/call",
         params: {
           name: "config_draft_provider",
           arguments: {
@@ -289,7 +313,7 @@ test("config MCP sidecar：拉起 → 四工具 schema 无密钥字段 → list 
   );
   rmSync(mailboxDir, { recursive: true, force: true });
 
-  expect(responses).toHaveLength(4);
+  expect(responses).toHaveLength(5);
 
   // 工具面恰好四个，且任何 schema 里没有一个密钥字样的键（铁律 1 的打包产物级证据）
   const list = responses[1] as {
@@ -297,9 +321,9 @@ test("config MCP sidecar：拉起 → 四工具 schema 无密钥字段 → list 
   };
   expect(list.result.tools.map((tool) => tool.name)).toEqual([
     "config_list_providers",
-    "config_list_profiles",
+    "config_list_configs",
     "config_draft_provider",
-    "config_draft_profile",
+    "config_draft_config",
   ]);
   for (const tool of list.result.tools) {
     for (const key of collectPropertyKeys(tool.inputSchema)) {
@@ -315,7 +339,13 @@ test("config MCP sidecar：拉起 → 四工具 schema 无密钥字段 → list 
   expect(listText).not.toContain("super-secret-ref-do-not-leak");
 
   // 草案信箱往返：sidecar 把主进程写回的 rejected 转述给模型
-  const draftCall = responses[3] as { result: { content: { text: string }[] } };
+  const configList = responses[3] as { result: { content: { text: string }[] } };
+  const configText = configList.result.content[0]?.text ?? "";
+  expect(configText).toContain("ListedConfig");
+  expect(configText).not.toContain("config-secret-ref-do-not-leak");
+  expect(configText).not.toContain("apiKeyRef");
+
+  const draftCall = responses[4] as { result: { content: { text: string }[] } };
   expect(draftCall.result.content[0]?.text).toContain("rejected");
   expect(draftCall.result.content[0]?.text).toContain("not this one");
 });

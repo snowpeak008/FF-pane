@@ -11,9 +11,11 @@
 
 import {
   clampMaxWorkbenchWindows,
+  DEFAULT_AI_OUTPUT_LANGUAGE,
   DEFAULT_GLOBAL_CONFIG,
   DEFAULT_WORKBENCH_WINDOW_PERMISSION,
   type GlobalConfig,
+  isAiOutputLanguageSetting,
   isWorkbenchPermissionLevel,
 } from "@ff-pane/shared";
 import { readJson, writeJsonAtomic } from "../fs/index.js";
@@ -23,6 +25,9 @@ import { ConfigFileInvalidError } from "./errors.js";
 function normalizeConfig(config: GlobalConfig): GlobalConfig {
   return {
     ...config,
+    aiOutputLanguage: isAiOutputLanguageSetting(config.aiOutputLanguage)
+      ? config.aiOutputLanguage
+      : DEFAULT_AI_OUTPUT_LANGUAGE,
     maxWorkbenchWindows: clampMaxWorkbenchWindows(config.maxWorkbenchWindows),
     defaultWorkbenchPermission: isWorkbenchPermissionLevel(config.defaultWorkbenchPermission)
       ? config.defaultWorkbenchPermission

@@ -28,11 +28,11 @@ import { randomUUID } from "node:crypto";
 import { appendFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import type { AgentProfile, ConfigToolCallRecord, Provider } from "@ff-pane/shared";
+import type { ConfigToolCallRecord, ProjectConfig, Provider } from "@ff-pane/shared";
 import {
-  CONFIG_TOOL_DRAFT_PROFILE,
+  CONFIG_TOOL_DRAFT_CONFIG,
   CONFIG_TOOL_DRAFT_PROVIDER,
-  CONFIG_TOOL_LIST_PROFILES,
+  CONFIG_TOOL_LIST_CONFIGS,
   CONFIG_TOOL_LIST_PROVIDERS,
   DEFAULT_CONFIG_TOOL_SERVER_NAME,
 } from "@ff-pane/shared";
@@ -40,8 +40,8 @@ import {
   CONFIG_TOOLS,
   type ConfigDraftRequestFile,
   type ConfigDraftResponseFile,
+  renderConfigList,
   renderDraftOutcome,
-  renderProfileList,
   renderProviderList,
 } from "./config-tool";
 import { handleMcpLine, type McpServerOptions, type McpToolResult } from "./protocol";
@@ -50,8 +50,8 @@ import { handleMcpLine, type McpServerOptions, type McpToolResult } from "./prot
 const ENV_MAILBOX = "FF_PANE_CONFIG_MAILBOX";
 /** providers.json 路径（只读；缺席时 list 返回空集）。 */
 const ENV_PROVIDERS = "FF_PANE_CONFIG_PROVIDERS";
-/** profiles.json 路径（只读）。 */
-const ENV_PROFILES = "FF_PANE_CONFIG_PROFILES";
+/** configs.json 路径（只读）。 */
+const ENV_CONFIGS = "FF_PANE_CONFIG_CONFIGS";
 /** 审计 JSONL 路径（本进程只写 list 调用的行；缺席即不留审计，照 knowledge sidecar 口径）。 */
 const ENV_AUDIT = "FF_PANE_CONFIG_AUDIT";
 
@@ -148,7 +148,7 @@ function main(): void {
     process.exit(1);
   }
   const providersFile = process.env[ENV_PROVIDERS];
-  const profilesFile = process.env[ENV_PROFILES];
+  const configsFile = process.env[ENV_CONFIGS];
   const auditPath = process.env[ENV_AUDIT];
   const requestsDir = join(mailboxDir, "requests");
   const responsesDir = join(mailboxDir, "responses");
@@ -173,19 +173,19 @@ function main(): void {
       return { text: renderProviderList(providers) };
     }
 
-    if (name === CONFIG_TOOL_LIST_PROFILES) {
-      const profiles = readEntries<AgentProfile>(profilesFile, "profiles");
+    if (name === CONFIG_TOOL_LIST_CONFIGS) {
+      const configs = readEntries<ProjectConfig>(configsFile, "configs");
       appendAudit(auditPath, {
         calledAt: startedAt,
         tool: name,
-        summary: `list profiles (${profiles.length})`,
+        summary: `list configs (${configs.length})`,
         outcome: "ok",
         durationMs: Date.now() - startedAt,
       });
-      return { text: renderProfileList(profiles) };
+      return { text: renderConfigList(configs) };
     }
 
-    if (name === CONFIG_TOOL_DRAFT_PROVIDER || name === CONFIG_TOOL_DRAFT_PROFILE) {
+    if (name === CONFIG_TOOL_DRAFT_PROVIDER || name === CONFIG_TOOL_DRAFT_CONFIG) {
       // 草案：原样投递，主进程是解析 / 校验 / 确认 / 审计的唯一权威（见模块头）
       const request: ConfigDraftRequestFile = {
         id: randomUUID(),

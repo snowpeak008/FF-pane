@@ -18,26 +18,40 @@ import type {
   AgentProfile,
   AiOutputLanguage,
   ConfigToolOutcome,
+  ConnectionMode,
   GenericExecProfileConfig,
   ModelId,
   PermissionEnvelope,
+  ProjectConfig,
+  ProjectConfigDraft,
+  ProjectConfigRoute,
+  ProjectId,
   Provider,
+  ProviderId,
   ProviderModel,
   ProviderTemplateId,
+  ReasoningEffortLevel,
+  WorkbenchPermissionLevel,
 } from "@ff-pane/shared";
 import {
+  CONFIG_TOOL_DRAFT_CONFIG,
   CONFIG_TOOL_DRAFT_PROFILE,
   CONFIG_TOOL_DRAFT_PROVIDER,
+  CONFIG_TOOL_LIST_CONFIGS,
   CONFIG_TOOL_LIST_PROFILES,
   CONFIG_TOOL_LIST_PROVIDERS,
+  CONNECTION_MODES,
   GENERIC_EXEC_DELIVERIES,
   isConnectionMode,
   isGenericExecDelivery,
   isProviderTemplateId,
   isShellPolicy,
+  isWorkbenchPermissionLevel,
   MODEL_KINDS,
   PROVIDER_TEMPLATE_IDS,
+  REASONING_EFFORT_LEVELS,
   SHELL_POLICIES,
+  WORKBENCH_PERMISSION_LEVELS,
 } from "@ff-pane/shared";
 import type { McpToolDefinition } from "./protocol";
 
@@ -49,6 +63,47 @@ export const KEY_REFUSAL_NOTE =
   "API keys are NEVER handled by this tool. Do not ask the user for a key and do not put a key " +
   "into any field; after the user confirms the draft, the workbench UI will guide them to enter " +
   "the key in a secure input that the model cannot see.";
+
+const SECRET_VALUE = /^(?:sk[-_]|bearer\s)/i;
+
+function isMisleadingCode(code: number): boolean {
+  return (
+    code <= 31 ||
+    code === 127 ||
+    (code >= 0x200b && code <= 0x200f) ||
+    (code >= 0x202a && code <= 0x202e) ||
+    (code >= 0x2060 && code <= 0x2064) ||
+    (code >= 0x2066 && code <= 0x2069) ||
+    code === 0xfeff ||
+    code === 0x2028 ||
+    code === 0x2029
+  );
+}
+
+/** 展示用文本不得含会误导确认框的字符。换行、控制符、零宽字符、双向控制符都不收。 */
+export function plainTextError(field: string, value: string): string | undefined {
+  for (const char of value) {
+    const code = char.codePointAt(0) ?? 0;
+    if (isMisleadingCode(code)) {
+      return `Field "${field}" cannot contain newlines, control characters, zero-width characters, or hidden direction marks.`;
+    }
+  }
+  return undefined;
+}
+
+function rejectMisleading(field: string, value: string): string | undefined {
+  return plainTextError(field, value);
+}
+
+function rejectSecretBagEntry(bag: string, key: string, value: string): string | undefined {
+  const keyIsSecret = SECRET_LIKE_KEY.test(key);
+  const valueIsSecret =
+    SECRET_VALUE.test(value.trim()) || (bag === "extraEnv" && SECRET_LIKE_KEY.test(value));
+  if (keyIsSecret || valueIsSecret) {
+    return `${bag}.${key} is not accepted. ${KEY_REFUSAL_NOTE}`;
+  }
+  return rejectMisleading(`${bag}.${key}`, key) ?? rejectMisleading(`${bag}.${key}`, value);
+}
 
 /**
  * Provider 草案的字段白名单（= Provider 除 id / apiKeyRef 外的全部字段 + 可选 id 表示更新）。
@@ -93,7 +148,8 @@ export type ConfigProfileDraft = Omit<AgentProfile, "id">;
 /** 解析后的一份草案：kind 判别 + 可选 id（带 id 即更新）。 */
 export type ParsedConfigDraft =
   | { readonly kind: "provider"; readonly id?: string; readonly draft: ConfigProviderDraft }
-  | { readonly kind: "profile"; readonly id?: string; readonly draft: ConfigProfileDraft };
+  | { readonly kind: "profile"; readonly id?: string; readonly draft: ConfigProfileDraft }
+  | { readonly kind: "config"; readonly id?: string; readonly draft: ProjectConfigDraft };
 
 /** 解析结果判别联合（照 knowledge-tool 的 ParseToolArgsResult 款式）。 */
 export type ParseDraftResult =
@@ -267,12 +323,111 @@ export const CONFIG_DRAFT_PROFILE_TOOL: McpToolDefinition = {
   },
 };
 
-/** 全部工具声明（tools/list 顺序）。 */
+export const CONFIG_LIST_CONFIGS_TOOL: McpToolDefinition = {
+  name: CONFIG_TOOL_LIST_CONFIGS,
+  description:
+    "List workbench configs (name, whether it is the default, optional project scope, optional default " +
+    "permission, and the Claude / Codex route). A route is local login or a relay provider id, plus optional " +
+    "model and reasoning effort. No secrets are included. " +
+    `To create or update one, submit a draft via config_draft_config (the user must confirm). ${KEY_REFUSAL_NOTE}`,
+  inputSchema: { type: "object", properties: {}, additionalProperties: false },
+};
+
+const CONFIG_ROUTE_SCHEMA = {
+  type: "object",
+  properties: {
+    connectionMode: {
+      type: "string",
+      enum: [...CONNECTION_MODES],
+      description:
+        "local_cli uses the machine login. relay uses an existing or newly drafted provider.",
+    },
+    providerId: {
+      type: "string",
+      description: "Required when connectionMode is relay. Ignored for local_cli.",
+    },
+    model: {
+      type: "string",
+      description: "Optional model id. Omit to use the CLI default.",
+    },
+    reasoningEffort: {
+      type: "string",
+      enum: [...REASONING_EFFORT_LEVELS],
+      description: "Optional reasoning effort. Omit to use the CLI default.",
+    },
+  },
+  required: ["connectionMode"],
+  additionalProperties: false,
+} as const;
+
+/** 配置草案字段白名单。没有密钥字段。 */
+export const CONFIG_CONFIG_DRAFT_FIELDS = [
+  "id",
+  "name",
+  "isDefault",
+  "projectIds",
+  "defaultPermission",
+  "claude",
+  "codex",
+] as const;
+
+/** 一路的字段白名单。 */
+export const CONFIG_ROUTE_DRAFT_FIELDS = [
+  "connectionMode",
+  "providerId",
+  "model",
+  "reasoningEffort",
+] as const;
+
+export const CONFIG_DRAFT_CONFIG_TOOL: McpToolDefinition = {
+  name: CONFIG_TOOL_DRAFT_CONFIG,
+  description:
+    "Submit a draft to create or update a workbench config (name, Claude route, Codex route, optional " +
+    "default permission, optional project scope). The draft is shown to the user; NOTHING is saved until " +
+    "the user confirms. Pass id to update. The default config is open to every project and cannot be narrowed. " +
+    "A relay route needs a provider id; draft a provider first when none exists. " +
+    `${KEY_REFUSAL_NOTE}`,
+  inputSchema: {
+    type: "object",
+    properties: {
+      id: { type: "string", description: "Existing config id to update; omit to create." },
+      name: { type: "string", description: "Display name." },
+      isDefault: {
+        type: "boolean",
+        description: "Make this the default config. A default config cannot set projectIds.",
+      },
+      projectIds: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Projects allowed to use this config. Omit or empty = every project. Ignored when isDefault.",
+      },
+      defaultPermission: {
+        type: "string",
+        enum: [...WORKBENCH_PERMISSION_LEVELS],
+        description:
+          "Optional initial permission for new windows. Omit to use the global workbench default.",
+      },
+      claude: {
+        ...CONFIG_ROUTE_SCHEMA,
+        description: "Claude route. Omit to leave Claude unavailable.",
+      },
+      codex: {
+        ...CONFIG_ROUTE_SCHEMA,
+        description: "Codex route. Omit to leave Codex unavailable.",
+      },
+    },
+    required: ["name"],
+    additionalProperties: false,
+  },
+};
+
+/** 全部工具声明（tools/list 顺序）。档案工具不再注册。 */
 export const CONFIG_TOOLS: readonly McpToolDefinition[] = [
   CONFIG_LIST_PROVIDERS_TOOL,
-  CONFIG_LIST_PROFILES_TOOL,
+  CONFIG_LIST_CONFIGS_TOOL,
   CONFIG_DRAFT_PROVIDER_TOOL,
-  CONFIG_DRAFT_PROFILE_TOOL,
+  CONFIG_DRAFT_CONFIG_TOOL,
 ];
 
 // ── 入参解析（白名单严进：未知键拒绝，密钥字样的键给明确拒收话术） ─────────────────
@@ -315,7 +470,17 @@ function parseModels(
     if (id === undefined) {
       return { error: `models[${index}] needs non-empty "id".` };
     }
+    const idText = rejectMisleading(`models[${index}].id`, id);
+    if (idText !== undefined) {
+      return { error: idText };
+    }
     const label = nonEmptyString(record["label"]) ?? nonEmptyString(record["displayName"]);
+    if (label !== undefined) {
+      const labelText = rejectMisleading(`models[${index}].label`, label);
+      if (labelText !== undefined) {
+        return { error: labelText };
+      }
+    }
     const kind = record["kind"];
     if (kind !== undefined && kind !== "chat" && kind !== "embedding") {
       return { error: `models[${index}].kind must be "chat" or "embedding".` };
@@ -351,6 +516,10 @@ export function parseProviderDraftArgs(args: Readonly<Record<string, unknown>>):
   if (name === undefined) {
     return { ok: false, error: 'Field "name" is required and must be a non-empty string.' };
   }
+  const nameText = rejectMisleading("name", name);
+  if (nameText !== undefined) {
+    return { ok: false, error: nameText };
+  }
   const templateId = args["templateId"];
   if (!isProviderTemplateId(templateId)) {
     return {
@@ -375,6 +544,20 @@ export function parseProviderDraftArgs(args: Readonly<Record<string, unknown>>):
   const embeddingModel = nonEmptyString(args["embeddingModel"]);
   const proxy = nonEmptyString(args["proxy"]);
   const id = nonEmptyString(args["id"]);
+  for (const [field, value] of [
+    ["baseUrl", baseUrl],
+    ["defaultModelId", defaultModelId],
+    ["embeddingModel", embeddingModel],
+    ["proxy", proxy],
+    ["id", id],
+  ] as const) {
+    if (value !== undefined) {
+      const text = rejectMisleading(field, value);
+      if (text !== undefined) {
+        return { ok: false, error: text };
+      }
+    }
+  }
   const now = Date.now();
 
   let extraEnv: Record<string, string> | undefined;
@@ -390,6 +573,10 @@ export function parseProviderDraftArgs(args: Readonly<Record<string, unknown>>):
     for (const [k, v] of Object.entries(args["extraEnv"] as Record<string, unknown>)) {
       if (typeof v !== "string") {
         return { ok: false, error: `extraEnv.${k} must be a string.` };
+      }
+      const secret = rejectSecretBagEntry("extraEnv", k, v);
+      if (secret !== undefined) {
+        return { ok: false, error: secret };
       }
       extraEnv[k] = v;
     }
@@ -408,6 +595,10 @@ export function parseProviderDraftArgs(args: Readonly<Record<string, unknown>>):
     for (const [k, v] of Object.entries(args["options"] as Record<string, unknown>)) {
       if (typeof v !== "string") {
         return { ok: false, error: `options.${k} must be a string.` };
+      }
+      const secret = rejectSecretBagEntry("options", k, v);
+      if (secret !== undefined) {
+        return { ok: false, error: secret };
       }
       options[k] = v;
     }
@@ -578,6 +769,123 @@ export const PRESET_FROM_GLOBAL_DEFAULT: PermissionEnvelope = {
   dangerousOpsRequireApproval: true,
 };
 
+function parseConfigRoute(
+  value: unknown,
+  label: string,
+): { readonly ok: true; readonly route: ProjectConfigRoute } | { readonly error: string } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return { error: `Field "${label}" must be an object.` };
+  }
+  const record = value as Record<string, unknown>;
+  const unknown = rejectUnknownKeys(record, CONFIG_ROUTE_DRAFT_FIELDS);
+  if (unknown !== undefined) {
+    return { error: `${label}: ${unknown}` };
+  }
+  if (!isConnectionMode(record["connectionMode"])) {
+    return {
+      error: `Field "${label}.connectionMode" must be one of: ${CONNECTION_MODES.join(", ")}.`,
+    };
+  }
+  const providerId = nonEmptyString(record["providerId"]);
+  const model = nonEmptyString(record["model"]);
+  const effort = nonEmptyString(record["reasoningEffort"]);
+  for (const [field, value] of [
+    [`${label}.providerId`, providerId],
+    [`${label}.model`, model],
+    [`${label}.reasoningEffort`, effort],
+  ] as const) {
+    if (value !== undefined) {
+      const text = rejectMisleading(field, value);
+      if (text !== undefined) {
+        return { error: text };
+      }
+    }
+  }
+  const route: ProjectConfigRoute = {
+    connectionMode: record["connectionMode"] as ConnectionMode,
+    ...(providerId !== undefined ? { providerId: providerId as ProviderId } : {}),
+    ...(model !== undefined ? { model } : {}),
+    ...(effort !== undefined ? { reasoningEffort: effort as ReasoningEffortLevel } : {}),
+  };
+  return { ok: true, route };
+}
+
+/**
+ * 解析 config_draft_config 的入参。形状检查在此；默认范围、来源是否存在等与设置页相同的规则在主进程。
+ */
+export function parseConfigDraftArgs(args: Readonly<Record<string, unknown>>): ParseDraftResult {
+  const unknown = rejectUnknownKeys(args, CONFIG_CONFIG_DRAFT_FIELDS);
+  if (unknown !== undefined) {
+    return { ok: false, error: unknown };
+  }
+  const name = nonEmptyString(args["name"]);
+  if (name === undefined) {
+    return { ok: false, error: 'Field "name" is required and must be a non-empty string.' };
+  }
+  const nameText = rejectMisleading("name", name);
+  if (nameText !== undefined) {
+    return { ok: false, error: nameText };
+  }
+  if (args["isDefault"] !== undefined && typeof args["isDefault"] !== "boolean") {
+    return { ok: false, error: 'Field "isDefault" must be a boolean.' };
+  }
+  let projectIds: string[] | undefined;
+  if (args["projectIds"] !== undefined) {
+    if (
+      !Array.isArray(args["projectIds"]) ||
+      !args["projectIds"].every((item): item is string => typeof item === "string")
+    ) {
+      return { ok: false, error: 'Field "projectIds" must be an array of strings.' };
+    }
+    projectIds = args["projectIds"];
+    for (const [index, projectId] of projectIds.entries()) {
+      const text = rejectMisleading(`projectIds[${index}]`, projectId);
+      if (text !== undefined) {
+        return { ok: false, error: text };
+      }
+    }
+  }
+  if (
+    args["defaultPermission"] !== undefined &&
+    !isWorkbenchPermissionLevel(args["defaultPermission"])
+  ) {
+    return {
+      ok: false,
+      error: `Field "defaultPermission" must be one of: ${WORKBENCH_PERMISSION_LEVELS.join(", ")}.`,
+    };
+  }
+  let claude: ProjectConfigRoute | undefined;
+  if (args["claude"] !== undefined) {
+    const parsed = parseConfigRoute(args["claude"], "claude");
+    if (!("ok" in parsed)) {
+      return { ok: false, error: parsed.error };
+    }
+    claude = parsed.route;
+  }
+  let codex: ProjectConfigRoute | undefined;
+  if (args["codex"] !== undefined) {
+    const parsed = parseConfigRoute(args["codex"], "codex");
+    if (!("ok" in parsed)) {
+      return { ok: false, error: parsed.error };
+    }
+    codex = parsed.route;
+  }
+  const id = nonEmptyString(args["id"]);
+  const draft: ProjectConfigDraft = {
+    name,
+    isDefault: args["isDefault"] === true,
+    ...(projectIds !== undefined && projectIds.length > 0
+      ? { projectIds: projectIds as unknown as ProjectId[] }
+      : {}),
+    ...(isWorkbenchPermissionLevel(args["defaultPermission"])
+      ? { defaultPermission: args["defaultPermission"] as WorkbenchPermissionLevel }
+      : {}),
+    ...(claude !== undefined ? { claude } : {}),
+    ...(codex !== undefined ? { codex } : {}),
+  };
+  return { ok: true, parsed: { kind: "config", ...(id !== undefined ? { id } : {}), draft } };
+}
+
 // ── 脱敏视图（list 工具的输出；铁律 1 的第二层证据） ─────────────────────────────
 
 /** Provider 的脱敏视图：逐字段显式构造，**永不展开原对象**，key 折算为布尔。 */
@@ -619,6 +927,52 @@ export function renderProviderList(providers: readonly Provider[]): string {
   return [
     `${views.length} provider(s) configured. API keys are never included; "apiKeyConfigured" tells whether one is stored.`,
     "To create or update one, submit a draft via config_draft_provider (the user must confirm).",
+    "",
+    JSON.stringify(views, null, 2),
+  ].join("\n");
+}
+
+function sanitizeRoute(route: ProjectConfigRoute): ProjectConfigRoute {
+  return {
+    connectionMode: route.connectionMode,
+    ...(route.providerId !== undefined ? { providerId: route.providerId } : {}),
+    ...(route.model !== undefined ? { model: route.model } : {}),
+    ...(route.reasoningEffort !== undefined ? { reasoningEffort: route.reasoningEffort } : {}),
+  };
+}
+
+/** 配置的只读视图：只抄已知字段，调用方多出来的密钥字段不会出现。 */
+export function sanitizeProjectConfig(config: ProjectConfig): {
+  readonly id: string;
+  readonly name: string;
+  readonly isDefault: boolean;
+  readonly projectIds?: readonly string[];
+  readonly defaultPermission?: WorkbenchPermissionLevel;
+  readonly claude?: ProjectConfigRoute;
+  readonly codex?: ProjectConfigRoute;
+} {
+  return {
+    id: config.id,
+    name: config.name,
+    isDefault: config.isDefault === true,
+    ...(config.projectIds !== undefined && config.projectIds.length > 0
+      ? { projectIds: [...config.projectIds] }
+      : {}),
+    ...(config.defaultPermission !== undefined
+      ? { defaultPermission: config.defaultPermission }
+      : {}),
+    ...(config.claude !== undefined ? { claude: sanitizeRoute(config.claude) } : {}),
+    ...(config.codex !== undefined ? { codex: sanitizeRoute(config.codex) } : {}),
+  };
+}
+
+/** 渲染配置列表。 */
+export function renderConfigList(configs: readonly ProjectConfig[]): string {
+  const views = configs.map((config) => sanitizeProjectConfig(config));
+  return [
+    `${views.length} config(s). Secrets are never included.`,
+    "To create or update one, submit a draft via config_draft_config (the user must confirm).",
+    "A relay route needs a provider. Draft one with config_draft_provider when it does not exist yet.",
     "",
     JSON.stringify(views, null, 2),
   ].join("\n");

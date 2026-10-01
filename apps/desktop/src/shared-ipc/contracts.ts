@@ -92,11 +92,36 @@ export type ConfigDraftPayload =
       /** 更新目标（带 = 更新既有条目；缺省 = 新建）。 */
       readonly targetId?: ProviderId;
       readonly draft: ConfigProviderDraftWire;
+      /** 更新时的脱敏现状。不含 apiKeyRef。 */
+      readonly current?: {
+        readonly id: string;
+        readonly name: string;
+        readonly templateId: string;
+        readonly baseUrl?: string;
+        readonly models: readonly {
+          readonly id: string;
+          readonly label?: string;
+          readonly kind?: string;
+        }[];
+        readonly defaultModelId?: string;
+        readonly embeddingModel?: string;
+        readonly proxy?: string;
+        readonly timeoutS?: number;
+        readonly enabled: boolean;
+        readonly apiKeyConfigured: boolean;
+      };
     }
   | {
       readonly kind: "profile";
       readonly targetId?: ProfileId;
       readonly draft: ConfigProfileDraftWire;
+    }
+  | {
+      readonly kind: "config";
+      readonly targetId?: ProjectConfigId;
+      readonly draft: ProjectConfigDraft;
+      /** 更新时的现状。新建时缺省。 */
+      readonly current?: ProjectConfig;
     };
 
 /**
@@ -115,6 +140,30 @@ export interface RespondConfigDraftRequest {
   readonly apiKey?: string;
   /** 拒绝原因（原样回给 Agent，供其调整草案）。 */
   readonly reason?: string;
+}
+
+/** 工作台确认框回执。windowId 对应草案中枢的 turnId。 */
+export interface RespondWorkbenchConfigDraftRequest {
+  readonly windowId: string;
+  readonly draftId: string;
+  readonly decision: "confirm" | "reject";
+  readonly apiKey?: string;
+  readonly reason?: string;
+}
+
+/** 推给工作台确认框的一份草案。 */
+export interface WorkbenchConfigDraftEvent {
+  readonly windowId: string;
+  readonly draftId: string;
+  readonly summary: string;
+  readonly needsApiKey: boolean;
+  readonly payload: ConfigDraftPayload;
+}
+
+/** 草案已了结（确认、取消、超时），确认框应关掉。 */
+export interface WorkbenchConfigDraftResolvedEvent {
+  readonly windowId: string;
+  readonly draftId: string;
 }
 
 /** session:respond-config-draft 应答：ok=false 时给出人可读的失败原因（如落盘校验失败）。 */
@@ -1382,6 +1431,11 @@ export interface IpcInvokeContracts {
     request: { readonly projectId: ProjectId };
     response: WorkbenchPanelActivityResponse;
   };
+  /** 用户确认或取消一份自配置草案。未确认不落盘。 */
+  "workbench:respond-config-draft": {
+    request: RespondWorkbenchConfigDraftRequest;
+    response: ConfigDraftAck;
+  };
   /** 列出工作台已登记的全部项目（注册表原样，只读 projects.json，不碰任何项目目录）。 */
   "projects:list": { request: undefined; response: readonly ProjectRegistryEntry[] };
   /**
@@ -1584,6 +1638,8 @@ export interface IpcEventContracts {
   "workbench:open-panel": { payload: WorkbenchOpenPanelEvent };
   "workbench:window-closed": { payload: WorkbenchWindowClosedEvent };
   "workbench:manager-grant": { payload: WorkbenchManagerGrantEvent };
+  "workbench:config-draft": { payload: WorkbenchConfigDraftEvent };
+  "workbench:config-draft-resolved": { payload: WorkbenchConfigDraftResolvedEvent };
 }
 
 export type InvokeChannel = keyof IpcInvokeContracts;
@@ -1632,6 +1688,7 @@ export const INVOKE_CHANNELS = [
   "workbench:read-threads",
   "workbench:open-ffpane",
   "workbench:panel-activity",
+  "workbench:respond-config-draft",
   "projects:list",
   "projects:summary",
   "projects:create",
@@ -1707,6 +1764,8 @@ export const EVENT_CHANNELS = [
   "workbench:open-panel",
   "workbench:window-closed",
   "workbench:manager-grant",
+  "workbench:config-draft",
+  "workbench:config-draft-resolved",
 ] as const satisfies readonly EventChannel[];
 
 type AssertNever<T extends never> = T;

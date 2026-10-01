@@ -1954,3 +1954,256 @@ Claude 带参数的 `/model` 在已有对话时会不会再要一次确认，官
 - [开发进度](../开发进度.md)
 - 检查：[2026-10-01 18:00 · T10.13 · 检查 · 清理](./Phase10-对话总记录.md)
 
+## 2026-10-01 18:32 · T10.14 · 执行 · 串联
+
+### 任务要点
+
+按计划 §9.2 定稿、§9.5 第 3、6、7 条、§9.6 第 2 条、§9.7、§8、§3.2.1、§7.3、§7.4，以及总记录「2026-10-01 14:03 · Phase10 · T10.12-0 · 调研 · 串联审计」第 1、3、5 节，做四件事：AI 输出语言写进窗口角色提示；已通过且启用的习惯写进同一份提示；自配置工具改为起草配置、只给管理者、须确认；用户主动要求时管理者派工作者总结沉淀。不提交。
+
+### 结论
+
+#### AI 输出语言
+
+设置页增加「跟随（不指定）」。选简体中文或 English 时，打开 Claude / Codex 窗口会把一句「请用该语言回复」接在该窗口角色提示后面。选跟随、空值或无法识别的值不写。出厂默认仍是简体中文，所以没改过这项的窗口会要求用中文回复。Claude 写进该窗口临时文件；Codex 走现有的本窗口 `developer_instructions`。不写 PTY，不改本机 CLI 全局设置。设置页说明已改成这句话。
+
+#### 习惯
+
+开窗口时用 `compileHabitProfile` 只取已通过且启用的习惯，接在同一份角色提示里。停用、待审核、已归档（删除）不带。习惯段上限 4000 字，超出在换行处截断并写明「其余习惯因长度上限未写入」。没有把「根据纠正自动生成习惯候选」接回来。记忆页习惯说明已改成与上述事实一致。
+
+#### 自配置工具
+
+工具改为 `config_list_providers`、`config_list_configs`、`config_draft_provider`、`config_draft_config`。不再注册档案列表和档案草案。中转路需要新来源时仍可起草来源；密钥只能在确认框里手输，schema、列表和草案里都没有密钥或 `apiKeyRef`。只在该项目 `configToolEnabled` 打开、且窗口角色是管理者时挂上 `ffpane-config`。草案先走与设置页相同的校验（默认配置不能收窄范围、名单外仍绑定不许收窄、中转来源必须存在、不能取消唯一默认）。校验通过后工作台弹出确认框，展示全部字段和与现状的差异；确认才写入 `configs.json`，取消丢弃。设置页开关说明已改回：打开后注册给该项目的管理者窗口，写入须经你确认。§3.2.1 和 `manager.md` 已写上这套工具。
+
+#### 总结沉淀
+
+`manager.md` 写明：只有用户主动要求总结时，管理者才派一个工作者去总结；工作者用 `ffpane_memory_add` 写成待审核记忆（现有 120 / 2000 字和 10 秒间隔），再用 `ffpane_report` 汇报。不自动触发，不新增写知识库的工具。`worker.md` 补了总结任务的写法。
+
+### 改动文件
+
+- 语言与习惯注入：`packages/shared/src/domain/language.ts`、`packages/shared/src/domain/config.ts`、`packages/storage/src/config/store.ts`、`packages/core/src/habit/compile.ts`、`packages/core/src/workbench-role/launch-prompt.ts`、`packages/core/src/workbench-role/index.ts`、`apps/desktop/src/main/workbench/handlers.ts`、`apps/desktop/src/renderer/src/pages/settings/LanguageSection.tsx`
+- 自配置：`apps/desktop/src/mcp/config-tool.ts`、`apps/desktop/src/mcp/config-server.ts`、`apps/desktop/src/main/session/config-tool.ts`、`apps/desktop/src/main/session/config-draft-hub.ts`、`apps/desktop/src/main/workbench/config-draft-validate.ts`、`apps/desktop/src/main/workbench/config-draft-apply.ts`、`apps/desktop/src/main/workbench/config-tool-attach.ts`、`apps/desktop/src/main/workbench/launch-cli.ts`、`apps/desktop/src/main/data.ts`、`apps/desktop/src/main/index.ts`、`apps/desktop/src/shared-ipc/contracts.ts`、`apps/desktop/src/renderer/src/pages/workbench/WorkbenchConfigDraftDialog.tsx`、`apps/desktop/src/renderer/src/App.tsx`
+- 文案与说明：`locales/zh-CN.json`、`locales/en-US.json`、`apps/desktop/resources/workbench-roles/manager.md`、`apps/desktop/resources/workbench-roles/worker.md`、`docs/Phase10-多窗口终端工作台计划.md`（§3.2.1 工具清单）
+- 测试：`packages/core/tests/launch-prompt.test.ts`、`apps/desktop/tests/mcp-config-tool.test.ts`、`apps/desktop/tests/session-config-tool.test.ts`、`apps/desktop/tests/workbench-config-draft.test.ts`、`apps/desktop/tests/e2e/config-tool.spec.ts`、`apps/desktop/tests/e2e/config-tool-workbench.spec.ts`
+
+### 命令结果
+
+- `pnpm lint`：通过。Biome 759 个文件。`check-i18n` PASS。
+- `pnpm --filter @ff-pane/shared build`、`pnpm --filter @ff-pane/core build`、`pnpm --filter @ff-pane/storage build`：通过。给 desktop typecheck 用。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过（node、web、e2e）。
+- 相关单测：`packages/core` `launch-prompt.test.ts` 7 过；desktop `workbench-config-draft.test.ts`、`mcp-config-tool.test.ts`、`session-config-tool.test.ts` 共 47 过。
+- e2e：`electron-vite build` 后，`config-tool.spec.ts` 2 过，`config-tool-workbench.spec.ts` 1 过（管理者确认后配置出现、取消不变、工作者窗口没有该工具）。
+
+### 问题与遗留
+
+- 未提交。未改 `apps/desktop/scripts/real-config-probe.mjs`。未读写 `~/.aiworkbench`，未改 `~/.claude`、`~/.codex`。未跑消耗额度的命令。
+- 计划 §9 总表里 T10.14 仍写「待开工」。本节是执行结果，状态行留给检查通过后的提交步骤。
+- 旧档案草案解析函数还在，工具面已不再注册。会话编排不在磁盘上，没有接回。
+- 语言和习惯在启动时写进角色提示。窗口开着之后改设置或习惯，要重启该窗口才生效。
+- Codex 的角色提示仍是启动参数里的 `developer_instructions`，不是临时文件；正文不进 PTY。
+- 不需要主控决策。
+
+### 相关文件链接
+
+- [Phase 10 计划 §3.2.1、§9.5、§9.6、§9.7](../Phase10-多窗口终端工作台计划.md)
+- 审计：[2026-10-01 14:03 · Phase10 · T10.12-0 · 调研 · 串联审计](./Phase10-对话总记录.md)
+- 注入：`packages/core/src/workbench-role/launch-prompt.ts`、`apps/desktop/src/main/workbench/handlers.ts`
+- 确认框：`apps/desktop/src/renderer/src/pages/workbench/WorkbenchConfigDraftDialog.tsx`
+- 说明书：`apps/desktop/resources/workbench-roles/manager.md`、`apps/desktop/resources/workbench-roles/worker.md`
+- e2e：`apps/desktop/tests/e2e/config-tool-workbench.spec.ts`
+
+## 2026-10-01 19:02 · T10.14 · 检查 · 串联
+
+### 任务要点
+
+独立检查未提交的 T10.14。对照计划 §9.2 定稿、§9.5 第 3、6、7 条、§9.6 第 2 条、§9.7、§9.8、§3.2.1、§4.1、§7.3、§7.4，以及总记录「2026-10-01 18:32 · T10.14 · 执行 · 串联」。未改实现，未提交。
+
+### 结论
+
+有条件通过。四件事的主路径都在：语言和已启用习惯写入本窗口角色提示；自配置改为起草配置，普通角色和开关关闭不挂；未确认不落盘；说明书写了「只有用户要求才总结 → 派工作者 → `ffpane_memory_add` 待审核 → 汇报」，没有新的写知识库工具。
+
+必须修复 4 项，修完再给 Tony 试用：
+
+1. `manager.md` 2921 字节，超过说明书测试上限 2048，`pnpm test` 因此失败。写短，保留总结和确认两句。
+2. 冷读后管理权未恢复、或被清洗锁住的管理者，角色名仍是 manager，自配置工具仍会挂上。应拿不到。
+3. 确认框不清洗零宽字符和双向控制符；来源草案的 `extraEnv` 可夹带密钥且确认框不展示，确认后会写入 `providers.json`。
+4. 短时间 30 份合格草案全部进入待确认。界面同时只显示一个，但没有上限或合并。
+
+建议不挡：Codex 仍把提示放进本次进程参数而不是临时文件；不存在的项目 id 能写进范围；无法识别的输出语言会被收成简体中文。
+
+不需要主控决策。
+
+### 改动文件
+
+- 新增 `docs/验收记录/T10.14-验收.md`
+- 本条追加到总记录
+
+### 命令结果
+
+- `pnpm lint`：通过。Biome 759 个文件。`check-i18n` PASS。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过（node、web、e2e）。
+- `pnpm test`：2413 过 / 1 失败 / 1 跳过。失败是 `manager.md` 超 2048 字节，不是偶发。
+- `pnpm smoke`：11 项 ALL PASS。FF-pane v0.10.15。pdfjs 缺 canvas 的警告在 PASS 之前。
+- `pnpm test:e2e`：52 过（约 5.3 分钟）。含管理者确认草案、非管理者没有工具、config MCP 无密钥字段。无 flake。
+- 打包冒烟：`electron-builder --win dir` 到系统临时目录，数据根隔离后 `--smoke` ALL PASS。打包内有新的 `manager.md` 和 `config-mcp.js`。临时目录已删。
+
+### 问题与遗留
+
+- 未提交。未改实现，未改 `apps/desktop/scripts/real-config-probe.mjs`。未读写 `~/.aiworkbench`，未改 `~/.claude`、`~/.codex`。未跑消耗额度的命令。探针文件已删。
+- 必须项见验收记录第 4 节。
+
+### 相关文件链接
+
+- [T10.14 验收记录](../验收记录/T10.14-验收.md)
+- 执行：[2026-10-01 18:32 · T10.14 · 执行 · 串联](./Phase10-对话总记录.md)
+
+## 2026-10-01 19:14 · T10.14 · 修复 · 串联
+
+### 任务要点
+
+按验收记录「必须修复」四项改。建议里没有改动小到可以顺手做的：Codex 改临时文件验收写明可以以后再做；不存在的项目 id、无法识别的语言收口拿不准，没动；设为默认仍保持拒绝；开着的窗口仍要重启才吃到新语言和习惯。
+
+### 结论
+
+四项都按验收写明的改法修了。
+
+1. **说明书超长。** `manager.md` 从 2921 字节压到 2035 字节（上限 2048），仍是 LF。留下「只有 Tony 主动要求总结时」和「确认后才保存」。模型切换和自配置的约束还在，只是写短了。
+2. **未恢复管理权仍挂工具。** 挂载增加「这次启动会授予或已经授予管理权」。已授予、用户重新授权的顶层管理者、父级已授予而继承的，才挂。冷读后不授予、被清洗锁住、父级还没授予的子管理者，不挂。伪造令牌仍走原来的控制通道拒绝，没改那条。
+3. **确认框误导和隐藏密钥。** 名称、模型、地址、代理、项目 id、附加环境变量和模板选项里的换行、控制符、零宽字符、双向控制符，解析时直接拒绝，不进确认框。`extraEnv` 的键或值像密钥（含 `ANTHROPIC_API_KEY`、`sk-` 开头）也拒绝。确认框补上默认模型、向量模型、代理、超时、附加环境变量、模板选项，这些非密钥字段能看见。密钥仍只在确认框手输。
+4. **草案刷屏。** 同时最多 3 份在等确认。多出来的写回「没有交给用户，也没有保存」，不弹下一个。
+
+### 改动文件
+
+- `apps/desktop/resources/workbench-roles/manager.md`
+- `apps/desktop/src/main/workbench/config-tool-attach.ts`
+- `apps/desktop/src/main/workbench/handlers.ts`
+- `apps/desktop/src/main/session/config-draft-hub.ts`
+- `apps/desktop/src/mcp/config-tool.ts`
+- `apps/desktop/src/renderer/src/pages/workbench/WorkbenchConfigDraftDialog.tsx`
+- `locales/zh-CN.json`、`locales/en-US.json`
+- 测试：`apps/desktop/tests/workbench-config-draft.test.ts`、`apps/desktop/tests/mcp-config-tool.test.ts`、`apps/desktop/tests/e2e/config-tool-workbench.spec.ts`
+
+### 命令结果
+
+- `pnpm lint`：通过。Biome 759 个文件。`check-i18n` PASS。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过（node、web、e2e）。
+- 相关单测：`workbench-config-draft.test.ts`、`mcp-config-tool.test.ts`、`workbench-role-resources.test.ts`、`session-config-tool.test.ts` 共 54 过。修完正则写法后又跑前三份，40 过。
+- 受影响 e2e：`config-tool-workbench.spec.ts` 1 过（约 24 秒）。含确认、取消、零宽名称被拒、第 4 份草案不进确认框、工作者没有该工具。
+
+### 问题与遗留
+
+- 未提交。未改 `apps/desktop/scripts/real-config-probe.mjs`。未读写 `~/.aiworkbench`，未改 `~/.claude`、`~/.codex`。未跑消耗额度的命令。
+- 建议 5 条都没改，原因见任务要点。
+- 不需要主控决策。
+
+### 相关文件链接
+
+- [T10.14 验收记录](../验收记录/T10.14-验收.md)
+- 检查：[2026-10-01 19:02 · T10.14 · 检查 · 串联](./Phase10-对话总记录.md)
+
+## 2026-10-01 19:39 · T10.14 · 复验 · 串联
+
+### 任务要点
+
+复验 4 项必须修。重跑首验失败的探针，并核对上一轮通过的探针。完整跑 lint、desktop typecheck、`pnpm test`、`pnpm smoke`、`pnpm test:e2e`，以及打包冒烟。未改实现，未提交。
+
+### 结论
+
+通过。4 项必须修都成立，上一轮通过的探针没有被修坏。可以按验收记录里的手动试用步骤给 Tony 试用。建议 5 条仍未改，不挡。
+
+### 改动文件
+
+- 在 `docs/验收记录/T10.14-验收.md` 末尾追加「复验」
+- 本条追加到总记录
+
+### 命令结果
+
+- `pnpm lint`：通过。Biome 759 个文件。`check-i18n` PASS。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- `pnpm test`：2417 过 / 1 跳过（142 个文件）。首跑即过。
+- `pnpm smoke`：11 项 ALL PASS。FF-pane v0.10.15。
+- `pnpm test:e2e`：52 过（约 5.6 分钟）。无 flake。
+- 打包冒烟：临时目录 `--smoke` 退出码 0。打包内 `manager.md` 2035 字节，含总结和确认两句。`app.asar` 含 `config-mcp.js`。临时目录已删。
+
+### 问题与遗留
+
+- 未提交。未改 `apps/desktop/scripts/real-config-probe.mjs`。未读写 `~/.aiworkbench`，未改 `~/.claude`、`~/.codex`。未跑消耗额度的命令。探针已删。
+- 不需要主控决策。
+
+### 相关文件链接
+
+- [T10.14 验收记录](../验收记录/T10.14-验收.md)
+- 修复：[2026-10-01 19:14 · T10.14 · 修复 · 串联](./Phase10-对话总记录.md)
+
+## 2026-10-01 19:42 · T10.14 · 提交 · v0.10.16
+
+### 任务要点
+
+按计划 §7.2 第 4 步提交 T10.14。版本 `0.10.15` → `0.10.16`（根与 desktop 的 `package.json`、README 状态行、测试里的假 AppInfo）。开发进度登记 T10.14 已验收和验收建议。计划 §4、§9、§7.5 同步。轻量 tag `v0.10.16`，不 push。
+
+### 结论
+
+已提交并打轻量 tag `v0.10.16`，未 push。不需要主控决策。下一步 T10.15 加固。
+
+### 改动文件
+
+暂存并提交（不含 `apps/desktop/scripts/real-config-probe.mjs`，不含 `apps/desktop/out`）：
+
+- `package.json`
+- `apps/desktop/package.json`
+- `README.md`
+- `locales/zh-CN.json`
+- `locales/en-US.json`
+- `apps/desktop/resources/workbench-roles/manager.md`
+- `apps/desktop/resources/workbench-roles/worker.md`
+- `apps/desktop/src/main/data.ts`
+- `apps/desktop/src/main/index.ts`
+- `apps/desktop/src/main/session/config-draft-hub.ts`
+- `apps/desktop/src/main/session/config-tool.ts`
+- `apps/desktop/src/main/workbench/handlers.ts`
+- `apps/desktop/src/main/workbench/launch-cli.ts`
+- `apps/desktop/src/main/workbench/config-draft-apply.ts`
+- `apps/desktop/src/main/workbench/config-draft-validate.ts`
+- `apps/desktop/src/main/workbench/config-tool-attach.ts`
+- `apps/desktop/src/mcp/config-server.ts`
+- `apps/desktop/src/mcp/config-tool.ts`
+- `apps/desktop/src/renderer/src/App.tsx`
+- `apps/desktop/src/renderer/src/pages/settings/LanguageSection.tsx`
+- `apps/desktop/src/renderer/src/pages/workbench/WorkbenchConfigDraftDialog.tsx`
+- `apps/desktop/src/shared-ipc/contracts.ts`
+- `apps/desktop/tests/client-server.test.ts`
+- `apps/desktop/tests/command-ipc.test.ts`
+- `apps/desktop/tests/e2e/config-tool.spec.ts`
+- `apps/desktop/tests/e2e/config-tool-workbench.spec.ts`
+- `apps/desktop/tests/mcp-config-tool.test.ts`
+- `apps/desktop/tests/session-config-tool.test.ts`
+- `apps/desktop/tests/workbench-config-draft.test.ts`
+- `packages/core/src/habit/compile.ts`
+- `packages/core/src/workbench-role/index.ts`
+- `packages/core/src/workbench-role/launch-prompt.ts`
+- `packages/core/tests/launch-prompt.test.ts`
+- `packages/shared/src/domain/config.ts`
+- `packages/shared/src/domain/language.ts`
+- `packages/storage/src/config/store.ts`
+- `docs/Phase10-多窗口终端工作台计划.md`
+- `docs/开发进度.md`
+- `docs/验收记录/T10.14-验收.md`
+- `docs/对话记录/Phase10-对话总记录.md`
+
+### 命令结果
+
+- `pnpm lint`：通过。Biome 759 个文件。`check-i18n` PASS。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- `vitest run apps/desktop/tests/client-server.test.ts apps/desktop/tests/command-ipc.test.ts`：2 个文件，73 过。
+- 提交信息：`feat: T10.14 语言习惯注入、自配置改起草配置、总结沉淀`
+- 轻量 tag `v0.10.16`，未 push
+- 提交哈希：见下一条补记
+
+### 问题与遗留
+
+未纳入 `apps/desktop/scripts/real-config-probe.mjs`。验收建议仍是：Codex 提示在本次进程参数里；草案可写入不存在的项目 id；无法识别的输出语言会收成简体中文；带范围的配置设为默认时草案直接拒绝；语言和习惯要重启窗口才生效。
+
+### 相关文件链接
+
+- [T10.14 验收记录](../验收记录/T10.14-验收.md)
+- 复验：[2026-10-01 19:39 · T10.14 · 复验 · 串联](./Phase10-对话总记录.md)
+

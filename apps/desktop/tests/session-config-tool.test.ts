@@ -22,8 +22,8 @@ import {
   CONFIG_MCP_SCRIPT,
   createConfigMailbox,
   ENV_CONFIG_AUDIT,
+  ENV_CONFIG_CONFIGS,
   ENV_CONFIG_MAILBOX,
-  ENV_CONFIG_PROFILES,
   ENV_CONFIG_PROVIDERS,
   readConfigAudit,
   resolveConfigMcpServer,
@@ -44,14 +44,14 @@ describe("resolveConfigMcpServer（装配）", () => {
       moduleDir: "/app/out/main",
       mailbox: MAILBOX,
       providersFile: "/root/.aiworkbench/providers.json",
-      profilesFile: "/root/.aiworkbench/profiles.json",
+      configsFile: "/root/.aiworkbench/configs.json",
     });
     expect(spec.command).toBe(process.execPath);
     expect(spec.args).toEqual([join("/app/out/main", CONFIG_MCP_SCRIPT)]);
     expect(spec.env?.["ELECTRON_RUN_AS_NODE"]).toBe("1");
     expect(spec.env?.[ENV_CONFIG_MAILBOX]).toBe(MAILBOX.mailboxDir);
     expect(spec.env?.[ENV_CONFIG_PROVIDERS]).toBe("/root/.aiworkbench/providers.json");
-    expect(spec.env?.[ENV_CONFIG_PROFILES]).toBe("/root/.aiworkbench/profiles.json");
+    expect(spec.env?.[ENV_CONFIG_CONFIGS]).toBe("/root/.aiworkbench/configs.json");
     expect(spec.env?.[ENV_CONFIG_AUDIT]).toBe(MAILBOX.auditPath);
   });
 
@@ -60,7 +60,7 @@ describe("resolveConfigMcpServer（装配）", () => {
       moduleDir: "/m",
       mailbox: MAILBOX,
       providersFile: "/p.json",
-      profilesFile: "/f.json",
+      configsFile: "/f.json",
     });
     expect(spec.allowedTools).toEqual([...CONFIG_TOOL_NAMES]);
   });
@@ -70,7 +70,7 @@ describe("resolveConfigMcpServer（装配）", () => {
       moduleDir: "/m",
       mailbox: MAILBOX,
       providersFile: "/p.json",
-      profilesFile: "/f.json",
+      configsFile: "/f.json",
     });
     for (const key of Object.keys(spec.env ?? {})) {
       expect(/secret|token|password|api.?key/i.test(key)).toBe(false);

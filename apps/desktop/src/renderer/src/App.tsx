@@ -15,6 +15,7 @@ import { AppLayout } from "./layout/AppLayout";
 import { navItemById } from "./layout/nav";
 import { SecondaryPanelProvider } from "./layout/secondary-panel";
 import { AppRoutes } from "./pages/AppRoutes";
+import { WorkbenchConfigDraftDialog } from "./pages/workbench/WorkbenchConfigDraftDialog";
 import { WorkbenchFlushBridge } from "./pages/workbench/WorkbenchFlushBridge";
 import { WorkbenchPanelBridge } from "./pages/workbench/WorkbenchPanelBridge";
 import { useUiStore } from "./stores/ui";
@@ -114,6 +115,7 @@ export function App(): ReactElement {
         <AppCommandPalette>
           <SecondaryPanelProvider>
             <WorkbenchPanelBridge />
+            <WorkbenchConfigDraftDialog />
             <AppLayout>
               <AppRoutes />
             </AppLayout>

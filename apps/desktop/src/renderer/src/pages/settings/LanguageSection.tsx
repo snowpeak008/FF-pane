@@ -1,4 +1,4 @@
-import { AI_OUTPUT_LANGUAGES, type AiOutputLanguage } from "@ff-pane/shared";
+import { AI_OUTPUT_LANGUAGES, type AiOutputLanguageSetting } from "@ff-pane/shared";
 import { type ReactElement, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -17,7 +17,7 @@ const selectClass = cn(inputVariants({}), "w-48 cursor-pointer");
 /**
  * 语言设置区（W3.2b / 设计文档 §9）：界面语言（§9.1）与 AI 输出语言（§9.2）互不影响。
  * 界面语言即时生效并持久化 localStorage（i18n 既有机制）；
- * AI 输出语言写全局 config.json（主进程 Prompt 组装 T4.1 消费），故经 config:update。
+ * AI 输出语言写全局 config.json。打开 Claude / Codex 窗口时写进该窗口的角色提示。
  */
 export function LanguageSection(): ReactElement {
   const { t, i18n } = useTranslation();
@@ -34,7 +34,7 @@ export function LanguageSection(): ReactElement {
     void changeUiLanguage(next);
   };
 
-  const onOutputChange = async (language: AiOutputLanguage): Promise<void> => {
+  const onOutputChange = async (language: AiOutputLanguageSetting): Promise<void> => {
     const settled = await invokeQuery("config:update", { aiOutputLanguage: language });
     if (settled.status === "error") {
       toast.error(t("settings.outputLanguage.error"), { description: settled.error.message });
@@ -93,10 +93,9 @@ export function LanguageSection(): ReactElement {
             id="setting-output-language"
             className={selectClass}
             value={config.aiOutputLanguage}
-            onChange={(e) => void onOutputChange(e.target.value as AiOutputLanguage)}
+            onChange={(e) => void onOutputChange(e.target.value as AiOutputLanguageSetting)}
           >
-            {/* AI 输出语言仍走 t(languageName)：它不绑语言包（可以有没有界面翻译的输出语言），
-                故没有"自称"可取，其名字只能由语言包提供。这是与上面界面语言选择器的刻意分歧。 */}
+            <option value="follow">{t("settings.outputLanguage.follow")}</option>
             {AI_OUTPUT_LANGUAGES.map((lang) => (
               <option key={lang} value={lang}>
                 {t(`settings.languageName.${lang}`)}

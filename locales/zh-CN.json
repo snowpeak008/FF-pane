@@ -300,6 +300,43 @@
       "cancel": "取消",
       "confirm": "打开"
     },
+    "configDraft": {
+      "titleCreate": "确认新建",
+      "titleUpdate": "确认修改",
+      "description": "看完字段和与现状的差异后再决定。取消不会保存。密钥只在这里手输，不会交给 AI。",
+      "confirm": "确认保存",
+      "cancel": "取消",
+      "confirmed": "已保存",
+      "applyFailed": "保存失败",
+      "rejectedReason": "用户取消",
+      "diffHeading": "与现状的差异",
+      "diffLine": "{{label}}：{{before}} → {{after}}",
+      "currentEmpty": "（新建，目前没有）",
+      "scopeOpen": "所有项目",
+      "unset": "不填",
+      "yes": "是",
+      "no": "否",
+      "apiKeyLabel": "API 密钥",
+      "apiKeyHint": "只在这个输入框里填写。AI 看不到，也不会写进草案。",
+      "field": {
+        "name": "名称",
+        "isDefault": "默认配置",
+        "projectIds": "可用项目",
+        "defaultPermission": "默认权限",
+        "claude": "Claude",
+        "codex": "Codex",
+        "templateId": "来源模板",
+        "baseUrl": "地址",
+        "models": "模型",
+        "defaultModelId": "默认模型",
+        "embeddingModel": "向量模型",
+        "proxy": "代理",
+        "timeoutS": "超时（秒）",
+        "extraEnv": "附加环境变量",
+        "options": "模板选项",
+        "enabled": "启用"
+      }
+    },
     "permission": {
       "level": {
         "read-only": "只读",
@@ -650,7 +687,8 @@
     },
     "outputLanguage": {
       "label": "AI 输出语言",
-      "hint": "Agent 回复与产出使用的语言（全局默认，Profile / 项目可覆盖）。",
+      "follow": "跟随（不指定）",
+      "hint": "打开 Claude 或 Codex 窗口时，把所选语言写进该窗口的角色提示，要求用它回复。选「跟随」时不写。不改本机 CLI 的全局设置。",
       "loadError": "读取失败",
       "error": "保存 AI 输出语言失败"
     },
@@ -876,11 +914,11 @@
     },
     "configTool": {
       "title": "工作台自配置工具",
-      "subtitle": "开关会保存设置。当前不会进入任何工作台窗口，也不会注册给 Agent。",
-      "safetyNote": "当前没有确认对话框。提交的草案不会经确认后保存，调用也不会记入执行记录。",
+      "subtitle": "打开后会注册给该项目的管理者窗口。写入必须经你在确认框里点确认。",
+      "safetyNote": "草案不会自动保存。你点确认才写入，取消即丢弃。密钥只在确认框里手输，不会交给 AI。",
       "label": "对当前项目启用",
-      "hint": "仅作用于项目「{{project}}」。打开或关闭都会保存这项设置；当前不会注册给 Agent，也不会进入任何工作台窗口。",
-      "enabledNote": "已保存。当前没有确认对话框，调用也不会记入执行记录。",
+      "hint": "仅作用于项目「{{project}}」。打开后注册给该项目的管理者窗口；其它角色和开关关闭时都不注册。写入须经你确认。",
+      "enabledNote": "已打开。该项目的管理者窗口会带上这套工具，写入须经你确认。",
       "needProject": "请先选择一个项目——此开关按项目生效。",
       "saveError": "开关保存失败"
     },
@@ -996,7 +1034,7 @@
     }
   },
   "habit": {
-    "intro": "跨项目生效的做事习惯，会注入每次会话的系统提示。",
+    "intro": "已通过并且还启用的习惯，会在打开 Claude 或 Codex 窗口时写进该窗口的角色提示。停用、待审核、已删除的不会带上。不会根据纠正自动生成候选。",
     "add": "新增习惯",
     "create": "新增",
     "edit": "编辑",
@@ -1029,7 +1067,7 @@
     "editDialog": {
       "createTitle": "新增习惯",
       "editTitle": "编辑习惯",
-      "description": "习惯会跨项目注入系统提示，请写成通用、可长期遵守的一句话。",
+      "description": "已通过且启用后，会写进之后打开的 Claude / Codex 窗口的角色提示。请写成通用、可长期遵守的一句话。",
       "distillTitle": "提炼为共享习惯",
       "distillDescription": "把这条项目记忆提炼成跨项目通用的习惯，请去掉项目专有信息后确认。"
     },

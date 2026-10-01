@@ -57,3 +57,34 @@ export function compileHabitProfile(habits: readonly HabitEntry[]): string | und
 
   return blocks.length > 0 ? blocks.join("\n\n") : undefined;
 }
+
+/** 写进单个窗口角色提示时，习惯段的字符上限（含截断说明）。 */
+export const HABIT_PROMPT_MAX_CHARS = 4_000;
+
+/** 超出上限时附在末尾的说明（发给模型，不进语言包）。 */
+export const HABIT_PROMPT_TRUNCATION_NOTE = "（其余习惯因长度上限未写入）";
+
+/**
+ * 把已编译的习惯文本裁到上限。超出时在换行处截断，并附上说明。
+ * 返回值长度不超过 maxChars。
+ */
+export function limitHabitProfileText(
+  text: string,
+  maxChars: number = HABIT_PROMPT_MAX_CHARS,
+): string {
+  if (text.length <= maxChars) {
+    return text;
+  }
+  const note = HABIT_PROMPT_TRUNCATION_NOTE;
+  if (maxChars <= note.length) {
+    return note.slice(0, maxChars);
+  }
+  const budget = maxChars - note.length - 2;
+  let cut = text.slice(0, budget);
+  const lastBreak = cut.lastIndexOf("\n");
+  if (lastBreak > budget * 0.5) {
+    cut = cut.slice(0, lastBreak);
+  }
+  const limited = `${cut.trimEnd()}\n\n${note}`;
+  return limited.length <= maxChars ? limited : limited.slice(0, maxChars);
+}

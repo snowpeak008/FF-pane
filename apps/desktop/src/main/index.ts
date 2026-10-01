@@ -257,6 +257,7 @@ async function bootstrap(): Promise<void> {
           if (typeof windowId === "string" && windowId.trim() !== "") {
             layer.modelEffort.noteTerminalExit(windowId);
             void layer.rolePromptTemps.release(windowId);
+            void layer.releaseConfigHub(windowId);
           }
         }
       },

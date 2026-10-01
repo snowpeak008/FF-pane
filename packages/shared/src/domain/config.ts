@@ -6,7 +6,7 @@
  */
 
 import { DEFAULT_CONTEXT_WARN_PERCENT } from "./context-window.js";
-import type { AiOutputLanguage } from "./language.js";
+import type { AiOutputLanguage, AiOutputLanguageSetting } from "./language.js";
 import type { PermissionEnvelope } from "./permission.js";
 import { DEFAULT_MAX_WORKBENCH_WINDOWS } from "./workbench.js";
 import {
@@ -45,8 +45,11 @@ export interface KnowledgeToolSettings {
 
 /** 全局设置（config.json 的领域形态）。 */
 export interface GlobalConfig {
-  /** 设计文档 §9.2 —— AI 输出语言的全局默认（Profile / 项目可覆盖）。 */
-  readonly aiOutputLanguage: AiOutputLanguage;
+  /**
+   * AI 输出语言。具体语言会在打开 Claude / Codex 窗口时写进该窗口的角色提示。
+   * `follow` 或不识别的值不写。不改用户本机 CLI 的全局设置。
+   */
+  readonly aiOutputLanguage: AiOutputLanguageSetting;
   /** 设计文档 §7 / §4.4 —— 新建 Profile 时预填的默认权限信封。 */
   readonly defaultPermissionPreset: PermissionEnvelope;
   /** 设计文档 §8.3.5 —— 只读检索工具的 MCP 接入设置；缺省 = 全用内置默认。 */
@@ -94,25 +97,32 @@ export const DEFAULT_CONFIG_TOOL_SERVER_NAME = "ffpane-config";
 /** T9.1 —— 只读：列出 Provider 的脱敏视图（绝不含 key，apiKeyRef 折算为布尔）。 */
 export const CONFIG_TOOL_LIST_PROVIDERS = "config_list_providers";
 
-/** T9.1 —— 只读：列出 Agent Profile。 */
-export const CONFIG_TOOL_LIST_PROFILES = "config_list_profiles";
+/** 只读：列出项目配置（名称、两路、权限、范围）。不含密钥。 */
+export const CONFIG_TOOL_LIST_CONFIGS = "config_list_configs";
 
-/** T9.1 —— 写草案：Provider 创建 / 更新（带 id 即更新）。落盘必经用户确认。 */
+/** 写草案：Provider 创建 / 更新（带 id 即更新）。落盘必经用户确认。 */
 export const CONFIG_TOOL_DRAFT_PROVIDER = "config_draft_provider";
 
-/** T9.1 —— 写草案：Profile 创建 / 更新（带 id 即更新）。落盘必经用户确认。 */
+/** 写草案：项目配置创建 / 更新（带 id 即更新）。落盘必经用户确认。 */
+export const CONFIG_TOOL_DRAFT_CONFIG = "config_draft_config";
+
+/**
+ * 旧档案工具名。工作台不再注册；保留常量避免历史审计行无法对上名字。
+ */
+export const CONFIG_TOOL_LIST_PROFILES = "config_list_profiles";
+
+/** 旧档案草案工具名。工作台不再注册。 */
 export const CONFIG_TOOL_DRAFT_PROFILE = "config_draft_profile";
 
 /**
- * T9.1 工作台自配置工具的全部工具名。**没有 delete、没有直接写**：
- * 写路径只有「草案 → 用户确认」一条，静默写在服务端物理不存在（两条铁律之二）；
- * 密钥字段在任何工具的输入 schema 里物理不存在（两条铁律之一）。
+ * 工作台自配置工具的全部工具名。**没有 delete、没有直接写**：
+ * 写路径只有「草案 → 用户确认」一条；密钥字段在任何工具的输入 schema 里不存在。
  */
 export const CONFIG_TOOL_NAMES = [
   CONFIG_TOOL_LIST_PROVIDERS,
-  CONFIG_TOOL_LIST_PROFILES,
+  CONFIG_TOOL_LIST_CONFIGS,
   CONFIG_TOOL_DRAFT_PROVIDER,
-  CONFIG_TOOL_DRAFT_PROFILE,
+  CONFIG_TOOL_DRAFT_CONFIG,
 ] as const;
 
 /**

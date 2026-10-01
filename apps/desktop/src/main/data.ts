@@ -34,7 +34,6 @@ import {
   type HabitEntryId,
   isProjectConfigScopeOpen,
   isProjectConfigVisibleTo,
-  projectNamesOutsideScope,
   resolveReasoningEffortOptions,
 } from "@ff-pane/shared";
 import {
@@ -54,8 +53,6 @@ import {
   listEntries,
   listHabits,
   type ProfileDraftValidator,
-  ProjectConfigDraftInvalidError,
-  ProjectConfigScopeBlockedError,
   type ProviderDraft,
   profileReferencesProvider,
   profileReferencesRole,
@@ -76,6 +73,7 @@ import { createMemoryIndexService, type MemoryIndexService } from "./memory-inde
 import { type ProjectSummarySources, summarizeProjects } from "./project-summary";
 import { resolveProbeOutlet } from "./provider-proxy";
 import { createSafeStorageBackend, createSecretStore, resolveSecretsFile } from "./secrets";
+import { validateWorkbenchConfigDraft } from "./workbench/config-draft-validate";
 import { keepModelEffortOverrides } from "./workbench/model-effort";
 
 /** 本数据层负责的 invoke 通道集合。 */
@@ -248,42 +246,33 @@ export async function createDataHandlers(
   };
 
   const assertConfigDraft = async (
-    draft: {
-      readonly claude?: { readonly connectionMode: string; readonly providerId?: string };
-      readonly codex?: { readonly connectionMode: string; readonly providerId?: string };
-      readonly projectIds?: readonly string[];
-    },
+    draft: Parameters<typeof validateWorkbenchConfigDraft>[0]["draft"],
     configId?: string,
   ): Promise<void> => {
-    for (const route of [draft.claude, draft.codex]) {
-      if (route?.connectionMode !== "relay") {
-        continue;
-      }
-      const providerId = route.providerId;
-      if (
-        providerId === undefined ||
-        (await providers.getProvider(providerId as never)) === undefined
-      ) {
-        throw new ProjectConfigDraftInvalidError("中转来源不存在");
-      }
-    }
-    if (configId === undefined) {
-      return;
-    }
-    const projects = await registry.listProjects();
+    let currentIsOnlyDefault = false;
     const bound: { id: string; name: string }[] = [];
-    for (const project of projects) {
-      const settings = await createProjectSettingsStore(
-        resolveProjectLayout(project.rootPath).projectFile,
-      ).readSettings();
-      if (settings.configId === configId) {
-        bound.push({ id: project.id, name: project.name });
+    if (configId !== undefined) {
+      const configs = await projectConfigs.listConfigs();
+      const current = configs.find((item) => item.id === configId);
+      const othersHaveDefault = configs.some((item) => item.id !== configId && item.isDefault);
+      currentIsOnlyDefault = current?.isDefault === true && !othersHaveDefault;
+      const projects = await registry.listProjects();
+      for (const project of projects) {
+        const settings = await createProjectSettingsStore(
+          resolveProjectLayout(project.rootPath).projectFile,
+        ).readSettings();
+        if (settings.configId === configId) {
+          bound.push({ id: project.id, name: project.name });
+        }
       }
     }
-    const names = projectNamesOutsideScope(bound, draft.projectIds);
-    if (names.length > 0) {
-      throw new ProjectConfigScopeBlockedError(names);
-    }
+    await validateWorkbenchConfigDraft({
+      draft,
+      ...(configId !== undefined ? { configId } : {}),
+      currentIsOnlyDefault,
+      getProvider: async (id) => providers.getProvider(id as never),
+      boundProjects: bound,
+    });
   };
 
   const assertConfigUsableByProject = async (

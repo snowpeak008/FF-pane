@@ -19,15 +19,27 @@
 
 import { appendFile, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { ConfigToolCallRecord, ProfileId, ProviderId } from "@ff-pane/shared";
-import { CONFIG_TOOL_DRAFT_PROFILE, CONFIG_TOOL_DRAFT_PROVIDER } from "@ff-pane/shared";
+import type {
+  ConfigToolCallRecord,
+  ProfileId,
+  ProjectConfig,
+  ProjectConfigId,
+  ProviderId,
+} from "@ff-pane/shared";
+import {
+  CONFIG_TOOL_DRAFT_CONFIG,
+  CONFIG_TOOL_DRAFT_PROFILE,
+  CONFIG_TOOL_DRAFT_PROVIDER,
+} from "@ff-pane/shared";
 import {
   type ConfigDraftRequestFile,
   type ConfigDraftResponseFile,
   describeDraft,
   type ParsedConfigDraft,
+  parseConfigDraftArgs,
   parseProfileDraftArgs,
   parseProviderDraftArgs,
+  type SanitizedProviderView,
 } from "../../mcp/config-tool";
 import type {
   ConfigDraftAck,
@@ -40,6 +52,9 @@ import { CONFIG_CONFIRM_TIMEOUT_MS } from "./config-tool";
 /** 信箱轮询间隔（与 sidecar 侧对响应目录的轮询同数量级）。 */
 export const DRAFT_POLL_INTERVAL_MS = 250;
 
+/** 同时等用户确认的草案上限。多出来的直接拒绝，不进入确认框。 */
+export const MAX_PENDING_CONFIG_DRAFTS = 3;
+
 /** 领域校验 + 归一的结果。 */
 export type PrepareDraftResult =
   | {
@@ -48,6 +63,8 @@ export type PrepareDraftResult =
       readonly normalized: ParsedConfigDraft;
       /** 确认时是否需要用户补填密钥（Provider 草案且类型需 key 且无既有引用）。 */
       readonly needsApiKey: boolean;
+      /** 更新目标的现状（已脱敏）。新建时缺省。确认框用它做差异。 */
+      readonly current?: ProjectConfig | SanitizedProviderView;
     }
   | { readonly ok: false; readonly error: string };
 
@@ -177,9 +194,11 @@ export function createConfigDraftHub(deps: ConfigDraftHubDeps): ConfigDraftHub {
     const parsed =
       request.tool === CONFIG_TOOL_DRAFT_PROVIDER
         ? parseProviderDraftArgs(request.args)
-        : request.tool === CONFIG_TOOL_DRAFT_PROFILE
-          ? parseProfileDraftArgs(request.args)
-          : undefined;
+        : request.tool === CONFIG_TOOL_DRAFT_CONFIG
+          ? parseConfigDraftArgs(request.args)
+          : request.tool === CONFIG_TOOL_DRAFT_PROFILE
+            ? parseProfileDraftArgs(request.args)
+            : undefined;
     if (parsed === undefined) {
       await rejectInvalid(request, `Unknown draft tool: ${request.tool}`);
       return;
@@ -198,8 +217,15 @@ export function createConfigDraftHub(deps: ConfigDraftHubDeps): ConfigDraftHub {
       await rejectInvalid(request, prepared.error);
       return;
     }
+    if (pending.size >= MAX_PENDING_CONFIG_DRAFTS) {
+      await rejectInvalid(
+        request,
+        `已有 ${MAX_PENDING_CONFIG_DRAFTS} 份草案在等确认。这份没有交给用户，也没有保存。`,
+      );
+      return;
+    }
 
-    const { normalized, needsApiKey } = prepared;
+    const { normalized, needsApiKey, current } = prepared;
     const draft: PendingDraft = {
       id: request.id,
       tool: request.tool,
@@ -223,12 +249,22 @@ export function createConfigDraftHub(deps: ConfigDraftHubDeps): ConfigDraftHub {
             kind: "provider",
             ...(normalized.id !== undefined ? { targetId: normalized.id as ProviderId } : {}),
             draft: normalized.draft,
+            ...(current !== undefined && "apiKeyConfigured" in current ? { current } : {}),
           }
-        : {
-            kind: "profile",
-            ...(normalized.id !== undefined ? { targetId: normalized.id as ProfileId } : {}),
-            draft: normalized.draft,
-          };
+        : normalized.kind === "config"
+          ? {
+              kind: "config",
+              ...(normalized.id !== undefined
+                ? { targetId: normalized.id as ProjectConfigId }
+                : {}),
+              draft: normalized.draft,
+              ...(current !== undefined && "isDefault" in current ? { current } : {}),
+            }
+          : {
+              kind: "profile",
+              ...(normalized.id !== undefined ? { targetId: normalized.id as ProfileId } : {}),
+              draft: normalized.draft,
+            };
     deps.publish({
       turnId: deps.turnId,
       kind: "config-draft",

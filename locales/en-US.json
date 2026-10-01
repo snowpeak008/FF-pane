@@ -300,6 +300,43 @@
       "cancel": "Cancel",
       "confirm": "Open"
     },
+    "configDraft": {
+      "titleCreate": "Confirm create",
+      "titleUpdate": "Confirm update",
+      "description": "Review every field and how it differs from the current config. Cancel discards the draft. API keys are typed only here and are never given to the AI.",
+      "confirm": "Save",
+      "cancel": "Cancel",
+      "confirmed": "Saved",
+      "applyFailed": "Could not save",
+      "rejectedReason": "Cancelled",
+      "diffHeading": "Difference from current",
+      "diffLine": "{{label}}: {{before}} → {{after}}",
+      "currentEmpty": "(new — nothing yet)",
+      "scopeOpen": "Every project",
+      "unset": "Not set",
+      "yes": "Yes",
+      "no": "No",
+      "apiKeyLabel": "API key",
+      "apiKeyHint": "Type it only in this box. The AI cannot see it and cannot put it in the draft.",
+      "field": {
+        "name": "Name",
+        "isDefault": "Default config",
+        "projectIds": "Projects",
+        "defaultPermission": "Default permission",
+        "claude": "Claude",
+        "codex": "Codex",
+        "templateId": "Provider template",
+        "baseUrl": "Base URL",
+        "models": "Models",
+        "defaultModelId": "Default model",
+        "embeddingModel": "Embedding model",
+        "proxy": "Proxy",
+        "timeoutS": "Timeout (seconds)",
+        "extraEnv": "Extra environment",
+        "options": "Template options",
+        "enabled": "Enabled"
+      }
+    },
     "permission": {
       "level": {
         "read-only": "Read-only",
@@ -650,7 +687,8 @@
     },
     "outputLanguage": {
       "label": "AI output language",
-      "hint": "Language the agent replies and produces in (global default; profile / project can override).",
+      "follow": "Follow (don't specify)",
+      "hint": "When a Claude or Codex window starts, the chosen language is written into that window's role prompt and it is asked to reply in it. Follow writes nothing. This does not change the CLI's own global settings.",
       "loadError": "Failed to load",
       "error": "Failed to save AI output language"
     },
@@ -876,11 +914,11 @@
     },
     "configTool": {
       "title": "Workbench self-configuration tool",
-      "subtitle": "The switch saves the setting. It does not enter any workbench window and is not registered with the agent.",
-      "safetyNote": "There is no confirmation dialog. A submitted draft is not saved after confirmation, and calls are not written to the execution log.",
+      "subtitle": "When on, this is registered with manager windows in this project. Nothing is written until you confirm it in the dialog.",
+      "safetyNote": "Drafts are not saved on their own. Confirm writes them; cancel discards them. API keys are typed only in the dialog and are never given to the AI.",
       "label": "Enable for the current project",
-      "hint": "Applies to project \"{{project}}\" only. Turning it on or off saves this setting. It is not registered with the agent and does not enter any workbench window.",
-      "enabledNote": "Saved. There is no confirmation dialog, and calls are not written to the execution log.",
+      "hint": "Applies to project \"{{project}}\" only. When on, manager windows in this project get the tool. Other roles, and this switch off, do not. Writes need your confirmation.",
+      "enabledNote": "On. Manager windows in this project get the tool. Writes need your confirmation.",
       "needProject": "Select a project first — this switch is per-project.",
       "saveError": "Could not save the switch"
     },
@@ -996,7 +1034,7 @@
     }
   },
   "habit": {
-    "intro": "Cross-project working habits, injected into every session prompt.",
+    "intro": "Habits you have approved and left enabled are written into each Claude or Codex window's role prompt when it starts. Disabled, pending, and deleted habits are left out. Corrections do not create habit candidates.",
     "add": "Add habit",
     "create": "Add",
     "edit": "Edit",
@@ -1029,7 +1067,7 @@
     "editDialog": {
       "createTitle": "Add habit",
       "editTitle": "Edit habit",
-      "description": "Habits inject into prompts across all projects — phrase them as one general, lasting rule.",
+      "description": "Once approved and enabled, this is written into later Claude or Codex windows' role prompts. Phrase it as one general, lasting rule.",
       "distillTitle": "Distill into a habit",
       "distillDescription": "Turn this project memory into a cross-project habit — strip project-specific details, then confirm."
     },
