@@ -13,6 +13,7 @@ import type {
   TaskId,
 } from "./common.js";
 import { createLiteralGuard } from "./common.js";
+import type { WorkbenchRole } from "./workbench-role.js";
 
 /** 设计文档 §8.1 —— 项目记忆分类（4 类，够用）。 */
 export const MEMORY_CATEGORIES = ["decision", "rule", "lesson", "state"] as const;
@@ -49,8 +50,14 @@ export type MemoryConfidence = (typeof MEMORY_CONFIDENCES)[number];
 /** MemoryConfidence 运行时守卫。 */
 export const isMemoryConfidence = createLiteralGuard(MEMORY_CONFIDENCES);
 
-/** 设计文档 §8.1 —— source 来源类别（user_manual | task_<id> | plan_<version> | agent_proposed）。 */
-export const MEMORY_SOURCE_KINDS = ["user_manual", "task", "plan", "agent_proposed"] as const;
+/** 设计文档 §8.1 —— source 来源类别（user_manual | task_<id> | plan_<version> | agent_proposed | workbench）。 */
+export const MEMORY_SOURCE_KINDS = [
+  "user_manual",
+  "task",
+  "plan",
+  "agent_proposed",
+  "workbench",
+] as const;
 
 /** 设计文档 §8.1 —— 记忆来源类别。 */
 export type MemorySourceKind = (typeof MEMORY_SOURCE_KINDS)[number];
@@ -67,7 +74,14 @@ export type MemorySource =
   | { readonly kind: "user_manual" }
   | { readonly kind: "task"; readonly taskId: TaskId }
   | { readonly kind: "plan"; readonly planVersion: PlanVersion }
-  | { readonly kind: "agent_proposed" };
+  | { readonly kind: "agent_proposed" }
+  | {
+      /** 工作台窗口写入的候选。写入时间用条目的 createdAt，不另存一份。 */
+      readonly kind: "workbench";
+      readonly windowId: string;
+      readonly windowTitle: string;
+      readonly role: WorkbenchRole;
+    };
 
 /** 设计文档 §8.1 —— 注入上限缺省值：单次注入不超过 20 条，超出按类别优先级 + 更新时间截断。 */
 export const MEMORY_INJECTION_DEFAULT_LIMIT = 20;

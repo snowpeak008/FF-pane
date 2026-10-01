@@ -69,7 +69,7 @@ afterEach(() => {
 
 const APP_INFO: AppInfo = {
   name: "FF-pane",
-  version: "0.10.9",
+  version: "0.10.10",
   runtime: { electron: "44.0.0", chrome: "140", node: "24.0.0" },
 };
 

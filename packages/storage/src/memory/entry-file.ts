@@ -8,7 +8,8 @@
  * - created / updated 序列化为 ISO 8601 UTC 字符串（毫秒精度，与 EpochMillis
  *   无损往返），供任意编辑器直接阅读。
  * - source 序列化格式（本工单定义，作为持久层约定）：
- *   `user_manual` | `agent_proposed` | `task:<taskId>` | `plan:<正整数版本>`。
+ *   `user_manual` | `agent_proposed` | `task:<taskId>` | `plan:<正整数版本>` |
+ *   `workbench:` 后接 JSON（windowId、windowTitle、role）。
  *   与设计文档 §8.1 原文 task_<id> 的差异：改用冒号分隔，避免与 user_manual /
  *   agent_proposed 自身的下划线产生解析歧义。
  * - 读入容忍策略（W1.2c 决策）：未知 frontmatter key 一律忽略，不导致拒读——
@@ -30,6 +31,7 @@ import {
   isMemoryCategory,
   isMemoryConfidence,
   isMemoryStatus,
+  isWorkbenchRole,
   MEMORY_CATEGORIES,
   MEMORY_CONFIDENCES,
   MEMORY_STATUSES,
@@ -41,7 +43,7 @@ import { encodeFrontmatterDocument, parseFrontmatterDocument } from "./frontmatt
 
 /** source 合法编码提示（错误信息与文档共用）。 */
 export const MEMORY_SOURCE_ENCODING_HINT =
-  "user_manual | agent_proposed | task:<taskId> | plan:<正整数版本>";
+  "user_manual | agent_proposed | task:<taskId> | plan:<正整数版本> | workbench:<JSON>";
 
 /** 序列化 MemorySource（格式见模块注释）。 */
 export function encodeMemorySource(source: MemorySource): string {
@@ -54,7 +56,62 @@ export function encodeMemorySource(source: MemorySource): string {
       return `task:${source.taskId}`;
     case "plan":
       return `plan:${source.planVersion}`;
+    case "workbench":
+      return `workbench:${JSON.stringify({
+        windowId: source.windowId,
+        windowTitle: source.windowTitle,
+        role: source.role,
+      })}`;
   }
+}
+
+const WORKBENCH_SOURCE_JSON_MAX = 2048;
+
+function hasControlChar(text: string): boolean {
+  for (const char of text) {
+    const code = char.codePointAt(0) ?? 0;
+    if (code <= 0x1f || code === 0x7f) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** 工作台来源必须能还原窗口 id、标题和角色；残缺或带控制字符的编码拒读。 */
+function decodeWorkbenchSource(raw: string): MemorySource | undefined {
+  if (raw.length === 0 || raw.length > WORKBENCH_SOURCE_JSON_MAX) {
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    return undefined;
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return undefined;
+  }
+  const record = parsed as Record<string, unknown>;
+  const windowId = record["windowId"];
+  const windowTitle = record["windowTitle"];
+  const role = record["role"];
+  if (typeof windowId !== "string" || windowId.trim() === "" || windowId.length > 128) {
+    return undefined;
+  }
+  if (
+    typeof windowTitle !== "string" ||
+    windowTitle.trim() === "" ||
+    [...windowTitle].length > 80
+  ) {
+    return undefined;
+  }
+  if (hasControlChar(windowId) || hasControlChar(windowTitle)) {
+    return undefined;
+  }
+  if (!isWorkbenchRole(role)) {
+    return undefined;
+  }
+  return { kind: "workbench", windowId, windowTitle, role };
 }
 
 /** 反序列化 MemorySource；不合法返回 undefined（由调用方转成带字段的 typed error）。 */
@@ -64,6 +121,9 @@ export function decodeMemorySource(text: string): MemorySource | undefined {
   }
   if (text === "agent_proposed") {
     return { kind: "agent_proposed" };
+  }
+  if (text.startsWith("workbench:")) {
+    return decodeWorkbenchSource(text.slice("workbench:".length));
   }
   if (text.startsWith("task:")) {
     const taskId = text.slice("task:".length);

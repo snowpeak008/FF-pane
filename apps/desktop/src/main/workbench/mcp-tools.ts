@@ -14,11 +14,31 @@ import {
 } from "@ff-pane/core";
 import {
   isWorkbenchRole,
+  type MemoryCategory,
+  type MemoryEntry,
+  type MemoryEntryId,
+  type WorkbenchOpenedBy,
   type WorkbenchPermissionLevel,
   type WorkbenchRole,
 } from "@ff-pane/shared";
 import { resolveBriefPath, writeBriefFile } from "./brief-files";
 import { type CloseDescendantDeps, closeDescendantWindow } from "./close-descendant";
+import {
+  canAddProjectMemory,
+  codePointLength,
+  MEMORY_ADD_BODY_MAX_CHARS,
+  MEMORY_ADD_MIN_INTERVAL_MS,
+  MEMORY_ADD_TITLE_MAX_CHARS,
+  MEMORY_SEARCH_MAX_BYTES,
+  MEMORY_SEARCH_MAX_HITS,
+  MEMORY_SEARCH_QUERY_MAX_CHARS,
+  packMemorySearchHits,
+  reserveMemoryAdd,
+  resetMemoryAddSlots,
+  sanitizeMemoryBody,
+  sanitizeMemoryTitle,
+  sanitizeSourceWindowTitle,
+} from "./memory-policy";
 import type { OpenChildArgs, OpenChildSuccess } from "./open-child";
 import { openChildWindow } from "./open-child";
 import { clampReadOutputBytes, stripTerminalControls } from "./output-text";
@@ -65,6 +85,10 @@ export interface ToolWindowView {
   readonly running: boolean;
   readonly parentWindowId?: string;
   readonly parentTitle?: string;
+  /** 开启者。缺省按用户开启处理会放宽写入，所以调用方必须填上。 */
+  readonly openedBy: WorkbenchOpenedBy;
+  /** 冷启动清洗锁。锁住的窗口不能新增记忆。 */
+  readonly sanitizeLocked: boolean;
 }
 
 export interface WorkbenchToolDeps {
@@ -95,6 +119,13 @@ export interface WorkbenchToolDeps {
   ) => Promise<{ readonly running: boolean; readonly status: string; readonly text?: string }>;
   readonly closeDescendant: CloseDescendantDeps;
   readonly openPanel: (panel: WorkbenchPanelName, openerTitle: string, projectId: string) => void;
+  /** 只查传入的项目根。工具层不会把参数里的项目路径传进来。 */
+  readonly searchProjectMemory: (
+    projectRoot: string,
+    query: string,
+    limit: number,
+  ) => Promise<readonly MemoryEntry[]>;
+  readonly addProjectMemory: (projectRoot: string, entry: MemoryEntry) => Promise<void>;
 }
 
 const buckets = new Map<string, { t: number; n: number }>();
@@ -122,6 +153,7 @@ export function allowOpenPanel(windowId: string, now: number): boolean {
 export function resetToolCallBuckets(): void {
   buckets.clear();
   panelOpenedAt.clear();
+  resetMemoryAddSlots();
 }
 
 function fail(text: string): ToolTextResult {
@@ -214,6 +246,10 @@ export async function executeWorkbenchTool(
       return closeWindow(caller, args, tree, deps);
     case "ffpane_open_panel":
       return openPanel(caller, args, deps);
+    case "ffpane_memory_search":
+      return searchMemory(caller, args, deps);
+    case "ffpane_memory_add":
+      return addMemory(caller, args, deps);
     default:
       return fail(`未知工具：${name}`);
   }
@@ -684,6 +720,109 @@ async function publishUnread(target: ToolWindowView, deps: WorkbenchToolDeps): P
   deps.publishInbox({
     windowId: target.id,
     unread: inboxAfter(records, target.id, cursor).length,
+  });
+}
+
+const MEMORY_ADD_DENIED =
+  "只有已授权的管理者，或用户自己打开且没有被冷启动清洗锁住的窗口，才能添加项目记忆。请用 ffpane_report 请上级添加，不要反复尝试。";
+
+function isMemoryAddCategory(value: unknown): value is Exclude<MemoryCategory, "state"> {
+  return value === "decision" || value === "rule" || value === "lesson";
+}
+
+async function searchMemory(
+  caller: ToolWindowView,
+  args: Readonly<Record<string, unknown>>,
+  deps: WorkbenchToolDeps,
+): Promise<ToolTextResult> {
+  const raw = args["query"];
+  if (typeof raw !== "string") {
+    return fail("需要 query。");
+  }
+  const query = raw.trim();
+  if (query.length === 0) {
+    return fail("查询不能为空。");
+  }
+  if (codePointLength(query) > MEMORY_SEARCH_QUERY_MAX_CHARS) {
+    return fail(`查询超过 ${MEMORY_SEARCH_QUERY_MAX_CHARS} 字。请改短后再查。`);
+  }
+  let entries: readonly MemoryEntry[];
+  try {
+    entries = await deps.searchProjectMemory(caller.projectRoot, query, MEMORY_SEARCH_MAX_HITS + 1);
+  } catch {
+    return fail("检索项目记忆失败。");
+  }
+  const packed = packMemorySearchHits(entries, MEMORY_SEARCH_MAX_HITS, MEMORY_SEARCH_MAX_BYTES);
+  return ok({ hits: packed.hits, truncated: packed.truncated });
+}
+
+async function addMemory(
+  caller: ToolWindowView,
+  args: Readonly<Record<string, unknown>>,
+  deps: WorkbenchToolDeps,
+): Promise<ToolTextResult> {
+  if (
+    !canAddProjectMemory({
+      managerGranted: deps.isManagerGranted(caller.id),
+      openedBy: caller.openedBy,
+      sanitizeLocked: caller.sanitizeLocked,
+    })
+  ) {
+    return fail(MEMORY_ADD_DENIED);
+  }
+  const category = args["category"];
+  const rawTitle = args["title"];
+  const rawBody = args["body"];
+  if (!isMemoryAddCategory(category)) {
+    return fail("category 只能是 decision、rule 或 lesson。");
+  }
+  if (typeof rawTitle !== "string" || typeof rawBody !== "string") {
+    return fail("需要 title 和 body。");
+  }
+  const title = sanitizeMemoryTitle(rawTitle);
+  const body = sanitizeMemoryBody(rawBody);
+  if (title.length === 0) {
+    return fail("标题不能为空。");
+  }
+  if (body.length === 0) {
+    return fail("正文不能为空。");
+  }
+  if (codePointLength(title) > MEMORY_ADD_TITLE_MAX_CHARS) {
+    return fail(`标题超过 ${MEMORY_ADD_TITLE_MAX_CHARS} 字。`);
+  }
+  if (codePointLength(body) > MEMORY_ADD_BODY_MAX_CHARS) {
+    return fail(`正文超过 ${MEMORY_ADD_BODY_MAX_CHARS} 字。`);
+  }
+  const now = deps.now();
+  if (!reserveMemoryAdd(caller.id, now)) {
+    return fail(`添加记忆过于频繁，请至少间隔 ${MEMORY_ADD_MIN_INTERVAL_MS / 1000} 秒。`);
+  }
+  const entry: MemoryEntry = {
+    id: `mem-${randomUUID()}` as MemoryEntryId,
+    category,
+    title,
+    body,
+    status: "candidate",
+    confidence: "low",
+    source: {
+      kind: "workbench",
+      windowId: caller.id,
+      windowTitle: sanitizeSourceWindowTitle(caller.title),
+      role: caller.role,
+    },
+    createdAt: now,
+    updatedAt: now,
+  };
+  try {
+    await deps.addProjectMemory(caller.projectRoot, entry);
+  } catch {
+    return fail("写入项目记忆失败。");
+  }
+  return ok({
+    id: entry.id,
+    status: entry.status,
+    category: entry.category,
+    title: entry.title,
   });
 }
 

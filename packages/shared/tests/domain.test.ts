@@ -203,11 +203,17 @@ describe("常量数组 ↔ 设计文档定值对照", () => {
     ]);
   });
 
-  it("§8.1 项目记忆 4 类 / 3 状态 / 2 档置信度 / 4 种来源", () => {
+  it("§8.1 项目记忆 4 类 / 3 状态 / 2 档置信度 / 5 种来源", () => {
     expect(MEMORY_CATEGORIES).toEqual(["decision", "rule", "lesson", "state"]);
     expect(MEMORY_STATUSES).toEqual(["candidate", "active", "archived"]);
     expect(MEMORY_CONFIDENCES).toEqual(["high", "low"]);
-    expect(MEMORY_SOURCE_KINDS).toEqual(["user_manual", "task", "plan", "agent_proposed"]);
+    expect(MEMORY_SOURCE_KINDS).toEqual([
+      "user_manual",
+      "task",
+      "plan",
+      "agent_proposed",
+      "workbench",
+    ]);
   });
 
   it("§8.1 注入上限缺省 20 条；§8.2.5 习惯上限缺省 80 条", () => {

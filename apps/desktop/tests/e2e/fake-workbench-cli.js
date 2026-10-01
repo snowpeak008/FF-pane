@@ -130,6 +130,22 @@ async function main() {
       keepAlive();
       return;
     }
+    if (process.env.FFPANE_WB_SCRIPT === "memory") {
+      const found = await tool("ffpane_memory_search", { query: "窗台记忆口令" });
+      const hit = !found.isError && found.text.includes("窗台记忆口令");
+      process.stdout.write(`FFPANE_MCP_MEMORY_SEARCH=${hit ? "hit" : "miss"}\n`);
+      if (!hit) {
+        process.stdout.write(`FFPANE_MCP_MEMORY_SEARCH_TEXT=${found.text.slice(0, 300)}\n`);
+      }
+      const added = await tool("ffpane_memory_add", {
+        category: "lesson",
+        title: "子窗口不该写入",
+        body: "不行",
+      });
+      process.stdout.write(`FFPANE_MCP_MEMORY_ADD=${added.isError ? "denied" : "allowed"}\n`);
+      keepAlive();
+      return;
+    }
     if (process.env.FFPANE_WB_SCRIPT === "panel") {
       let briefPath;
       for (let attempt = 0; attempt < 30 && briefPath === undefined; attempt += 1) {
@@ -173,6 +189,56 @@ async function main() {
     process.stdout.write(`FFPANE_MCP_WORKER_REPORT=${report.isError ? "error" : "ok"}\n`);
     process.stdout.write(`FFPANE_MCP_WORKER_OPEN=${opened.isError ? "denied" : "allowed"}\n`);
     process.stdout.write(`FFPANE_MCP_WORKER_SEND=${sent.isError ? "denied" : "allowed"}\n`);
+    keepAlive();
+    return;
+  }
+
+  if (process.env.FFPANE_WB_SCRIPT === "memory") {
+    const role = await tool("ffpane_set_role", { windowId: me.windowId, role: "manager" });
+    if (role.isError) {
+      process.stdout.write(`FFPANE_MCP_ERROR=${role.text}\n`);
+      keepAlive();
+      return;
+    }
+    const added = await tool("ffpane_memory_add", {
+      category: "lesson",
+      title: "窗台记忆口令",
+      body: "管理者记下的项目教训\n第二行",
+    });
+    if (added.isError) {
+      process.stdout.write(`FFPANE_MCP_ERROR=${added.text}\n`);
+      keepAlive();
+      return;
+    }
+    const opened = await tool("ffpane_open_window", {
+      cli: "claude",
+      role: "worker",
+      permission: "edit",
+      title: "记忆子",
+    });
+    if (opened.isError) {
+      process.stdout.write(`FFPANE_MCP_ERROR=${opened.text}\n`);
+      keepAlive();
+      return;
+    }
+    const child = JSON.parse(opened.text);
+    let seen = false;
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const output = await tool("ffpane_read_output", {
+        windowId: child.windowId,
+        maxBytes: 32768,
+      });
+      if (
+        !output.isError &&
+        output.text.includes("FFPANE_MCP_MEMORY_SEARCH=hit") &&
+        output.text.includes("FFPANE_MCP_MEMORY_ADD=denied")
+      ) {
+        seen = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    process.stdout.write(`FFPANE_MCP_MEMORY_PARENT=${seen ? "ok" : "timeout"}\n`);
     keepAlive();
     return;
   }

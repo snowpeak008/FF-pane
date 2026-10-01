@@ -89,6 +89,8 @@ function view(
     role,
     permission: "edit",
     running: true,
+    openedBy: parent === undefined ? "user" : { windowId: parent },
+    sanitizeLocked: false,
     ...(parent !== undefined ? { parentWindowId: parent, parentTitle: "总管" } : {}),
   };
 }
@@ -166,6 +168,8 @@ function harness(
     openPanel: (panel, title) => {
       panels.push({ panel, title });
     },
+    searchProjectMemory: async () => [],
+    addProjectMemory: async () => undefined,
   };
   return { views, tree, reminders, outputCalls, closedIds, panels, deps };
 }
@@ -415,6 +419,8 @@ describe("write_brief 与 files", () => {
       role: outsider.role,
       permission: "read-only",
       running: outsider.running,
+      openedBy: outsider.openedBy,
+      sanitizeLocked: outsider.sanitizeLocked,
     };
     const result = await call(deps, "E", "ffpane_write_brief", {
       name: "note.md",

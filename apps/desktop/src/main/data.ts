@@ -83,7 +83,7 @@ import { type BrowserWindow, dialog, type OpenDialogOptions } from "electron";
 import type { InvokeHandlers } from "../shared-ipc/server";
 import { materializeProfileDraft, resetLegacyAgentConfigIfNeeded } from "./connection-mode";
 import { resolveGlobalRoot } from "./data-root";
-import { createMemoryIndexService } from "./memory-index";
+import { createMemoryIndexService, type MemoryIndexService } from "./memory-index";
 import { type ProjectSummarySources, summarizeProjects } from "./project-summary";
 import { resolveProbeOutlet } from "./provider-proxy";
 import { createSafeStorageBackend, createSecretStore, resolveSecretsFile } from "./secrets";
@@ -151,6 +151,8 @@ export interface DataHandlersOptions {
   readonly onProjectRemoved?: (projectId: string) => void | Promise<void>;
   /** T10.5'：与 CLI 启动层共享的权威权限表。 */
   readonly authRegistry?: import("./workbench/auth-registry").WorkbenchAuthRegistry;
+  /** T10.10：把记忆索引交给工作台层，避免两套连接各写各的。 */
+  readonly shareMemoryIndex?: (service: MemoryIndexService) => void;
 }
 
 /**
@@ -216,6 +218,7 @@ export async function createDataHandlers(
     revealSecret: (ref) => secrets.revealSecret(ref),
     log: (message) => console.log(message),
   });
+  options.shareMemoryIndex?.(memoryIndex);
 
   // 测试连接 / 拉取模型的共用取密逻辑：优先明文（未保存表单），否则用引用解密（已保存）。
   // 明文用完即弃、不出现在任何返回值（§4.3；探测层输出已 redact 兜底）。

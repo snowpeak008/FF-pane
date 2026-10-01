@@ -1,5 +1,5 @@
 /**
- * 工作台 MCP 工具声明（T10.7a / T10.7b）。
+ * 工作台 MCP 工具声明（T10.7a / T10.7b / T10.10）。
  * 描述与参数与 Phase 10 §3.2.1 及角色说明书一致。
  * sidecar 只列出并转发这些工具，不做授权判断。
  */
@@ -20,6 +20,8 @@ export const WORKBENCH_MCP_TOOL_NAMES = [
   "ffpane_read_output",
   "ffpane_close_window",
   "ffpane_open_panel",
+  "ffpane_memory_search",
+  "ffpane_memory_add",
 ] as const;
 
 export type WorkbenchMcpToolName = (typeof WORKBENCH_MCP_TOOL_NAMES)[number];
@@ -28,6 +30,7 @@ const ROLE_ENUM = ["manager", "planner", "worker", "reviewer", "none"] as const;
 const PERMISSION_ENUM = ["read-only", "edit", "edit-exec", "yolo"] as const;
 const REPORT_STATUS_ENUM = ["done", "blocked", "failed", "progress"] as const;
 const PANEL_ENUM = ["plan", "tasks", "runs"] as const;
+const MEMORY_CATEGORY_ENUM = ["decision", "rule", "lesson"] as const;
 
 export const WORKBENCH_MCP_TOOLS: readonly McpToolDefinition[] = [
   {
@@ -199,6 +202,38 @@ export const WORKBENCH_MCP_TOOLS: readonly McpToolDefinition[] = [
         },
       },
       required: ["panel"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "ffpane_memory_search",
+    description:
+      "检索本窗口所属项目的记忆（已生效的和待审核候选）。任何窗口都可以调用。只会查你自己的项目，参数里的项目路径会被忽略。一次最多 20 条，标题加正文合计不超过 16KB。可能依赖以前的决定、规则或教训时先查。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "要查的词或一句话。不能为空，最多 200 字。" },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "ffpane_memory_add",
+    description:
+      "新增一条本项目记忆候选（decision 决策 / rule 规则 / lesson 教训）。写入后出现在记忆页，带来源窗口，用户可以删除；用户通过后才会进入旧的自动注入。只有已授权的管理者，或用户自己打开且没有被冷启动清洗锁住的窗口可以调用。其它窗口请用 ffpane_report 请上级添加，不要反复尝试。标题最多 120 字，正文最多 2000 字。同一窗口至少间隔 10 秒。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        category: {
+          type: "string",
+          enum: [...MEMORY_CATEGORY_ENUM],
+          description: "decision、rule 或 lesson。",
+        },
+        title: { type: "string", description: "一句话标题。" },
+        body: { type: "string", description: "正文。换行会保留。" },
+      },
+      required: ["category", "title", "body"],
       additionalProperties: false,
     },
   },

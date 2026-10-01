@@ -19,9 +19,17 @@ export function MemoryEntryCard({ entry, actions }: MemoryEntryCardProps): React
   const { t, i18n } = useTranslation();
   const locale = i18n.language;
   return (
-    <Card padding="compact" className="flex flex-col gap-1.5">
-      <div className="flex items-center gap-2">
+    <Card padding="compact" className="flex flex-col gap-1.5" data-testid="memory-entry">
+      <div className="flex flex-wrap items-center gap-2">
         <Badge>{t(`memory.category.${entry.category}`)}</Badge>
+        {entry.source.kind === "workbench" ? (
+          <Badge data-testid="memory-entry-source">
+            {t("memory.source.workbench", {
+              title: entry.source.windowTitle,
+              role: t(`workbench.role.level.${entry.source.role}`),
+            })}
+          </Badge>
+        ) : null}
         <span className="text-2xs text-fg-subtle">
           {t(`memory.confidence.${entry.confidence}`)}
         </span>

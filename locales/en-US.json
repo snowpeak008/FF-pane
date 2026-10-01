@@ -921,6 +921,7 @@
     "approve": "Approve",
     "edit": "Edit",
     "reject": "Reject",
+    "delete": "Delete",
     "saveAndApprove": "Save and approve",
     "approved": "Approved \"{{title}}\"",
     "rejected": "Rejected \"{{title}}\"",
@@ -941,6 +942,9 @@
     "confidence": {
       "high": "Confirmed",
       "low": "Unverified"
+    },
+    "source": {
+      "workbench": "From {{title}} · {{role}}"
     },
     "editDialog": {
       "title": "Edit candidate",

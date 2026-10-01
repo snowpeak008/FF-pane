@@ -484,3 +484,50 @@ test("从会话页收到打开任务面板后，切到工作台并打开抽屉",
     await launched.cleanup();
   }
 });
+
+test("管理者写入记忆，子窗口能查到但不能写，记忆页可删除", async () => {
+  test.setTimeout(120_000);
+  const fakeBinDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-mcp-mem-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-mcp-mem-proj-"));
+  seedFakeClaude(fakeBinDir);
+  const launched = await launchApp({
+    pathPrepend: fakeBinDir,
+    extraEnv: { FFPANE_WB_SCRIPT: "memory" },
+  });
+  try {
+    const { app, page } = launched;
+    await createProject(app, page, projectDir, "E2E Memory");
+    await page.getByRole("button", { name: /^E2E Memory/ }).click();
+    await seedClaudeProfile(page);
+    await gotoRoute(page, "/workbench");
+    await page.getByTestId("workbench-new-tab").click();
+    await expect(page.getByTestId("workbench-new-window-dialog")).toBeVisible();
+    await page.getByTestId("workbench-new-kind-claude").click();
+    await expect(page.getByTestId("workbench-new-profile")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("workbench-new-confirm")).toBeEnabled({ timeout: 15_000 });
+    await page.getByTestId("workbench-new-confirm").click();
+
+    const manager = page.getByTestId("workbench-window").first();
+    const managerId = await manager.getAttribute("data-window-id");
+    expect(managerId).toBeTruthy();
+    await expect
+      .poll(async () => readReplayForWindowId(page, managerId ?? ""), { timeout: 90_000 })
+      .toContain("FFPANE_MCP_MEMORY_PARENT=ok");
+    const child = page.getByTestId("workbench-window").filter({ hasText: "记忆子" });
+    const childId = await child.getAttribute("data-window-id");
+    const childReplay = await readReplayForWindowId(page, childId ?? "");
+    expect(childReplay).toContain("FFPANE_MCP_MEMORY_SEARCH=hit");
+    expect(childReplay).toContain("FFPANE_MCP_MEMORY_ADD=denied");
+
+    await gotoRoute(page, "/memory");
+    await page.getByRole("tab", { name: "Candidates" }).click();
+    const card = page.getByTestId("memory-entry").filter({ hasText: "窗台记忆口令" });
+    await expect(card).toBeVisible();
+    await expect(card.getByTestId("memory-entry-source")).toContainText("Claude 1");
+    await expect(card.getByTestId("memory-entry-source")).toContainText("Manager");
+    await card.getByTestId("memory-entry-delete").click();
+    await expect(card).toHaveCount(0);
+  } finally {
+    await launched.cleanup();
+  }
+});

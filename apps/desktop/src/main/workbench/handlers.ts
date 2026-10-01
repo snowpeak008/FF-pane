@@ -28,6 +28,7 @@ import { app, type BrowserWindow, shell } from "electron";
 import type { InvokeHandlers } from "../../shared-ipc/server";
 import { publishEvent } from "../../shared-ipc/server";
 import { resolveGlobalRoot } from "../data-root";
+import { createMemoryIndexService, type MemoryIndexService } from "../memory-index";
 import { createSafeStorageBackend, createSecretStore, resolveSecretsFile } from "../secrets";
 import { WORKBENCH_WINDOW_LIMIT_ERROR_PREFIX } from "../terminal/handlers";
 import type { PtyManager } from "../terminal/manager";
@@ -56,6 +57,7 @@ import {
   readPanelThreadIndex,
   resolveFfPaneFile,
 } from "./panel-files";
+import { addCallerProjectMemory, searchCallerProjectMemory } from "./project-memory";
 import {
   composeWindowRolePrompt,
   listRoleManuals,
@@ -105,6 +107,11 @@ export interface WorkbenchCliLayerOptions {
   readonly getMaxWorkbenchWindows?: () => number | Promise<number>;
   /** 与 data 层共享的权威权限表；缺省则本层自建。 */
   readonly authRegistry?: WorkbenchAuthRegistry;
+  /**
+   * 与记忆页共用的索引服务。缺省时本层自建一份，检索仍能从 Markdown 对账，
+   * 但已打开的另一份连接不会立刻看到新条目。
+   */
+  readonly memoryIndex?: MemoryIndexService;
 }
 
 function mainModuleDir(): string {
@@ -132,6 +139,14 @@ export async function createWorkbenchCliLayer(
   const codexClaimer = new CodexSessionClaimer();
   const tokenRegistry = createWindowTokenRegistry();
   const authRegistry = options.authRegistry ?? createWorkbenchAuthRegistry();
+  const ownsMemoryIndex = options.memoryIndex === undefined;
+  const memoryIndex =
+    options.memoryIndex ??
+    createMemoryIndexService({
+      listProviders: () => providers.listProviders(),
+      revealSecret: (ref) => secrets.revealSecret(ref),
+      log: (message) => console.log(message),
+    });
   const layouts = createWorkbenchLayoutStore(layout.workbenchLayoutsFile);
   const resourcesDir = resolveWorkbenchRoleResourcesDir({
     isPackaged: app.isPackaged,
@@ -723,6 +738,8 @@ export async function createWorkbenchCliLayer(
           projectRoot,
           role: node?.role ?? found.role ?? "none",
           permission: node?.permission ?? found.permission ?? "edit",
+          openedBy: node?.openedBy ?? found.openedBy ?? "user",
+          sanitizeLocked: node?.sanitizeLocked === true,
           running: findLiveTerminalId(windowId) !== undefined,
           ...(parentId !== undefined && parentId.trim() !== "" ? { parentWindowId: parentId } : {}),
           ...(parentTitle !== undefined ? { parentTitle } : {}),
@@ -862,6 +879,11 @@ export async function createWorkbenchCliLayer(
           });
         },
       },
+      searchProjectMemory: (projectRoot, query, limit) =>
+        searchCallerProjectMemory(memoryIndex, projectRoot, query, limit),
+      addProjectMemory: async (projectRoot, entry) => {
+        await addCallerProjectMemory(memoryIndex, projectRoot, entry);
+      },
       openPanel: (panel, openerTitle, projectId) => {
         const browser = options.getWindow();
         if (browser === null || browser.isDestroyed()) {
@@ -893,6 +915,9 @@ export async function createWorkbenchCliLayer(
       authRegistry.clear();
       await mcpRegistry.releaseAll();
       await rolePromptTemps.releaseAll();
+      if (ownsMemoryIndex) {
+        memoryIndex.close();
+      }
     },
   };
 }

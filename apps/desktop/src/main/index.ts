@@ -7,6 +7,7 @@ import { installCsp } from "./csp";
 import { createDataHandlers } from "./data";
 import { resolveGlobalRoot } from "./data-root";
 import { createKnowledgeHandlers } from "./knowledge";
+import type { MemoryIndexService } from "./memory-index";
 import { createQuitCoordinator, createSessionLayer, type QuitCoordinatorDeps } from "./session";
 import { startSmokeMode } from "./smoke";
 import { runSqliteCheck } from "./sqlite-check";
@@ -185,12 +186,16 @@ async function bootstrap(): Promise<void> {
   };
   // T10.5'：权威权限表在数据层与 CLI 启动层之间共享
   const workbenchAuthRegistry = createWorkbenchAuthRegistry();
+  let sharedMemoryIndex: MemoryIndexService | undefined;
   try {
     const dataHandlers = await createDataHandlers(() => mainWindow, {
       onProjectRemoved: (projectId) => {
         projectPtyCleanup.killProject(projectId);
       },
       authRegistry: workbenchAuthRegistry,
+      shareMemoryIndex: (service) => {
+        sharedMemoryIndex = service;
+      },
     });
     registerInvokeHandlers(ipcMain, dataHandlers);
   } catch (thrown) {
@@ -297,6 +302,7 @@ async function bootstrap(): Promise<void> {
       getWindow: () => mainWindow,
       getMaxWorkbenchWindows: async () => (await configStore.readConfig()).maxWorkbenchWindows,
       authRegistry: workbenchAuthRegistry,
+      ...(sharedMemoryIndex !== undefined ? { memoryIndex: sharedMemoryIndex } : {}),
     });
     registerInvokeHandlers(ipcMain, workbenchCliLayer.handlers);
 

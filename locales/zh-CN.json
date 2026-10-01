@@ -921,6 +921,7 @@
     "approve": "通过",
     "edit": "编辑",
     "reject": "拒绝",
+    "delete": "删除",
     "saveAndApprove": "保存并通过",
     "approved": "已通过「{{title}}」",
     "rejected": "已拒绝「{{title}}」",
@@ -941,6 +942,9 @@
     "confidence": {
       "high": "已确认",
       "low": "待验证"
+    },
+    "source": {
+      "workbench": "来自「{{title}}」· {{role}}"
     },
     "editDialog": {
       "title": "编辑候选",

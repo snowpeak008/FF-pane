@@ -252,9 +252,12 @@ function MemoryView({
                         variant="ghost"
                         size="sm"
                         disabled={busyIds.has(entry.id)}
+                        data-testid={
+                          entry.source.kind === "workbench" ? "memory-entry-delete" : undefined
+                        }
                         onClick={() => reject(entry)}
                       >
-                        {t("memory.reject")}
+                        {t(entry.source.kind === "workbench" ? "memory.delete" : "memory.reject")}
                       </Button>
                     </>
                   }
