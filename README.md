@@ -18,7 +18,7 @@ FF-pane 是本地优先的多窗口终端工作台。在一个项目里并排打
 
 ## 项目状态
 
-**v0.10.19（M3 完成；Phase 10 多窗口终端工作台终验已通过）。** 进度事实源见 [docs/开发进度.md](docs/开发进度.md)。
+**v0.10.20（M3 完成；Phase 10 多窗口终端工作台终验已通过）。** 进度事实源见 [docs/开发进度.md](docs/开发进度.md)。给人看的用法见 [使用说明.md](使用说明.md)。
 
 ## 启动方式
 
@@ -26,8 +26,8 @@ FF-pane 是本地优先的多窗口终端工作台。在一个项目里并排打
 |---|---|---|
 | 开发模式 | 仓库根运行 `pnpm dev` | electron-vite 热更新，日常开发用 |
 | 打包 | 仓库根运行 `pnpm package` | 产出 NSIS 安装包与免安装目录，落在 `apps\desktop\release\` |
-| 双击启动（免安装） | 双击根目录 `FF-pane.cmd` | 定位并启动打包产物；未打包时会提示先运行 `pnpm package` |
-| 直接运行 exe | `apps\desktop\release\win-unpacked\FF-pane.exe` | `FF-pane.cmd` 启动的就是它；打包产物不进 git，需先本机打包 |
+| 双击启动 | 双击根目录 `FF-pane.cmd` | 启动当前源码（`pnpm dev`），黑窗口闪一下即关。打包产物是另一份，可能更旧 |
+| 直接运行 exe | `apps\desktop\release\win-unpacked\FF-pane.exe` | 本机 `pnpm package` 之后的免安装程序，不进 git |
 | 安装版 | 运行 `apps\desktop\release\FF-pane-Setup-<版本>.exe` | 向导式用户级安装（默认 `%LOCALAPPDATA%\Programs\FF-pane`），免管理员权限 |
 
 > 打包产物体积大（win-unpacked 约数百 MB），不进 git——所以根目录放的是轻量启动器 `FF-pane.cmd` 而非真 exe。
