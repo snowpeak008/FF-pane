@@ -17,6 +17,7 @@ import type {
 import {
   DEFAULT_WORKBENCH_ROLE,
   DEFAULT_WORKBENCH_WINDOW_PERMISSION,
+  isAiWorkbenchKind,
   noteWorkbenchConversation,
   WORKBENCH_PERMISSION_RANK,
 } from "@ff-pane/shared";
@@ -254,9 +255,15 @@ function nextShellTitle(layout: ProjectWorkbenchLayout): string {
   return `Shell ${n}`;
 }
 
-function nextCliTitle(kind: "claude" | "codex", layout: ProjectWorkbenchLayout): string {
+function nextCliTitle(kind: "claude" | "codex" | "grok", layout: ProjectWorkbenchLayout): string {
   const n = Object.values(layout.windows).filter((window) => window.kind === kind).length + 1;
-  return kind === "claude" ? `Claude ${n}` : `Codex ${n}`;
+  if (kind === "claude") {
+    return `Claude ${n}`;
+  }
+  if (kind === "codex") {
+    return `Codex ${n}`;
+  }
+  return `Grok ${n}`;
 }
 
 function nextTabTitle(layout: ProjectWorkbenchLayout): string {
@@ -393,7 +400,7 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
     }
     patchProject(set, get, projectId, (layout) => {
       const resolvedKind = kind;
-      const isAi = resolvedKind === "claude" || resolvedKind === "codex";
+      const isAi = isAiWorkbenchKind(resolvedKind);
       const window: WorkbenchWindow = {
         id: windowId,
         projectId,
@@ -456,7 +463,7 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
       if (tab === undefined) {
         return current;
       }
-      const isAi = kind === "claude" || kind === "codex";
+      const isAi = isAiWorkbenchKind(kind);
       const window: WorkbenchWindow = {
         id: windowId,
         projectId,

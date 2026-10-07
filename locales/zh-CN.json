@@ -289,6 +289,7 @@
       "kindShell": "PowerShell",
       "kindClaude": "Claude Code",
       "kindCodex": "Codex",
+      "kindGrok": "Grok",
       "profile": "启动配置",
       "permission": "权限等级",
       "role": "角色",
@@ -332,6 +333,7 @@
         "defaultPermission": "默认权限",
         "claude": "Claude",
         "codex": "Codex",
+        "grok": "Grok",
         "templateId": "来源模板",
         "baseUrl": "地址",
         "models": "模型",
@@ -435,6 +437,7 @@
       "permissionHold": "批准权限后，自动提醒会等你发下一句再恢复。",
       "busy": "本回合还没结束，暂不发送",
       "noNode": "没有可用的 node.exe，收不到回合结束信号。有待投递内容时请点立即发送。",
+      "grokManual": "Grok 窗口收不到回合结束信号。有待投递内容时请点立即发送。软件不会把对话正文写进终端。",
       "codexManualHint": "点「立即发送」会把排队的字和一次回车写进当前终端。Codex 在第一轮结束前收不到权限信号。画面上如果已经有确认框，不要点这个按钮。"
     },
     "inbox": {
@@ -460,7 +463,8 @@
       "kind": {
         "shell": "Shell",
         "claude": "Claude",
-        "codex": "Codex"
+        "codex": "Codex",
+        "grok": "Grok"
       },
       "status": {
         "running": "运行中",
@@ -664,6 +668,10 @@
           "name": "OpenAI 兼容中转",
           "description": "兼容 OpenAI 协议的中转站，需填写地址；用于 Codex（也可给 Claude Code 作中转）。"
         },
+        "grok-compatible": {
+          "name": "Grok 中转",
+          "description": "只给 Grok 用的中转。地址和密钥都要填。本机登录不用选这个。"
+        },
         "local-login": {
           "name": "本机已登录",
           "description": "使用本机 Claude Code / Codex 已登录账号，不注入密钥或地址。"
@@ -747,7 +755,7 @@
     },
     "configs": {
       "title": "配置",
-      "subtitle": "每个项目用一张配置决定 Claude 和 Codex 各走哪条路。可以只配一路。",
+      "subtitle": "每个项目用一张配置决定 Claude、Codex 和 Grok 各走哪条路。可以只配一路。",
       "new": "新建配置",
       "empty": "还没有配置。",
       "loadError": "读取配置失败",
@@ -774,6 +782,7 @@
         "scopeAll": "还没有项目，这张配置对以后的所有项目可用。",
         "routeClaude": "Claude",
         "routeCodex": "Codex",
+        "routeGrok": "Grok",
         "connection": "连法",
         "local": "本机登录",
         "relay": "中转",
@@ -793,7 +802,7 @@
           "xhigh": "xhigh",
           "max": "max"
         },
-        "needRoute": "至少配置 Claude 或 Codex 一路。"
+        "needRoute": "至少配置 Claude、Codex 或 Grok 一路。"
       },
       "edit": {
         "title": "编辑配置",

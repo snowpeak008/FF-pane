@@ -13,6 +13,7 @@ import type {
 import {
   DEFAULT_WORKBENCH_ROLE,
   DEFAULT_WORKBENCH_WINDOW_PERMISSION,
+  isAiWorkbenchKind,
   projectConfigRoute,
   selectEffectiveProjectConfig,
   WORKBENCH_PERMISSION_LEVELS,
@@ -73,12 +74,17 @@ export function NewWindowDialog({
   const [loadingConfig, setLoadingConfig] = useState(false);
   const [effective, setEffective] = useState<ProjectConfig | undefined>(undefined);
 
-  const aiRuntime = kind === "claude" ? "claude-code" : kind === "codex" ? "codex" : undefined;
+  const aiRuntime =
+    kind === "claude"
+      ? "claude-code"
+      : kind === "codex"
+        ? "codex"
+        : kind === "grok"
+          ? "grok-build"
+          : undefined;
   const route =
-    kind === "claude" || kind === "codex"
-      ? effective === undefined
-        ? undefined
-        : projectConfigRoute(effective, kind)
+    isAiWorkbenchKind(kind) && effective !== undefined
+      ? projectConfigRoute(effective, kind)
       : undefined;
   const routeMissing = kind !== "shell" && !loadingConfig && route === undefined;
 
@@ -170,6 +176,7 @@ export function NewWindowDialog({
                   ["shell", "workbench.newWindow.kindShell"],
                   ["claude", "workbench.newWindow.kindClaude"],
                   ["codex", "workbench.newWindow.kindCodex"],
+                  ["grok", "workbench.newWindow.kindGrok"],
                 ] as const
               ).map(([value, labelKey]) => (
                 <Button
@@ -191,7 +198,7 @@ export function NewWindowDialog({
               {cliMissing ? (
                 <p className="text-sm text-danger-text" data-testid="workbench-cli-missing">
                   {t("workbench.newWindow.cliMissing", {
-                    cli: kind === "claude" ? "Claude Code" : "Codex",
+                    cli: kind === "claude" ? "Claude Code" : kind === "grok" ? "Grok" : "Codex",
                   })}
                 </p>
               ) : null}
@@ -199,7 +206,7 @@ export function NewWindowDialog({
                 <div className="flex flex-col gap-2">
                   <p className="text-sm text-danger-text" data-testid="workbench-route-missing">
                     {t("workbench.newWindow.routeMissing", {
-                      cli: kind === "claude" ? "Claude" : "Codex",
+                      cli: kind === "claude" ? "Claude" : kind === "grok" ? "Grok" : "Codex",
                       name: effective?.name ?? "",
                     })}
                   </p>

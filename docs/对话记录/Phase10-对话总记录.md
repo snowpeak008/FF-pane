@@ -2700,3 +2700,161 @@ e2e 偶发：`config-tool-workbench.spec.ts` 排队草案取消后 15 秒内对�
 ### 相关文件链接
 
 - [Phase 10 终验](../验收记录/Phase10-终验.md)
+
+## 2026-10-06 16:39 · T10.16 · 调研 · Grok 窗口
+
+### 任务要点
+
+按计划 §10 先查、不写实现。只看本机 `grok --help`、官方文档和 `docs/adapters/grok-build.md`。确认能不能在启动这一个工作台窗口时带上 MCP，而且不改用户 `~/.grok`、不在项目目录留下 `.grok`。不调用模型。
+
+### 结论
+
+不能。停下，没有改代码。
+
+本机是 `grok 1.0.13`（`C:\Users\admin\.grok\bin\grok.exe`）。工作台窗口要启动的是交互式 `grok`（和 Claude、Codex 一样的终端窗口）。这条命令没有「只给这一个进程」的 MCP 参数：`grok --help` 里没有 `--plugin-dir`、`--mcp-config` 或临时配置路径；实测 `grok --plugin-dir` 报 `unexpected argument '--plugin-dir'`。
+
+`grok mcp add --scope` 只有两档，帮助写明都会落盘：`user` 写 `~/.grok/config.toml`，`project` 写 `./.grok/config.toml`。两条都是本单禁止的。官方文档 [MCP Servers](https://docs.x.ai/build/features/mcp-servers) 同样只写这两处，另外还会读 `~/.claude.json`、`.cursor/mcp.json` 和项目 `.mcp.json`。写这些也会改用户全局配置，或在项目里留文件。
+
+`grok agent --plugin-dir <DIR>` 的帮助写明「仅本进程，MCP 会直接启用」。但 `grok agent` 是不带交互界面的子命令，下面只有 `stdio` / `headless` / `serve` / `leader`，不是用户在窗口里打字的那条命令。官方插件说明也把 `--plugin-dir` 限定在 agent 进程，不包含交互式窗口。
+
+`GROK_HOME` 会把配置、登录态和会话整份搬走，`docs/adapters/grok-build.md` §7.4 已否决，本单不用。ACP `session/new` 的 `mcpServers` / `_meta.pluginDirs` 是非交互协议，旧文档写明形状未实测，也不是工作台这个 PTY 窗口。未调用模型，未做注入试验。
+
+按 §10：不要改成写用户配置或项目目录。请 Tony 定下一步。
+
+### 改动文件
+
+无实现改动。只追加本条。
+
+### 命令结果
+
+- `grok --version`：`grok 1.0.13 (5e9a58528b76) [stable]`
+- `grok --help`：交互式命令无 MCP / plugin-dir / 临时配置参数。有 `grok mcp` 子命令。
+- `grok --plugin-dir`：退出码 2，`unexpected argument '--plugin-dir'`
+- `grok mcp add --help`：`--scope` 仅 `user`（`~/.grok/config.toml`）或 `project`（`./.grok/config.toml`），默认 user
+- `grok agent --help`：`--plugin-dir` 仅在此子命令；说明为仅本进程。子命令为 stdio / headless / serve / leader
+- `grok agent --plugin-dir`：退出码 2，缺目录参数（说明参数存在），未启动、未调用模型
+- 官方文档：https://docs.x.ai/build/features/mcp-servers ，https://docs.x.ai/build/features/skills-plugins-marketplaces ，https://docs.x.ai/build/cli/reference
+
+### 问题与遗留
+
+当前本机 Grok 不能在启动这一个交互窗口时带上工作台工具，同时守住「不改 `~/.grok`、不在项目留 `.grok`」。实现未开始。需要 Tony 决定：继续挂起 Grok，还是接受改用户配置 / 项目目录 / 换非交互的 `grok agent` 路径。
+
+### 相关文件链接
+
+- [Phase 10 计划 §10](../Phase10-多窗口终端工作台计划.md)
+- [Grok 适配器说明](../adapters/grok-build.md)
+
+## 2026-10-07 01:52 · T10.16 · 执行 · Grok 窗口
+
+### 任务要点
+
+按 §10 把 Grok 接进工作台：配置多一路（本机登录或中转），启动时合并写入项目 `.grok/config.toml`，令牌只放进程环境。不提交。
+
+### 结论
+
+做完了。本机 `grok 1.0.13` 会展开占位，所以令牌没有写进文件。
+
+官方文档写明 `[mcp_servers]` 的 `env` 在加载时展开 `${VAR}`，项目 `.grok/config.toml` 会读这一段。帮助里交互式 `grok` 有 `--session-id`，新开窗口由软件指定对话编号，并行不排队。没有编号时不用空的 `--resume`（那个会接最近一条），改从本窗口历史里选。
+
+中转没有现成能给 Grok 用的来源模板，补了只给 Grok 的「Grok 中转」（地址和密钥必填）。密钥进 `XAI_API_KEY`，地址进 `GROK_MODELS_BASE_URL`，都不进配置文件。角色说明走 `--rules`。Grok 没有可靠的回合结束信号，投递要手动点发送。版本仍是 1.0.0，末位 +1 留给提交那一步。
+
+### 改动文件
+
+配置与窗口：项目配置增加 Grok 一路；新建窗口、管理者开子窗口、重启和续接都走这一路。来源模板 `grok-compatible`。权限参数：只读 `plan`，可改 / 可改+跑命令都是 `acceptEdits`（Grok 没有单独禁命令的档），全放开 `--always-approve`。
+
+工具文件：启动时合并项目 `.grok/config.toml`。工作台工具始终写入。知识库、自配置看项目开关。自配置调用时非管理者会被拒绝。退出不删文件。`.grok/` 已加入仓库忽略列表。不写 `~/.grok`、`~/.claude.json`、`.cursor/mcp.json`、项目 `.mcp.json`。
+
+说明：中英文语言包、`使用说明.md`。计划 §7.5 里「不能在项目留 .grok」已改成 Tony 选定的写法。
+
+### 命令结果
+
+- `pnpm lint`：通过。`check-i18n` PASS。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- 单测：`grok-mcp-config`、`workbench-grok-launch`、`mcp-config-tool`、`workbench-permission`（快照已更新）、`provider-injection`、`domain`、`project-configs` 通过。
+- e2e：`tests/e2e/workbench-grok.spec.ts` 通过。假的 grok 开得出窗口，项目里有 `.grok/config.toml`，文件里是占位符，没有令牌明文。测例在 PATH 前面放了同名 exe，避免启动本机真的 `grok.exe`。
+
+### 问题与遗留
+
+Grok 的「可改文件」和「可改+跑命令」启动参数相同，命令仍由 Grok 自己询问。没有不接最近一条的命令行选择器。回合结束要手动发送。版本号留到提交时改为 1.0.1。未纳入 `apps/desktop/scripts/real-config-probe.mjs`。
+
+### 相关文件链接
+
+- [Phase 10 计划 §10](../Phase10-多窗口终端工作台计划.md)
+- [使用说明](../../使用说明.md)
+
+## 2026-10-07 11:02 · T10.16 · 检查 · Grok 窗口
+
+### 任务要点
+
+独立检查未提交的 T10.16。对照计划 §10、§7.3、§7.4，以及总记录「2026-10-07 01:52 · T10.16 · 执行 · Grok 窗口」。审查未提交改动，做反向探针，完整跑 lint / desktop typecheck / `pnpm test` / `pnpm smoke` / `pnpm test:e2e`。不改实现，不提交。不碰 `apps/desktop/scripts/real-config-probe.mjs`。不改 `~/.grok`、`~/.claude`、`~/.codex`。
+
+### 结论
+
+通过。配置有 Grok 一路，默认不勾。只合并项目 `.grok/config.toml`，不写 `~/.grok`、`~/.claude.json`、`.cursor/mcp.json`、项目 `.mcp.json`。令牌只有占位符。知识库和自配置看项目开关，非管理者调用自配置会被拒绝。退出不删文件。`.grok/` 在忽略列表里。新开、子窗口、重启和续接都走这一路。使用说明里的四句和事实一致。
+
+执行者的三点都属实，没有破坏安全规矩：可改文件和可改+跑命令的启动参数相同，命令仍询问；没有编号时不起进程，不用空的 `--resume`；没有回合结束信号，不会超时强写，要点立即发送。
+
+不需要主控决策。版本仍是 1.0.0，末位 +1 留到提交。
+
+### 改动文件
+
+- 新增 `docs/验收记录/T10.16-验收.md`
+- 本条追加到总记录
+
+### 命令结果
+
+- `pnpm lint`：通过。Biome 766 个文件。`check-i18n` PASS。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- `pnpm test`：146 个文件，2444 过，1 跳过。
+- `pnpm smoke`：ALL PASS。`FF-pane v1.0.0`。pdfjs 缺 canvas 的警告在 PASS 之前。
+- `pnpm test:e2e`：53 过，1 失败。失败是 Grok 用例超过 60 秒，另有一次工作进程清理超时。单独重跑 `tests/e2e/workbench-grok.spec.ts`：1 过，10.2 秒。
+
+### 问题与遗留
+
+- 未提交。未改实现，未改 `apps/desktop/scripts/real-config-probe.mjs`。未读写 `~/.aiworkbench`，未改 `~/.grok`、`~/.claude`、`~/.codex`。未跑消耗额度的命令。探针已删。核对用户目录时只比较了修改时间和大小，没有打开内容。
+- 建议不挡：使用说明补一句 Grok 两档权限参数相同；黄条补上立即发送会写回车；全量 e2e 的 Grok 超时先单独重跑。
+- 工作区里若干旧验收记录和 `docs/Provider-模板说明.md` 只有换行警告、diff 没有正文。提交时不要带上。
+
+### 相关文件链接
+
+- [T10.16 验收记录](../验收记录/T10.16-验收.md)
+- [Phase 10 计划 §10](../Phase10-多窗口终端工作台计划.md)
+- 执行：[2026-10-07 01:52 · T10.16 · 执行 · Grok 窗口](./Phase10-对话总记录.md)
+
+## 2026-10-07 11:40 · T10.16 · 提交 · v1.0.1
+
+### 任务要点
+
+按计划 §7.2 第 4 步提交 T10.16。版本 `1.0.0` → `1.0.1`（根与 desktop 的 `package.json`、README 状态行、测试里的假 AppInfo）。开发进度登记 T10.16 已验收，并写下验收留下的三点。计划 §4 保持 T10.8 挂起，另加 T10.16 行；§7.5 当前版本改为 1.0.1。轻量 tag `v1.0.1`，不 push。
+
+### 结论
+
+已提交并打轻量 tag `v1.0.1`，未 push。验收没有必须修复。不需要主控决策。
+
+### 改动文件
+
+暂存并提交（不含 `apps/desktop/scripts/real-config-probe.mjs`，不含只有换行符变化的旧验收记录和 `docs/Provider-模板说明.md`）：
+
+- 版本：根与 `apps/desktop` 的 `package.json`、`README.md`、`command-ipc.test.ts` 与 `client-server.test.ts` 里的假 AppInfo
+- 实现与测试：Grok 配置一路、项目 `.grok/config.toml` 合并、启动 / 子窗口 / 续接、语言包、使用说明、`.gitignore`
+- 进度与计划：`docs/开发进度.md`、`docs/Phase10-多窗口终端工作台计划.md`
+- `docs/验收记录/T10.16-验收.md`
+- 本总记录
+
+### 命令结果
+
+- `pnpm lint`：通过。Biome 766 个文件。`check-i18n` PASS。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- `vitest run tests/command-ipc.test.ts tests/client-server.test.ts`：2 个文件，73 过。
+- 提交信息：`feat: T10.16 工作台接入 Grok 窗口`
+- 轻量 tag `v1.0.1`，未 push
+- 提交哈希：打 tag 之后补进本条
+
+### 问题与遗留
+
+验收留下的三点已写入开发进度：Grok 两档权限启动参数相同；没有不接最近一条的选择器；没有回合结束信号，要手动发送。历史记录里的 `1.0.0` 没有改。未纳入 `apps/desktop/scripts/real-config-probe.mjs`。旧验收记录和 `docs/Provider-模板说明.md` 只有换行符变化，没有提交。
+
+### 相关文件链接
+
+- [T10.16 验收记录](../验收记录/T10.16-验收.md)
+- [Phase 10 计划 §10](../Phase10-多窗口终端工作台计划.md)

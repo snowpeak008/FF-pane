@@ -13,6 +13,9 @@ export const CLAUDE_INTERACTIVE_COMMAND = "claude";
 /** Codex 默认可执行文件名。 */
 export const CODEX_INTERACTIVE_COMMAND = "codex";
 
+/** Grok 默认可执行文件名。 */
+export const GROK_INTERACTIVE_COMMAND = "grok";
+
 /** 交互式 Claude 启动参数。 */
 export interface BuildInteractiveClaudeArgsInput {
   readonly model?: string;
@@ -148,6 +151,56 @@ export function buildInteractiveCodexArgs(input: BuildInteractiveCodexArgsInput)
   if (input.notifyArgv !== undefined && input.notifyArgv.length > 0) {
     const encoded = input.notifyArgv.map((part) => JSON.stringify(part)).join(",");
     args.push("-c", `notify=[${encoded}]`);
+  }
+  if (input.initialPrompt !== undefined && input.initialPrompt.trim() !== "") {
+    args.push(input.initialPrompt);
+  }
+  return args;
+}
+
+/** 交互式 Grok 启动参数。会话编号能指定，所以新开用 `--session-id`。 */
+export interface BuildInteractiveGrokArgsInput {
+  readonly model?: string;
+  readonly effort?: string;
+  /** 新开会话的 UUID（`--session-id`）。与 resumeSessionId 互斥。 */
+  readonly sessionId?: string;
+  /** 续接已有 UUID（`--resume <id>`）。没有 id 时调用方不得启动，避免接上最近一条。 */
+  readonly resumeSessionId?: string;
+  /** 追加到系统提示（`--rules`）。不使用 `--system-prompt-override`。 */
+  readonly rules?: string;
+  readonly initialPrompt?: string;
+  readonly permission?: WorkbenchPermissionLevel;
+}
+
+/**
+ * 组装交互式 `grok` argv（不含可执行文件名）。
+ * 不加 `-p`。续接必须带会话 id，绝不使用 `--continue` 或空的 `--resume`。
+ */
+export function buildInteractiveGrokArgs(input: BuildInteractiveGrokArgsInput): string[] {
+  const args: string[] = [];
+  const resumeId = input.resumeSessionId?.trim() ?? "";
+  if (resumeId !== "") {
+    args.push("--resume", resumeId);
+  } else if (input.sessionId !== undefined && input.sessionId.trim() !== "") {
+    args.push("--session-id", input.sessionId.trim());
+  }
+  if (input.permission !== undefined) {
+    args.push(
+      ...resolvePermissionCliArgs({
+        cli: "grok",
+        level: input.permission,
+        resume: resumeId !== "",
+      }),
+    );
+  }
+  if (input.model !== undefined && input.model.trim() !== "") {
+    args.push("--model", input.model.trim());
+  }
+  if (input.effort !== undefined && input.effort.trim() !== "") {
+    args.push("--reasoning-effort", input.effort.trim());
+  }
+  if (input.rules !== undefined && input.rules.trim() !== "") {
+    args.push("--rules", input.rules);
   }
   if (input.initialPrompt !== undefined && input.initialPrompt.trim() !== "") {
     args.push(input.initialPrompt);

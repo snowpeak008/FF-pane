@@ -31,7 +31,7 @@ import {
 } from "../src/workbench-permission/index.js";
 
 describe("WORKBENCH_PERMISSION_MAPPINGS snapshots", () => {
-  const clis = ["claude-code", "codex"] as const;
+  const clis = ["claude-code", "codex", "grok"] as const;
   const modes = [false, true] as const;
 
   for (const cli of clis) {
@@ -45,8 +45,8 @@ describe("WORKBENCH_PERMISSION_MAPPINGS snapshots", () => {
     }
   }
 
-  it("表穷尽 4×2", () => {
-    expect(WORKBENCH_PERMISSION_MAPPINGS).toHaveLength(8);
+  it("表穷尽 4×3", () => {
+    expect(WORKBENCH_PERMISSION_MAPPINGS).toHaveLength(12);
   });
 });
 

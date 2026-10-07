@@ -6,6 +6,7 @@ import type { WorkbenchPermissionLevel, WorkbenchRole, WorkbenchWindow } from "@
 import {
   DEFAULT_WORKBENCH_ROLE,
   DEFAULT_WORKBENCH_WINDOW_PERMISSION,
+  isAiWorkbenchKind,
   shortSessionId,
   WORKBENCH_PERMISSION_LEVELS,
   WORKBENCH_ROLES,
@@ -77,7 +78,7 @@ export function WindowPane({
   const getProjectLayout = useWorkbenchStore((s) => s.getProjectLayout);
   const inbox = useWorkbenchStore((s) => s.inboxByWindow[window.id]);
 
-  const isCli = window.kind === "claude" || window.kind === "codex";
+  const isCli = isAiWorkbenchKind(window.kind);
   const permission = window.permission ?? DEFAULT_WORKBENCH_WINDOW_PERMISSION;
   const role = window.role ?? DEFAULT_WORKBENCH_ROLE;
   const [editingPermission, setEditingPermission] = useState(false);
@@ -277,7 +278,9 @@ export function WindowPane({
       ? t("workbench.window.kind.claude")
       : window.kind === "codex"
         ? t("workbench.window.kind.codex")
-        : t("workbench.window.kind.shell");
+        : window.kind === "grok"
+          ? t("workbench.window.kind.grok")
+          : t("workbench.window.kind.shell");
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: pane focus-on-click
@@ -723,7 +726,9 @@ export function WindowPane({
           className="shrink-0 border-b border-border bg-warning-surface px-2 py-1 text-2xs text-warning-text"
           data-testid="workbench-manual-turn-signal"
         >
-          {t("workbench.deliver.noNode")}
+          {window.kind === "grok"
+            ? t("workbench.deliver.grokManual")
+            : t("workbench.deliver.noNode")}
         </div>
       ) : null}
       {deliverPending.count > 0 && deliverPending.mode !== "clear" ? (
@@ -793,7 +798,8 @@ export function WindowPane({
         {...(isCli
           ? {
               cliLaunch: {
-                kind: window.kind === "codex" ? "codex" : "claude",
+                kind:
+                  window.kind === "codex" ? "codex" : window.kind === "grok" ? "grok" : "claude",
                 projectRoot,
                 autoStart: autoStart || resumeNext,
                 permission,

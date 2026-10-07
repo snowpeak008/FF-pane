@@ -70,7 +70,10 @@ export function configReferencesProvider(
   providerId: ProviderId,
 ): boolean {
   return configs.some(
-    (config) => config.claude?.providerId === providerId || config.codex?.providerId === providerId,
+    (config) =>
+      config.claude?.providerId === providerId ||
+      config.codex?.providerId === providerId ||
+      config.grok?.providerId === providerId,
   );
 }
 
@@ -143,6 +146,7 @@ function pickConfig(value: unknown): ProjectConfig | undefined {
   const permission = raw["defaultPermission"];
   const claude = pickRoute(raw["claude"]);
   const codex = pickRoute(raw["codex"]);
+  const grok = pickRoute(raw["grok"]);
   const isDefault = raw["isDefault"] === true;
   return {
     id: raw["id"] as ProjectConfigId,
@@ -152,6 +156,7 @@ function pickConfig(value: unknown): ProjectConfig | undefined {
     ...(isWorkbenchPermissionLevel(permission) ? { defaultPermission: permission } : {}),
     ...(claude !== undefined ? { claude } : {}),
     ...(codex !== undefined ? { codex } : {}),
+    ...(grok !== undefined ? { grok } : {}),
   };
 }
 
@@ -198,8 +203,9 @@ export function normalizeProjectConfigDraft(draft: ProjectConfigDraft): ProjectC
   }
   const claude = normalizeRoute(draft.claude, "Claude");
   const codex = normalizeRoute(draft.codex, "Codex");
-  if (claude === undefined && codex === undefined) {
-    throw new ProjectConfigDraftInvalidError("至少配置 Claude 或 Codex 一路");
+  const grok = normalizeRoute(draft.grok, "Grok");
+  if (claude === undefined && codex === undefined && grok === undefined) {
+    throw new ProjectConfigDraftInvalidError("至少配置 Claude、Codex 或 Grok 一路");
   }
   if (
     draft.defaultPermission !== undefined &&
@@ -218,6 +224,7 @@ export function normalizeProjectConfigDraft(draft: ProjectConfigDraft): ProjectC
       : {}),
     ...(claude !== undefined ? { claude } : {}),
     ...(codex !== undefined ? { codex } : {}),
+    ...(grok !== undefined ? { grok } : {}),
   };
 }
 

@@ -6,7 +6,7 @@
 
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import {
@@ -23,6 +23,8 @@ import {
   type WindowTokenRegistry,
 } from "@ff-pane/core";
 import {
+  DEFAULT_CONFIG_TOOL_SERVER_NAME,
+  DEFAULT_KNOWLEDGE_TOOL_SERVER_NAME,
   DEFAULT_WORKBENCH_ROLE,
   isWorkbenchRole,
   type ProjectId,
@@ -31,6 +33,14 @@ import {
   type WorkbenchRole,
   workbenchKindToRuntime,
 } from "@ff-pane/shared";
+import { ENV_CONFIG_CALLER_ROLE } from "../../mcp/config-tool";
+import {
+  CONFIG_MCP_SCRIPT,
+  ENV_CONFIG_AUDIT,
+  ENV_CONFIG_CONFIGS,
+  ENV_CONFIG_MAILBOX,
+  ENV_CONFIG_PROVIDERS,
+} from "../session/config-tool";
 import { resolveRuntimeConfigOverrides, resolveRuntimeEnv } from "../session/env";
 import { createKnowledgeAuditPath, resolveKnowledgeMcpServer } from "../session/knowledge-tool";
 import type { PtyManager } from "../terminal/manager";
@@ -41,10 +51,13 @@ import {
   assertTokenAbsent,
   buildInteractiveClaudeArgs,
   buildInteractiveCodexArgs,
+  buildInteractiveGrokArgs,
   CLAUDE_INTERACTIVE_COMMAND,
   CODEX_INTERACTIVE_COMMAND,
+  GROK_INTERACTIVE_COMMAND,
 } from "./cli-args";
 import { type CodexSessionClaimer, withCodexClaimMarker } from "./codex-claim";
+import { writeGrokProjectMcpConfig } from "./grok-mcp-config";
 import {
   prepareWindowHooks,
   releaseWindowHooks,
@@ -87,7 +100,7 @@ export interface LaunchCliWindowInput {
   readonly windowId: string;
   readonly projectId: ProjectId;
   readonly projectRoot: string;
-  readonly kind: "claude" | "codex";
+  readonly kind: "claude" | "codex" | "grok";
   /** 已按项目配置解析好的这一路。本机登录不带 providerId。 */
   readonly route: LaunchCliRoute;
   readonly cols: number;
@@ -106,7 +119,7 @@ export interface LaunchCliWindowInput {
 
 export interface LaunchCliWindowResult {
   readonly terminal: TerminalRecord;
-  readonly kind: "claude" | "codex";
+  readonly kind: "claude" | "codex" | "grok";
   readonly nativeSessionId?: string;
   /** Codex：已开始后台认领会话 id。 */
   readonly claimingSession?: boolean;
@@ -145,6 +158,8 @@ export interface LaunchCliWindowDeps {
   readonly revealSecret: (ref: string) => Promise<string | undefined>;
   readonly getMaxWorkbenchWindows: () => number | Promise<number>;
   readonly isKnowledgeToolEnabled: (projectRoot: string) => Promise<boolean>;
+  /** 项目自配置开关。缺省当关。文件是否写入自配置工具只看这个开关。 */
+  readonly isConfigToolEnabled?: (projectRoot: string) => Promise<boolean>;
   readonly getKnowledgeToolSettings: () => Promise<
     | {
         readonly command?: string;
@@ -175,10 +190,11 @@ export interface LaunchCliWindowDeps {
   readonly loadRoleInjection?: (input: {
     readonly windowId: string;
     readonly role: WorkbenchRole;
-    readonly runtime: "claude-code" | "codex";
+    readonly runtime: "claude-code" | "codex" | "grok";
   }) => Promise<{
     readonly claudePromptFile?: string;
     readonly developerInstructions?: string;
+    readonly grokRules?: string;
   }>;
   /**
    * 自配置 MCP。只在管理者且项目开关打开时返回服务器；否则返回空对象。
@@ -233,8 +249,14 @@ export function assertLaunchCliIpcSafe(request: object): void {
   }
 }
 
-function resolveCliCommand(runtime: "claude-code" | "codex"): string {
-  return runtime === "claude-code" ? CLAUDE_INTERACTIVE_COMMAND : CODEX_INTERACTIVE_COMMAND;
+function resolveCliCommand(runtime: "claude-code" | "codex" | "grok"): string {
+  if (runtime === "claude-code") {
+    return CLAUDE_INTERACTIVE_COMMAND;
+  }
+  if (runtime === "grok") {
+    return GROK_INTERACTIVE_COMMAND;
+  }
+  return CODEX_INTERACTIVE_COMMAND;
 }
 
 async function resolveKnowledgeServers(
@@ -401,6 +423,8 @@ async function launchCliWindowBody(
   };
 
   let mcpTemp: WorkbenchMcpTempFile | undefined;
+  let grokConfigPath: string | undefined;
+  const extraProcessEnv: Record<string, string> = {};
   const cwd = (input.cwd?.trim() || input.projectRoot).trim();
 
   let nativeSessionId: string | undefined = input.nativeSessionId?.trim() || undefined;
@@ -442,7 +466,7 @@ async function launchCliWindowBody(
       ...(hooks.settingsPath !== undefined ? { settingsFile: hooks.settingsPath } : {}),
       ...(input.initialPrompt !== undefined ? { initialPrompt: input.initialPrompt } : {}),
     });
-  } else {
+  } else if (runtime === "codex") {
     let serversForMcp = mcpServers;
     if (Object.keys(mcpServers).length > 0) {
       serversForMcp = injectTokenIntoMcpServers(mcpServers, windowToken, "codex-forward");
@@ -473,6 +497,88 @@ async function launchCliWindowBody(
       ...(hooks.notifyArgv.length > 0 ? { notifyArgv: hooks.notifyArgv } : {}),
       ...(input.initialPrompt !== undefined ? { initialPrompt: input.initialPrompt } : {}),
     });
+  } else if (runtime === "grok") {
+    const configEnabled =
+      deps.isConfigToolEnabled !== undefined
+        ? await deps.isConfigToolEnabled(input.projectRoot)
+        : false;
+    const attachedConfig = mcpServers[DEFAULT_CONFIG_TOOL_SERVER_NAME];
+    const serversForFile: Record<string, McpStdioServerSpec> = {};
+    for (const [name, spec] of Object.entries(mcpServers)) {
+      if (name !== DEFAULT_CONFIG_TOOL_SERVER_NAME) {
+        serversForFile[name] = spec;
+      }
+    }
+    if (configEnabled) {
+      const placeholder = `\${`;
+      serversForFile[DEFAULT_CONFIG_TOOL_SERVER_NAME] = {
+        command: attachedConfig?.command ?? process.execPath,
+        args: attachedConfig?.args ?? [join(deps.moduleDir, CONFIG_MCP_SCRIPT)],
+        env: {
+          ELECTRON_RUN_AS_NODE: "1",
+          [ENV_CONFIG_MAILBOX]: `${placeholder}${ENV_CONFIG_MAILBOX}}`,
+          [ENV_CONFIG_PROVIDERS]: `${placeholder}${ENV_CONFIG_PROVIDERS}}`,
+          [ENV_CONFIG_CONFIGS]: `${placeholder}${ENV_CONFIG_CONFIGS}}`,
+          [ENV_CONFIG_AUDIT]: `${placeholder}${ENV_CONFIG_AUDIT}}`,
+          [ENV_CONFIG_CALLER_ROLE]: `${placeholder}${ENV_CONFIG_CALLER_ROLE}}`,
+        },
+      };
+      extraProcessEnv[ENV_CONFIG_CALLER_ROLE] = role;
+      if (attachedConfig?.env !== undefined) {
+        for (const key of [
+          ENV_CONFIG_MAILBOX,
+          ENV_CONFIG_PROVIDERS,
+          ENV_CONFIG_CONFIGS,
+          ENV_CONFIG_AUDIT,
+        ]) {
+          const value = attachedConfig.env[key];
+          if (value !== undefined && value.trim() !== "") {
+            extraProcessEnv[key] = value;
+          }
+        }
+      }
+    }
+    const withToken = injectTokenIntoMcpServers(serversForFile, windowToken, "grok-env-expand");
+    const wantResume = input.resume === true;
+    if (wantResume && nativeSessionId === undefined) {
+      await releaseFailedLaunch();
+      throw new WorkbenchCliLaunchError(
+        "invalid",
+        "Grok 没有不接最近一条的选择器。请从本窗口的历史对话里选一段再续接。",
+      );
+    }
+    if (!wantResume) {
+      nativeSessionId = randomUUID();
+    }
+    try {
+      grokConfigPath = await writeGrokProjectMcpConfig({
+        projectRoot: input.projectRoot,
+        servers: withToken,
+        managedNames: [
+          WORKBENCH_MCP_SERVER_NAME,
+          DEFAULT_KNOWLEDGE_TOOL_SERVER_NAME,
+          DEFAULT_CONFIG_TOOL_SERVER_NAME,
+          ...Object.keys(withToken),
+        ],
+      });
+    } catch (error) {
+      await releaseFailedLaunch();
+      throw error;
+    }
+    args = buildInteractiveGrokArgs({
+      ...(model !== undefined ? { model } : {}),
+      ...(effort !== undefined ? { effort } : {}),
+      ...(wantResume && nativeSessionId !== undefined
+        ? { resumeSessionId: nativeSessionId }
+        : nativeSessionId !== undefined
+          ? { sessionId: nativeSessionId }
+          : {}),
+      permission,
+      ...(roleInjection.grokRules !== undefined ? { rules: roleInjection.grokRules } : {}),
+      ...(input.initialPrompt !== undefined ? { initialPrompt: input.initialPrompt } : {}),
+    });
+  } else {
+    throw new WorkbenchCliLaunchError("unsupported-runtime", `unsupported runtime: ${runtime}`);
   }
 
   try {
@@ -480,6 +586,7 @@ async function launchCliWindowBody(
       ...args,
       roleInjection.developerInstructions ?? "",
       roleInjection.claudePromptFile ?? "",
+      roleInjection.grokRules ?? "",
     ]);
     assertTokenAbsent(windowToken, args);
     if (mcpTemp !== undefined) {
@@ -492,6 +599,11 @@ async function launchCliWindowBody(
       const promptBody = readFileSync(roleInjection.claudePromptFile, "utf8");
       assertSecretAbsent(secret, [promptBody]);
       assertTokenAbsent(windowToken, [promptBody]);
+    }
+    if (grokConfigPath !== undefined) {
+      const grokBody = readFileSync(grokConfigPath, "utf8");
+      assertSecretAbsent(secret, [grokBody]);
+      assertTokenAbsent(windowToken, [grokBody]);
     }
     for (const hookFile of hooks.files) {
       const hookBody = readFileSync(hookFile, "utf8");
@@ -522,6 +634,9 @@ async function launchCliWindowBody(
     }
   }
   stringEnv[FF_PANE_WINDOW_TOKEN_ENV] = windowToken;
+  for (const [key, value] of Object.entries(extraProcessEnv)) {
+    stringEnv[key] = value;
+  }
   if (deps.controlPipe !== undefined && deps.controlPipe.trim() !== "") {
     stringEnv[FF_PANE_WB_PIPE_ENV] = deps.controlPipe;
   }
@@ -615,7 +730,7 @@ async function launchCliWindowBody(
     args: [...direct.args],
     effectivePermission: permission,
     permissionCapped,
-    turnSignal: nodePath === undefined ? "manual" : "auto",
+    turnSignal: runtime === "grok" || nodePath === undefined ? "manual" : "auto",
   };
 }
 

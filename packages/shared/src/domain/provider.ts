@@ -12,6 +12,7 @@ export const PROVIDER_TEMPLATE_IDS = [
   "anthropic-compatible",
   "openai-official",
   "openai-compatible",
+  "grok-compatible",
   "local-login",
 ] as const;
 

@@ -131,3 +131,57 @@ exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > codex × yolo × resume 1`] =
   "--dangerously-bypass-approvals-and-sandbox",
 ]
 `;
+
+exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > grok × edit × fresh 1`] = `
+[
+  "--permission-mode",
+  "acceptEdits",
+]
+`;
+
+exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > grok × edit × resume 1`] = `
+[
+  "--permission-mode",
+  "acceptEdits",
+]
+`;
+
+exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > grok × edit-exec × fresh 1`] = `
+[
+  "--permission-mode",
+  "acceptEdits",
+]
+`;
+
+exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > grok × edit-exec × resume 1`] = `
+[
+  "--permission-mode",
+  "acceptEdits",
+]
+`;
+
+exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > grok × read-only × fresh 1`] = `
+[
+  "--permission-mode",
+  "plan",
+]
+`;
+
+exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > grok × read-only × resume 1`] = `
+[
+  "--permission-mode",
+  "plan",
+]
+`;
+
+exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > grok × yolo × fresh 1`] = `
+[
+  "--always-approve",
+]
+`;
+
+exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > grok × yolo × resume 1`] = `
+[
+  "--always-approve",
+]
+`;

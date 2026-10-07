@@ -37,9 +37,12 @@ import {
   DEFAULT_CONFIG_TOOL_SERVER_NAME,
 } from "@ff-pane/shared";
 import {
+  CONFIG_TOOL_MANAGER_ONLY_MESSAGE,
   CONFIG_TOOLS,
   type ConfigDraftRequestFile,
   type ConfigDraftResponseFile,
+  ENV_CONFIG_CALLER_ROLE,
+  isConfigToolCallerDenied,
   renderConfigList,
   renderDraftOutcome,
   renderProviderList,
@@ -142,23 +145,34 @@ async function awaitResponse(
 }
 
 function main(): void {
-  const mailboxDir = process.env[ENV_MAILBOX];
-  if (mailboxDir === undefined || mailboxDir.length === 0) {
-    process.stderr.write(`[config-mcp] missing ${ENV_MAILBOX}\n`);
-    process.exit(1);
+  const denied = isConfigToolCallerDenied(process.env[ENV_CONFIG_CALLER_ROLE]);
+  let providersFile: string | undefined;
+  let configsFile: string | undefined;
+  let auditPath: string | undefined;
+  let requestsDir = "";
+  let responsesDir = "";
+  if (!denied) {
+    const mailboxDir = process.env[ENV_MAILBOX];
+    if (mailboxDir === undefined || mailboxDir.length === 0) {
+      process.stderr.write(`[config-mcp] missing ${ENV_MAILBOX}\n`);
+      process.exit(1);
+    }
+    providersFile = process.env[ENV_PROVIDERS];
+    configsFile = process.env[ENV_CONFIGS];
+    auditPath = process.env[ENV_AUDIT];
+    requestsDir = join(mailboxDir, "requests");
+    responsesDir = join(mailboxDir, "responses");
+    mkdirSync(requestsDir, { recursive: true });
+    mkdirSync(responsesDir, { recursive: true });
   }
-  const providersFile = process.env[ENV_PROVIDERS];
-  const configsFile = process.env[ENV_CONFIGS];
-  const auditPath = process.env[ENV_AUDIT];
-  const requestsDir = join(mailboxDir, "requests");
-  const responsesDir = join(mailboxDir, "responses");
-  mkdirSync(requestsDir, { recursive: true });
-  mkdirSync(responsesDir, { recursive: true });
 
   const execute = async (
     name: string,
     args: Readonly<Record<string, unknown>>,
   ): Promise<McpToolResult> => {
+    if (denied) {
+      return { text: CONFIG_TOOL_MANAGER_ONLY_MESSAGE, isError: true };
+    }
     const startedAt = Date.now();
 
     if (name === CONFIG_TOOL_LIST_PROVIDERS) {

@@ -438,6 +438,16 @@ export async function createWorkbenchCliLayer(
         return false;
       }
     },
+    isConfigToolEnabled: async (projectRoot: string) => {
+      try {
+        const settings = await createProjectSettingsStore(
+          resolveProjectLayout(projectRoot).projectFile,
+        ).readSettings();
+        return settings.configToolEnabled === true;
+      } catch {
+        return false;
+      }
+    },
     getKnowledgeToolSettings: async () => {
       const globalConfig = await config.readConfig();
       return globalConfig.knowledgeTool;
@@ -454,7 +464,7 @@ export async function createWorkbenchCliLayer(
     }: {
       readonly windowId: string;
       readonly role: import("@ff-pane/shared").WorkbenchRole;
-      readonly runtime: "claude-code" | "codex";
+      readonly runtime: "claude-code" | "codex" | "grok";
     }) => {
       const roleText = await composeWindowRolePrompt(resourcesDir, overridesDir, role);
       let outputLanguage: string | undefined;
@@ -478,6 +488,9 @@ export async function createWorkbenchCliLayer(
         const filePath = writeClaudeRolePromptFile(windowId, text);
         rolePromptTemps.track(windowId, filePath);
         return { claudePromptFile: filePath };
+      }
+      if (runtime === "grok") {
+        return { grokRules: text };
       }
       return { developerInstructions: text };
     },
@@ -673,9 +686,15 @@ export async function createWorkbenchCliLayer(
           ? request.permission
           : undefined;
       const kind =
-        request.kind === "codex" ? "codex" : request.kind === "claude" ? "claude" : undefined;
+        request.kind === "codex"
+          ? "codex"
+          : request.kind === "claude"
+            ? "claude"
+            : request.kind === "grok"
+              ? "grok"
+              : undefined;
       if (kind === undefined) {
-        throw new Error("kind must be claude or codex");
+        throw new Error("kind must be claude, codex, or grok");
       }
       const resolved = await resolveProjectLaunchRoute({
         projectRoot: request.projectRoot,

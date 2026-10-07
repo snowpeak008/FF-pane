@@ -109,7 +109,8 @@ export async function setWindowRole(
     return deliverRoleSwitch(windowId, role, deps);
   }
 
-  const isAi = found.window.kind === "claude" || found.window.kind === "codex";
+  const isAi =
+    found.window.kind === "claude" || found.window.kind === "codex" || found.window.kind === "grok";
   if (isAi) {
     ensureAuthNode(deps.authRegistry, found.window);
   }

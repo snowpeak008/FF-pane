@@ -30,6 +30,9 @@ index.sqlite
 # Workbench raw run logs (kept locally, not committed)
 .workbench/runs/**/raw.log
 
+# Grok project MCP config written for workbench windows (placeholders only; do not commit)
+.grok/
+
 # OS
 .DS_Store
 Thumbs.db

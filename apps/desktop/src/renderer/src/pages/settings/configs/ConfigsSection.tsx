@@ -134,9 +134,13 @@ export function ConfigsSection(): ReactElement {
                 ) : null}
               </div>
               <p className="truncate text-xs text-fg-muted">
-                {config.claude !== undefined ? "Claude" : ""}
-                {config.claude !== undefined && config.codex !== undefined ? " · " : ""}
-                {config.codex !== undefined ? "Codex" : ""}
+                {[
+                  config.claude !== undefined ? "Claude" : "",
+                  config.codex !== undefined ? "Codex" : "",
+                  config.grok !== undefined ? "Grok" : "",
+                ]
+                  .filter((label) => label !== "")
+                  .join(" · ")}
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-1">

@@ -38,6 +38,9 @@ export const CLAUDE_API_KEY_ENV = "ANTHROPIC_API_KEY";
 export const CLAUDE_BASE_URL_ENV = "ANTHROPIC_BASE_URL";
 export const CLAUDE_MODEL_ENV = "ANTHROPIC_MODEL";
 export const CODEX_API_KEY_ENV = "OPENAI_API_KEY";
+export const GROK_API_KEY_ENV = "XAI_API_KEY";
+/** 中转推理地址。本机 grok 1.0.13 把聊天和模型列表都发到这个变量。 */
+export const GROK_MODELS_BASE_URL_ENV = "GROK_MODELS_BASE_URL";
 
 export class ProviderInjectionError extends Error {
   readonly code:
@@ -178,6 +181,18 @@ export const PROVIDER_INJECTION_MAPPINGS: readonly ProviderInjectionMapping[] = 
         name: "apiKeyEnvName",
       },
     },
+  },
+  // —— Grok × 兼容中转（地址 + 密钥只进本进程环境，不写 ~/.grok）——
+  {
+    templateId: "grok-compatible",
+    cli: "grok",
+    requireBaseUrl: true,
+    apiKeyEnv: GROK_API_KEY_ENV,
+    env: {
+      [GROK_API_KEY_ENV]: { kind: "placeholder", name: "apiKey" },
+      [GROK_MODELS_BASE_URL_ENV]: { kind: "placeholder", name: "baseUrl" },
+    },
+    configOverrides: {},
   },
   // —— local-login：空映射（显式登记，避免漏表）——
   {

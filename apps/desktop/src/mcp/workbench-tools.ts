@@ -84,7 +84,11 @@ export const WORKBENCH_MCP_TOOLS: readonly McpToolDefinition[] = [
     inputSchema: {
       type: "object",
       properties: {
-        cli: { type: "string", enum: ["claude", "codex"], description: "子窗口使用的 CLI。" },
+        cli: {
+          type: "string",
+          enum: ["claude", "codex", "grok"],
+          description: "子窗口使用的 CLI。",
+        },
         profileId: {
           type: "string",
           description: "已忽略。子窗口按调用者所在项目的配置选路；这一路没配会失败。",

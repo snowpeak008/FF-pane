@@ -11,8 +11,8 @@ import {
   type ProviderTemplateId,
 } from "./provider.js";
 
-/** 模板适用的 CLI（T10.3 首批；Grok 等不在本阶段）。 */
-export const PROVIDER_TEMPLATE_CLIS = ["claude-code", "codex"] as const;
+/** 模板适用的 CLI。Grok 中转只用 grok-compatible。 */
+export const PROVIDER_TEMPLATE_CLIS = ["claude-code", "codex", "grok"] as const;
 
 /** 模板适用 CLI。 */
 export type ProviderTemplateCli = (typeof PROVIDER_TEMPLATE_CLIS)[number];
@@ -117,6 +117,14 @@ export const BUILTIN_PROVIDER_TEMPLATES: readonly ProviderTemplateDefinition[] =
     nameKey: "settings.providers.template.openai-compatible.name",
     descriptionKey: "settings.providers.template.openai-compatible.description",
     applicableClis: ["codex", "claude-code"],
+    fields: { baseUrl: "required", apiKey: "required", models: "optional" },
+    probe: "openai",
+  },
+  {
+    id: "grok-compatible",
+    nameKey: "settings.providers.template.grok-compatible.name",
+    descriptionKey: "settings.providers.template.grok-compatible.description",
+    applicableClis: ["grok"],
     fields: { baseUrl: "required", apiKey: "required", models: "optional" },
     probe: "openai",
   },

@@ -28,7 +28,7 @@ import { stripControls, WORKBENCH_ROLE_LABEL } from "./remind";
 import type { LaunchCliRoute } from "./resolve-config";
 
 export interface OpenChildArgs {
-  readonly cli: "claude" | "codex";
+  readonly cli: "claude" | "codex" | "grok";
   readonly role: WorkbenchRole;
   readonly permission: WorkbenchPermissionLevel;
   readonly title: string;
@@ -51,7 +51,7 @@ export interface OpenChildDeps {
   readonly saveLayout: (layout: ProjectWorkbenchLayout) => Promise<void>;
   readonly launch: (input: LaunchCliWindowInput) => Promise<LaunchCliWindowResult>;
   readonly resolveRoute: (input: {
-    readonly cli: "claude" | "codex";
+    readonly cli: "claude" | "codex" | "grok";
     readonly projectId: string;
     readonly projectRoot: string;
   }) => Promise<
@@ -141,8 +141,8 @@ export async function openChildWindow(
   if (!isWorkbenchRole(args.role) || !isWorkbenchPermissionLevel(args.permission)) {
     return { ok: false, error: "角色或权限无效。" };
   }
-  if (args.cli !== "claude" && args.cli !== "codex") {
-    return { ok: false, error: "cli 只能是 claude 或 codex。" };
+  if (args.cli !== "claude" && args.cli !== "codex" && args.cli !== "grok") {
+    return { ok: false, error: "cli 只能是 claude、codex 或 grok。" };
   }
   const described = await deps.describeCaller(callerId);
   if (described === undefined) {

@@ -97,7 +97,7 @@ export const FF_PANE_WINDOW_TOKEN_ENV_PLACEHOLDER = `\${${FF_PANE_WINDOW_TOKEN_E
 /** Claude MCP 配置里的管道名占位符（由 CLI 从进程 env 展开）。 */
 export const FF_PANE_WB_PIPE_ENV_PLACEHOLDER = `\${${FF_PANE_WB_PIPE_ENV}}`;
 
-export type McpTokenDeliveryMode = "claude-env-expand" | "codex-forward";
+export type McpTokenDeliveryMode = "claude-env-expand" | "grok-env-expand" | "codex-forward";
 
 type McpSpecLike = {
   readonly command: string;
@@ -109,7 +109,7 @@ type McpSpecLike = {
 
 /**
  * 把令牌通道接到 MCP 规格（值永不进配置明文 / Codex `-c`）：
- * - claude-env-expand：临时 MCP JSON 只写 `${FF_PANE_WINDOW_TOKEN}`，由 CLI 从进程 env 展开
+ * - claude-env-expand / grok-env-expand：配置只写 `${FF_PANE_WINDOW_TOKEN}`，由 CLI 从进程 env 展开
  * - codex-forward：仅 env_vars 白名单名（值在 CLI 父进程 env）
  */
 export function injectTokenIntoMcpServers<T extends McpSpecLike>(
@@ -119,7 +119,7 @@ export function injectTokenIntoMcpServers<T extends McpSpecLike>(
 ): Record<string, T> {
   const out: Record<string, T> = {};
   for (const [name, spec] of Object.entries(servers)) {
-    if (mode === "claude-env-expand") {
+    if (mode === "claude-env-expand" || mode === "grok-env-expand") {
       out[name] = {
         ...spec,
         env: {

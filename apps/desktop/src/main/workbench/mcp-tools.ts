@@ -352,8 +352,8 @@ async function openWindow(
   const role = args["role"];
   const permission = args["permission"];
   const title = args["title"];
-  if (cli !== "claude" && cli !== "codex") {
-    return fail("cli 只能是 claude 或 codex。");
+  if (cli !== "claude" && cli !== "codex" && cli !== "grok") {
+    return fail("cli 只能是 claude、codex 或 grok。");
   }
   if (!isWorkbenchRole(role) || typeof permission !== "string" || typeof title !== "string") {
     return fail("ffpane_open_window 需要 cli、role、permission 和 title。");

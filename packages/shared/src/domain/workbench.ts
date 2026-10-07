@@ -33,8 +33,8 @@ export function clampMaxWorkbenchWindows(value: unknown): number {
   return Math.min(MAX_MAX_WORKBENCH_WINDOWS, Math.max(MIN_MAX_WORKBENCH_WINDOWS, floored));
 }
 
-/** 窗口内容种类；T10.4 起含 Claude Code / Codex。 */
-export const WORKBENCH_WINDOW_KINDS = ["shell", "claude", "codex"] as const;
+/** 窗口内容种类；T10.4 起含 Claude Code / Codex，T10.16 起含 Grok。 */
+export const WORKBENCH_WINDOW_KINDS = ["shell", "claude", "codex", "grok"] as const;
 
 /** 窗口内容种类。 */
 export type WorkbenchWindowKind = (typeof WORKBENCH_WINDOW_KINDS)[number];
@@ -44,22 +44,35 @@ export function isWorkbenchWindowKind(value: unknown): value is WorkbenchWindowK
   return typeof value === "string" && (WORKBENCH_WINDOW_KINDS as readonly string[]).includes(value);
 }
 
-/** AI 窗口 kind ↔ Profile runtime。 */
-export function workbenchKindToRuntime(
-  kind: Exclude<WorkbenchWindowKind, "shell">,
-): "claude-code" | "codex" {
-  return kind === "claude" ? "claude-code" : "codex";
+/** AI 窗口 kind。 */
+export type WorkbenchAiKind = Exclude<WorkbenchWindowKind, "shell">;
+
+/** 是否为会启动 CLI 的窗口。 */
+export function isAiWorkbenchKind(kind: string): kind is WorkbenchAiKind {
+  return kind === "claude" || kind === "codex" || kind === "grok";
+}
+
+/** AI 窗口 kind ↔ 启动用 runtime。Grok 用 "grok"，与旧适配器 "grok-build" 分开。 */
+export function workbenchKindToRuntime(kind: WorkbenchAiKind): "claude-code" | "codex" | "grok" {
+  if (kind === "claude") {
+    return "claude-code";
+  }
+  if (kind === "codex") {
+    return "codex";
+  }
+  return "grok";
 }
 
 /** Profile runtime → AI 窗口 kind；非 AI runtime 返回 undefined。 */
-export function runtimeToWorkbenchKind(
-  runtime: string,
-): Exclude<WorkbenchWindowKind, "shell"> | undefined {
+export function runtimeToWorkbenchKind(runtime: string): WorkbenchAiKind | undefined {
   if (runtime === "claude-code") {
     return "claude";
   }
   if (runtime === "codex") {
     return "codex";
+  }
+  if (runtime === "grok") {
+    return "grok";
   }
   return undefined;
 }

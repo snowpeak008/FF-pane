@@ -196,6 +196,7 @@ export const isReasoningEffortLevel = createLiteralGuard(REASONING_EFFORT_LEVELS
 export const REASONING_EFFORT_RUNTIMES = [
   "codex",
   "claude-code",
+  "grok",
   "grok-build",
   "opencode",
 ] as const;

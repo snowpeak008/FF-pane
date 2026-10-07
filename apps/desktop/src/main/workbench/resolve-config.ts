@@ -28,7 +28,7 @@ export interface LaunchCliRoute {
 export interface ResolveProjectLaunchRouteInput {
   readonly projectRoot: string;
   readonly projectId: string;
-  readonly kind: "claude" | "codex";
+  readonly kind: "claude" | "codex" | "grok";
   readonly configs: ProjectConfigStore;
   readonly getProvider: (
     id: string,
@@ -51,7 +51,7 @@ export async function resolveProjectLaunchRoute(
     return { ok: false, error: "没有可用的项目配置。" };
   }
   const spec = projectConfigRoute(effective, input.kind);
-  const cliName = input.kind === "claude" ? "Claude" : "Codex";
+  const cliName = input.kind === "claude" ? "Claude" : input.kind === "codex" ? "Codex" : "Grok";
   if (spec === undefined) {
     return {
       ok: false,

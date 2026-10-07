@@ -9,7 +9,11 @@ import type {
   ReasoningEffortLevel,
   WorkbenchPermissionLevel,
 } from "@ff-pane/shared";
-import { REASONING_EFFORT_LEVELS, WORKBENCH_PERMISSION_LEVELS } from "@ff-pane/shared";
+import {
+  getProviderTemplate,
+  REASONING_EFFORT_LEVELS,
+  WORKBENCH_PERMISSION_LEVELS,
+} from "@ff-pane/shared";
 import { type ReactElement, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/Button";
@@ -23,7 +27,14 @@ import {
 import { Field, Input } from "../../../components/ui/Input";
 import { invokeQuery } from "../../../ipc/query";
 
-type RouteSide = "claude" | "codex";
+type RouteSide = "claude" | "codex" | "grok";
+
+function providersForSide(side: RouteSide, providers: readonly Provider[]): readonly Provider[] {
+  const cli = side === "claude" ? "claude-code" : side === "codex" ? "codex" : "grok";
+  return providers.filter(
+    (provider) => getProviderTemplate(provider.templateId)?.applicableClis.includes(cli) === true,
+  );
+}
 
 interface RouteDraft {
   enabled: boolean;
@@ -107,6 +118,7 @@ export function ConfigEditorDialog({
   const [scope, setScope] = useState<ReadonlySet<string>>(new Set());
   const [claude, setClaude] = useState<RouteDraft>(emptyRoute(true));
   const [codex, setCodex] = useState<RouteDraft>(emptyRoute(true));
+  const [grok, setGrok] = useState<RouteDraft>(emptyRoute(false));
   const [error, setError] = useState<string | undefined>(undefined);
   const [saving, setSaving] = useState(false);
 
@@ -119,6 +131,7 @@ export function ConfigEditorDialog({
     setScope(new Set(config?.projectIds ?? []));
     setClaude(config === null ? emptyRoute(true) : routeFrom(config.claude));
     setCodex(config === null ? emptyRoute(true) : routeFrom(config.codex));
+    setGrok(config === null ? emptyRoute(false) : routeFrom(config.grok));
     setError(undefined);
     setSaving(false);
   }, [config, open]);
@@ -128,9 +141,10 @@ export function ConfigEditorDialog({
   const saveDisabled =
     saving ||
     name.trim() === "" ||
-    (!claude.enabled && !codex.enabled) ||
+    (!claude.enabled && !codex.enabled && !grok.enabled) ||
     (claude.enabled && claude.connectionMode === "relay" && claude.providerId === "") ||
-    (codex.enabled && codex.connectionMode === "relay" && codex.providerId === "");
+    (codex.enabled && codex.connectionMode === "relay" && codex.providerId === "") ||
+    (grok.enabled && grok.connectionMode === "relay" && grok.providerId === "");
 
   const toggleScope = (projectId: string): void => {
     setScope((current) => {
@@ -146,7 +160,7 @@ export function ConfigEditorDialog({
 
   const probeModels = async (side: RouteSide): Promise<void> => {
     const settled = await invokeQuery("providers:list-local-models", {
-      runtime: side === "claude" ? "claude-code" : "codex",
+      runtime: side === "claude" ? "claude-code" : side === "grok" ? "grok-build" : "codex",
     });
     const apply = (note: string, models: readonly string[]): void => {
       const patch = (current: RouteDraft): RouteDraft => ({
@@ -156,6 +170,8 @@ export function ConfigEditorDialog({
       });
       if (side === "claude") {
         setClaude(patch);
+      } else if (side === "grok") {
+        setGrok(patch);
       } else {
         setCodex(patch);
       }
@@ -177,6 +193,7 @@ export function ConfigEditorDialog({
   const submit = async (): Promise<void> => {
     const claudeRoute = toRoute(claude);
     const codexRoute = toRoute(codex);
+    const grokRoute = toRoute(grok);
     const projectIds = config?.isDefault === true ? [] : ([...scope] as ProjectId[]);
     const draft: ProjectConfigDraft = {
       name: name.trim(),
@@ -185,6 +202,7 @@ export function ConfigEditorDialog({
       ...(permission !== "" ? { defaultPermission: permission as WorkbenchPermissionLevel } : {}),
       ...(claudeRoute !== undefined ? { claude: claudeRoute } : {}),
       ...(codexRoute !== undefined ? { codex: codexRoute } : {}),
+      ...(grokRoute !== undefined ? { grok: grokRoute } : {}),
     };
     setSaving(true);
     setError(undefined);
@@ -276,7 +294,7 @@ export function ConfigEditorDialog({
             side="claude"
             title={t("settings.configs.field.routeClaude")}
             draft={claude}
-            providers={relayProviders}
+            providers={providersForSide("claude", relayProviders)}
             onChange={setClaude}
             onProbe={() => void probeModels("claude")}
           />
@@ -284,11 +302,19 @@ export function ConfigEditorDialog({
             side="codex"
             title={t("settings.configs.field.routeCodex")}
             draft={codex}
-            providers={relayProviders}
+            providers={providersForSide("codex", relayProviders)}
             onChange={setCodex}
             onProbe={() => void probeModels("codex")}
           />
-          {!claude.enabled && !codex.enabled ? (
+          <RouteFields
+            side="grok"
+            title={t("settings.configs.field.routeGrok")}
+            draft={grok}
+            providers={providersForSide("grok", relayProviders)}
+            onChange={setGrok}
+            onProbe={() => void probeModels("grok")}
+          />
+          {!claude.enabled && !codex.enabled && !grok.enabled ? (
             <p className="text-sm text-danger-text">{t("settings.configs.field.needRoute")}</p>
           ) : null}
           {error !== undefined ? (

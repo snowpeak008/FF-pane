@@ -127,6 +127,7 @@ describe("常量数组 ↔ 设计文档定值对照", () => {
       "anthropic-compatible",
       "openai-official",
       "openai-compatible",
+      "grok-compatible",
       "local-login",
     ]);
   });

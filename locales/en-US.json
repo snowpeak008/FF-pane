@@ -289,6 +289,7 @@
       "kindShell": "PowerShell",
       "kindClaude": "Claude Code",
       "kindCodex": "Codex",
+      "kindGrok": "Grok",
       "profile": "Launch profile",
       "permission": "Permission level",
       "role": "Role",
@@ -332,6 +333,7 @@
         "defaultPermission": "Default permission",
         "claude": "Claude",
         "codex": "Codex",
+        "grok": "Grok",
         "templateId": "Provider template",
         "baseUrl": "Base URL",
         "models": "Models",
@@ -435,6 +437,7 @@
       "permissionHold": "After you approve a permission, automatic reminders wait until you send the next message.",
       "busy": "This turn has not finished — not sending",
       "noNode": "No node.exe is available, so turn-complete signals cannot arrive. Use Send now for anything waiting.",
+      "grokManual": "A Grok window cannot tell when a turn has ended. Use Send now for anything waiting. The app does not type the message itself into the terminal.",
       "codexManualHint": "Send now writes the queued text and one Enter into this terminal. Codex gets no permission signal before the first turn ends. If a confirmation is already on screen, do not press this button."
     },
     "inbox": {
@@ -460,7 +463,8 @@
       "kind": {
         "shell": "Shell",
         "claude": "Claude",
-        "codex": "Codex"
+        "codex": "Codex",
+        "grok": "Grok"
       },
       "status": {
         "running": "Running",
@@ -664,6 +668,10 @@
           "name": "OpenAI-compatible relay",
           "description": "OpenAI-compatible relay; requires a base URL. For Codex (also usable as a Claude Code relay)."
         },
+        "grok-compatible": {
+          "name": "Grok relay",
+          "description": "Relay for Grok only. Base URL and API key are both required. Local login does not use this."
+        },
         "local-login": {
           "name": "Local CLI login",
           "description": "Use the Claude Code / Codex account already logged in on this machine. Injects nothing."
@@ -747,7 +755,7 @@
     },
     "configs": {
       "title": "Configs",
-      "subtitle": "Each project uses one config to choose the Claude route and the Codex route. Either route can be left unset.",
+      "subtitle": "Each project uses one config to choose the Claude, Codex, and Grok routes. Any route can be left unset.",
       "new": "New config",
       "empty": "No configs yet.",
       "loadError": "Failed to load configs",
@@ -774,6 +782,7 @@
         "scopeAll": "There are no projects yet, so this config is available to all of them.",
         "routeClaude": "Claude",
         "routeCodex": "Codex",
+        "routeGrok": "Grok",
         "connection": "Connection",
         "local": "Local login",
         "relay": "Relay",
@@ -793,7 +802,7 @@
           "xhigh": "xhigh",
           "max": "max"
         },
-        "needRoute": "Configure at least the Claude route or the Codex route."
+        "needRoute": "Configure at least the Claude, Codex, or Grok route."
       },
       "edit": {
         "title": "Edit config",

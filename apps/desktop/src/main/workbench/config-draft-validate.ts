@@ -32,7 +32,7 @@ export async function validateWorkbenchConfigDraft(
   if (input.currentIsOnlyDefault === true && normalized.isDefault !== true) {
     throw new ProjectConfigDefaultRequiredError();
   }
-  for (const route of [normalized.claude, normalized.codex]) {
+  for (const route of [normalized.claude, normalized.codex, normalized.grok]) {
     if (route?.connectionMode !== "relay") {
       continue;
     }

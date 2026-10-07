@@ -120,6 +120,13 @@ function ConfigFields({ pending }: { readonly pending: WorkbenchConfigDraftEvent
             : routeText(current.codex),
         after: routeText(draft.codex),
       },
+      {
+        key: "grok",
+        label: t("workbench.configDraft.field.grok"),
+        before:
+          current === undefined ? t("workbench.configDraft.currentEmpty") : routeText(current.grok),
+        after: routeText(draft.grok),
+      },
     ];
     return (
       <div className="flex flex-col gap-3">

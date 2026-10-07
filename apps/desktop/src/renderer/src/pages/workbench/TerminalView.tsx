@@ -30,7 +30,7 @@ export interface TerminalViewProps {
   readonly onCwdFallback?: () => void;
   /** AI 窗口：不自动 spawn shell，改走 workbench:launch-cli。 */
   readonly cliLaunch?: {
-    readonly kind: "claude" | "codex";
+    readonly kind: "claude" | "codex" | "grok";
     readonly projectRoot: string;
     readonly nativeSessionId?: string;
     readonly initialPrompt?: string;

@@ -327,7 +327,7 @@ export const CONFIG_LIST_CONFIGS_TOOL: McpToolDefinition = {
   name: CONFIG_TOOL_LIST_CONFIGS,
   description:
     "List workbench configs (name, whether it is the default, optional project scope, optional default " +
-    "permission, and the Claude / Codex route). A route is local login or a relay provider id, plus optional " +
+    "permission, and the Claude / Codex / Grok route). A route is local login or a relay provider id, plus optional " +
     "model and reasoning effort. No secrets are included. " +
     `To create or update one, submit a draft via config_draft_config (the user must confirm). ${KEY_REFUSAL_NOTE}`,
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
@@ -369,7 +369,22 @@ export const CONFIG_CONFIG_DRAFT_FIELDS = [
   "defaultPermission",
   "claude",
   "codex",
+  "grok",
 ] as const;
+
+/** 自配置 sidecar 用来识别调用者角色的环境变量。只有 manager 能调用。 */
+export const ENV_CONFIG_CALLER_ROLE = "FF_PANE_CONFIG_CALLER_ROLE";
+
+export const CONFIG_TOOL_MANAGER_ONLY_MESSAGE = "只有管理者可以使用自配置工具。";
+
+/** 非空且不是 manager（含未展开的占位符）一律拒绝。未设置则保持旧行为。 */
+export function isConfigToolCallerDenied(role: string | undefined): boolean {
+  if (role === undefined) {
+    return false;
+  }
+  const trimmed = role.trim();
+  return trimmed.length > 0 && trimmed !== "manager";
+}
 
 /** 一路的字段白名单。 */
 export const CONFIG_ROUTE_DRAFT_FIELDS = [
@@ -382,7 +397,7 @@ export const CONFIG_ROUTE_DRAFT_FIELDS = [
 export const CONFIG_DRAFT_CONFIG_TOOL: McpToolDefinition = {
   name: CONFIG_TOOL_DRAFT_CONFIG,
   description:
-    "Submit a draft to create or update a workbench config (name, Claude route, Codex route, optional " +
+    "Submit a draft to create or update a workbench config (name, Claude route, Codex route, Grok route, optional " +
     "default permission, optional project scope). The draft is shown to the user; NOTHING is saved until " +
     "the user confirms. Pass id to update. The default config is open to every project and cannot be narrowed. " +
     "A relay route needs a provider id; draft a provider first when none exists. " +
@@ -415,6 +430,11 @@ export const CONFIG_DRAFT_CONFIG_TOOL: McpToolDefinition = {
       codex: {
         ...CONFIG_ROUTE_SCHEMA,
         description: "Codex route. Omit to leave Codex unavailable.",
+      },
+      grok: {
+        ...CONFIG_ROUTE_SCHEMA,
+        description:
+          "Grok route. Omit to leave Grok unavailable. Relay uses a Grok-compatible provider.",
       },
     },
     required: ["name"],
@@ -870,6 +890,14 @@ export function parseConfigDraftArgs(args: Readonly<Record<string, unknown>>): P
     }
     codex = parsed.route;
   }
+  let grok: ProjectConfigRoute | undefined;
+  if (args["grok"] !== undefined) {
+    const parsed = parseConfigRoute(args["grok"], "grok");
+    if (!("ok" in parsed)) {
+      return { ok: false, error: parsed.error };
+    }
+    grok = parsed.route;
+  }
   const id = nonEmptyString(args["id"]);
   const draft: ProjectConfigDraft = {
     name,
@@ -882,6 +910,7 @@ export function parseConfigDraftArgs(args: Readonly<Record<string, unknown>>): P
       : {}),
     ...(claude !== undefined ? { claude } : {}),
     ...(codex !== undefined ? { codex } : {}),
+    ...(grok !== undefined ? { grok } : {}),
   };
   return { ok: true, parsed: { kind: "config", ...(id !== undefined ? { id } : {}), draft } };
 }
@@ -950,6 +979,7 @@ export function sanitizeProjectConfig(config: ProjectConfig): {
   readonly defaultPermission?: WorkbenchPermissionLevel;
   readonly claude?: ProjectConfigRoute;
   readonly codex?: ProjectConfigRoute;
+  readonly grok?: ProjectConfigRoute;
 } {
   return {
     id: config.id,
@@ -963,6 +993,7 @@ export function sanitizeProjectConfig(config: ProjectConfig): {
       : {}),
     ...(config.claude !== undefined ? { claude: sanitizeRoute(config.claude) } : {}),
     ...(config.codex !== undefined ? { codex: sanitizeRoute(config.codex) } : {}),
+    ...(config.grok !== undefined ? { grok: sanitizeRoute(config.grok) } : {}),
   };
 }
 

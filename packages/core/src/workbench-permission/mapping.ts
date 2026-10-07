@@ -9,7 +9,7 @@
 import type { WorkbenchPermissionLevel } from "@ff-pane/shared";
 
 /** 映射适用的交互式 CLI。 */
-export type WorkbenchPermissionCli = "claude-code" | "codex";
+export type WorkbenchPermissionCli = "claude-code" | "codex" | "grok";
 
 /** 单条等级 × CLI 映射。 */
 export interface WorkbenchPermissionMapping {
@@ -127,13 +127,40 @@ export const WORKBENCH_PERMISSION_MAPPINGS: readonly WorkbenchPermissionMapping[
     freshArgs: ["--dangerously-bypass-approvals-and-sandbox"],
     resumeArgs: ["--dangerously-bypass-approvals-and-sandbox"],
   },
+  // —— Grok（交互式 grok 1.0.13；新开与续接同一组参数）——
+  {
+    level: "read-only",
+    cli: "grok",
+    freshArgs: ["--permission-mode", "plan"],
+    resumeArgs: ["--permission-mode", "plan"],
+  },
+  {
+    level: "edit",
+    cli: "grok",
+    freshArgs: ["--permission-mode", "acceptEdits"],
+    resumeArgs: ["--permission-mode", "acceptEdits"],
+    notes: "acceptEdits 自动接受文件修改；命令仍由 Grok 询问。",
+  },
+  {
+    level: "edit-exec",
+    cli: "grok",
+    freshArgs: ["--permission-mode", "acceptEdits"],
+    resumeArgs: ["--permission-mode", "acceptEdits"],
+    notes: "Grok 没有单独的「可改且可跑命令」档，与 edit 相同，命令仍询问。",
+  },
+  {
+    level: "yolo",
+    cli: "grok",
+    freshArgs: ["--always-approve"],
+    resumeArgs: ["--always-approve"],
+  },
 ];
 
 const MAPPING_INDEX = new Map<string, WorkbenchPermissionMapping>(
   WORKBENCH_PERMISSION_MAPPINGS.map((row) => [`${row.cli}::${row.level}`, row]),
 );
 
-/** 查表；缺行抛错（表应穷尽 4×2）。 */
+/** 查表；缺行抛错（表应穷尽 4×3）。 */
 export function getPermissionMapping(
   cli: WorkbenchPermissionCli,
   level: WorkbenchPermissionLevel,

@@ -1,5 +1,5 @@
 /**
- * 项目配置：一张表里 Claude 一路、Codex 一路。
+ * 项目配置：一张表里 Claude、Codex、Grok 各一路。
  * 项目可绑定一张配置；没绑定时用标记为默认的那张。
  * 可用项目范围缺省或空数组 = 所有项目。
  */
@@ -19,7 +19,7 @@ export interface ProjectConfigRoute {
 
 /**
  * 全局 configs.json 里的一条配置。
- * 可以只配 Claude 或只配 Codex。
+ * 可以只配其中一路。
  */
 export interface ProjectConfig {
   readonly id: ProjectConfigId;
@@ -31,6 +31,7 @@ export interface ProjectConfig {
   readonly defaultPermission?: WorkbenchPermissionLevel;
   readonly claude?: ProjectConfigRoute;
   readonly codex?: ProjectConfigRoute;
+  readonly grok?: ProjectConfigRoute;
 }
 
 /** 创建 / 更新时提交的内容（id 由存储层生成）。 */
@@ -74,10 +75,20 @@ export function selectEffectiveProjectConfig<
 
 /** 这一路。没配返回 undefined。 */
 export function projectConfigRoute(
-  config: { readonly claude?: ProjectConfigRoute; readonly codex?: ProjectConfigRoute },
-  kind: "claude" | "codex",
+  config: {
+    readonly claude?: ProjectConfigRoute;
+    readonly codex?: ProjectConfigRoute;
+    readonly grok?: ProjectConfigRoute;
+  },
+  kind: "claude" | "codex" | "grok",
 ): ProjectConfigRoute | undefined {
-  return kind === "claude" ? config.claude : config.codex;
+  if (kind === "claude") {
+    return config.claude;
+  }
+  if (kind === "codex") {
+    return config.codex;
+  }
+  return config.grok;
 }
 
 /**
