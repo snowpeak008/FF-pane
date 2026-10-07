@@ -290,6 +290,8 @@
       "kindClaude": "Claude Code",
       "kindCodex": "Codex",
       "kindGrok": "Grok",
+      "kindDeepseek": "DeepSeek",
+      "deepseekHint": "窗口里是 Claude 的界面，模型是 DeepSeek。要先在配置里选 DeepSeek，填密钥和模型。",
       "profile": "启动配置",
       "permission": "权限等级",
       "role": "角色",
@@ -334,6 +336,7 @@
         "claude": "Claude",
         "codex": "Codex",
         "grok": "Grok",
+        "deepseek": "DeepSeek",
         "templateId": "来源模板",
         "baseUrl": "地址",
         "models": "模型",
@@ -464,7 +467,8 @@
         "shell": "Shell",
         "claude": "Claude",
         "codex": "Codex",
-        "grok": "Grok"
+        "grok": "Grok",
+        "deepseek": "DeepSeek"
       },
       "status": {
         "running": "运行中",
@@ -672,6 +676,10 @@
           "name": "Grok 中转",
           "description": "只给 Grok 用的中转。地址和密钥都要填。本机登录不用选这个。"
         },
+        "deepseek": {
+          "name": "DeepSeek",
+          "description": "用本机 Claude Code 连接 DeepSeek。密钥必填，地址已填好，模型可手填。"
+        },
         "local-login": {
           "name": "本机已登录",
           "description": "使用本机 Claude Code / Codex 已登录账号，不注入密钥或地址。"
@@ -783,6 +791,10 @@
         "routeClaude": "Claude",
         "routeCodex": "Codex",
         "routeGrok": "Grok",
+        "routeDeepseek": "DeepSeek",
+        "deepseekNote": "密钥必填。窗口里是 Claude 的界面，模型是你填的 DeepSeek。",
+        "modelHintDeepseek": "手填模型名，例如 deepseek-flash、deepseek-v4-pro。留空则不指定。",
+        "modelPlaceholderDeepseek": "例如 deepseek-flash",
         "connection": "连法",
         "local": "本机登录",
         "relay": "中转",
@@ -802,7 +814,7 @@
           "xhigh": "xhigh",
           "max": "max"
         },
-        "needRoute": "至少配置 Claude、Codex 或 Grok 一路。"
+        "needRoute": "至少配置 Claude、Codex、Grok 或 DeepSeek 一路。"
       },
       "edit": {
         "title": "编辑配置",

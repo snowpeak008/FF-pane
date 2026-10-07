@@ -1,11 +1,12 @@
 /**
- * 项目配置：一张表里 Claude、Codex、Grok 各一路。
+ * 项目配置：一张表里 Claude、Codex、Grok、DeepSeek 各一路。
  * 项目可绑定一张配置；没绑定时用标记为默认的那张。
  * 可用项目范围缺省或空数组 = 所有项目。
  */
 
 import type { ProjectConfigId, ProjectId, ProviderId } from "./common.js";
 import type { ConnectionMode, ReasoningEffortLevel } from "./profile.js";
+import type { WorkbenchAiKind } from "./workbench.js";
 import type { WorkbenchPermissionLevel } from "./workbench-permission.js";
 
 /** 配置里的一路：本机登录或中转。模型与思考强度可空（空 = 用 CLI 自己的默认）。 */
@@ -32,6 +33,7 @@ export interface ProjectConfig {
   readonly claude?: ProjectConfigRoute;
   readonly codex?: ProjectConfigRoute;
   readonly grok?: ProjectConfigRoute;
+  readonly deepseek?: ProjectConfigRoute;
 }
 
 /** 创建 / 更新时提交的内容（id 由存储层生成）。 */
@@ -79,8 +81,9 @@ export function projectConfigRoute(
     readonly claude?: ProjectConfigRoute;
     readonly codex?: ProjectConfigRoute;
     readonly grok?: ProjectConfigRoute;
+    readonly deepseek?: ProjectConfigRoute;
   },
-  kind: "claude" | "codex" | "grok",
+  kind: WorkbenchAiKind,
 ): ProjectConfigRoute | undefined {
   if (kind === "claude") {
     return config.claude;
@@ -88,7 +91,10 @@ export function projectConfigRoute(
   if (kind === "codex") {
     return config.codex;
   }
-  return config.grok;
+  if (kind === "grok") {
+    return config.grok;
+  }
+  return config.deepseek;
 }
 
 /**

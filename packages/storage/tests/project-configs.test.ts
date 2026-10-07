@@ -96,6 +96,20 @@ describe("project configs", () => {
     void (created.id as ProjectConfigId);
   });
 
+  it("只有 DeepSeek 引用的来源也算还在用，不能当成没人用", async () => {
+    const created = await store.createConfig({
+      name: "只有 DeepSeek",
+      isDefault: true,
+      deepseek: {
+        connectionMode: "relay",
+        providerId: "prov-ds" as ProviderId,
+        model: "deepseek-flash",
+      },
+    });
+    expect(configReferencesProvider([created], "prov-ds" as ProviderId)).toBe(true);
+    expect(configReferencesProvider([created], "other" as ProviderId)).toBe(false);
+  });
+
   it("默认配置不能带范围；设为默认或接替默认时清空范围", async () => {
     const first = await store.ensureDefaultConfig();
     await expect(

@@ -2858,3 +2858,189 @@ Grok 的「可改文件」和「可改+跑命令」启动参数相同，命令�
 
 - [T10.16 验收记录](../验收记录/T10.16-验收.md)
 - [Phase 10 计划 §10](../Phase10-多窗口终端工作台计划.md)
+
+## 2026-10-07 14:23 · T10.17 · 执行 · DeepSeek 窗口
+
+### 任务要点
+
+按计划 §11、§7.3、§7.4 做 DeepSeek 窗口。Tony 已定用本机 Claude Code 连接，不用 Codex。先只查官方文档、不调用模型。查到地址再实现，地址做默认值。不提交。不碰 apps/desktop/scripts/real-config-probe.mjs。不读写 ~/.aiworkbench，不改 ~/.claude、~/.codex、~/.grok。
+
+### 结论
+
+做完了。官方文档写明，给 Claude Code 用的地址是 https://api.deepseek.com/anthropic（[Integrate with Claude Code](https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code)，[Using the Anthropic API](https://api-docs.deepseek.com/guides/anthropic_api)）。密钥用 ANTHROPIC_AUTH_TOKEN。没有改回 Codex。
+
+来源模板「DeepSeek」：地址默认就是这个，可以改；密钥必填；模型手填。项目配置多一路 DeepSeek，默认不勾。没配这一路不能开窗口。本机登录这一档对 DeepSeek 不开放。
+
+新建窗口、管理者开子窗口、重启和续接都能选 DeepSeek。实际启动的是本机 claude：权限参数、工作台工具、对话编号（--session-id / --resume）都走 Claude。密钥和地址只进这个进程的环境变量，不写用户的 Claude 配置。窗口标题和种类显示 DeepSeek，不是普通 Claude。思考强度仍用 Claude 的 --effort。用户填了模型时，同时写入 ANTHROPIC_MODEL 和官方文档里的 opus / sonnet / haiku / 子代理模型变量，避免 Claude 再换成别的名字。
+
+中英文语言包和仓库根目录使用说明已同步：选 DeepSeek，填密钥和模型；窗口里是 Claude 的界面，模型是 DeepSeek。版本仍是 1.0.1，提交时再升到 1.0.2。不需要主控决策。
+
+### 改动文件
+
+- 来源与配置：packages/shared 的 provider、模板、项目配置、窗口种类；packages/storage 的配置读写；packages/core 的注入表
+- 启动：launch-cli、resolve-config、open-child、handlers、MCP 开窗口与自配置草案
+- 界面：新建窗口、窗口标题、配置编辑、中英文语言包、使用说明.md
+- 测试：workbench-deepseek-launch.test.ts、project-config.test.ts、e2e/workbench-deepseek.spec.ts
+
+### 命令结果
+
+- pnpm lint：通过。Biome 768 个文件。check-i18n PASS。
+- pnpm --filter @ff-pane/shared --filter @ff-pane/core --filter @ff-pane/storage build：通过（typecheck 读的是各包 dist）。
+- pnpm --filter @ff-pane/desktop run typecheck：通过。
+- vitest：workbench-deepseek-launch、project-config、mcp-config-tool、domain、project-configs、provider-injection 共 6 个文件，112 过（修断言后 deepseek 启动 4 过、选路 2 过）。
+- e2e tests/e2e/workbench-deepseek.spec.ts：1 过，9.1 秒。假 claude 开出 data-window-kind=deepseek，回放里有 Claude 参数、官方地址、deepseek-chat，密钥只显示 present。
+
+### 问题与遗留
+
+未提交。版本号留在 1.0.1。未改 apps/desktop/scripts/real-config-probe.mjs。未读写 ~/.aiworkbench，未改 ~/.claude、~/.codex、~/.grok。未调用模型。官方文档里的 CLAUDE_CODE_EFFORT_LEVEL 和自动压缩窗口没有照抄进环境变量，思考强度仍走 Claude 的 --effort。
+
+### 相关文件链接
+
+- [Integrate with Claude Code](https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code)
+- [Using the Anthropic API](https://api-docs.deepseek.com/guides/anthropic_api)
+- [Phase 10 计划 §11](../Phase10-多窗口终端工作台计划.md)
+
+## 2026-10-07 15:33 · T10.17 · 检查 · DeepSeek 窗口
+
+### 任务要点
+
+独立检查未提交的 T10.17。对照计划 §11、§7.3、§7.4，以及总记录「2026-10-07 14:23 · T10.17 · 执行 · DeepSeek 窗口」。审查未提交改动，做反向探针，完整跑 lint / desktop typecheck / `pnpm test` / `pnpm smoke` / `pnpm test:e2e`。不改实现，不提交。不碰 `apps/desktop/scripts/real-config-probe.mjs`。不改 `~/.claude`、`~/.codex`、`~/.grok`。
+
+### 结论
+
+有条件通过，1 项必须修。启动的是本机 Claude，不是 Codex。默认地址是 `https://api.deepseek.com/anthropic`。没配这一路时，对话框、管理者开子窗口、重启都会拒绝。密钥和地址只在这个进程的环境里，探针期间没有改用户的 `~/.claude`、`~/.codex`、`~/.grok`。窗口显示 DeepSeek。管理者开子窗口、重启和续接也走这一路。使用说明里「窗口里是 Claude 的界面，模型是 DeepSeek」和事实一致。
+
+必须修：删除来源时只检查了 Claude、Codex、Grok，没算 DeepSeek。来源和密钥会被删掉，配置里这一路还指着它。
+
+要主控决策：使用说明和语言包的模型例子仍是计划里的 `deepseek-chat` / `deepseek-reasoner`。今天打开的官方文档示例已是 `deepseek-flash` 一类名字。软件不写死模型。
+
+### 改动文件
+
+- 新增 `docs/验收记录/T10.17-验收.md`
+- 本条追加到总记录
+
+### 命令结果
+
+- `pnpm lint`：通过。Biome 768 个文件。`check-i18n` PASS。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- `pnpm test`：147 个文件，2448 过，1 跳过。
+- `pnpm smoke`：ALL PASS。`FF-pane v1.0.1`。pdfjs 缺 canvas 的警告在 PASS 之前。
+- `pnpm test:e2e`：55 过，约 5.7 分钟。含 `workbench-deepseek.spec.ts`。没有单独重跑。
+
+### 问题与遗留
+
+- 未提交。未改实现，未改 `apps/desktop/scripts/real-config-probe.mjs`。未读写 `~/.aiworkbench`，未改 `~/.claude`、`~/.codex`、`~/.grok`。未跑消耗额度的命令。探针已删。核对用户目录时只比较了修改时间和大小，没有打开内容。
+- 必须修：`configReferencesProvider` 漏了 DeepSeek。
+- 建议不挡：配置卡片摘要没列出 DeepSeek；官方示例里的 `CLAUDE_CODE_EFFORT_LEVEL` 和自动压缩窗口没有写入，思考强度仍走 `--effort`；真 `claude` 仍可能把会话记在 `~/.claude`，软件没有改配置目录。
+- 工作区里若干旧验收记录和 `docs/Provider-模板说明.md` 只有换行警告、diff 没有正文。提交时不要带上。
+
+### 相关文件链接
+
+- [T10.17 验收记录](../验收记录/T10.17-验收.md)
+- [Phase 10 计划 §11](../Phase10-多窗口终端工作台计划.md)
+- 执行：[2026-10-07 14:23 · T10.17 · 执行 · DeepSeek 窗口](./Phase10-对话总记录.md)
+
+## 2026-10-07 15:43 · T10.17 · 修复 · DeepSeek 窗口
+
+### 任务要点
+
+按验收「必须修复」和计划 §11 末尾的模型例子决定。不提交。
+
+1. 删除来源时把 DeepSeek 这一路算进「还在用」。还有配置指着它，就不能删，密钥也不会被清掉。
+2. 使用说明和中英文语言包的模型例子改成 `deepseek-flash`、`deepseek-v4-pro`。不写死，手填仍有效。
+
+### 结论
+
+两处都改了。`configReferencesProvider` 现在也会看 DeepSeek 的来源。设置页删除来源时，只要有配置的 DeepSeek 路指着它，就会拒绝删除，后面的清密钥不会执行。模型输入框仍是手填，例子换成官方现在的两个名字。
+
+### 改动文件
+
+- `packages/storage/src/project-configs/store.ts`
+- `packages/storage/tests/project-configs.test.ts`
+- `使用说明.md`
+- `locales/zh-CN.json`、`locales/en-US.json`
+
+### 命令结果
+
+- `pnpm lint`：通过。Biome 768 个文件。`check-i18n` PASS。
+- `pnpm --filter @ff-pane/storage build`：通过。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- `vitest run packages/storage/tests/project-configs.test.ts`：1 个文件，7 过。含「只有 DeepSeek 引用的来源也算还在用」。
+
+### 问题与遗留
+
+未提交。未改 `apps/desktop/scripts/real-config-probe.mjs`。未读写 `~/.aiworkbench`，未改 `~/.claude`、`~/.codex`、`~/.grok`。配置卡片摘要仍不列出 DeepSeek，验收里这一条是建议，这次没改。不需要主控决策。
+
+### 相关文件链接
+
+- [T10.17 验收记录](../验收记录/T10.17-验收.md)
+- [Phase 10 计划 §11](../Phase10-多窗口终端工作台计划.md)
+
+## 2026-10-07 15:59 · T10.17 · 复验 · DeepSeek 窗口
+
+### 任务要点
+
+复验 T10.17 必须项和模型例子。对照总记录「2026-10-07 15:43 · T10.17 · 修复 · DeepSeek 窗口」，以及计划 §11 已定的例子 `deepseek-flash`、`deepseek-v4-pro`。删掉仍被 DeepSeek 使用的来源应被拒绝，密钥还在；没有任何配置引用时才能删。上一轮通过的探针不能被修坏。最后一轮完整跑 lint / desktop typecheck / `pnpm test` / `pnpm smoke` / `pnpm test:e2e`。不改实现，不提交。
+
+### 结论
+
+通过。必须项已补上：还有配置的 DeepSeek 路指着这个来源时，删除被拒绝，密钥还能读出来；拿掉引用之后才能删，密钥随之清掉。使用说明和中英文语言包的例子已换成 `deepseek-flash`、`deepseek-v4-pro`，仍是手填。上一轮的启动、拒绝和普通 Claude 不被改去连 DeepSeek，都还在。不需要主控决策。
+
+### 改动文件
+
+- `docs/验收记录/T10.17-验收.md` 末尾追加「复验」
+- 本条追加到总记录
+
+### 命令结果
+
+- `pnpm lint`：通过。Biome 768 个文件。`check-i18n` PASS。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- `pnpm test`：147 个文件，2449 过，1 跳过。
+- `pnpm smoke`：ALL PASS。`FF-pane v1.0.1`。pdfjs 缺 canvas 的警告在 PASS 之前。
+- `pnpm test:e2e`：55 过，约 5.5 分钟。含 `workbench-deepseek.spec.ts`。没有单独重跑。
+
+### 问题与遗留
+
+未提交。未改实现，未改 `apps/desktop/scripts/real-config-probe.mjs`。未读写 `~/.aiworkbench`，未改 `~/.claude`、`~/.codex`、`~/.grok`。未跑消耗额度的命令。探针已删。核对用户目录时只比较了修改时间和大小，没有打开内容。配置卡片摘要仍不列出 DeepSeek，仍是建议，不挡。版本仍是 1.0.1。
+
+### 相关文件链接
+
+- [T10.17 验收记录](../验收记录/T10.17-验收.md)
+- [Phase 10 计划 §11](../Phase10-多窗口终端工作台计划.md)
+- 修复：[2026-10-07 15:43 · T10.17 · 修复 · DeepSeek 窗口](./Phase10-对话总记录.md)
+
+## 2026-10-07 16:29 · T10.17 · 提交 · v1.0.2
+
+### 任务要点
+
+按计划 §7.2 第 4 步提交 T10.17。版本 `1.0.1` → `1.0.2`（根与 desktop 的 `package.json`、README 状态行、测试里的假 AppInfo）。开发进度登记 T10.17 已验收。计划 §4 增加 T10.17 行，§7.5 当前版本改为 1.0.2。轻量 tag `v1.0.2`，不 push。
+
+### 结论
+
+已提交并打轻量 tag `v1.0.2`，未 push。复验已通过。不需要主控决策。
+
+### 改动文件
+
+- 版本：根与 `apps/desktop` 的 `package.json`、`README.md`、`command-ipc.test.ts` 与 `client-server.test.ts` 里的假 AppInfo
+- 实现与测试：DeepSeek 来源模板、项目配置一路、用本机 Claude 启动、删除来源时算「还在用」、语言包、使用说明
+- 进度与计划：`docs/开发进度.md`、`docs/Phase10-多窗口终端工作台计划.md`
+- `docs/验收记录/T10.17-验收.md`
+- 本总记录
+
+### 命令结果
+
+- `pnpm lint`：通过。Biome 768 个文件。`check-i18n` PASS。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- `vitest run apps/desktop/tests/command-ipc.test.ts apps/desktop/tests/client-server.test.ts`：2 个文件，73 过。
+- 提交信息：`feat: T10.17 DeepSeek 窗口经 Claude 连接`
+- 轻量 tag `v1.0.2`，未 push
+- 提交哈希：打 tag 之后补进本条。
+
+### 问题与遗留
+
+历史记录里的 `1.0.1` 没有改。未纳入 `apps/desktop/scripts/real-config-probe.mjs`。旧验收记录和 `docs/Provider-模板说明.md` 只有换行符变化，没有提交。配置卡片摘要仍不列出 DeepSeek，验收里是建议，不挡。上面的提交哈希是 tag `v1.0.2` 所指的那一笔；这一行是后补的，所以 tag 里的本条仍写着「打 tag 之后补进本条」。
+
+### 相关文件链接
+
+- [T10.17 验收记录](../验收记录/T10.17-验收.md)
+- [Phase 10 计划 §11](../Phase10-多窗口终端工作台计划.md)

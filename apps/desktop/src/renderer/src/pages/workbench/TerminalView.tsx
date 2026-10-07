@@ -2,6 +2,7 @@
  * xterm 终端视图（T10.1 / T10.2）：按 windowId 槽位复用 PTY；卸载只退订不杀进程。
  */
 
+import type { WorkbenchAiKind } from "@ff-pane/shared";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { type ReactElement, useCallback, useEffect, useRef, useState } from "react";
@@ -30,7 +31,7 @@ export interface TerminalViewProps {
   readonly onCwdFallback?: () => void;
   /** AI 窗口：不自动 spawn shell，改走 workbench:launch-cli。 */
   readonly cliLaunch?: {
-    readonly kind: "claude" | "codex" | "grok";
+    readonly kind: WorkbenchAiKind;
     readonly projectRoot: string;
     readonly nativeSessionId?: string;
     readonly initialPrompt?: string;

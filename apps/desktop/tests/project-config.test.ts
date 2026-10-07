@@ -63,6 +63,18 @@ describe("项目配置选路", () => {
       error: "配置「只有 Claude」没有 Codex 这一路，不能开这个窗口。",
     });
 
+    const deepseek = await resolveProjectLaunchRoute({
+      projectRoot,
+      projectId: "proj-1",
+      kind: "deepseek",
+      configs,
+      getProvider: async () => undefined,
+    });
+    expect(deepseek).toEqual({
+      ok: false,
+      error: "配置「只有 Claude」没有 DeepSeek 这一路，不能开这个窗口。",
+    });
+
     const unbound = await resolveProjectLaunchRoute({
       projectRoot: join(root, "other"),
       projectId: "proj-2",

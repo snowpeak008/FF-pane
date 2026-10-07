@@ -255,7 +255,10 @@ function nextShellTitle(layout: ProjectWorkbenchLayout): string {
   return `Shell ${n}`;
 }
 
-function nextCliTitle(kind: "claude" | "codex" | "grok", layout: ProjectWorkbenchLayout): string {
+function nextCliTitle(
+  kind: "claude" | "codex" | "grok" | "deepseek",
+  layout: ProjectWorkbenchLayout,
+): string {
   const n = Object.values(layout.windows).filter((window) => window.kind === kind).length + 1;
   if (kind === "claude") {
     return `Claude ${n}`;
@@ -263,7 +266,10 @@ function nextCliTitle(kind: "claude" | "codex" | "grok", layout: ProjectWorkbenc
   if (kind === "codex") {
     return `Codex ${n}`;
   }
-  return `Grok ${n}`;
+  if (kind === "grok") {
+    return `Grok ${n}`;
+  }
+  return `DeepSeek ${n}`;
 }
 
 function nextTabTitle(layout: ProjectWorkbenchLayout): string {

@@ -27,10 +27,17 @@ import {
 import { Field, Input } from "../../../components/ui/Input";
 import { invokeQuery } from "../../../ipc/query";
 
-type RouteSide = "claude" | "codex" | "grok";
+type RouteSide = "claude" | "codex" | "grok" | "deepseek";
 
 function providersForSide(side: RouteSide, providers: readonly Provider[]): readonly Provider[] {
-  const cli = side === "claude" ? "claude-code" : side === "codex" ? "codex" : "grok";
+  const cli =
+    side === "claude"
+      ? "claude-code"
+      : side === "codex"
+        ? "codex"
+        : side === "grok"
+          ? "grok"
+          : "deepseek";
   return providers.filter(
     (provider) => getProviderTemplate(provider.templateId)?.applicableClis.includes(cli) === true,
   );
@@ -73,7 +80,7 @@ function routeFrom(route: ProjectConfigRoute | undefined): RouteDraft {
   };
 }
 
-function toRoute(draft: RouteDraft): ProjectConfigRoute | undefined {
+function toRoute(draft: RouteDraft, relayOnly = false): ProjectConfigRoute | undefined {
   if (!draft.enabled) {
     return undefined;
   }
@@ -83,7 +90,7 @@ function toRoute(draft: RouteDraft): ProjectConfigRoute | undefined {
     ...(model !== "" ? { model } : {}),
     ...(effort !== "" ? { reasoningEffort: effort as ReasoningEffortLevel } : {}),
   };
-  if (draft.connectionMode === "relay") {
+  if (relayOnly || draft.connectionMode === "relay") {
     return {
       connectionMode: "relay",
       providerId: draft.providerId as ProviderId,
@@ -119,6 +126,7 @@ export function ConfigEditorDialog({
   const [claude, setClaude] = useState<RouteDraft>(emptyRoute(true));
   const [codex, setCodex] = useState<RouteDraft>(emptyRoute(true));
   const [grok, setGrok] = useState<RouteDraft>(emptyRoute(false));
+  const [deepseek, setDeepseek] = useState<RouteDraft>(emptyRoute(false));
   const [error, setError] = useState<string | undefined>(undefined);
   const [saving, setSaving] = useState(false);
 
@@ -132,6 +140,11 @@ export function ConfigEditorDialog({
     setClaude(config === null ? emptyRoute(true) : routeFrom(config.claude));
     setCodex(config === null ? emptyRoute(true) : routeFrom(config.codex));
     setGrok(config === null ? emptyRoute(false) : routeFrom(config.grok));
+    setDeepseek(
+      config === null
+        ? emptyRoute(false)
+        : { ...routeFrom(config.deepseek), connectionMode: "relay" },
+    );
     setError(undefined);
     setSaving(false);
   }, [config, open]);
@@ -141,10 +154,11 @@ export function ConfigEditorDialog({
   const saveDisabled =
     saving ||
     name.trim() === "" ||
-    (!claude.enabled && !codex.enabled && !grok.enabled) ||
+    (!claude.enabled && !codex.enabled && !grok.enabled && !deepseek.enabled) ||
     (claude.enabled && claude.connectionMode === "relay" && claude.providerId === "") ||
     (codex.enabled && codex.connectionMode === "relay" && codex.providerId === "") ||
-    (grok.enabled && grok.connectionMode === "relay" && grok.providerId === "");
+    (grok.enabled && grok.connectionMode === "relay" && grok.providerId === "") ||
+    (deepseek.enabled && deepseek.providerId === "");
 
   const toggleScope = (projectId: string): void => {
     setScope((current) => {
@@ -159,6 +173,9 @@ export function ConfigEditorDialog({
   };
 
   const probeModels = async (side: RouteSide): Promise<void> => {
+    if (side === "deepseek") {
+      return;
+    }
     const settled = await invokeQuery("providers:list-local-models", {
       runtime: side === "claude" ? "claude-code" : side === "grok" ? "grok-build" : "codex",
     });
@@ -194,6 +211,7 @@ export function ConfigEditorDialog({
     const claudeRoute = toRoute(claude);
     const codexRoute = toRoute(codex);
     const grokRoute = toRoute(grok);
+    const deepseekRoute = toRoute(deepseek, true);
     const projectIds = config?.isDefault === true ? [] : ([...scope] as ProjectId[]);
     const draft: ProjectConfigDraft = {
       name: name.trim(),
@@ -203,6 +221,7 @@ export function ConfigEditorDialog({
       ...(claudeRoute !== undefined ? { claude: claudeRoute } : {}),
       ...(codexRoute !== undefined ? { codex: codexRoute } : {}),
       ...(grokRoute !== undefined ? { grok: grokRoute } : {}),
+      ...(deepseekRoute !== undefined ? { deepseek: deepseekRoute } : {}),
     };
     setSaving(true);
     setError(undefined);
@@ -314,7 +333,16 @@ export function ConfigEditorDialog({
             onChange={setGrok}
             onProbe={() => void probeModels("grok")}
           />
-          {!claude.enabled && !codex.enabled && !grok.enabled ? (
+          <RouteFields
+            side="deepseek"
+            title={t("settings.configs.field.routeDeepseek")}
+            draft={deepseek}
+            providers={providersForSide("deepseek", relayProviders)}
+            relayOnly
+            onChange={setDeepseek}
+            onProbe={() => undefined}
+          />
+          {!claude.enabled && !codex.enabled && !grok.enabled && !deepseek.enabled ? (
             <p className="text-sm text-danger-text">{t("settings.configs.field.needRoute")}</p>
           ) : null}
           {error !== undefined ? (
@@ -348,6 +376,7 @@ function RouteFields({
   title,
   draft,
   providers,
+  relayOnly = false,
   onChange,
   onProbe,
 }: {
@@ -355,6 +384,7 @@ function RouteFields({
   readonly title: string;
   readonly draft: RouteDraft;
   readonly providers: readonly Provider[];
+  readonly relayOnly?: boolean;
   readonly onChange: (next: RouteDraft) => void;
   readonly onProbe: () => void;
 }): ReactElement {
@@ -370,31 +400,44 @@ function RouteFields({
           type="checkbox"
           data-testid={`config-${side}-enabled`}
           checked={draft.enabled}
-          onChange={(event) => onChange({ ...draft, enabled: event.target.checked })}
+          onChange={(event) =>
+            onChange({
+              ...draft,
+              enabled: event.target.checked,
+              ...(relayOnly ? { connectionMode: "relay" as const } : {}),
+            })
+          }
         />
         {title}
       </label>
       {draft.enabled ? (
         <>
-          <Field htmlFor={`config-${side}-mode`} label={t("settings.configs.field.connection")}>
-            <select
-              id={`config-${side}-mode`}
-              className={selectClass}
-              data-testid={`config-${side}-mode`}
-              value={draft.connectionMode}
-              onChange={(event) =>
-                onChange({
-                  ...draft,
-                  connectionMode: event.target.value === "relay" ? "relay" : "local_cli",
-                  providerId: event.target.value === "relay" ? draft.providerId : "",
-                })
-              }
-            >
-              <option value="local_cli">{t("settings.configs.field.local")}</option>
-              <option value="relay">{t("settings.configs.field.relay")}</option>
-            </select>
-          </Field>
-          {draft.connectionMode === "relay" ? (
+          {relayOnly ? (
+            <p className="text-2xs text-fg-muted" data-testid={`config-${side}-note`}>
+              {t("settings.configs.field.deepseekNote")}
+            </p>
+          ) : null}
+          {relayOnly ? null : (
+            <Field htmlFor={`config-${side}-mode`} label={t("settings.configs.field.connection")}>
+              <select
+                id={`config-${side}-mode`}
+                className={selectClass}
+                data-testid={`config-${side}-mode`}
+                value={draft.connectionMode}
+                onChange={(event) =>
+                  onChange({
+                    ...draft,
+                    connectionMode: event.target.value === "relay" ? "relay" : "local_cli",
+                    providerId: event.target.value === "relay" ? draft.providerId : "",
+                  })
+                }
+              >
+                <option value="local_cli">{t("settings.configs.field.local")}</option>
+                <option value="relay">{t("settings.configs.field.relay")}</option>
+              </select>
+            </Field>
+          )}
+          {relayOnly || draft.connectionMode === "relay" ? (
             <Field htmlFor={`config-${side}-provider`} label={t("settings.configs.field.provider")}>
               <select
                 id={`config-${side}-provider`}
@@ -415,14 +458,22 @@ function RouteFields({
           <Field
             htmlFor={`config-${side}-model`}
             label={t("settings.configs.field.model")}
-            hint={t("settings.configs.field.modelHint")}
+            hint={
+              side === "deepseek"
+                ? t("settings.configs.field.modelHintDeepseek")
+                : t("settings.configs.field.modelHint")
+            }
           >
             <Input
               id={`config-${side}-model`}
               data-testid={`config-${side}-model`}
               list={`config-${side}-models`}
               value={draft.model}
-              placeholder={t("settings.configs.field.modelPlaceholder")}
+              placeholder={
+                side === "deepseek"
+                  ? t("settings.configs.field.modelPlaceholderDeepseek")
+                  : t("settings.configs.field.modelPlaceholder")
+              }
               onChange={(event) => onChange({ ...draft, model: event.target.value })}
             />
             <datalist id={`config-${side}-models`}>

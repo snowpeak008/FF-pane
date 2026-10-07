@@ -290,6 +290,8 @@
       "kindClaude": "Claude Code",
       "kindCodex": "Codex",
       "kindGrok": "Grok",
+      "kindDeepseek": "DeepSeek",
+      "deepseekHint": "The window shows Claude's interface. The model is DeepSeek. Choose the DeepSeek route first, then fill in the API key and model.",
       "profile": "Launch profile",
       "permission": "Permission level",
       "role": "Role",
@@ -334,6 +336,7 @@
         "claude": "Claude",
         "codex": "Codex",
         "grok": "Grok",
+        "deepseek": "DeepSeek",
         "templateId": "Provider template",
         "baseUrl": "Base URL",
         "models": "Models",
@@ -464,7 +467,8 @@
         "shell": "Shell",
         "claude": "Claude",
         "codex": "Codex",
-        "grok": "Grok"
+        "grok": "Grok",
+        "deepseek": "DeepSeek"
       },
       "status": {
         "running": "Running",
@@ -672,6 +676,10 @@
           "name": "Grok relay",
           "description": "Relay for Grok only. Base URL and API key are both required. Local login does not use this."
         },
+        "deepseek": {
+          "name": "DeepSeek",
+          "description": "Connect DeepSeek through the Claude Code already on this machine. API key is required, the address is filled in, and the model can be typed."
+        },
         "local-login": {
           "name": "Local CLI login",
           "description": "Use the Claude Code / Codex account already logged in on this machine. Injects nothing."
@@ -783,6 +791,10 @@
         "routeClaude": "Claude",
         "routeCodex": "Codex",
         "routeGrok": "Grok",
+        "routeDeepseek": "DeepSeek",
+        "deepseekNote": "API key is required. The window shows Claude's interface, and the model is the DeepSeek model you type.",
+        "modelHintDeepseek": "Type a model name, for example deepseek-flash or deepseek-v4-pro. Leave empty to omit it.",
+        "modelPlaceholderDeepseek": "e.g. deepseek-flash",
         "connection": "Connection",
         "local": "Local login",
         "relay": "Relay",
@@ -802,7 +814,7 @@
           "xhigh": "xhigh",
           "max": "max"
         },
-        "needRoute": "Configure at least the Claude, Codex, or Grok route."
+        "needRoute": "Configure at least the Claude, Codex, Grok, or DeepSeek route."
       },
       "edit": {
         "title": "Edit config",

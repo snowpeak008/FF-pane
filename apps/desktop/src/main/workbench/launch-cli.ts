@@ -31,6 +31,7 @@ import {
   resolveDispatchedReasoningEffort,
   type WorkbenchPermissionLevel,
   type WorkbenchRole,
+  workbenchKindToInjectionCli,
   workbenchKindToRuntime,
 } from "@ff-pane/shared";
 import { ENV_CONFIG_CALLER_ROLE } from "../../mcp/config-tool";
@@ -100,7 +101,7 @@ export interface LaunchCliWindowInput {
   readonly windowId: string;
   readonly projectId: ProjectId;
   readonly projectRoot: string;
-  readonly kind: "claude" | "codex" | "grok";
+  readonly kind: "claude" | "codex" | "grok" | "deepseek";
   /** 已按项目配置解析好的这一路。本机登录不带 providerId。 */
   readonly route: LaunchCliRoute;
   readonly cols: number;
@@ -119,7 +120,7 @@ export interface LaunchCliWindowInput {
 
 export interface LaunchCliWindowResult {
   readonly terminal: TerminalRecord;
-  readonly kind: "claude" | "codex" | "grok";
+  readonly kind: "claude" | "codex" | "grok" | "deepseek";
   readonly nativeSessionId?: string;
   /** Codex：已开始后台认领会话 id。 */
   readonly claimingSession?: boolean;
@@ -300,6 +301,7 @@ async function launchCliWindowBody(
 ): Promise<LaunchCliWindowResult> {
   const kind = input.kind;
   const runtime = workbenchKindToRuntime(kind);
+  const injectionCli = workbenchKindToInjectionCli(kind);
   const route = input.route;
   let provider: Awaited<ReturnType<LaunchCliWindowDeps["getProvider"]>>;
   if (route.connectionMode === "relay") {
@@ -347,18 +349,21 @@ async function launchCliWindowBody(
       secret = await deps.revealSecret(provider.apiKeyRef);
     }
     injectEnv = resolveRuntimeEnv({
-      runtime,
+      runtime: injectionCli,
       provider: provider as never,
       ...(secret !== undefined ? { apiKeyPlaintext: secret } : {}),
       connectionMode,
       ...(model !== undefined ? { model } : {}),
     });
     configOverrides = resolveRuntimeConfigOverrides({
-      runtime,
+      runtime: injectionCli,
       provider: provider as never,
       ...(effort !== undefined ? { reasoningEffort: effort } : {}),
       connectionMode,
     });
+  }
+  if (kind === "deepseek" && (secret === undefined || secret.length === 0)) {
+    throw new WorkbenchCliLaunchError("invalid", "DeepSeek 窗口需要已填写密钥的来源。");
   }
 
   const requestedPermission: WorkbenchPermissionLevel = input.permission ?? "edit";

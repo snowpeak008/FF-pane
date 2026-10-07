@@ -692,9 +692,11 @@ export async function createWorkbenchCliLayer(
             ? "claude"
             : request.kind === "grok"
               ? "grok"
-              : undefined;
+              : request.kind === "deepseek"
+                ? "deepseek"
+                : undefined;
       if (kind === undefined) {
-        throw new Error("kind must be claude, codex, or grok");
+        throw new Error("kind must be claude, codex, grok, or deepseek");
       }
       const resolved = await resolveProjectLaunchRoute({
         projectRoot: request.projectRoot,

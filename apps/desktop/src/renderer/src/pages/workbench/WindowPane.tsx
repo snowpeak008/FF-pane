@@ -280,7 +280,9 @@ export function WindowPane({
         ? t("workbench.window.kind.codex")
         : window.kind === "grok"
           ? t("workbench.window.kind.grok")
-          : t("workbench.window.kind.shell");
+          : window.kind === "deepseek"
+            ? t("workbench.window.kind.deepseek")
+            : t("workbench.window.kind.shell");
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: pane focus-on-click
@@ -799,7 +801,13 @@ export function WindowPane({
           ? {
               cliLaunch: {
                 kind:
-                  window.kind === "codex" ? "codex" : window.kind === "grok" ? "grok" : "claude",
+                  window.kind === "codex"
+                    ? "codex"
+                    : window.kind === "grok"
+                      ? "grok"
+                      : window.kind === "deepseek"
+                        ? "deepseek"
+                        : "claude",
                 projectRoot,
                 autoStart: autoStart || resumeNext,
                 permission,

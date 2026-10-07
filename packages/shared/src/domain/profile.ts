@@ -224,7 +224,7 @@ export const isConnectionMode = createLiteralGuard(CONNECTION_MODES);
 
 /**
  * 有本机 CLI 登录态的 Runtime（Claude / Codex / Gemini / Grok / OpenCode）。
- * DeepSeek 不是 Runtime，它只作为中转来源（openai_compatible 网址）。
+ * DeepSeek 窗口启动本机 Claude，密钥和地址走单独的来源，不是本机 CLI 登录。
  */
 export const LOCAL_CLI_RUNTIMES = [
   "codex",

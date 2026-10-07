@@ -58,7 +58,12 @@ function runtimeBaseUrlEnvVar(runtime: RuntimeId): string | undefined {
 }
 
 function asTemplateCli(runtime: RuntimeId): ProviderTemplateCli | undefined {
-  if (runtime === "claude-code" || runtime === "codex" || runtime === "grok") {
+  if (
+    runtime === "claude-code" ||
+    runtime === "codex" ||
+    runtime === "grok" ||
+    runtime === "deepseek"
+  ) {
     return runtime;
   }
   return undefined;

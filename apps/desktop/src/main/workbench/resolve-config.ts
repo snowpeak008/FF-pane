@@ -7,6 +7,7 @@ import {
   type ProjectConfigId,
   projectConfigRoute,
   selectEffectiveProjectConfig,
+  type WorkbenchAiKind,
 } from "@ff-pane/shared";
 import {
   createProjectSettingsStore,
@@ -28,7 +29,7 @@ export interface LaunchCliRoute {
 export interface ResolveProjectLaunchRouteInput {
   readonly projectRoot: string;
   readonly projectId: string;
-  readonly kind: "claude" | "codex" | "grok";
+  readonly kind: WorkbenchAiKind;
   readonly configs: ProjectConfigStore;
   readonly getProvider: (
     id: string,
@@ -51,11 +52,24 @@ export async function resolveProjectLaunchRoute(
     return { ok: false, error: "没有可用的项目配置。" };
   }
   const spec = projectConfigRoute(effective, input.kind);
-  const cliName = input.kind === "claude" ? "Claude" : input.kind === "codex" ? "Codex" : "Grok";
+  const cliName =
+    input.kind === "claude"
+      ? "Claude"
+      : input.kind === "codex"
+        ? "Codex"
+        : input.kind === "grok"
+          ? "Grok"
+          : "DeepSeek";
   if (spec === undefined) {
     return {
       ok: false,
       error: `配置「${effective.name}」没有 ${cliName} 这一路，不能开这个窗口。`,
+    };
+  }
+  if (input.kind === "deepseek" && spec.connectionMode !== "relay") {
+    return {
+      ok: false,
+      error: `配置「${effective.name}」的 DeepSeek 必须选择来源并填写密钥。`,
     };
   }
   const model = spec.model?.trim() || undefined;

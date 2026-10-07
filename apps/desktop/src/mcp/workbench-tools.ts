@@ -86,8 +86,8 @@ export const WORKBENCH_MCP_TOOLS: readonly McpToolDefinition[] = [
       properties: {
         cli: {
           type: "string",
-          enum: ["claude", "codex", "grok"],
-          description: "子窗口使用的 CLI。",
+          enum: ["claude", "codex", "grok", "deepseek"],
+          description: "子窗口使用的 CLI。deepseek 启动本机 Claude，模型是 DeepSeek。",
         },
         profileId: {
           type: "string",

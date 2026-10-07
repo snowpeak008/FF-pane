@@ -75,7 +75,7 @@ export function NewWindowDialog({
   const [effective, setEffective] = useState<ProjectConfig | undefined>(undefined);
 
   const aiRuntime =
-    kind === "claude"
+    kind === "claude" || kind === "deepseek"
       ? "claude-code"
       : kind === "codex"
         ? "codex"
@@ -177,6 +177,7 @@ export function NewWindowDialog({
                   ["claude", "workbench.newWindow.kindClaude"],
                   ["codex", "workbench.newWindow.kindCodex"],
                   ["grok", "workbench.newWindow.kindGrok"],
+                  ["deepseek", "workbench.newWindow.kindDeepseek"],
                 ] as const
               ).map(([value, labelKey]) => (
                 <Button
@@ -193,12 +194,23 @@ export function NewWindowDialog({
             </div>
           </fieldset>
 
+          {kind === "deepseek" ? (
+            <p className="text-sm text-fg-muted" data-testid="workbench-deepseek-hint">
+              {t("workbench.newWindow.deepseekHint")}
+            </p>
+          ) : null}
+
           {kind !== "shell" ? (
             <>
               {cliMissing ? (
                 <p className="text-sm text-danger-text" data-testid="workbench-cli-missing">
                   {t("workbench.newWindow.cliMissing", {
-                    cli: kind === "claude" ? "Claude Code" : kind === "grok" ? "Grok" : "Codex",
+                    cli:
+                      kind === "claude" || kind === "deepseek"
+                        ? "Claude Code"
+                        : kind === "grok"
+                          ? "Grok"
+                          : "Codex",
                   })}
                 </p>
               ) : null}
@@ -206,7 +218,14 @@ export function NewWindowDialog({
                 <div className="flex flex-col gap-2">
                   <p className="text-sm text-danger-text" data-testid="workbench-route-missing">
                     {t("workbench.newWindow.routeMissing", {
-                      cli: kind === "claude" ? "Claude" : kind === "grok" ? "Grok" : "Codex",
+                      cli:
+                        kind === "claude"
+                          ? "Claude"
+                          : kind === "grok"
+                            ? "Grok"
+                            : kind === "deepseek"
+                              ? "DeepSeek"
+                              : "Codex",
                       name: effective?.name ?? "",
                     })}
                   </p>

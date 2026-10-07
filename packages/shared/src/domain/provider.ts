@@ -13,6 +13,7 @@ export const PROVIDER_TEMPLATE_IDS = [
   "openai-official",
   "openai-compatible",
   "grok-compatible",
+  "deepseek",
   "local-login",
 ] as const;
 
@@ -70,6 +71,12 @@ export const ANTHROPIC_OFFICIAL_BASE_URL = "https://api.anthropic.com";
 
 /** OpenAI 官方 API 根地址。 */
 export const OPENAI_OFFICIAL_BASE_URL = "https://api.openai.com/v1";
+
+/**
+ * DeepSeek 给 Claude Code 用的 Anthropic 兼容地址。
+ * 来源：https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code
+ */
+export const DEEPSEEK_ANTHROPIC_BASE_URL = "https://api.deepseek.com/anthropic";
 
 /** Provider 模型列表条目。 */
 export interface ProviderModel {

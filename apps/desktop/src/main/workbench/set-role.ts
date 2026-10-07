@@ -8,6 +8,7 @@ import { canSetRole, type WorkbenchAuthActor, type WorkbenchAuthNode } from "@ff
 import {
   DEFAULT_WORKBENCH_ROLE,
   DEFAULT_WORKBENCH_WINDOW_PERMISSION,
+  isAiWorkbenchKind,
   isWorkbenchPermissionLevel,
   isWorkbenchRole,
   type ProjectWorkbenchLayout,
@@ -109,8 +110,7 @@ export async function setWindowRole(
     return deliverRoleSwitch(windowId, role, deps);
   }
 
-  const isAi =
-    found.window.kind === "claude" || found.window.kind === "codex" || found.window.kind === "grok";
+  const isAi = isAiWorkbenchKind(found.window.kind);
   if (isAi) {
     ensureAuthNode(deps.authRegistry, found.window);
   }

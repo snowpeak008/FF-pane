@@ -128,6 +128,7 @@ describe("常量数组 ↔ 设计文档定值对照", () => {
       "openai-official",
       "openai-compatible",
       "grok-compatible",
+      "deepseek",
       "local-login",
     ]);
   });

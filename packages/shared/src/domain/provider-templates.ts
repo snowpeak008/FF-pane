@@ -6,13 +6,14 @@
 import { createLiteralGuard } from "./common.js";
 import {
   ANTHROPIC_OFFICIAL_BASE_URL,
+  DEEPSEEK_ANTHROPIC_BASE_URL,
   OPENAI_OFFICIAL_BASE_URL,
   PROVIDER_TEMPLATE_IDS,
   type ProviderTemplateId,
 } from "./provider.js";
 
-/** 模板适用的 CLI。Grok 中转只用 grok-compatible。 */
-export const PROVIDER_TEMPLATE_CLIS = ["claude-code", "codex", "grok"] as const;
+/** 模板适用的 CLI。Grok 中转只用 grok-compatible。DeepSeek 只用 deepseek。 */
+export const PROVIDER_TEMPLATE_CLIS = ["claude-code", "codex", "grok", "deepseek"] as const;
 
 /** 模板适用 CLI。 */
 export type ProviderTemplateCli = (typeof PROVIDER_TEMPLATE_CLIS)[number];
@@ -127,6 +128,15 @@ export const BUILTIN_PROVIDER_TEMPLATES: readonly ProviderTemplateDefinition[] =
     applicableClis: ["grok"],
     fields: { baseUrl: "required", apiKey: "required", models: "optional" },
     probe: "openai",
+  },
+  {
+    id: "deepseek",
+    nameKey: "settings.providers.template.deepseek.name",
+    descriptionKey: "settings.providers.template.deepseek.description",
+    applicableClis: ["deepseek"],
+    fields: { baseUrl: "optional", apiKey: "required", models: "optional" },
+    defaultBaseUrl: DEEPSEEK_ANTHROPIC_BASE_URL,
+    probe: "anthropic",
   },
   {
     id: "local-login",

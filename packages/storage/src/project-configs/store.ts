@@ -73,7 +73,8 @@ export function configReferencesProvider(
     (config) =>
       config.claude?.providerId === providerId ||
       config.codex?.providerId === providerId ||
-      config.grok?.providerId === providerId,
+      config.grok?.providerId === providerId ||
+      config.deepseek?.providerId === providerId,
   );
 }
 
@@ -147,6 +148,7 @@ function pickConfig(value: unknown): ProjectConfig | undefined {
   const claude = pickRoute(raw["claude"]);
   const codex = pickRoute(raw["codex"]);
   const grok = pickRoute(raw["grok"]);
+  const deepseek = pickRoute(raw["deepseek"]);
   const isDefault = raw["isDefault"] === true;
   return {
     id: raw["id"] as ProjectConfigId,
@@ -157,6 +159,7 @@ function pickConfig(value: unknown): ProjectConfig | undefined {
     ...(claude !== undefined ? { claude } : {}),
     ...(codex !== undefined ? { codex } : {}),
     ...(grok !== undefined ? { grok } : {}),
+    ...(deepseek !== undefined ? { deepseek } : {}),
   };
 }
 
@@ -183,6 +186,9 @@ function normalizeRoute(
     ...(effort !== undefined ? { reasoningEffort: effort } : {}),
   };
   if (route.connectionMode === "local_cli") {
+    if (label === "DeepSeek") {
+      throw new ProjectConfigDraftInvalidError("DeepSeek 必须选择来源并填写密钥");
+    }
     return { connectionMode: "local_cli" as ConnectionMode, ...extras };
   }
   const providerId = route.providerId?.trim() ?? "";
@@ -204,8 +210,9 @@ export function normalizeProjectConfigDraft(draft: ProjectConfigDraft): ProjectC
   const claude = normalizeRoute(draft.claude, "Claude");
   const codex = normalizeRoute(draft.codex, "Codex");
   const grok = normalizeRoute(draft.grok, "Grok");
-  if (claude === undefined && codex === undefined && grok === undefined) {
-    throw new ProjectConfigDraftInvalidError("至少配置 Claude、Codex 或 Grok 一路");
+  const deepseek = normalizeRoute(draft.deepseek, "DeepSeek");
+  if (claude === undefined && codex === undefined && grok === undefined && deepseek === undefined) {
+    throw new ProjectConfigDraftInvalidError("至少配置 Claude、Codex、Grok 或 DeepSeek 一路");
   }
   if (
     draft.defaultPermission !== undefined &&
@@ -225,6 +232,7 @@ export function normalizeProjectConfigDraft(draft: ProjectConfigDraft): ProjectC
     ...(claude !== undefined ? { claude } : {}),
     ...(codex !== undefined ? { codex } : {}),
     ...(grok !== undefined ? { grok } : {}),
+    ...(deepseek !== undefined ? { deepseek } : {}),
   };
 }
 

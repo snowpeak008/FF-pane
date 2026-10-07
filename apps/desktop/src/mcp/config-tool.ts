@@ -370,6 +370,7 @@ export const CONFIG_CONFIG_DRAFT_FIELDS = [
   "claude",
   "codex",
   "grok",
+  "deepseek",
 ] as const;
 
 /** 自配置 sidecar 用来识别调用者角色的环境变量。只有 manager 能调用。 */
@@ -397,7 +398,7 @@ export const CONFIG_ROUTE_DRAFT_FIELDS = [
 export const CONFIG_DRAFT_CONFIG_TOOL: McpToolDefinition = {
   name: CONFIG_TOOL_DRAFT_CONFIG,
   description:
-    "Submit a draft to create or update a workbench config (name, Claude route, Codex route, Grok route, optional " +
+    "Submit a draft to create or update a workbench config (name, Claude route, Codex route, Grok route, DeepSeek route, optional " +
     "default permission, optional project scope). The draft is shown to the user; NOTHING is saved until " +
     "the user confirms. Pass id to update. The default config is open to every project and cannot be narrowed. " +
     "A relay route needs a provider id; draft a provider first when none exists. " +
@@ -435,6 +436,11 @@ export const CONFIG_DRAFT_CONFIG_TOOL: McpToolDefinition = {
         ...CONFIG_ROUTE_SCHEMA,
         description:
           "Grok route. Omit to leave Grok unavailable. Relay uses a Grok-compatible provider.",
+      },
+      deepseek: {
+        ...CONFIG_ROUTE_SCHEMA,
+        description:
+          "DeepSeek route. Omit to leave DeepSeek unavailable. Must be relay: a DeepSeek provider (API key required) and an optional hand-typed model. The window launches Claude Code.",
       },
     },
     required: ["name"],
@@ -821,6 +827,11 @@ function parseConfigRoute(
       }
     }
   }
+  if (label === "deepseek" && record["connectionMode"] !== "relay") {
+    return {
+      error: 'Field "deepseek.connectionMode" must be "relay". DeepSeek requires an API key.',
+    };
+  }
   const route: ProjectConfigRoute = {
     connectionMode: record["connectionMode"] as ConnectionMode,
     ...(providerId !== undefined ? { providerId: providerId as ProviderId } : {}),
@@ -898,6 +909,14 @@ export function parseConfigDraftArgs(args: Readonly<Record<string, unknown>>): P
     }
     grok = parsed.route;
   }
+  let deepseek: ProjectConfigRoute | undefined;
+  if (args["deepseek"] !== undefined) {
+    const parsed = parseConfigRoute(args["deepseek"], "deepseek");
+    if (!("ok" in parsed)) {
+      return { ok: false, error: parsed.error };
+    }
+    deepseek = parsed.route;
+  }
   const id = nonEmptyString(args["id"]);
   const draft: ProjectConfigDraft = {
     name,
@@ -911,6 +930,7 @@ export function parseConfigDraftArgs(args: Readonly<Record<string, unknown>>): P
     ...(claude !== undefined ? { claude } : {}),
     ...(codex !== undefined ? { codex } : {}),
     ...(grok !== undefined ? { grok } : {}),
+    ...(deepseek !== undefined ? { deepseek } : {}),
   };
   return { ok: true, parsed: { kind: "config", ...(id !== undefined ? { id } : {}), draft } };
 }
@@ -980,6 +1000,7 @@ export function sanitizeProjectConfig(config: ProjectConfig): {
   readonly claude?: ProjectConfigRoute;
   readonly codex?: ProjectConfigRoute;
   readonly grok?: ProjectConfigRoute;
+  readonly deepseek?: ProjectConfigRoute;
 } {
   return {
     id: config.id,
@@ -994,6 +1015,7 @@ export function sanitizeProjectConfig(config: ProjectConfig): {
     ...(config.claude !== undefined ? { claude: sanitizeRoute(config.claude) } : {}),
     ...(config.codex !== undefined ? { codex: sanitizeRoute(config.codex) } : {}),
     ...(config.grok !== undefined ? { grok: sanitizeRoute(config.grok) } : {}),
+    ...(config.deepseek !== undefined ? { deepseek: sanitizeRoute(config.deepseek) } : {}),
   };
 }
 

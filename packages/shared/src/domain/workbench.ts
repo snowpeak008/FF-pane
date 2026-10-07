@@ -33,8 +33,8 @@ export function clampMaxWorkbenchWindows(value: unknown): number {
   return Math.min(MAX_MAX_WORKBENCH_WINDOWS, Math.max(MIN_MAX_WORKBENCH_WINDOWS, floored));
 }
 
-/** 窗口内容种类；T10.4 起含 Claude Code / Codex，T10.16 起含 Grok。 */
-export const WORKBENCH_WINDOW_KINDS = ["shell", "claude", "codex", "grok"] as const;
+/** 窗口内容种类；T10.4 起含 Claude Code / Codex，T10.16 起含 Grok，T10.17 起含 DeepSeek。 */
+export const WORKBENCH_WINDOW_KINDS = ["shell", "claude", "codex", "grok", "deepseek"] as const;
 
 /** 窗口内容种类。 */
 export type WorkbenchWindowKind = (typeof WORKBENCH_WINDOW_KINDS)[number];
@@ -49,18 +49,32 @@ export type WorkbenchAiKind = Exclude<WorkbenchWindowKind, "shell">;
 
 /** 是否为会启动 CLI 的窗口。 */
 export function isAiWorkbenchKind(kind: string): kind is WorkbenchAiKind {
-  return kind === "claude" || kind === "codex" || kind === "grok";
+  return kind !== "shell" && (WORKBENCH_WINDOW_KINDS as readonly string[]).includes(kind);
 }
 
-/** AI 窗口 kind ↔ 启动用 runtime。Grok 用 "grok"，与旧适配器 "grok-build" 分开。 */
+/**
+ * AI 窗口 kind ↔ 实际启动的 runtime。
+ * DeepSeek 没有自己的命令，启动本机 Claude Code。
+ * Grok 用 "grok"，与旧适配器 "grok-build" 分开。
+ */
 export function workbenchKindToRuntime(kind: WorkbenchAiKind): "claude-code" | "codex" | "grok" {
-  if (kind === "claude") {
-    return "claude-code";
-  }
   if (kind === "codex") {
     return "codex";
   }
-  return "grok";
+  if (kind === "grok") {
+    return "grok";
+  }
+  return "claude-code";
+}
+
+/** 注入密钥和地址时用的模板 CLI。DeepSeek 用自己的来源，不走普通 Claude 来源。 */
+export function workbenchKindToInjectionCli(
+  kind: WorkbenchAiKind,
+): "claude-code" | "codex" | "grok" | "deepseek" {
+  if (kind === "deepseek") {
+    return "deepseek";
+  }
+  return workbenchKindToRuntime(kind);
 }
 
 /** Profile runtime → AI 窗口 kind；非 AI runtime 返回 undefined。 */

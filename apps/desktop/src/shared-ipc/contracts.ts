@@ -285,8 +285,8 @@ export interface LaunchCliWindowRequest {
   readonly windowId: string;
   readonly projectId: ProjectId;
   readonly projectRoot: string;
-  /** claude、codex 或 grok。主进程按项目配置选路，不读档案。 */
-  readonly kind: "claude" | "codex" | "grok";
+  /** claude、codex、grok 或 deepseek。主进程按项目配置选路，不读档案。 */
+  readonly kind: "claude" | "codex" | "grok" | "deepseek";
   /** 已忽略。旧客户端若仍传入，主进程不使用。 */
   readonly profileId?: string;
   readonly cols: number;
@@ -306,7 +306,7 @@ export interface LaunchCliWindowRequest {
 /** workbench:launch-cli 响应（不含密钥）。 */
 export interface LaunchCliWindowResponse {
   readonly terminal: TerminalInfo;
-  readonly kind: "claude" | "codex" | "grok";
+  readonly kind: "claude" | "codex" | "grok" | "deepseek";
   readonly nativeSessionId?: string;
   /** Codex 新开：后台认领 session id 中。 */
   readonly claimingSession?: boolean;

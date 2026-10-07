@@ -5,6 +5,7 @@
 
 import type { Provider, ProviderTemplateCli, ProviderTemplateId } from "@ff-pane/shared";
 import {
+  DEEPSEEK_ANTHROPIC_BASE_URL,
   getProviderTemplate,
   isDangerousExtraEnvName,
   isLocalLoginProvider,
@@ -37,6 +38,10 @@ export const CLAUDE_AUTH_TOKEN_ENV = "ANTHROPIC_AUTH_TOKEN";
 export const CLAUDE_API_KEY_ENV = "ANTHROPIC_API_KEY";
 export const CLAUDE_BASE_URL_ENV = "ANTHROPIC_BASE_URL";
 export const CLAUDE_MODEL_ENV = "ANTHROPIC_MODEL";
+export const CLAUDE_DEFAULT_OPUS_MODEL_ENV = "ANTHROPIC_DEFAULT_OPUS_MODEL";
+export const CLAUDE_DEFAULT_SONNET_MODEL_ENV = "ANTHROPIC_DEFAULT_SONNET_MODEL";
+export const CLAUDE_DEFAULT_HAIKU_MODEL_ENV = "ANTHROPIC_DEFAULT_HAIKU_MODEL";
+export const CLAUDE_CODE_SUBAGENT_MODEL_ENV = "CLAUDE_CODE_SUBAGENT_MODEL";
 export const CODEX_API_KEY_ENV = "OPENAI_API_KEY";
 export const GROK_API_KEY_ENV = "XAI_API_KEY";
 /** 中转推理地址。本机 grok 1.0.13 把聊天和模型列表都发到这个变量。 */
@@ -181,6 +186,23 @@ export const PROVIDER_INJECTION_MAPPINGS: readonly ProviderInjectionMapping[] = 
         name: "apiKeyEnvName",
       },
     },
+  },
+  // —— DeepSeek × Claude Code（官方 Anthropic 兼容地址；密钥和地址只进本进程环境）——
+  {
+    templateId: "deepseek",
+    cli: "deepseek",
+    requireBaseUrl: false,
+    apiKeyEnv: CLAUDE_AUTH_TOKEN_ENV,
+    env: {
+      [CLAUDE_AUTH_TOKEN_ENV]: { kind: "placeholder", name: "apiKey" },
+      [CLAUDE_BASE_URL_ENV]: { kind: "placeholder", name: "baseUrl" },
+      [CLAUDE_MODEL_ENV]: { kind: "placeholder", name: "model" },
+      [CLAUDE_DEFAULT_OPUS_MODEL_ENV]: { kind: "placeholder", name: "model" },
+      [CLAUDE_DEFAULT_SONNET_MODEL_ENV]: { kind: "placeholder", name: "model" },
+      [CLAUDE_DEFAULT_HAIKU_MODEL_ENV]: { kind: "placeholder", name: "model" },
+      [CLAUDE_CODE_SUBAGENT_MODEL_ENV]: { kind: "placeholder", name: "model" },
+    },
+    configOverrides: {},
   },
   // —— Grok × 兼容中转（地址 + 密钥只进本进程环境，不写 ~/.grok）——
   {
@@ -383,8 +405,14 @@ export function resolveProviderInjection(input: ResolveProviderInjectionInput): 
     };
   }
 
-  const baseUrl = provider.baseUrl?.trim();
-  if (mapping.requireBaseUrl && (baseUrl === undefined || baseUrl.length === 0)) {
+  const explicitBaseUrl = provider.baseUrl?.trim() ?? "";
+  const baseUrl =
+    explicitBaseUrl.length > 0
+      ? explicitBaseUrl
+      : provider.templateId === "deepseek"
+        ? (template.defaultBaseUrl ?? DEEPSEEK_ANTHROPIC_BASE_URL)
+        : "";
+  if (mapping.requireBaseUrl && baseUrl.length === 0) {
     throw new ProviderInjectionError(
       "missing-base-url",
       `模板 ${provider.templateId} 需要 baseUrl`,
