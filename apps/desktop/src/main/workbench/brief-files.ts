@@ -143,6 +143,69 @@ export async function writeBriefFile(input: {
   return { ok: false, error: "briefs 目录里同名文件过多，无法分配新文件名。" };
 }
 
+/**
+ * 近况页：只写 briefs 目录内的一个文件名。同名覆盖，不追加，不加序号。
+ * 用 "w" 截断重写，不用 "a"。
+ */
+export async function writeStatusFile(input: {
+  readonly projectRoot: string;
+  readonly name: string;
+  readonly content: string;
+}): Promise<
+  | { readonly ok: true; readonly relativePath: string; readonly absolutePath: string }
+  | { readonly ok: false; readonly error: string }
+> {
+  const named = normalizeBriefFileName(input.name);
+  if (!named.ok) {
+    return named;
+  }
+  if (typeof input.content !== "string") {
+    return { ok: false, error: "正文必须是字符串。" };
+  }
+  const normalized = input.content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const body = normalized.endsWith("\n") ? normalized : `${normalized}\n`;
+  if (body.trim().length === 0) {
+    return { ok: false, error: "近况不能为空。" };
+  }
+  if (Buffer.byteLength(body, "utf8") > BRIEF_MAX_BYTES) {
+    return { ok: false, error: "正文超过 256KB。请拆成多份说明。" };
+  }
+  const root = resolve(input.projectRoot);
+  const dir = briefsDir(root);
+  await mkdir(dir, { recursive: true });
+  if (!(await assertRealInside(root, dir))) {
+    return { ok: false, error: "briefs 目录经符号链接指向了项目之外，已拒绝写入。" };
+  }
+  const realDir = await realpath(dir);
+  const full = join(realDir, named.fileName);
+  try {
+    const st = await lstat(full);
+    if (st.isSymbolicLink() || !st.isFile()) {
+      return { ok: false, error: "近况路径不是 briefs 目录里的普通文件，已拒绝覆盖。" };
+    }
+  } catch {
+    // 还不存在，下面用 "w" 创建。
+  }
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    handle = await open(full, "w");
+    await handle.writeFile(body, "utf8");
+  } catch {
+    return { ok: false, error: "写入近况失败。" };
+  } finally {
+    await handle?.close();
+  }
+  if (!(await assertRealInside(realDir, full))) {
+    return { ok: false, error: "写入结果越过了 briefs 目录，已拒绝。" };
+  }
+  const absolutePath = await realpath(full);
+  return {
+    ok: true,
+    relativePath: `.ffpane/briefs/${named.fileName}`,
+    absolutePath,
+  };
+}
+
 /** briefPath 必须落在该项目 .ffpane/briefs 内（相对或绝对均可）。 */
 export async function resolveBriefPath(
   projectRoot: string,

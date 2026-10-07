@@ -32,6 +32,7 @@ function tree(): Record<string, WorkbenchAuthNode> {
     plan: node("plan", "planner", "mgr"),
     work: node("work", "worker", "plan"),
     review: node("review", "reviewer", "mgr"),
+    watch: node("watch", "supervisor", "mgr"),
     plain: node("plain", "none", "mgr"),
     other: node("other", "manager", "mgr"),
     stranger: node("stranger", "worker"),
@@ -42,8 +43,8 @@ function tree(): Record<string, WorkbenchAuthNode> {
 describe("canSetModelEffort", () => {
   const nodes = tree();
 
-  it("管理者可以改自己和后代里的写计划、工作者、检查员、普通窗口", () => {
-    for (const targetId of ["mgr", "plan", "work", "review", "plain"] as const) {
+  it("管理者可以改自己和后代里的写计划、执行、监管者、检查、普通窗口", () => {
+    for (const targetId of ["mgr", "plan", "work", "review", "watch", "plain"] as const) {
       const allowed = canSetModelEffort({
         callerId: "mgr",
         callerGranted: true,

@@ -373,6 +373,7 @@
         "planner": "规划",
         "worker": "执行",
         "reviewer": "检查",
+        "supervisor": "监管者",
         "none": "普通"
       },
       "badgeHint": "点击或右键，把这个窗口设为某个角色",
@@ -754,7 +755,8 @@
         "manager": "管理者",
         "planner": "规划",
         "worker": "执行",
-        "reviewer": "检查"
+        "reviewer": "检查",
+        "supervisor": "监管者"
       },
       "source": {
         "default": "正在使用内置原文",

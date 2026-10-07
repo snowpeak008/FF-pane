@@ -17,7 +17,13 @@ export const MODEL_EFFORT_AUTO_MESSAGE = "已排队，空闲时自动续接";
 export const MODEL_EFFORT_CONFIRM_MESSAGE = "等用户确认";
 export const MODEL_EFFORT_DEFERRED_MESSAGE = "无法续接，待下次重启";
 
-const DESCENDANT_ROLES: readonly WorkbenchRole[] = ["planner", "worker", "reviewer", "none"];
+const DESCENDANT_ROLES: readonly WorkbenchRole[] = [
+  "planner",
+  "worker",
+  "reviewer",
+  "supervisor",
+  "none",
+];
 
 export type ModelEffortOutcome = "queued" | "confirm" | "deferred";
 
@@ -64,7 +70,7 @@ export function canSetModelEffort(input: {
   ) {
     return {
       ok: false,
-      error: "只能改自己，或自己后代里的写计划、工作者、检查员、普通窗口。",
+      error: "只能改自己，或自己后代里的写计划、执行、监管者、检查、普通窗口。",
     };
   }
   return { ok: true };

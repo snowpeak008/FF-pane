@@ -13,6 +13,7 @@ export const WORKBENCH_ROLE_LABEL: Readonly<Record<WorkbenchRole, string>> = {
   planner: "规划",
   worker: "执行",
   reviewer: "检查",
+  supervisor: "监管者",
   none: "普通",
 };
 

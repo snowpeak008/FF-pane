@@ -168,7 +168,9 @@ export function WindowPane({
           ? "bg-warning-surface text-warning-text"
           : role === "reviewer"
             ? "bg-success-surface text-success-text"
-            : "bg-surface-active text-fg-muted";
+            : role === "supervisor"
+              ? "bg-status-pending-surface text-status-pending-text"
+              : "bg-surface-active text-fg-muted";
 
   const chooseRole = (next: WorkbenchRole): void => {
     setRoleMenuOpen(false);

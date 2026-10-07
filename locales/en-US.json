@@ -373,6 +373,7 @@
         "planner": "Planner",
         "worker": "Worker",
         "reviewer": "Reviewer",
+        "supervisor": "Supervisor",
         "none": "Plain"
       },
       "badgeHint": "Click or right-click to set this window's role",
@@ -754,7 +755,8 @@
         "manager": "Manager",
         "planner": "Planner",
         "worker": "Worker",
-        "reviewer": "Reviewer"
+        "reviewer": "Reviewer",
+        "supervisor": "Supervisor"
       },
       "source": {
         "default": "Using the built-in text",

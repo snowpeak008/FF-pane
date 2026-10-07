@@ -4,6 +4,7 @@
  * sidecar 只列出并转发这些工具，不做授权判断。
  */
 
+import { WORKBENCH_ROLES } from "@ff-pane/shared";
 import type { McpToolDefinition } from "./protocol";
 
 export const WORKBENCH_MCP_SERVER_NAME = "ffpane-workbench";
@@ -13,6 +14,7 @@ export const WORKBENCH_MCP_TOOL_NAMES = [
   "ffpane_list_windows",
   "ffpane_set_role",
   "ffpane_write_brief",
+  "ffpane_write_status",
   "ffpane_open_window",
   "ffpane_send_message",
   "ffpane_report",
@@ -27,7 +29,7 @@ export const WORKBENCH_MCP_TOOL_NAMES = [
 
 export type WorkbenchMcpToolName = (typeof WORKBENCH_MCP_TOOL_NAMES)[number];
 
-const ROLE_ENUM = ["manager", "planner", "worker", "reviewer", "none"] as const;
+const ROLE_ENUM = WORKBENCH_ROLES;
 const PERMISSION_ENUM = ["read-only", "edit", "edit-exec", "yolo"] as const;
 const REPORT_STATUS_ENUM = ["done", "blocked", "failed", "progress"] as const;
 const PANEL_ENUM = ["plan", "tasks", "runs"] as const;
@@ -49,7 +51,7 @@ export const WORKBENCH_MCP_TOOLS: readonly McpToolDefinition[] = [
   {
     name: "ffpane_set_role",
     description:
-      "设定某个窗口的角色（manager 管理者 / planner 规划 / worker 执行 / reviewer 检查 / none 普通）。把自己设为管理者仅限用户开启的顶层窗口；也可以设定自己后代的角色。其余情况会被拒绝。",
+      "设定某个窗口的角色（manager 管理者 / planner 规划 / worker 执行 / reviewer 检查 / supervisor 监管者 / none 普通）。把自己设为管理者仅限用户开启的顶层窗口；也可以设定自己后代的角色。其余情况会被拒绝。",
     inputSchema: {
       type: "object",
       properties: {
@@ -72,6 +74,23 @@ export const WORKBENCH_MCP_TOOLS: readonly McpToolDefinition[] = [
           description: "文件名，例如 plan.md。只能是 briefs 目录内的文件名。",
         },
         content: { type: "string", description: "Markdown 正文。" },
+      },
+      required: ["name", "content"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "ffpane_write_status",
+    description:
+      "覆盖写入本窗口所属项目 .ffpane/briefs/ 下的一份近况。同名直接盖掉，不追加，也不另起序号。任何角色、任何权限都可以调用。不要传绝对路径或 .. 。正文上限 256KB。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "文件名，例如 status.md。只能是 briefs 目录内的文件名。",
+        },
+        content: { type: "string", description: "近况正文。监管者只写四行，每次覆盖。" },
       },
       required: ["name", "content"],
       additionalProperties: false,
@@ -120,6 +139,11 @@ export const WORKBENCH_MCP_TOOLS: readonly McpToolDefinition[] = [
         windowId: { type: "string", description: "后代窗口 id。" },
         text: { type: "string", description: "消息正文。" },
         briefPath: { type: "string", description: "可选，项目 .ffpane/briefs/ 内的说明路径。" },
+        detailPath: {
+          type: "string",
+          description:
+            "可选。监管者交给管理者时，详细记录的路径，必须在 .ffpane/briefs/ 内。不要把正文放进来。",
+        },
       },
       required: ["windowId"],
       additionalProperties: false,
@@ -128,7 +152,7 @@ export const WORKBENCH_MCP_TOOLS: readonly McpToolDefinition[] = [
   {
     name: "ffpane_report",
     description:
-      "向上级链汇报。windowId 缺省时汇报给直接上级。status 只能是 done、blocked、failed、progress。summary 上限 8KB，更长请改用 ffpane_write_brief。files 是项目内相对路径，不能越出项目根。",
+      "向上级链汇报。windowId 缺省时汇报给直接上级。status 只能是 done、blocked、failed、progress。summary 上限 8KB，更长请改用 ffpane_write_brief。files 是项目内相对路径，不能越出项目根。监管者汇报给管理者时，summary 只能是近况四行，briefPath 是近况路径；四行不齐不会写入收件箱，也不会叫醒管理者。detailPath 只能是详细记录的路径。",
     inputSchema: {
       type: "object",
       properties: {
@@ -141,6 +165,11 @@ export const WORKBENCH_MCP_TOOLS: readonly McpToolDefinition[] = [
           description: "相关文件的项目内相对路径。",
         },
         briefPath: { type: "string", description: "可选，项目 .ffpane/briefs/ 内的说明路径。" },
+        detailPath: {
+          type: "string",
+          description:
+            "可选。监管者交给管理者时，详细记录的路径，必须在 .ffpane/briefs/ 内。不要把正文放进来。",
+        },
       },
       required: ["status", "summary"],
       additionalProperties: false,

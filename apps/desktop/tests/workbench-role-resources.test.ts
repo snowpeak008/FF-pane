@@ -29,9 +29,16 @@ afterEach(async () => {
 });
 
 describe("workbench role manuals", () => {
-  it("五份说明书存在、LF、且不超过约 2KB", () => {
+  it("六份说明书存在、LF、且不超过约 2KB", () => {
     const names = readdirSync(resourcesDir).sort();
-    expect(names).toEqual(["base.md", "manager.md", "planner.md", "reviewer.md", "worker.md"]);
+    expect(names).toEqual([
+      "base.md",
+      "manager.md",
+      "planner.md",
+      "reviewer.md",
+      "supervisor.md",
+      "worker.md",
+    ]);
     for (const name of names) {
       const bytes = readFileSync(join(resourcesDir, name));
       expect(bytes.includes(13), name).toBe(false);

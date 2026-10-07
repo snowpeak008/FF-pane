@@ -3196,3 +3196,104 @@ Grok 的「可改文件」和「可改+跑命令」启动参数相同，命令�
 
 - [T10.18 验收记录](../验收记录/T10.18-验收.md)
 - [Phase 10 计划 §7.5](../Phase10-多窗口终端工作台计划.md)
+
+## 2026-10-07 19:19 · T10.19 · 执行 · 监管者交接
+
+### 任务要点
+
+按计划 §12、§7.3、§7.4 做监管者交接。不提交。不碰 `apps/desktop/scripts/real-config-probe.mjs`。不读写 `~/.aiworkbench`，不改 `~/.claude`、`~/.codex`、`~/.grok`。不运行消耗额度的命令。不往终端写 AI 正文。
+
+### 结论
+
+做完了。新增角色「监管者」：不写代码，建议用 DeepSeek 的 `deepseek-flash`，思考强度放低。执行者自己把过程和命令结果写成详细记录，只把路径交给监管者。监管者把近况覆盖写成一页四行（结论、改了哪些、还没做的、要管理者决定的一件事），必须写有没有跑过、结果如何，不把执行者说的「做完了」当成结论。四行不齐不写入收件箱、不叫醒管理者。叫醒时消息只有路径和这四行，详细记录正文不进消息，也不进别人的终端。管理者平时只看这四行。未提交。版本仍是 1.0.3，提交时再升到 1.0.4。不需要主控决策。
+
+### 改动文件
+
+- 角色：`packages/shared` 的工作台角色；`apps/desktop/resources/workbench-roles/` 新增 `supervisor.md`，并改了共同说明、管理者、执行者
+- 交接：`status-handoff.ts`（四行、叫醒门闩）、`writeStatusFile`（同名覆盖）、MCP `ffpane_write_status`，汇报和发消息在监管者交给管理者时套用门闩
+- 界面与说明：中英文语言包、窗口角色徽章、`使用说明.md`、计划 §3.1 的角色名单
+- 测试：`apps/desktop/tests/status-handoff.test.ts`，以及角色说明书、改模型强度的相关断言
+
+### 命令结果
+
+- `pnpm lint`：通过。Biome 772 个文件。`check-i18n` PASS。
+- `pnpm --filter @ff-pane/shared build` 后 `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- vitest：desktop 的 `status-handoff`、`workbench-role-resources`、`model-effort`、`workbench-mcp` 共 4 个文件、41 过；core 的 `workbench-can-set-role`、`workbench-role-prompt` 共 2 个文件、11 过。
+
+### 问题与遗留
+
+未提交。版本留在 1.0.3。未改 `apps/desktop/scripts/real-config-probe.mjs`。未读写用户目录，未调用模型。角色说明书仍限制在约 2KB：共同说明 2038 字节，管理者说明 2022 字节。
+
+### 相关文件链接
+
+- [Phase 10 计划 §12](../Phase10-多窗口终端工作台计划.md)
+- [使用说明](../../使用说明.md)
+
+## 2026-10-07 19:35 · T10.19 · 检查 · 监管者交接
+
+### 任务要点
+
+独立检查未提交的监管者交接。对照计划 §12、§7.3、§7.4，以及总记录「2026-10-07 19:19 · T10.19 · 执行 · 监管者交接」。不改实现，不提交。不碰 `apps/desktop/scripts/real-config-probe.mjs`。不改 `~/.claude`、`~/.codex`、`~/.grok`。
+
+### 结论
+
+通过。没有必须修复。不需要主控决策。版本仍是 1.0.3，末位 +1 留在提交。反向探针五条都成立：缺一行不给管理者消息；消息和终端提醒里没有详细记录全文；近况路径逃出 `.ffpane/briefs/` 被拒绝；第二次写入是覆盖；「做完了」且没有跑过的结果不能当成合格近况。
+
+### 改动文件
+
+- 新增 `docs/验收记录/T10.19-验收.md`
+- 本条追加进总记录
+
+### 命令结果
+
+- `pnpm lint`：通过。Biome 772 个文件。`check-i18n` PASS。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- `pnpm test`：149 个文件，2463 过，1 跳过。
+- `pnpm smoke`：ALL PASS。`FF-pane v1.0.3`。
+- `pnpm test:e2e`：55 过，约 5.5 分钟。没有单独重跑。
+
+### 问题与遗留
+
+建议见验收记录，不是必须修。「没跑」按子串匹配；全文若被贴进四行里的某一行，汇报工具不会拿文件再拦一次；执行者直接汇报仍按原摘要进收件箱。提交时不要带上 `apps/desktop/scripts/real-config-probe.mjs` 和旧文档的换行符改动。
+
+### 相关文件链接
+
+- [T10.19 验收记录](../验收记录/T10.19-验收.md)
+- [Phase 10 计划 §12](../Phase10-多窗口终端工作台计划.md)
+
+## 2026-10-07 19:38 · T10.19 · 提交 · v1.0.4
+
+### 任务要点
+
+按计划 §7.2 第 4 步提交 T10.19。版本 `1.0.3` → `1.0.4`（根与 desktop 的 `package.json`、README 状态行、测试里的假 AppInfo）。开发进度登记 T10.19 已验收。计划 §4 增加 T10.19 行，§7.5 当前版本改为 1.0.4，§12 标为已完成。轻量 tag `v1.0.4`，不 push。
+
+### 结论
+
+已提交并打轻量 tag `v1.0.4`，未 push。验收没有必须修复。不需要主控决策。
+
+### 改动文件
+
+- 版本：根与 `apps/desktop` 的 `package.json`、`README.md`、`command-ipc.test.ts` 与 `client-server.test.ts` 里的假 AppInfo
+- 监管者角色、近况覆盖、四行门闩、`ffpane_write_status`
+- 使用说明、中英文语言包
+- 进度与计划：`docs/开发进度.md`、`docs/Phase10-多窗口终端工作台计划.md`
+- `docs/验收记录/T10.19-验收.md`
+- 本总记录
+
+### 命令结果
+
+- `pnpm lint`：通过。Biome 772 个文件。`check-i18n` PASS。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- `vitest run tests/command-ipc.test.ts tests/client-server.test.ts`：2 个文件，73 过。
+- 提交信息：`feat: T10.19 监管者交接写成一页近况`
+- 轻量 tag `v1.0.4`，未 push
+- 提交哈希：打 tag 之后补进本条
+
+### 问题与遗留
+
+历史记录里的 `1.0.3` 没有改。未纳入 `apps/desktop/scripts/real-config-probe.mjs`。旧验收记录和 `docs/Provider-模板说明.md` 只有换行符变化，没有提交。没有排着的下一单。T10.8 仍挂起。
+
+### 相关文件链接
+
+- [T10.19 验收记录](../验收记录/T10.19-验收.md)
+- [Phase 10 计划 §12](../Phase10-多窗口终端工作台计划.md)

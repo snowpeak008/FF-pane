@@ -21,7 +21,7 @@ import {
   type WorkbenchPermissionLevel,
   type WorkbenchRole,
 } from "@ff-pane/shared";
-import { resolveBriefPath, writeBriefFile } from "./brief-files";
+import { resolveBriefPath, writeBriefFile, writeStatusFile } from "./brief-files";
 import { type CloseDescendantDeps, closeDescendantWindow } from "./close-descendant";
 import {
   canAddProjectMemory,
@@ -50,6 +50,7 @@ import {
   sanitizeThreadText,
 } from "./remind";
 import type { SetWindowRoleResult } from "./set-role";
+import { gateSupervisorToManager } from "./status-handoff";
 import {
   appendThreadRecord,
   assertProjectFiles,
@@ -240,6 +241,8 @@ export async function executeWorkbenchTool(
       return setRole(callerId, args, tree, deps);
     case "ffpane_write_brief":
       return writeBrief(caller, args);
+    case "ffpane_write_status":
+      return writeStatus(caller, args);
     case "ffpane_open_window":
       return openWindow(callerId, args, deps);
     case "ffpane_send_message":
@@ -343,6 +346,26 @@ async function writeBrief(
   return ok({ relativePath: written.relativePath, absolutePath: written.absolutePath });
 }
 
+async function writeStatus(
+  caller: ToolWindowView,
+  args: Readonly<Record<string, unknown>>,
+): Promise<ToolTextResult> {
+  const name = args["name"];
+  const content = args["content"];
+  if (typeof name !== "string" || typeof content !== "string") {
+    return fail("ffpane_write_status 需要 name 和 content。");
+  }
+  const written = await writeStatusFile({
+    projectRoot: caller.projectRoot,
+    name,
+    content,
+  });
+  if (!written.ok) {
+    return fail(written.error);
+  }
+  return ok({ relativePath: written.relativePath, absolutePath: written.absolutePath });
+}
+
 async function openWindow(
   callerId: string,
   args: Readonly<Record<string, unknown>>,
@@ -417,17 +440,37 @@ async function sendMessage(
   if (!brief.ok) {
     return fail(brief.error);
   }
+  const detailRaw = typeof args["detailPath"] === "string" ? args["detailPath"] : undefined;
+  const detail = await optionalBrief(caller.projectRoot, detailRaw);
+  if (!detail.ok) {
+    return fail(detail.error);
+  }
   const target = await deps.describe(targetId);
   if (target === undefined) {
     return fail("找不到目标窗口。");
   }
+  const gated = gateSupervisorToManager({
+    callerRole: caller.role,
+    targetRole: target.role,
+    ...(brief.path !== undefined ? { statusPath: brief.path } : {}),
+    ...(detail.path !== undefined ? { detailPath: detail.path } : {}),
+    statusText: text,
+  });
+  if (!gated.ok) {
+    return fail(gated.error);
+  }
+  if (gated.kind === "silent") {
+    return ok({ delivered: false, reason: "近况四行不齐，未叫醒管理者。" });
+  }
+  const deliveredText = gated.kind === "wake" ? gated.text : text;
+  const deliveredBrief = gated.kind === "wake" ? gated.statusPath : brief.path;
   const record = await persist(
     caller,
     target,
     {
       kind: "message",
-      text,
-      ...(brief.path !== undefined ? { briefPath: brief.path } : {}),
+      text: deliveredText,
+      ...(deliveredBrief !== undefined ? { briefPath: deliveredBrief } : {}),
     },
     tree,
     deps,
@@ -487,27 +530,48 @@ async function report(
   if (!brief.ok) {
     return fail(brief.error);
   }
+  const detailRaw = typeof args["detailPath"] === "string" ? args["detailPath"] : undefined;
+  const detail = await optionalBrief(caller.projectRoot, detailRaw);
+  if (!detail.ok) {
+    return fail(detail.error);
+  }
   const target = await deps.describe(targetId);
   if (target === undefined) {
     return fail("找不到上级窗口。");
   }
+  const gated = gateSupervisorToManager({
+    callerRole: caller.role,
+    targetRole: target.role,
+    ...(brief.path !== undefined ? { statusPath: brief.path } : {}),
+    ...(detail.path !== undefined ? { detailPath: detail.path } : {}),
+    statusText: summary,
+  });
+  if (!gated.ok) {
+    return fail(gated.error);
+  }
+  if (gated.kind === "silent") {
+    return ok({ delivered: false, reason: "近况四行不齐，未叫醒管理者。" });
+  }
+  const deliveredText = gated.kind === "wake" ? gated.text : summary;
+  const deliveredStatus = gated.kind === "wake" ? gated.status : status;
+  const deliveredBrief = gated.kind === "wake" ? gated.statusPath : brief.path;
   const record = await persist(
     caller,
     target,
     {
       kind: "report",
-      text: summary,
-      status,
+      text: deliveredText,
+      status: deliveredStatus,
       ...(files !== undefined ? { files } : {}),
-      ...(brief.path !== undefined ? { briefPath: brief.path } : {}),
+      ...(deliveredBrief !== undefined ? { briefPath: deliveredBrief } : {}),
     },
     tree,
     deps,
   );
-  remindTarget(target, caller, "report", status, deps);
+  remindTarget(target, caller, "report", deliveredStatus, deps);
   await publishUnread(target, deps);
-  deps.publishInbox({ windowId: caller.id, lastReportStatus: status });
-  return ok({ id: record.id, threadFile: record.threadFile, status });
+  deps.publishInbox({ windowId: caller.id, lastReportStatus: deliveredStatus });
+  return ok({ id: record.id, threadFile: record.threadFile, status: deliveredStatus });
 }
 
 async function readInbox(
