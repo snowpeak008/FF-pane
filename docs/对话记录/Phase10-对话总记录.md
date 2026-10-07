@@ -3186,7 +3186,7 @@ Grok 的「可改文件」和「可改+跑命令」启动参数相同，命令�
 - `vitest run apps/desktop/tests/command-ipc.test.ts apps/desktop/tests/client-server.test.ts`：2 个文件，73 过。
 - 提交信息：`feat: T10.18 Grok 说完后自动继续`
 - 轻量 tag `v1.0.3`，未 push
-- 提交哈希：打 tag 之后补进本条
+- 提交哈希：`c749053be1c374a04b35e4096963853fc72fb147`
 
 ### 问题与遗留
 
