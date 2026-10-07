@@ -3287,11 +3287,11 @@ Grok 的「可改文件」和「可改+跑命令」启动参数相同，命令�
 - `vitest run tests/command-ipc.test.ts tests/client-server.test.ts`：2 个文件，73 过。
 - 提交信息：`feat: T10.19 监管者交接写成一页近况`
 - 轻量 tag `v1.0.4`，未 push
-- 提交哈希：打 tag 之后补进本条
+- 提交哈希：`9eaae9ba969f33b5e63cce7fec13204dc9d9439b`
 
 ### 问题与遗留
 
-历史记录里的 `1.0.3` 没有改。未纳入 `apps/desktop/scripts/real-config-probe.mjs`。旧验收记录和 `docs/Provider-模板说明.md` 只有换行符变化，没有提交。没有排着的下一单。T10.8 仍挂起。
+历史记录里的 `1.0.3` 没有改。未纳入 `apps/desktop/scripts/real-config-probe.mjs`。旧验收记录和 `docs/Provider-模板说明.md` 只有换行符变化，没有提交。没有排着的下一单。T10.8 仍挂起。上面的提交哈希是 tag `v1.0.4` 所指的那一笔；这一行是后补的，所以 tag 里的本条仍写着「打 tag 之后补进本条」。
 
 ### 相关文件链接
 
