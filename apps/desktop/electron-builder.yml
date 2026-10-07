@@ -75,6 +75,9 @@ extraResources:
   # 普通 node 可读。Codex notify / Claude exec hook 都直接 spawn 这个文件。
   - from: out/main/workbench-hook.mjs
     to: workbench-hook.mjs
+  # Grok 的 command 只能是这一个没有参数的程序。
+  - from: resources/ffpane-grok-hook.exe
+    to: ffpane-grok-hook.exe
 
 win:
   target:

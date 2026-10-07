@@ -96,6 +96,8 @@ export interface IdleDeliverAttachOptions {
 export interface HookNoteMeta {
   readonly toolUseId?: string;
   readonly toolDigest?: string;
+  /** 批准已经被拒绝或取消，这一轮确实结束了，可以放开权限闩。 */
+  readonly releasePermissions?: boolean;
 }
 
 export interface IdleDeliverQueue {
@@ -387,6 +389,11 @@ export function createIdleDeliverQueue(deps: IdleDeliverDeps): IdleDeliverQueue 
         session.initialPromptPending = false;
         session.phase = "busy";
       } else if (signal === "stop") {
+        if (meta?.releasePermissions === true) {
+          session.pendingPermissionIds.clear();
+          session.pendingPermissionDigests.clear();
+          session.unpairedPermissions = 0;
+        }
         if (permissionOutstanding(session) > 0) {
           session.phase = "blocked";
           notifyPending(terminalId);

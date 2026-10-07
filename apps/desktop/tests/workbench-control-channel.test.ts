@@ -30,12 +30,24 @@ function start(options?: {
 }): Promise<{
   readonly server: WorkbenchControlServer;
   readonly logs: string[];
-  readonly hooks: { windowId: string; signal: HookSignal; toolUseId?: string }[];
+  readonly hooks: {
+    windowId: string;
+    signal: HookSignal;
+    toolUseId?: string;
+    sessionId?: string;
+    releasePermissions?: boolean;
+  }[];
   readonly registry: ReturnType<typeof createWindowTokenRegistry>;
 }> {
   const registry = createWindowTokenRegistry();
   const logs: string[] = [];
-  const hooks: { windowId: string; signal: HookSignal; toolUseId?: string }[] = [];
+  const hooks: {
+    windowId: string;
+    signal: HookSignal;
+    toolUseId?: string;
+    sessionId?: string;
+    releasePermissions?: boolean;
+  }[] = [];
   return createWorkbenchControlServer({
     tokens: registry,
     onHook: (windowId, signal, meta) => {
@@ -43,6 +55,8 @@ function start(options?: {
         windowId,
         signal,
         ...(meta?.toolUseId !== undefined ? { toolUseId: meta.toolUseId } : {}),
+        ...(meta?.sessionId !== undefined ? { sessionId: meta.sessionId } : {}),
+        ...(meta?.releasePermissions === true ? { releasePermissions: true } : {}),
       });
     },
     log: (message) => {
@@ -189,5 +203,50 @@ describe("workbench control channel", () => {
     expect(seen).toEqual(["win-2:tool"]);
     expect(raw).not.toContain(token);
     expect(logs.join("\n")).not.toContain(token);
+  });
+
+  it("Grok 的结束和权限事件能上报，对话编号不写进日志", async () => {
+    const { server, hooks, registry, logs } = await start();
+    const token = registry.issue("win-grok");
+    const sessionId = "11111111-2222-4333-8444-555555555555";
+    await exchange(
+      server.address,
+      `${JSON.stringify({
+        v: 1,
+        type: "hook",
+        token,
+        event: "StopCancelled",
+        sessionId,
+        releasePermissions: true,
+      })}\n`,
+    );
+    await exchange(
+      server.address,
+      `${JSON.stringify({
+        v: 1,
+        type: "hook",
+        token,
+        event: "PermissionDenied",
+        sessionId,
+      })}\n`,
+    );
+    await exchange(
+      server.address,
+      `${JSON.stringify({
+        v: 1,
+        type: "hook",
+        token,
+        event: "Notification",
+        hookEvent: "permission_prompt",
+        sessionId,
+      })}\n`,
+    );
+    expect(hooks).toEqual([
+      { windowId: "win-grok", signal: "stop", sessionId, releasePermissions: true },
+      { windowId: "win-grok", signal: "permission-request", sessionId },
+      { windowId: "win-grok", signal: "permission-request", sessionId },
+    ]);
+    expect(logs.join("\n")).not.toContain(token);
+    expect(logs.join("\n")).not.toContain(sessionId);
   });
 });

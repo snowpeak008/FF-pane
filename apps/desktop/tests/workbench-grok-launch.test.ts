@@ -2,7 +2,7 @@
  * T10.16：Grok 窗口启动写项目配置、令牌只在进程环境、开关控制知识库和自配置。
  */
 
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { createWindowTokenRegistry, resolveProviderInjection } from "@ff-pane/core";
@@ -10,6 +10,7 @@ import type { Provider } from "@ff-pane/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { PtyManager } from "../src/main/terminal/manager";
 import { createWorkbenchAuthRegistry } from "../src/main/workbench/auth-registry";
+import { grokHookCommandIsDirect } from "../src/main/workbench/grok-hook-config";
 import { launchCliWindow } from "../src/main/workbench/launch-cli";
 import { WorkbenchMcpTempRegistry } from "../src/main/workbench/mcp-temp";
 import type { LaunchCliRoute } from "../src/main/workbench/resolve-config";
@@ -118,6 +119,7 @@ describe("launchCliWindow Grok", () => {
     expect(result.turnSignal).toBe("manual");
     expect(result.command.toLowerCase()).toContain("grok");
     const args = captured[0]?.args ?? [];
+    expect(args).toContain("--trust");
     expect(args).toContain("--session-id");
     expect(args).toContain("--model");
     expect(args).toContain("grok-test");
@@ -140,6 +142,100 @@ describe("launchCliWindow Grok", () => {
     expect(args.join("\n")).not.toContain(issued);
     expect(captured[0]?.env["FF_PANE_CONFIG_CALLER_ROLE"]).toBe("worker");
     expect(isConfigToolCallerDenied(captured[0]?.env["FF_PANE_CONFIG_CALLER_ROLE"])).toBe(true);
+  });
+
+  it("没有空格的钩子程序会写进项目钩子，command 只有这一条路径", async () => {
+    const exe = join(projectRoot, "ffpane-grok-hook.exe");
+    writeFileSync(exe, "");
+    const spaced = join(projectRoot, "has space.exe");
+    writeFileSync(spaced, "");
+    const captured: { args: readonly string[]; env: Record<string, string> }[] = [];
+    const manager = {
+      aliveCount: () => 0,
+      create: (input: { env: Record<string, string>; direct: { args: readonly string[] } }) => {
+        captured.push({ args: [...input.direct.args], env: { ...input.env } });
+        return { id: `term-hook-${captured.length}` };
+      },
+    } as unknown as PtyManager;
+    const tokenRegistry = createWindowTokenRegistry();
+    const launched = await launchCliWindow(
+      {
+        windowId: "win-hook",
+        projectId: "proj" as never,
+        projectRoot,
+        kind: "grok",
+        route: route(),
+        cols: 80,
+        rows: 24,
+      },
+      {
+        manager,
+        getProvider: async () => undefined,
+        revealSecret: async () => "hook-secret",
+        getMaxWorkbenchWindows: async () => 8,
+        isKnowledgeToolEnabled: async () => false,
+        isConfigToolEnabled: async () => false,
+        getKnowledgeToolSettings: async () => undefined,
+        indexDbFile: join(projectRoot, "index.db"),
+        moduleDir: fakeBin,
+        mcpRegistry: new WorkbenchMcpTempRegistry(),
+        clampMax: (value: unknown) => (typeof value === "number" ? value : 8),
+        limitErrorPrefix: "limit",
+        tokenRegistry,
+        controlPipe: "\\\\.\\pipe\\ff-pane-wb-hook",
+        grokHookExe: exe,
+      },
+    );
+    expect(captured[0]?.args).toContain("--trust");
+    const hookFile = join(projectRoot, ".grok", "hooks", "ffpane-workbench.json");
+    if (grokHookCommandIsDirect(exe)) {
+      expect(launched.turnSignal).toBe("auto");
+      const body = readFileSync(hookFile, "utf8");
+      const command = (JSON.parse(body) as { hooks: { Stop: { hooks: { command: string }[] }[] } })
+        .hooks.Stop[0]?.hooks[0]?.command;
+      expect(command).toBe(exe);
+      expect(body).not.toContain("hook-secret");
+      const issued = captured[0]?.env["FF_PANE_WINDOW_TOKEN"] ?? "";
+      expect(issued.length).toBeGreaterThan(16);
+      expect(body).not.toContain(issued);
+      expect(body).not.toContain("node ");
+      expect(body).not.toMatch(/"args"/);
+      expect(body).not.toMatch(/"env"/);
+    } else {
+      expect(launched.turnSignal).toBe("manual");
+      expect(existsSync(hookFile)).toBe(false);
+    }
+
+    const manual = await launchCliWindow(
+      {
+        windowId: "win-spaced",
+        projectId: "proj" as never,
+        projectRoot,
+        kind: "grok",
+        route: route(),
+        cols: 80,
+        rows: 24,
+      },
+      {
+        manager,
+        getProvider: async () => undefined,
+        revealSecret: async () => "hook-secret",
+        getMaxWorkbenchWindows: async () => 8,
+        isKnowledgeToolEnabled: async () => false,
+        isConfigToolEnabled: async () => false,
+        getKnowledgeToolSettings: async () => undefined,
+        indexDbFile: join(projectRoot, "index.db"),
+        moduleDir: fakeBin,
+        mcpRegistry: new WorkbenchMcpTempRegistry(),
+        clampMax: (value: unknown) => (typeof value === "number" ? value : 8),
+        limitErrorPrefix: "limit",
+        tokenRegistry: createWindowTokenRegistry(),
+        controlPipe: "\\\\.\\pipe\\ff-pane-wb-hook",
+        grokHookExe: spaced,
+      },
+    );
+    expect(manual.turnSignal).toBe("manual");
+    expect(captured.at(-1)?.args).toContain("--trust");
   });
 
   it("中转密钥进环境变量，不进项目配置", async () => {

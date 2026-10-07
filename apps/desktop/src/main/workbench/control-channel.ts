@@ -52,6 +52,8 @@ export interface WorkbenchControlServerOptions {
       readonly hookEvent?: string;
       readonly toolUseId?: string;
       readonly toolDigest?: string;
+      readonly sessionId?: string;
+      readonly releasePermissions?: boolean;
     },
   ) => void;
   /**
@@ -80,6 +82,7 @@ export interface WorkbenchControlServer {
 
 const TOOL_USE_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
 const TOOL_DIGEST = /^[a-f0-9]{64}$/;
+const SESSION_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
 
 /** 只接受短 id。其它字段（工具参数、正文）不读取。 */
 function readToolUseId(value: unknown): string | undefined {
@@ -90,11 +93,27 @@ function readToolDigest(value: unknown): string | undefined {
   return typeof value === "string" && TOOL_DIGEST.test(value) ? value : undefined;
 }
 
+function readSessionId(value: unknown): string | undefined {
+  return typeof value === "string" && SESSION_ID.test(value) ? value : undefined;
+}
+
 export function mapHookEvent(event: string, hookEvent?: string): HookSignal | "ignore" {
-  if (event === "Stop" || event === "stop") {
+  if (
+    event === "Stop" ||
+    event === "stop" ||
+    event === "StopFailure" ||
+    event === "stop_failure" ||
+    event === "StopCancelled" ||
+    event === "stop_cancelled"
+  ) {
     return "stop";
   }
-  if (event === "PermissionRequest" || event === "permission-request") {
+  if (
+    event === "PermissionRequest" ||
+    event === "permission-request" ||
+    event === "PermissionDenied" ||
+    event === "permission_denied"
+  ) {
     return "permission-request";
   }
   if (event === "UserPromptSubmit" || event === "user-prompt-submit") {
@@ -239,14 +258,22 @@ export function createWorkbenchControlServer(
         const hookEvent = typeof body["hookEvent"] === "string" ? body["hookEvent"] : undefined;
         const toolUseId = readToolUseId(body["toolUseId"]);
         const toolDigest = readToolDigest(body["toolDigest"]);
+        const sessionId = readSessionId(body["sessionId"]);
+        const releasePermissions = body["releasePermissions"] === true;
         const signal = mapHookEvent(event, hookEvent);
         if (signal !== "ignore") {
           const meta =
-            hookEvent !== undefined || toolUseId !== undefined || toolDigest !== undefined
+            hookEvent !== undefined ||
+            toolUseId !== undefined ||
+            toolDigest !== undefined ||
+            sessionId !== undefined ||
+            releasePermissions
               ? {
                   ...(hookEvent !== undefined ? { hookEvent } : {}),
                   ...(toolUseId !== undefined ? { toolUseId } : {}),
                   ...(toolDigest !== undefined ? { toolDigest } : {}),
+                  ...(sessionId !== undefined ? { sessionId } : {}),
+                  ...(releasePermissions ? { releasePermissions: true } : {}),
                 }
               : undefined;
           options.onHook(windowId, signal, meta);

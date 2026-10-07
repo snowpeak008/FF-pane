@@ -58,6 +58,11 @@ import {
   GROK_INTERACTIVE_COMMAND,
 } from "./cli-args";
 import { type CodexSessionClaimer, withCodexClaimMarker } from "./codex-claim";
+import {
+  bundledGrokHookPath,
+  resolveGrokHookCommand,
+  writeGrokWorkbenchHookFile,
+} from "./grok-hook-config";
 import { writeGrokProjectMcpConfig } from "./grok-mcp-config";
 import {
   prepareWindowHooks,
@@ -216,6 +221,15 @@ export interface LaunchCliWindowDeps {
   readonly hookScriptPath?: string;
   readonly isPackaged?: boolean;
   readonly resourcesPath?: string;
+  /** 开发态钩子 exe 放在 appPath/resources。打包后走 resourcesPath。 */
+  readonly appPath?: string;
+  /**
+   * 测试注入的 Grok 钩子程序。路径有空格时不装钩子。
+   * 缺省用随包的 ffpane-grok-hook.exe。
+   */
+  readonly grokHookExe?: string;
+  /** 安装目录有空格时，把钩子程序复制到这里（不写 ~/.grok）。 */
+  readonly localAppData?: string;
 }
 
 export { WorkbenchMcpTempRegistry };
@@ -429,6 +443,7 @@ async function launchCliWindowBody(
 
   let mcpTemp: WorkbenchMcpTempFile | undefined;
   let grokConfigPath: string | undefined;
+  let grokHookPath: string | undefined;
   const extraProcessEnv: Record<string, string> = {};
   const cwd = (input.cwd?.trim() || input.projectRoot).trim();
 
@@ -570,6 +585,28 @@ async function launchCliWindowBody(
       await releaseFailedLaunch();
       throw error;
     }
+    const bundledHook =
+      deps.grokHookExe?.trim() ||
+      bundledGrokHookPath({
+        isPackaged: deps.isPackaged === true,
+        resourcesPath: deps.resourcesPath ?? "",
+        appPath: deps.appPath ?? "",
+      });
+    const hookCommand = resolveGrokHookCommand({
+      bundledPath: bundledHook,
+      ...(deps.localAppData !== undefined ? { localAppData: deps.localAppData } : {}),
+    });
+    if (hookCommand !== undefined) {
+      try {
+        grokHookPath = await writeGrokWorkbenchHookFile({
+          projectRoot: input.projectRoot,
+          command: hookCommand,
+        });
+      } catch (error) {
+        await releaseFailedLaunch();
+        throw error;
+      }
+    }
     args = buildInteractiveGrokArgs({
       ...(model !== undefined ? { model } : {}),
       ...(effort !== undefined ? { effort } : {}),
@@ -609,6 +646,11 @@ async function launchCliWindowBody(
       const grokBody = readFileSync(grokConfigPath, "utf8");
       assertSecretAbsent(secret, [grokBody]);
       assertTokenAbsent(windowToken, [grokBody]);
+    }
+    if (grokHookPath !== undefined) {
+      const hookBody = readFileSync(grokHookPath, "utf8");
+      assertSecretAbsent(secret, [hookBody]);
+      assertTokenAbsent(windowToken, [hookBody]);
     }
     for (const hookFile of hooks.files) {
       const hookBody = readFileSync(hookFile, "utf8");
@@ -735,7 +777,14 @@ async function launchCliWindowBody(
     args: [...direct.args],
     effectivePermission: permission,
     permissionCapped,
-    turnSignal: runtime === "grok" || nodePath === undefined ? "manual" : "auto",
+    turnSignal:
+      runtime === "grok"
+        ? grokHookPath !== undefined
+          ? "auto"
+          : "manual"
+        : nodePath === undefined
+          ? "manual"
+          : "auto",
   };
 }
 

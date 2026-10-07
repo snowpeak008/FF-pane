@@ -3044,3 +3044,155 @@ Grok 的「可改文件」和「可改+跑命令」启动参数相同，命令�
 
 - [T10.17 验收记录](../验收记录/T10.17-验收.md)
 - [Phase 10 计划 §11](../Phase10-多窗口终端工作台计划.md)
+
+## 2026-10-07 17:17 · T10.18 · 执行 · Grok 回合结束通知
+
+### 任务要点
+
+交互式 Grok 窗口在一轮说完后，要像 Claude 一样收到「有新消息」并继续。正在等权限批准时不能按回车。没有信号时仍只允许手动发送，不超时强写。先核对官方钩子说明和本机 grok 1.0.13，不调用模型。
+
+### 结论
+
+停下，没有改启动，也没有改成看屏幕猜它停了。
+
+本机 `grok 1.0.13`（`5e9a58528b76`）里，回合事件和 `--trust` 都在。随包 `~/.grok/docs/user-guide/10-hooks.md` 和二进制都能对上：`Stop`、`StopFailure`、`StopCancelled`、`PermissionDenied`，以及 `Notification` 的 `permission_prompt`。未知参数 `grok --not-a-real-flag -h` 退出码 2；`grok --trust -h` 退出码 0。`--help` 正文不列出 `--trust`，它是隐藏旗标。文档写明第一次会把该项目文件夹记进 `~/.grok/trusted_folders.toml`。
+
+装不上的是命令形态。钩子的 `command` 是一整段字符串，没有 Claude 那种 `args` 参数数组。路径里没有空格等符号时，只直接启动那一个文件，不能再带上脚本和事件名。一旦有空格，Windows 上走 shell（二进制写明当时的 shell 是 cmd 或 PowerShell）。网上当前源码的钩子结构也只有 `command`、`url`、`timeout`、`env`。要启动 `node` 加上现有的 `workbench-hook.mjs`，就得把路径拼进这一段字符串，从而经过 cmd。这违反「用参数数组、不经过 cmd」。
+
+所以没有写项目 `.grok/hooks/`，没有给启动参数加 `--trust`，没有改 `~/.grok/config.toml`，也没有往 `~/.grok/hooks`、`~/.claude`、`~/.cursor` 加文件。Grok 窗口仍是说完后手动发送，不会超时强写。
+
+### 改动文件
+
+只追加本总记录。产品代码、使用说明、语言包都没动。未纳入 `apps/desktop/scripts/real-config-probe.mjs`。
+
+### 命令结果
+
+- `grok --version`：`grok 1.0.13 (5e9a58528b76)`。
+- `grok --help`：没有 `--trust` 这一行。
+- `grok --trust -h`：退出码 0。
+- `grok --not-a-real-flag -h`：退出码 2，`unexpected argument`。
+- 未跑会消耗额度的命令。未跑 lint / typecheck（没有改代码）。
+
+### 问题与遗留
+
+要等本机 grok 的钩子能用参数数组直接启动 `node` 和 `workbench-hook.mjs`、并且不经过 cmd，才能再做自动继续。在那之前不要用输出静默去猜它停了。
+
+### 相关文件链接
+
+- [Phase 10 计划 §10](../Phase10-多窗口终端工作台计划.md)
+- [Grok 适配器说明](../adapters/grok-build.md)
+
+## 2026-10-07 18:03 · T10.18 · 执行 · Grok 无空格钩子
+
+### 任务要点
+
+上一轮因为钩子 command 带空格会进 cmd 而停下。这次改成只写一个没有空格、不带参数的程序。事件从标准输入和 `GROK_HOOK_EVENT`、`GROK_SESSION_ID` 来。启动参数加 `--trust`。不改 `~/.grok/config.toml`，不写 `~/.grok/hooks`、`~/.claude`、`~/.cursor`。不调用模型。不提交。
+
+### 结论
+
+本机 `grok 1.0.13` 对没有空格的路径是直接启动，所以做了自动继续。随包说明写明：command 里有空格、管道、`&&`、重定向、`$` 时走 shell；没有这些符号的路径由运行器直接启动那一个文件。Windows 上那条 shell 是 cmd。因此没有改成看屏幕猜它停了。
+
+项目 `.grok/hooks/ffpane-workbench.json` 的 command 只有 `ffpane-grok-hook.exe` 的完整路径。路径里有空格就不写这个文件，窗口仍是手动发送，不经过 cmd。程序不读命令行参数。说完（Stop、StopFailure、StopCancelled）才允许自动继续。PermissionDenied 和 `permission_prompt` 期间不按回车。批准被拒绝或取消之后，这一轮结束才放开。多个窗口用对话编号区分。令牌和密钥不进钩子文件。启动参数带 `--trust`，第一次由 Grok 自己把项目记成可信，软件不写 `config.toml`。
+
+为核对父进程，曾用 `--trust` 拉起过一次 grok，会话还没建成就停了，钩子程序没有跑到。这次启动让 grok 自己把 `~/.grok/config.toml` 从 200 字节改成了 348 字节，并刷新了已过期的登录。没有备份，无法把配置文件退回原来的字节。探测写出的 `trusted_folders.toml` 事先不存在，已经删掉。没有写 `~/.grok/hooks`。没有发对话请求。
+
+### 改动文件
+
+- `apps/desktop/resources/ffpane-grok-hook/GrokHook.cs`、`apps/desktop/resources/ffpane-grok-hook.exe`
+- `apps/desktop/src/main/workbench/grok-hook-config.ts`、`cli-args.ts`、`launch-cli.ts`、`control-channel.ts`、`idle-deliver.ts`、`handlers.ts`
+- `apps/desktop/electron-builder.yml`
+- `apps/desktop/tests/workbench-grok-hook.test.ts`、`workbench-grok-launch.test.ts`、`workbench-idle-deliver.test.ts`、`workbench-control-channel.test.ts`
+- `使用说明.md`、`locales/zh-CN.json`、`locales/en-US.json`、`docs/开发进度.md`
+- 本总记录
+
+未改 `apps/desktop/scripts/real-config-probe.mjs`。版本仍是 1.0.2。
+
+### 命令结果
+
+- `pnpm lint`：通过。Biome 770 个文件。`check-i18n` PASS。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- `vitest run` 上述 4 个测试文件：37 过。
+- 未提交。
+
+### 问题与遗留
+
+探测把用户的 `~/.grok/config.toml` 改大了，登录也被 grok 刷新过一次。产品代码仍然不会去写这份配置。路径里有空格时，Grok 窗口还是手动发送。
+
+### 相关文件链接
+
+- [Phase 10 计划 §10](../Phase10-多窗口终端工作台计划.md)
+- [使用说明](../../使用说明.md)
+
+## 2026-10-07 18:33 · T10.18 · 检查 · Grok 无空格钩子
+
+### 任务要点
+
+独立检查未提交的 Grok 自动继续。钩子 command 只能是没有空格的 exe 路径。Stop、StopFailure、StopCancelled 才允许自动继续。权限等待不按回车。不启动本机 grok。不改实现，不提交。
+
+### 结论
+
+通过。没有必须修复，不需要主控再拍板。
+
+带空格的安装路径不会写成交给 cmd 的命令。两边都有空格时不写钩子，窗口仍手动发送。能复制到没有空格的路径时，文件里只有那一个 exe。权限等待和其后的结束事件都不按回车；拒绝或取消之后的结束才放开。钩子文件里没有令牌和密钥。启动带 `--trust`。产品代码不写用户的 `~/.grok/config.toml`，也不写 `~/.grok/hooks`、`~/.claude`、`~/.cursor`。使用说明与此一致。版本仍是 1.0.2。
+
+### 改动文件
+
+- `docs/验收记录/T10.18-验收.md`
+- 本总记录
+
+未改实现。未纳入 `apps/desktop/scripts/real-config-probe.mjs`。探针已删。
+
+### 命令结果
+
+- `pnpm lint`：通过。Biome 770 个文件。`check-i18n` PASS。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- `pnpm test`：148 个文件，2459 过，1 跳过。
+- `pnpm smoke`：ALL PASS。`FF-pane v1.0.2`。
+- `pnpm test:e2e`：55 过，约 5.5 分钟。没有需要单独重跑的失败。
+- 未启动 grok。未提交。
+
+### 问题与遗留
+
+没有。用户目录的修改时间和大小在检查前后一致，没有打开里面的内容。
+
+### 相关文件链接
+
+- [T10.18 验收记录](../验收记录/T10.18-验收.md)
+- [Phase 10 计划 §7.4](../Phase10-多窗口终端工作台计划.md)
+
+## 2026-10-07 19:04 · T10.18 · 提交 · v1.0.3
+
+### 任务要点
+
+按计划 §7.2 第 4 步提交 T10.18。版本 `1.0.2` → `1.0.3`（根与 desktop 的 `package.json`、README 状态行、测试里的假 AppInfo）。开发进度登记 T10.18 已验收。计划 §4 增加 T10.18 行，§7.5 当前版本改为 1.0.3，下一步仍是 T10.19。轻量 tag `v1.0.3`，不 push。
+
+### 结论
+
+已提交并打轻量 tag `v1.0.3`，未 push。验收没有必须修复。不需要主控决策。
+
+### 改动文件
+
+- 版本：根与 `apps/desktop` 的 `package.json`、`README.md`、`command-ipc.test.ts` 与 `client-server.test.ts` 里的假 AppInfo
+- 钩子：`ffpane-grok-hook.exe` 与源码、项目 `.grok/hooks` 只写没有空格的路径、`--trust`、说完自动继续、等批准不按回车
+- 使用说明、语言包
+- 进度与计划：`docs/开发进度.md`、`docs/Phase10-多窗口终端工作台计划.md`
+- `docs/验收记录/T10.18-验收.md`
+- 本总记录
+
+### 命令结果
+
+- `pnpm lint`：通过。Biome 770 个文件。`check-i18n` PASS。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- `vitest run apps/desktop/tests/command-ipc.test.ts apps/desktop/tests/client-server.test.ts`：2 个文件，73 过。
+- 提交信息：`feat: T10.18 Grok 说完后自动继续`
+- 轻量 tag `v1.0.3`，未 push
+- 提交哈希：打 tag 之后补进本条
+
+### 问题与遗留
+
+历史记录里的 `1.0.2` 没有改。未纳入 `apps/desktop/scripts/real-config-probe.mjs`。旧验收记录和 `docs/Provider-模板说明.md` 只有换行符变化，没有提交。上面的提交哈希是 tag `v1.0.3` 所指的那一笔；这一行是后补的，所以 tag 里的本条仍写着「打 tag 之后补进本条」。
+
+### 相关文件链接
+
+- [T10.18 验收记录](../验收记录/T10.18-验收.md)
+- [Phase 10 计划 §7.5](../Phase10-多窗口终端工作台计划.md)

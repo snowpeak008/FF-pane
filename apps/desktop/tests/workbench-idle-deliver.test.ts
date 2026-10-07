@@ -102,6 +102,20 @@ describe("createIdleDeliverQueue", () => {
     expect(h.writes).toEqual([]);
   });
 
+  it("权限还在时 Stop 不放行；批准被拒绝后的结束可以继续", () => {
+    const h = harness();
+    h.queue.attach("t1");
+    h.queue.noteHook("t1", "permission-request");
+    h.queue.enqueue({ terminalId: "t1", text: "next" });
+    h.queue.noteHook("t1", "stop");
+    h.advance(60_000);
+    expect(h.writes).toEqual([]);
+    expect(h.queue.phaseOf("t1")).toBe("blocked");
+    h.queue.noteHook("t1", "stop", { releasePermissions: true });
+    expect(h.queue.phaseOf("t1")).toBe("busy");
+    expect(h.writes).toEqual(["next", "\r"]);
+  });
+
   it("用户刚输入时即使 Stop 也要等输入静默", () => {
     const h = harness();
     h.queue.attach("t1");

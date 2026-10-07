@@ -175,9 +175,10 @@ export interface BuildInteractiveGrokArgsInput {
 /**
  * 组装交互式 `grok` argv（不含可执行文件名）。
  * 不加 `-p`。续接必须带会话 id，绝不使用 `--continue` 或空的 `--resume`。
+ * `--trust` 让 Grok 把该项目文件夹记成可信（写入用户的 trusted_folders，不改 config.toml）。
  */
 export function buildInteractiveGrokArgs(input: BuildInteractiveGrokArgsInput): string[] {
-  const args: string[] = [];
+  const args: string[] = ["--trust"];
   const resumeId = input.resumeSessionId?.trim() ?? "";
   if (resumeId !== "") {
     args.push("--resume", resumeId);

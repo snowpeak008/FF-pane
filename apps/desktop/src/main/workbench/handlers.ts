@@ -55,6 +55,7 @@ import {
   WORKBENCH_TOOL_MAX_REQUEST_BYTES,
   type WorkbenchControlRequestContext,
 } from "./control-channel";
+import { grokHookSessionMatches } from "./grok-hook-config";
 import { releaseWindowHooks } from "./hook-launch";
 import { createIdleDeliverQueue, type IdleDeliverQueue } from "./idle-deliver";
 import { createInboxCursorStore, inboxCursorPath } from "./inbox-cursor";
@@ -314,9 +315,15 @@ export async function createWorkbenchCliLayer(
     onHook: (windowId, signal, meta) => {
       const terminalId = findLiveTerminalId(windowId);
       if (terminalId !== undefined) {
+        const storedSession = options.manager.get(terminalId)?.metadata?.["nativeSessionId"];
+        const expectedSession = typeof storedSession === "string" ? storedSession : undefined;
+        if (!grokHookSessionMatches(expectedSession, meta?.sessionId)) {
+          return;
+        }
         idleQueue.noteHook(terminalId, signal, {
           ...(meta?.toolUseId !== undefined ? { toolUseId: meta.toolUseId } : {}),
           ...(meta?.toolDigest !== undefined ? { toolDigest: meta.toolDigest } : {}),
+          ...(meta?.releasePermissions === true ? { releasePermissions: true } : {}),
         });
       }
       if (signal === "stop" || signal === "user-prompt-submit") {
@@ -589,6 +596,10 @@ export async function createWorkbenchCliLayer(
     controlPipe: control.address,
     isPackaged: app.isPackaged,
     resourcesPath: process.resourcesPath,
+    appPath: app.getAppPath(),
+    ...(process.env["LOCALAPPDATA"] !== undefined
+      ? { localAppData: process.env["LOCALAPPDATA"] }
+      : {}),
     idleQueue,
     onCodexSessionClaimed: (windowId: string, nativeSessionId: string) => {
       const window = options.getWindow();
