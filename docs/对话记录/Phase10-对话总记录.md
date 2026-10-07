@@ -2848,11 +2848,11 @@ Grok 的「可改文件」和「可改+跑命令」启动参数相同，命令�
 - `vitest run tests/command-ipc.test.ts tests/client-server.test.ts`：2 个文件，73 过。
 - 提交信息：`feat: T10.16 工作台接入 Grok 窗口`
 - 轻量 tag `v1.0.1`，未 push
-- 提交哈希：打 tag 之后补进本条
+- 提交哈希：`74995a267318260b9653dd41882cec635806002c`
 
 ### 问题与遗留
 
-验收留下的三点已写入开发进度：Grok 两档权限启动参数相同；没有不接最近一条的选择器；没有回合结束信号，要手动发送。历史记录里的 `1.0.0` 没有改。未纳入 `apps/desktop/scripts/real-config-probe.mjs`。旧验收记录和 `docs/Provider-模板说明.md` 只有换行符变化，没有提交。
+验收留下的三点已写入开发进度：Grok 两档权限启动参数相同；没有不接最近一条的选择器；没有回合结束信号，要手动发送。历史记录里的 `1.0.0` 没有改。未纳入 `apps/desktop/scripts/real-config-probe.mjs`。旧验收记录和 `docs/Provider-模板说明.md` 只有换行符变化，没有提交。上面的提交哈希是 tag `v1.0.1` 所指的那一笔；这一行是后补的，所以 tag 里的本条仍写着「打 tag 之后补进本条」。
 
 ### 相关文件链接
 
