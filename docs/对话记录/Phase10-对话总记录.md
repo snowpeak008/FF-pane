@@ -3034,7 +3034,7 @@ Grok 的「可改文件」和「可改+跑命令」启动参数相同，命令�
 - `vitest run apps/desktop/tests/command-ipc.test.ts apps/desktop/tests/client-server.test.ts`：2 个文件，73 过。
 - 提交信息：`feat: T10.17 DeepSeek 窗口经 Claude 连接`
 - 轻量 tag `v1.0.2`，未 push
-- 提交哈希：打 tag 之后补进本条。
+- 提交哈希：`c5bc103d94b11b2b3b20f4270fd0684b3b4e3e9c`
 
 ### 问题与遗留
 
