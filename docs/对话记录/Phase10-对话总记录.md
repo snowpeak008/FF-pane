@@ -3297,3 +3297,102 @@ Grok 的「可改文件」和「可改+跑命令」启动参数相同，命令�
 
 - [T10.19 验收记录](../验收记录/T10.19-验收.md)
 - [Phase 10 计划 §12](../Phase10-多窗口终端工作台计划.md)
+
+## 2026-10-07 20:10 · T10.20 · 执行 · 管理者压缩滑块
+
+### 任务要点
+
+按计划 §13、§7.3、§7.4 给管理者窗口加压缩滑块。不提交。不碰 `apps/desktop/scripts/real-config-probe.mjs`。不读写 `~/.aiworkbench`，不改 `~/.claude`、`~/.codex`、`~/.grok`。不运行消耗额度的命令。文件 LF。
+
+### 结论
+
+做完了。滑块只在管理者窗口，范围 50% 到 90%，默认不指定。不指定就不传，用命令行自己的默认。改完要重开这个窗口，下一次启动、重启或续接才生效。只传给这一个进程，不写用户配置。Claude 和 DeepSeek 同时设 `CLAUDE_CODE_AUTO_COMPACT_WINDOW`（整数 token）和 `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`。Grok 只设 `GROK_AUTO_COMPACT_THRESHOLD_PERCENT`，高于 85 的按 85 传，避免比它自己的默认更晚。Codex 把百分比换成 token，用本次进程的 `-c model_auto_compact_token_limit` 传入，不改 `config.toml`；较新版本大约到 90% 就压，滑块不能更晚。执行、监管、检查、规划、普通窗口不显示、也不传。压缩仍是命令行自己的摘要，不是监管者那一页四行近况。未提交。版本已改为 1.0.5，提交时不要再加末位。不需要主控决策。
+
+### 改动文件
+
+- 比例记在窗口上：`packages/shared` 的 `compactPercent`，布局读写只留 50–90 的整数；权威表同步时保留这个字段
+- 启动：`compact-launch.ts`、`launch-cli.ts`、`handlers.ts`。窗口 token 用现有上下文表：Claude 家族 200000，DeepSeek 家族 128000，Codex 的 gpt-5 按 400000 换算。值是十进制整数，不写 `500k`
+- 界面：只有管理者窗口有滑块和说明。中英文语言包、`使用说明.md`
+- 版本：根与 `apps/desktop` 的 `package.json`、README 状态行、测试里的假 AppInfo，均为 1.0.5。开发进度和计划 §7.5 写明尚未验收、尚未打 tag
+
+### 命令结果
+
+- `pnpm lint`：通过。Biome 775 个文件。`check-i18n` PASS。
+- `pnpm --filter @ff-pane/shared build` 后 `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- `vitest run` 相关单测：`compact-launch.test.ts`、`workbench-auth-registry.test.ts`、`workbench-layouts.test.ts`、`i18n-resources.test.ts`，4 个文件，29 过。覆盖：只有管理者带环境变量或 `-c`；其他角色不带；不指定不传；窗口值是整数 token；不写用户配置路径。
+
+### 问题与遗留
+
+勾上「指定比例」时滑块先停在 70%，不指定才是默认。窗口从管理者改成别的角色后，比例还记在窗口上，但不会传；改回管理者才再显示。未纳入 `apps/desktop/scripts/real-config-probe.mjs`。T10.8 仍挂起。
+
+### 相关文件链接
+
+- [Phase 10 计划 §13](../Phase10-多窗口终端工作台计划.md)
+- [使用说明](../../使用说明.md)
+
+## 2026-10-07 20:26 · T10.20 · 检查 · 管理者压缩滑块
+
+### 任务要点
+
+独立检查未提交的管理者压缩滑块。对照计划 §13、§7.3、§7.4，以及总记录「2026-10-07 20:10 · T10.20 · 执行 · 管理者压缩滑块」。不改实现，不提交。不碰 `apps/desktop/scripts/real-config-probe.mjs`。不改 `~/.claude`、`~/.codex`、`~/.grok`。
+
+### 结论
+
+通过。没有必须修复。不需要主控决策。滑块只在管理者窗口；50 到 90；不指定不传；下次启动、重启或续接才生效。Claude 和 DeepSeek 同时设窗口 token 和百分比，Grok 只设百分比且不超过 85，Codex 用本次进程的 `-c`。不写用户配置。界面和使用说明写明到了这个比例自己收一次、改滑块要重开、不能比原来更晚才压。版本已是 1.0.5，提交时不要再加末位。
+
+### 改动文件
+
+- 新增 `docs/验收记录/T10.20-验收.md`
+- 本条追加进总记录
+
+### 命令结果
+
+- `pnpm lint`：通过。Biome 775 个文件。`check-i18n` PASS。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- `pnpm test`：150 个文件，2467 过，1 跳过。
+- `pnpm smoke`：ALL PASS。`FF-pane v1.0.5`。
+- `pnpm test:e2e`：55 过，约 5.6 分钟。没有单独重跑。
+
+### 问题与遗留
+
+建议见验收记录，不是必须修。角色改走之后比例还留在窗口上，但不显示、也不传。提交时不要再加版本末位，也不要把 `apps/desktop/scripts/real-config-probe.mjs` 放进这一笔。
+
+### 相关文件链接
+
+- [T10.20 验收](../验收记录/T10.20-验收.md)
+
+## 2026-10-07 20:29 · T10.20 · 提交 · v1.0.5
+
+### 任务要点
+
+检查已通过（`docs/验收记录/T10.20-验收.md`，没有必须修复）。按计划提交。版本在实现时已经是 1.0.5，这次不再 +1。不 push。
+
+### 结论
+
+已提交并打轻量 tag `v1.0.5`，未 push。验收没有必须修复。不需要主控决策。
+
+### 改动文件
+
+- 版本保持 1.0.5：根与 `apps/desktop` 的 `package.json`、README 状态行、`command-ipc.test.ts` 与 `client-server.test.ts` 里的假 AppInfo
+- 管理者压缩滑块：窗口字段、启动时的环境变量或 Codex `-c`、界面与中英文语言包、使用说明
+- 进度与计划：`docs/开发进度.md` 登记 T10.20 已验收；计划 §4 增加 T10.20 行，§7.5 当前版本为 1.0.5，§13 标为已完成
+- `docs/验收记录/T10.20-验收.md`
+- 本总记录
+
+### 命令结果
+
+- `pnpm lint`：通过。Biome 775 个文件。`check-i18n` PASS。
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过。
+- `vitest run apps/desktop/tests/client-server.test.ts apps/desktop/tests/command-ipc.test.ts`：2 个文件，73 过。
+- 提交信息：`feat: T10.20 管理者窗口压缩滑块`
+- 轻量 tag `v1.0.5`，未 push
+- 提交哈希：打 tag 之后补进本条
+
+### 问题与遗留
+
+历史记录里的 `1.0.4` 没有改。未纳入 `apps/desktop/scripts/real-config-probe.mjs`。旧验收记录和 `docs/Provider-模板说明.md` 只有换行符变化，没有提交。没有排着的下一单。T10.8 仍挂起。上面的提交哈希是 tag `v1.0.5` 所指的那一笔；这一行是后补的，所以 tag 里的本条仍写着「打 tag 之后补进本条」。
+
+### 相关文件链接
+
+- [T10.20 验收记录](../验收记录/T10.20-验收.md)
+- [Phase 10 计划 §13](../Phase10-多窗口终端工作台计划.md)

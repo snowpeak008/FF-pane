@@ -743,6 +743,9 @@ export async function createWorkbenchCliLayer(
             : {}),
           ...(permission !== undefined ? { permission } : {}),
           ...(isWorkbenchRole(request.role) ? { role: request.role } : {}),
+          ...(storedWindow?.compactPercent !== undefined
+            ? { compactPercent: storedWindow.compactPercent }
+            : {}),
         },
         launchDeps(),
       );

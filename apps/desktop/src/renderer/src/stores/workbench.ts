@@ -116,6 +116,7 @@ export interface WorkbenchStoreActions {
       managerGrantPending: boolean;
       modelOverride: string;
       effortOverride: string;
+      compactPercent: number | null;
       routeSnapshot: {
         readonly connectionMode: "local_cli" | "relay";
         readonly providerName?: string;
@@ -653,6 +654,17 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
       }
       if (patch.effortOverride !== undefined) {
         Object.assign(next, { effortOverride: patch.effortOverride });
+      }
+      if (patch.compactPercent === null) {
+        const { compactPercent: _removed, ...rest } = next;
+        void _removed;
+        return {
+          ...current,
+          windows: { ...current.windows, [windowId]: rest },
+        };
+      }
+      if (patch.compactPercent !== undefined) {
+        Object.assign(next, { compactPercent: patch.compactPercent });
       }
       if (patch.routeSnapshot !== undefined) {
         const {

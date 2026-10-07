@@ -7,6 +7,7 @@
  */
 
 export * from "./common.js";
+export * from "./compact-percent.js";
 export * from "./config.js";
 export * from "./context-window.js";
 export * from "./handoff.js";

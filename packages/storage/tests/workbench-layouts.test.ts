@@ -209,6 +209,50 @@ describe("workbench layout store", () => {
     expect(all["proj-a"]?.windows["win-2"]?.profileId).toBeUndefined();
   });
 
+  it("管理者压缩比例只保留 50 到 90 的整数", async () => {
+    tempRoot = await mkdtemp(join(tmpdir(), "ffpane-wb-layout-"));
+    const file = join(tempRoot, "workbench-layouts.json");
+    const window = {
+      id: "win-1",
+      projectId: "proj-a",
+      title: "Claude",
+      kind: "claude",
+      cwd: "C:\\proj",
+      createdAt: 1,
+      role: "manager",
+    };
+    await writeFile(
+      file,
+      JSON.stringify({
+        version: WORKBENCH_LAYOUTS_FILE_VERSION,
+        layouts: {
+          "proj-a": {
+            projectId: "proj-a",
+            tabs: [{ id: "tab-1", title: "Tab", root: { type: "leaf", windowId: "win-1" } }],
+            activeTabId: "tab-1",
+            windows: {
+              "win-1": { ...window, compactPercent: 70 },
+              "win-low": { ...window, id: "win-low", compactPercent: 40 },
+              "win-high": { ...window, id: "win-high", compactPercent: 91 },
+              "win-text": { ...window, id: "win-text", compactPercent: "500k" },
+              "win-float": { ...window, id: "win-float", compactPercent: 70.5 },
+            },
+            maximizedWindowId: null,
+            focusedWindowId: "win-1",
+          },
+        },
+      }),
+      "utf8",
+    );
+    const store = createWorkbenchLayoutStore(file);
+    const read = await store.readProject("proj-a" as ProjectWorkbenchLayout["projectId"]);
+    expect(read?.windows["win-1"]?.compactPercent).toBe(70);
+    expect(read?.windows["win-low"]?.compactPercent).toBeUndefined();
+    expect(read?.windows["win-high"]?.compactPercent).toBeUndefined();
+    expect(read?.windows["win-text"]?.compactPercent).toBeUndefined();
+    expect(read?.windows["win-float"]?.compactPercent).toBeUndefined();
+  });
+
   it("removeProject 删条目", async () => {
     tempRoot = await mkdtemp(join(tmpdir(), "ffpane-wb-layout-"));
     const file = join(tempRoot, "workbench-layouts.json");

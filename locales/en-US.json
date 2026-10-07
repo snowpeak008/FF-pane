@@ -499,6 +499,15 @@
           "no-session": "cannot resume yet; applies on the next manual restart",
           "failed": "resume failed"
         }
+      },
+      "compact": {
+        "label": "It summarizes itself once usage reaches this share",
+        "unspecified": "Leave unset and use the command line's own default",
+        "reopen": "Changing the slider takes effect after you reopen this window.",
+        "notLater": "It cannot wait longer than it already does.",
+        "notStatus": "This is the command line's own summary, not the supervisor's four-line status.",
+        "grokCap": "Grok already summarizes around 85%. A higher slider still sends 85% for this process, so it does not wait longer.",
+        "percent": "{{percent}}%"
       }
     },
     "limit": {

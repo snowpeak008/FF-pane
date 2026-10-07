@@ -19,6 +19,7 @@ import {
   isWorkbenchPermissionLevel,
   isWorkbenchRole,
   isWorkbenchWindowKind,
+  parseManagerCompactPercent,
   parseWorkbenchOpenedBy,
   validateModelOverride,
   WORKBENCH_CONVERSATION_LIMIT,
@@ -146,6 +147,7 @@ function parseWindow(value: unknown, projectId: ProjectId): WorkbenchWindow | nu
       : undefined;
   const effortOverrideRaw =
     typeof raw["effortOverride"] === "string" ? raw["effortOverride"].trim() : undefined;
+  const compactPercent = parseManagerCompactPercent(raw["compactPercent"]);
   const window: WorkbenchWindow = {
     id: raw["id"],
     projectId: typeof raw["projectId"] === "string" ? (raw["projectId"] as ProjectId) : projectId,
@@ -167,6 +169,7 @@ function parseWindow(value: unknown, projectId: ProjectId): WorkbenchWindow | nu
     ...(effortOverrideRaw !== undefined && isReasoningEffortLevel(effortOverrideRaw)
       ? { effortOverride: effortOverrideRaw }
       : {}),
+    ...(compactPercent !== undefined ? { compactPercent } : {}),
     ...(typeof raw["nativeSessionId"] === "string" && raw["nativeSessionId"].trim() !== ""
       ? { nativeSessionId: raw["nativeSessionId"] }
       : {}),

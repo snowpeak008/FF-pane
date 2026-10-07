@@ -58,6 +58,7 @@ import {
   GROK_INTERACTIVE_COMMAND,
 } from "./cli-args";
 import { type CodexSessionClaimer, withCodexClaimMarker } from "./codex-claim";
+import { CODEX_AUTO_COMPACT_TOKEN_KEY, resolveManagerCompact } from "./compact-launch";
 import {
   bundledGrokHookPath,
   resolveGrokHookCommand,
@@ -121,6 +122,11 @@ export interface LaunchCliWindowInput {
   readonly permission?: WorkbenchPermissionLevel;
   /** T10.6：窗口角色。登记表已有角色时以登记表为准。 */
   readonly role?: WorkbenchRole;
+  /**
+   * 记在这个窗口上的压缩比例。只有角色是管理者且比例在 50–90 时才传给这一次进程。
+   * 不写用户配置文件。
+   */
+  readonly compactPercent?: number;
 }
 
 export interface LaunchCliWindowResult {
@@ -392,6 +398,18 @@ async function launchCliWindowBody(
   const registered = deps.authRegistry?.get(input.windowId);
   const role: WorkbenchRole =
     registered?.role ?? (isWorkbenchRole(input.role) ? input.role : DEFAULT_WORKBENCH_ROLE);
+  const compact = resolveManagerCompact({
+    role,
+    kind,
+    percent: input.compactPercent,
+    ...(model !== undefined ? { model } : {}),
+  });
+  if (compact.codexTokenLimit !== undefined) {
+    configOverrides = {
+      ...configOverrides,
+      [CODEX_AUTO_COMPACT_TOKEN_KEY]: compact.codexTokenLimit,
+    };
+  }
   if (deps.authRegistry !== undefined && registered === undefined) {
     deps.authRegistry.upsert(
       {
@@ -444,7 +462,7 @@ async function launchCliWindowBody(
   let mcpTemp: WorkbenchMcpTempFile | undefined;
   let grokConfigPath: string | undefined;
   let grokHookPath: string | undefined;
-  const extraProcessEnv: Record<string, string> = {};
+  const extraProcessEnv: Record<string, string> = { ...compact.env };
   const cwd = (input.cwd?.trim() || input.projectRoot).trim();
 
   let nativeSessionId: string | undefined = input.nativeSessionId?.trim() || undefined;

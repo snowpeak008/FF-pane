@@ -319,6 +319,7 @@ describe("createWorkbenchAuthRegistry", () => {
         routeEffort: "low",
         modelOverride: "opus",
         effortOverride: "high",
+        compactPercent: 70,
         nativeSessionId: "sess-current",
         sessionUnidentified: true,
         conversations: [
@@ -335,6 +336,7 @@ describe("createWorkbenchAuthRegistry", () => {
     expect(cold?.routeEffort).toBe("low");
     expect(cold?.modelOverride).toBe("opus");
     expect(cold?.effortOverride).toBe("high");
+    expect(cold?.compactPercent).toBe(70);
     expect(cold?.nativeSessionId).toBe("sess-current");
     expect(cold?.sessionUnidentified).toBe(true);
     expect(cold?.conversations?.map((item) => item.id)).toEqual(["sess-old", "sess-current"]);
@@ -344,6 +346,7 @@ describe("createWorkbenchAuthRegistry", () => {
     const again = registry.syncLayout(restored);
     expect(again.windows["child"]?.modelOverride).toBe("opus");
     expect(again.windows["child"]?.effortOverride).toBe("high");
+    expect(again.windows["child"]?.compactPercent).toBe(70);
     expect(again.windows["child"]?.conversations).toHaveLength(2);
     expect(again.windows["child"]?.routeMode).toBe("relay");
 
@@ -355,6 +358,7 @@ describe("createWorkbenchAuthRegistry", () => {
     const saved = reread?.windows["child"];
     expect(saved?.modelOverride).toBe("opus");
     expect(saved?.effortOverride).toBe("high");
+    expect(saved?.compactPercent).toBe(70);
     expect(saved?.conversations?.map((item) => item.id)).toEqual(["sess-old", "sess-current"]);
     expect(saved?.sessionUnidentified).toBe(true);
     expect(saved?.routeMode).toBe("relay");

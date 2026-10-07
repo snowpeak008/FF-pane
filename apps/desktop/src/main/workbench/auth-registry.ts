@@ -71,6 +71,7 @@ function applyAuthNode(window: WorkbenchWindow, node: WorkbenchAuthNode): Workbe
     ...(routeEffort !== undefined && routeEffort !== "" ? { routeEffort } : {}),
     ...(modelOverride !== undefined && modelOverride !== "" ? { modelOverride } : {}),
     ...(effortOverride !== undefined && effortOverride !== "" ? { effortOverride } : {}),
+    ...(window.compactPercent !== undefined ? { compactPercent: window.compactPercent } : {}),
     ...(window.nativeSessionId !== undefined ? { nativeSessionId: window.nativeSessionId } : {}),
     ...(window.sessionUnidentified === true ? { sessionUnidentified: true as const } : {}),
     ...(conversations !== undefined && conversations.length > 0 ? { conversations } : {}),

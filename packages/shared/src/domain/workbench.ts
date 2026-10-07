@@ -123,6 +123,12 @@ export interface WorkbenchWindow {
   /** 管理者改过的思考强度。优先级同 modelOverride。 */
   readonly effortOverride?: string;
   /**
+   * 管理者窗口的压缩比例，50 到 90 的整数。
+   * 缺省表示不指定：启动时不传，用命令行自己的默认。
+   * 只在这个窗口的角色是管理者时才传给那一次进程。改完后，下一次启动、重启或续接才生效。
+   */
+  readonly compactPercent?: number;
+  /**
    * AI 窗口：当前对话编号。
    * Claude 启动时用 `--session-id` 指定；Codex 按本窗口记号从 rollout 认领。
    * 没有编号时续接打开选择器，不用 `--continue` / `--last`。

@@ -7,6 +7,10 @@ import {
   DEFAULT_WORKBENCH_ROLE,
   DEFAULT_WORKBENCH_WINDOW_PERMISSION,
   isAiWorkbenchKind,
+  MANAGER_COMPACT_PERCENT_WHEN_ENABLED,
+  MAX_MANAGER_COMPACT_PERCENT,
+  MIN_MANAGER_COMPACT_PERCENT,
+  parseManagerCompactPercent,
   shortSessionId,
   WORKBENCH_PERMISSION_LEVELS,
   WORKBENCH_ROLES,
@@ -21,7 +25,7 @@ import { Tooltip } from "../../components/ui/Tooltip";
 import { invokeQuery } from "../../ipc/query";
 import { useSubscription } from "../../ipc/useSubscription";
 import { cn } from "../../lib/cn";
-import { useWorkbenchStore } from "../../stores/workbench";
+import { flushWorkbenchLayouts, useWorkbenchStore } from "../../stores/workbench";
 import { type ConversationLaunchPlan, planConversationLaunch } from "./conversation-launch";
 import { needsSensitiveLaunchConfirm, rememberSensitiveLaunchConfirm } from "./sensitive-launch";
 import { TerminalView } from "./TerminalView";
@@ -570,6 +574,67 @@ export function WindowPane({
           </Button>
         </Tooltip>
       </div>
+      {isCli && role === "manager" ? (
+        <div
+          className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-surface-sunken px-2 py-1"
+          data-testid="workbench-compact-slider"
+          data-compact={window.compactPercent ?? "default"}
+        >
+          <span className="text-2xs text-fg">{t("workbench.window.compact.label")}</span>
+          <label className="flex items-center gap-1 text-2xs text-fg-muted">
+            <input
+              type="checkbox"
+              data-testid="workbench-compact-unspecified"
+              checked={window.compactPercent === undefined}
+              onChange={(event) => {
+                patchWindow(window.projectId, window.id, {
+                  compactPercent: event.target.checked
+                    ? null
+                    : (window.compactPercent ?? MANAGER_COMPACT_PERCENT_WHEN_ENABLED),
+                });
+                void flushWorkbenchLayouts();
+              }}
+            />
+            {t("workbench.window.compact.unspecified")}
+          </label>
+          <input
+            type="range"
+            min={MIN_MANAGER_COMPACT_PERCENT}
+            max={MAX_MANAGER_COMPACT_PERCENT}
+            step={1}
+            disabled={window.compactPercent === undefined}
+            value={window.compactPercent ?? MIN_MANAGER_COMPACT_PERCENT}
+            data-testid="workbench-compact-range"
+            aria-label={t("workbench.window.compact.label")}
+            onChange={(event) => {
+              const parsed = parseManagerCompactPercent(Number(event.target.value));
+              if (parsed === undefined) {
+                return;
+              }
+              patchWindow(window.projectId, window.id, { compactPercent: parsed });
+            }}
+            onPointerUp={() => {
+              void flushWorkbenchLayouts();
+            }}
+            onKeyUp={() => {
+              void flushWorkbenchLayouts();
+            }}
+            onBlur={() => {
+              void flushWorkbenchLayouts();
+            }}
+          />
+          {window.compactPercent !== undefined ? (
+            <span className="text-2xs text-fg" data-testid="workbench-compact-value">
+              {t("workbench.window.compact.percent", { percent: window.compactPercent })}
+            </span>
+          ) : null}
+          <span className="text-2xs text-fg-muted">
+            {t("workbench.window.compact.reopen")} {t("workbench.window.compact.notLater")}{" "}
+            {t("workbench.window.compact.notStatus")}
+            {window.kind === "grok" ? ` ${t("workbench.window.compact.grokCap")}` : ""}
+          </span>
+        </div>
+      ) : null}
       {editingPermission ? (
         <div
           className="flex flex-wrap items-center gap-2 border-b border-border bg-surface-sunken px-2 py-1.5"
