@@ -3386,7 +3386,7 @@ Grok 的「可改文件」和「可改+跑命令」启动参数相同，命令�
 - `vitest run apps/desktop/tests/client-server.test.ts apps/desktop/tests/command-ipc.test.ts`：2 个文件，73 过。
 - 提交信息：`feat: T10.20 管理者窗口压缩滑块`
 - 轻量 tag `v1.0.5`，未 push
-- 提交哈希：打 tag 之后补进本条
+- 提交哈希：`e3066b22e7fd1efac3430a60c49aa24c8d225563`
 
 ### 问题与遗留
 
