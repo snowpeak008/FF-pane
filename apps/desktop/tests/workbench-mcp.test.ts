@@ -168,6 +168,8 @@ function harness(
     openPanel: (panel, title) => {
       panels.push({ panel, title });
     },
+    openCanvas: async () => ({ ok: true as const, relativePath: ".ffpane/canvas/a.png" }),
+    deleteCanvasFile: async () => ({ ok: true as const }),
     searchProjectMemory: async () => [],
     addProjectMemory: async () => undefined,
     setModelEffort: async () => ({ ok: false as const, error: "unused" }),
@@ -294,9 +296,48 @@ describe("工具授权", () => {
     expect(byName.get("ffpane_read_output")).toContain("32KB");
     expect(byName.get("ffpane_close_window")).toContain("仅后代");
     expect(byName.get("ffpane_close_window")).toContain("父级已关闭");
+    expect(byName.get("ffpane_open_canvas")).toContain("revision");
+    expect(byName.get("ffpane_open_canvas")).toContain("markedImage");
     expect(byName.get("ffpane_open_panel")).toContain("plan");
     expect(byName.get("ffpane_open_panel")).toContain("tasks");
     expect(byName.get("ffpane_open_panel")).toContain("runs");
+  });
+
+  it("打开画板时把修改要求交回去", async () => {
+    const { deps } = harness(tempDir());
+    const result = await call(
+      {
+        ...deps,
+        openCanvas: async () => ({
+          ok: true as const,
+          relativePath: ".ffpane/canvas/a.png",
+          revision: {
+            v: 1,
+            image: ".ffpane/canvas/a.png",
+            imageTag: "项目内图片 a.png .ffpane/canvas/a.png",
+            markedImage: ".ffpane/canvas/revisions/a.png.marked.png",
+            markedImageReady: true,
+            purpose: "修改要求",
+            marks: [
+              {
+                number: 1,
+                kind: "label",
+                color: "#ef4444",
+                text: "太阳再大",
+                x: 10,
+                y: 20,
+              },
+            ],
+          },
+        }),
+      },
+      "A",
+      "ffpane_open_canvas",
+      { imagePath: ".ffpane/canvas/a.png" },
+    );
+    expect(result.isError).toBe(false);
+    expect(result.text).toContain("太阳再大");
+    expect(result.text).toContain("a.png.marked.png");
   });
 });
 

@@ -47,6 +47,17 @@ import {
 import { WORKBENCH_WINDOW_LIMIT_ERROR_PREFIX } from "../terminal/handlers";
 import type { PtyManager } from "../terminal/manager";
 import { createWorkbenchAuthRegistry, type WorkbenchAuthRegistry } from "./auth-registry";
+import {
+  deleteCanvasImageFile,
+  describeCanvasRevision,
+  loadCanvasBoard,
+  placeImageOnBoard,
+  readCanvasImageBytes,
+  removeFromCanvasBoard,
+  saveCanvasBoard,
+  writeCanvasMarkedPreview,
+} from "./canvas-files";
+import { ensureCanvasWatcher } from "./canvas-watcher";
 import { CodexSessionClaimer } from "./codex-claim";
 import { createWorkbenchConfigDraftActions } from "./config-draft-apply";
 import { isConfigToolAuthorized, shouldAttachConfigTool } from "./config-tool-attach";
@@ -117,6 +128,11 @@ export interface WorkbenchCliLayer {
     | "workbench:read-threads"
     | "workbench:open-ffpane"
     | "workbench:panel-activity"
+    | "workbench:get-canvas"
+    | "workbench:save-canvas"
+    | "workbench:save-canvas-marked"
+    | "workbench:read-canvas-image"
+    | "workbench:remove-canvas-image"
     | "workbench:respond-config-draft"
   >;
   readonly mcpRegistry: WorkbenchMcpTempRegistry;
@@ -925,6 +941,56 @@ export async function createWorkbenchCliLayer(
         capped: index.capped,
       };
     },
+    "workbench:get-canvas": async (request) => {
+      const root = await projectRootOf(request.projectId);
+      ensureCanvasWatcher(root);
+      const board = await loadCanvasBoard(root);
+      return { board };
+    },
+    "workbench:save-canvas": async (request) => {
+      const root = await projectRootOf(request.projectId);
+      if (request.board.v !== 1) {
+        throw new Error("不支持的画板版本。");
+      }
+      await saveCanvasBoard(root, request.board);
+      const browser = options.getWindow();
+      if (browser !== null && !browser.isDestroyed()) {
+        publishEvent(browser.webContents, "workbench:canvas-changed", {
+          projectId: request.projectId,
+        });
+      }
+      return { ok: true as const };
+    },
+    "workbench:save-canvas-marked": async (request) => {
+      const root = await projectRootOf(request.projectId);
+      const written = await writeCanvasMarkedPreview(root, request.relativePath, request.pngBase64);
+      if (!written.ok) {
+        throw new Error(written.error);
+      }
+      return { ok: true as const, markedPath: written.relativePath };
+    },
+    "workbench:read-canvas-image": async (request) => {
+      const root = await projectRootOf(request.projectId);
+      const read = await readCanvasImageBytes(root, request.relativePath);
+      if (!read.ok) {
+        throw new Error(read.error);
+      }
+      return { mime: read.mime, dataUrl: `data:${read.mime};base64,${read.base64}` };
+    },
+    "workbench:remove-canvas-image": async (request) => {
+      const root = await projectRootOf(request.projectId);
+      const removed = await removeFromCanvasBoard(root, request.relativePath);
+      if (!removed.ok) {
+        throw new Error(removed.error);
+      }
+      const browser = options.getWindow();
+      if (browser !== null && !browser.isDestroyed()) {
+        publishEvent(browser.webContents, "workbench:canvas-changed", {
+          projectId: request.projectId,
+        });
+      }
+      return { board: removed.board };
+    },
     "workbench:open-ffpane": async (request) => {
       const root = await projectRootOf(request.projectId);
       const resolved = await resolveFfPaneFile(root, request.relativePath);
@@ -1308,6 +1374,35 @@ export async function createWorkbenchCliLayer(
           projectId: projectId as ProjectId,
         });
       },
+      openCanvas: async (input) => {
+        const placed = await placeImageOnBoard(input.projectRoot, input.imagePath, {
+          ...(input.rowId !== undefined ? { rowId: input.rowId } : {}),
+          ...(input.asNewVersion === true ? { asNewVersion: true } : {}),
+        });
+        if (!placed.ok) {
+          return placed;
+        }
+        const revision = await describeCanvasRevision(input.projectRoot, placed.relativePath);
+        ensureCanvasWatcher(input.projectRoot);
+        const browser = options.getWindow();
+        if (browser !== null && !browser.isDestroyed()) {
+          publishEvent(browser.webContents, "workbench:open-canvas", {
+            projectId: input.projectId as ProjectId,
+            openerTitle: input.openerTitle,
+            focusPath: placed.relativePath,
+          });
+          publishEvent(browser.webContents, "workbench:canvas-changed", {
+            projectId: input.projectId as ProjectId,
+          });
+        }
+        return {
+          ok: true as const,
+          relativePath: placed.relativePath,
+          ...(revision !== undefined ? { revision } : {}),
+        };
+      },
+      deleteCanvasFile: async (projectRoot, imagePath) =>
+        deleteCanvasImageFile(projectRoot, imagePath),
     });
     return { ok: true, result };
   };

@@ -391,6 +391,25 @@
     "panel": {
       "openedBy": "Opened from {{title}}"
     },
+    "canvas": {
+      "title": "Project canvas",
+      "open": "Open canvas",
+      "close": "Close canvas",
+      "projectTag": "Project image",
+      "openedBy": "Canvas opened from {{title}}",
+      "empty": "No images yet. Save files under this project’s .ffpane/canvas/, or ask a window to open the canvas tool.",
+      "pickImage": "Pick a thumbnail in a row above to zoom and tag.",
+      "removeFromBoard": "Remove from canvas",
+      "removedFromBoard": "Removed from the canvas; the file on disk is unchanged.",
+      "tools": "Annotations",
+      "toolRect": "Tag",
+      "toolPan": "Move",
+      "textPlaceholder": "Write on this bubble",
+      "dragHint": "Drag empty space to move the picture, click to tag. Drag a bubble to move it, click the words to edit, click × to delete.",
+      "deleteTag": "Delete tag",
+      "fit": "Fit",
+      "marksSaved": "Words and marks are saved in this project. A revision reads both the words and the marked picture."
+    },
     "drawer": {
       "noProject": "Choose a project before opening the workbench panel.",
       "close": "Close",
@@ -524,7 +543,7 @@
     "card": {
       "createdAt": "Added {{time}}",
       "removeLabel": "Remove \"{{name}}\" from the workspace",
-      "configLabel": "Config",
+      "configLabel": "Project config",
       "configTitle": "Config for \"{{name}}\"",
       "configUnset": "Follow the default config",
       "configSaved": "Project config updated",

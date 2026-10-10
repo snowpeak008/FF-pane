@@ -22,6 +22,8 @@ export const WORKBENCH_MCP_TOOL_NAMES = [
   "ffpane_read_output",
   "ffpane_close_window",
   "ffpane_open_panel",
+  "ffpane_open_canvas",
+  "ffpane_delete_canvas_file",
   "ffpane_memory_search",
   "ffpane_memory_add",
   "ffpane_set_model_effort",
@@ -236,6 +238,46 @@ export const WORKBENCH_MCP_TOOLS: readonly McpToolDefinition[] = [
         },
       },
       required: ["panel"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "ffpane_open_canvas",
+    description:
+      "打开本项目的画板，并把指定图片放上去。图片路径必须在 .ffpane/canvas/ 内。要看图、改图或生图前先调用；新图请先存到 .ffpane/canvas/ 再打开。可选 rowId 与 asNewVersion：为 true 时在同一行横向追加版本。用户对不满意的生图打过标签后，返回值里的 revision 就是修改要求：marks 里是编号、位置、颜色和用户写的字，markedImage 是带这些绘制的预览图。同名文件在 .ffpane/canvas/revisions/。改图时要读这些文字，也要看 markedImage；按 image 指向的原图来画，不要把气泡和字画进新图。任何窗口都可调用。过于频繁会被拒绝。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        imagePath: {
+          type: "string",
+          description: "项目内相对路径，例如 .ffpane/canvas/sketch.png。",
+        },
+        rowId: {
+          type: "string",
+          description: "可选。指定行 id，配合 asNewVersion 横向追加版本。",
+        },
+        asNewVersion: {
+          type: "boolean",
+          description: "为 true 时在 rowId 对应行追加新版本。",
+        },
+      },
+      required: ["imagePath"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "ffpane_delete_canvas_file",
+    description:
+      "从磁盘删除 .ffpane/canvas/ 内的一张图片，并同步从画板数据移除。只有用户在对话里明确说要清理文件时才调用；不要自动删。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        imagePath: {
+          type: "string",
+          description: "要删除的图片，路径必须在 .ffpane/canvas/ 内。",
+        },
+      },
+      required: ["imagePath"],
       additionalProperties: false,
     },
   },

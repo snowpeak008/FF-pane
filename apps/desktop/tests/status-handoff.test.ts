@@ -117,6 +117,8 @@ function harness(root: string): {
       publishClosed: () => undefined,
     },
     openPanel: () => undefined,
+    openCanvas: async () => ({ ok: true as const, relativePath: ".ffpane/canvas/a.png" }),
+    deleteCanvasFile: async () => ({ ok: true as const }),
     searchProjectMemory: async () => [],
     addProjectMemory: async () => undefined,
     setModelEffort: async () => ({ ok: false as const, error: "unused" }),

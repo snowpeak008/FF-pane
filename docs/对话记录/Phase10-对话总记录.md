@@ -3396,3 +3396,72 @@ Grok 的「可改文件」和「可改+跑命令」启动参数相同，命令�
 
 - [T10.20 验收记录](../验收记录/T10.20-验收.md)
 - [Phase 10 计划 §13](../Phase10-多窗口终端工作台计划.md)
+
+## 2026-10-09 22:30 · T10.21 · 执行 · 项目画板
+
+### 结论
+
+已按 §14 落地项目画板：数据仅 `.ffpane/canvas/`（`board.json` + 图片）；MCP `ffpane_open_canvas` / `ffpane_delete_canvas_file`；工作台隐藏全屏层（行内横向版本、页签、缩放平移、SVG 标注）；只监听 canvas 目录新图。未提交。
+
+### 改动摘要
+
+- 领域：`packages/shared/src/domain/canvas-board.ts`
+- 主进程：`canvas-files.ts`、`canvas-watcher.ts`；handlers / MCP / IPC 契约
+- 渲染：`WorkbenchCanvasPanel`、`WorkbenchCanvasBridge`、`workbench-canvas` store
+- 角色 `base.md`、中英文语言包、`使用说明.md` §3.1
+- 单测：`apps/desktop/tests/workbench-canvas.test.ts`
+
+### 命令结果
+
+- `pnpm --filter @ff-pane/shared run build`：通过
+- `pnpm lint`：未通过（7 项，主要为仓库内既有 compact-percent 等文件的格式/换行，非本单新增）
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过
+- `vitest run apps/desktop/tests/workbench-canvas.test.ts`：5 过
+
+### 要不要主控决策
+
+不需要。版本号与 tag 留待检查通过后再 +1 提交。
+
+## 2026-10-09 23:40 · T10.21 · 执行 · 改图要求写进项目
+
+### 结论
+
+用户在不满意的图上打的标签，现在会写进该项目。原图不变。文字在 `.ffpane/canvas/revisions/<文件名>.revision.json`（编号、位置、颜色、用户写的字）。绘制在同目录的 `<文件名>.marked.png`。打开画板时，工具返回里带上这份要求。窗口按文字和绘制改原图，新图不要把气泡画进去。未提交。
+
+### 改动摘要
+
+- `canvas-revision.ts`、保存画板时同步修订文件、`ffpane_open_canvas` 返回 revision
+- 画板把气泡画进预览 PNG
+- 角色说明、使用说明、计划 §14
+
+### 命令结果
+
+- `pnpm --filter @ff-pane/desktop run typecheck`：通过
+- `vitest run apps/desktop/tests/workbench-canvas.test.ts apps/desktop/tests/workbench-mcp.test.ts apps/desktop/tests/contracts.test.ts`：通过
+- `node scripts/check-i18n.mjs`：通过
+
+### 要不要主控决策
+
+不需要。仍等检查后再提交。
+
+## 2026-10-10 15:56 · 提交 · v1.0.6
+
+### 任务要点
+
+Tony 要求提交并推到远端。版本只加最小号：1.0.5 → 1.0.6。T10.21 尚未单独验收，按要求随这次提交。
+
+### 结论
+
+已提交并打轻量 tag `v1.0.6`，推到 `origin/main`。
+
+### 改动文件
+
+- 版本改为 1.0.6：根与 `apps/desktop` 的 `package.json`、README 状态行、`command-ipc.test.ts` 与 `client-server.test.ts` 里的假 AppInfo。历史记录里的 1.0.5 未改
+- 项目画板：气泡和字写入 `.ffpane/canvas/revisions/`，原图不改；打开画板时把文字和带标记预览交给窗口
+- 窗口菜单随界面语言中文化；项目卡片上的配置按钮加大
+- 根目录 `FF-pane.exe` 替代 `FF-pane.cmd`，只启动当前源码。改应用代码不用重新生成这个入口
+- 进度与计划：当前版本改为 1.0.6。T10.21 标为已提交、尚未单独验收
+
+### 问题与遗留
+
+未纳入 `apps/desktop/scripts/real-config-probe.mjs`。只有换行符变化的旧验收记录和 `supervisor.md` 没有提交。T10.21 尚未单独验收。T10.8 仍挂起。

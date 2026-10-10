@@ -18,7 +18,7 @@ FF-pane 是本地优先的多窗口终端工作台。在一个项目里并排打
 
 ## 项目状态
 
-**v1.0.5（T10.20 管理者窗口的压缩滑块，验收通过）。** 进度事实源见 [docs/开发进度.md](docs/开发进度.md)。给人看的用法见 [使用说明.md](使用说明.md)。
+**v1.0.6（项目画板，固定 exe 启动入口）。** 进度事实源见 [docs/开发进度.md](docs/开发进度.md)。给人看的用法见 [使用说明.md](使用说明.md)。
 
 ## 启动方式
 
@@ -26,11 +26,11 @@ FF-pane 是本地优先的多窗口终端工作台。在一个项目里并排打
 |---|---|---|
 | 开发模式 | 仓库根运行 `pnpm dev` | electron-vite 热更新，日常开发用 |
 | 打包 | 仓库根运行 `pnpm package` | 产出 NSIS 安装包与免安装目录，落在 `apps\desktop\release\` |
-| 双击启动 | 双击根目录 `FF-pane.cmd` | 启动当前源码（`pnpm dev`），黑窗口闪一下即关。打包产物是另一份，可能更旧 |
+| 双击启动 | 双击根目录 `FF-pane.exe` | 启动当前源码（`pnpm dev`）。这个 exe 是固定入口，改应用代码不用重新生成它 |
 | 直接运行 exe | `apps\desktop\release\win-unpacked\FF-pane.exe` | 本机 `pnpm package` 之后的免安装程序，不进 git |
 | 安装版 | 运行 `apps\desktop\release\FF-pane-Setup-<版本>.exe` | 向导式用户级安装（默认 `%LOCALAPPDATA%\Programs\FF-pane`），免管理员权限 |
 
-> 打包产物体积大（win-unpacked 约数百 MB），不进 git——所以根目录放的是轻量启动器 `FF-pane.cmd` 而非真 exe。
+> 根目录的 `FF-pane.exe` 只有几 KB，只做启动。打包出来的 `apps\desktop\release\` 才是完整安装包，体积大，不进 git。改代码之后继续双击原来的 `FF-pane.exe` 即可。
 
 ## 文档
 

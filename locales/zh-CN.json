@@ -391,6 +391,25 @@
     "panel": {
       "openedBy": "由 {{title}} 打开"
     },
+    "canvas": {
+      "title": "项目画板",
+      "open": "打开画板",
+      "close": "关闭画板",
+      "projectTag": "项目内图片",
+      "openedBy": "由 {{title}} 打开画板",
+      "empty": "还没有图片。把图存到本项目的 .ffpane/canvas/，或让窗口调用打开画板工具。",
+      "pickImage": "在上方横向条里点一张图，下面可以放大查看和打标签。",
+      "removeFromBoard": "从画板移除",
+      "removedFromBoard": "已从画板移除，项目里的文件还在。",
+      "tools": "标注",
+      "toolRect": "打标签",
+      "toolPan": "移动画面",
+      "textPlaceholder": "写在这个气泡上",
+      "dragHint": "拖动空白处移动画面，点一下打标签。拖气泡挪位置，点字改内容，点气泡上的 × 删除。",
+      "deleteTag": "删除标签",
+      "fit": "适应画面",
+      "marksSaved": "这些字和标记会写进本项目。改图时窗口会读到文字，以及画了标记的图。"
+    },
     "drawer": {
       "noProject": "先选一个项目，再打开工作台面板。",
       "close": "关闭",
@@ -524,7 +543,7 @@
     "card": {
       "createdAt": "登记于 {{time}}",
       "removeLabel": "从工作台移除「{{name}}」",
-      "configLabel": "配置",
+      "configLabel": "项目配置",
       "configTitle": "「{{name}}」使用的配置",
       "configUnset": "跟随默认配置",
       "configSaved": "已更新项目配置",

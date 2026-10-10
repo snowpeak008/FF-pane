@@ -17,6 +17,7 @@ import { SecondaryPanelProvider } from "./layout/secondary-panel";
 import { AppRoutes } from "./pages/AppRoutes";
 import { WorkbenchConfigDraftDialog } from "./pages/workbench/WorkbenchConfigDraftDialog";
 import { WorkbenchFlushBridge } from "./pages/workbench/WorkbenchFlushBridge";
+import { WorkbenchCanvasBridge } from "./pages/workbench/WorkbenchCanvasBridge";
 import { WorkbenchPanelBridge } from "./pages/workbench/WorkbenchPanelBridge";
 import { useUiStore } from "./stores/ui";
 import { useTheme } from "./theme";
@@ -115,6 +116,7 @@ export function App(): ReactElement {
         <AppCommandPalette>
           <SecondaryPanelProvider>
             <WorkbenchPanelBridge />
+            <WorkbenchCanvasBridge />
             <WorkbenchConfigDraftDialog />
             <AppLayout>
               <AppRoutes />

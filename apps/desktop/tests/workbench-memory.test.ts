@@ -126,6 +126,8 @@ function harness(
       publishClosed: () => undefined,
     },
     openPanel: () => undefined,
+    openCanvas: async () => ({ ok: true as const, relativePath: ".ffpane/canvas/a.png" }),
+    deleteCanvasFile: async () => ({ ok: true as const }),
     searchProjectMemory: async (projectRoot, query) => {
       searched.push({ root: projectRoot, query });
       return (byRoot.get(projectRoot) ?? []).filter(

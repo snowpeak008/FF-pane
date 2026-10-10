@@ -75,9 +75,20 @@ export async function initI18n(): Promise<void> {
     },
   });
   document.documentElement.lang = i18next.language;
+  syncAppMenuLanguage(i18next.language);
   i18next.on("languageChanged", (lng) => {
     document.documentElement.lang = lng;
+    syncAppMenuLanguage(lng);
   });
+}
+
+function syncAppMenuLanguage(language: string): void {
+  const menuLanguage = language.toLowerCase().startsWith("en") ? "en-US" : "zh-CN";
+  void window.ffpane
+    .invoke("app:set-menu-language", { language: menuLanguage })
+    .catch((thrown: unknown) => {
+      console.error("[renderer] app menu language sync failed:", thrown);
+    });
 }
 
 function writeSavedLanguage(setting: LanguageSetting): void {

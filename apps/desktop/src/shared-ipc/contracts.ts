@@ -188,6 +188,9 @@ export interface LocaleInfo {
   readonly locale: string;
 }
 
+/** 左上角应用菜单跟随界面语言。 */
+export type AppMenuLanguage = "zh-CN" | "en-US";
+
 /** app:ping 请求。 */
 export interface PingRequest {
   readonly message: string;
@@ -439,6 +442,53 @@ export interface WorkbenchOpenPanelEvent {
   readonly panel: WorkbenchPanelId;
   readonly openerTitle: string;
   readonly projectId: ProjectId;
+}
+
+/** ffpane_open_canvas：打开项目画板并可选聚焦某张图。 */
+export interface WorkbenchOpenCanvasEvent {
+  readonly projectId: ProjectId;
+  readonly openerTitle: string;
+  readonly focusPath?: string;
+}
+
+/** 画板 board.json 的渲染端视图（与 @ff-pane/shared CanvasBoard 对齐）。 */
+export interface WorkbenchCanvasBoardView {
+  readonly v: 1;
+  readonly pages: readonly {
+    readonly id: string;
+    readonly title: string;
+    readonly rows: readonly {
+      readonly id: string;
+      readonly versions: readonly { readonly path: string; readonly addedAt: string }[];
+      readonly hidden?: boolean;
+    }[];
+  }[];
+  readonly annotations: Readonly<
+    Record<
+      string,
+      readonly {
+        readonly id: string;
+        readonly kind: "rect" | "label" | "text";
+        readonly x: number;
+        readonly y: number;
+        readonly w: number;
+        readonly h: number;
+        readonly color: string;
+        readonly text?: string;
+        readonly label?: string;
+      }[]
+    >
+  >;
+  readonly activePageId?: string;
+}
+
+export interface WorkbenchGetCanvasResponse {
+  readonly board: WorkbenchCanvasBoardView;
+}
+
+export interface WorkbenchReadCanvasImageResponse {
+  readonly mime: string;
+  readonly dataUrl: string;
 }
 
 export interface WorkbenchBriefListItem {
@@ -1341,6 +1391,11 @@ export interface IpcInvokeContracts {
   "app:get-info": { request: undefined; response: AppInfo };
   /** 系统语言检测（Electron 下 navigator.language 不可靠，统一走主进程）。 */
   "app:get-locale": { request: undefined; response: LocaleInfo };
+  /** 按当前界面语言重画左上角 File / Edit / View / Window。 */
+  "app:set-menu-language": {
+    request: { readonly language: AppMenuLanguage };
+    response: { readonly ok: true };
+  };
   "app:ping": { request: PingRequest; response: PingResponse };
   "diagnostics:check-sqlite": { request: undefined; response: SqliteCheckReport };
   /** PTY 自检（T10.1；启动期 / smoke 用，渲染层一般不调）。 */
@@ -1441,6 +1496,35 @@ export interface IpcInvokeContracts {
   "workbench:panel-activity": {
     request: { readonly projectId: ProjectId };
     response: WorkbenchPanelActivityResponse;
+  };
+  /** 读取项目画板 board.json（并确保 canvas 目录监听已启动）。 */
+  "workbench:get-canvas": {
+    request: { readonly projectId: ProjectId };
+    response: WorkbenchGetCanvasResponse;
+  };
+  /** 保存 board.json（页签、标注、从画板移除等）。 */
+  "workbench:save-canvas": {
+    request: { readonly projectId: ProjectId; readonly board: WorkbenchCanvasBoardView };
+    response: { readonly ok: true };
+  };
+  /** 把画了标记的预览 PNG 写进 `.ffpane/canvas/revisions/`。不改原图。 */
+  "workbench:save-canvas-marked": {
+    request: {
+      readonly projectId: ProjectId;
+      readonly relativePath: string;
+      readonly pngBase64: string;
+    };
+    response: { readonly ok: true; readonly markedPath: string };
+  };
+  /** 读取 canvas 目录内的一张图片（base64 data URL）。 */
+  "workbench:read-canvas-image": {
+    request: { readonly projectId: ProjectId; readonly relativePath: string };
+    response: WorkbenchReadCanvasImageResponse;
+  };
+  /** 从画板数据移除路径，不删磁盘文件。 */
+  "workbench:remove-canvas-image": {
+    request: { readonly projectId: ProjectId; readonly relativePath: string };
+    response: WorkbenchGetCanvasResponse;
   };
   /** 用户确认或取消一份自配置草案。未确认不落盘。 */
   "workbench:respond-config-draft": {
@@ -1651,6 +1735,8 @@ export interface IpcEventContracts {
   "workbench:child-window": { payload: WorkbenchChildWindowEvent };
   "workbench:inbox-notice": { payload: WorkbenchInboxNoticeEvent };
   "workbench:open-panel": { payload: WorkbenchOpenPanelEvent };
+  "workbench:open-canvas": { payload: WorkbenchOpenCanvasEvent };
+  "workbench:canvas-changed": { payload: { readonly projectId: ProjectId } };
   "workbench:window-closed": { payload: WorkbenchWindowClosedEvent };
   "workbench:manager-grant": { payload: WorkbenchManagerGrantEvent };
   "workbench:config-draft": { payload: WorkbenchConfigDraftEvent };
@@ -1675,6 +1761,7 @@ export function isValidChannelName(name: string): boolean {
 export const INVOKE_CHANNELS = [
   "app:get-info",
   "app:get-locale",
+  "app:set-menu-language",
   "app:ping",
   "diagnostics:check-sqlite",
   "diagnostics:check-pty",
@@ -1703,6 +1790,11 @@ export const INVOKE_CHANNELS = [
   "workbench:read-threads",
   "workbench:open-ffpane",
   "workbench:panel-activity",
+  "workbench:get-canvas",
+  "workbench:save-canvas",
+  "workbench:save-canvas-marked",
+  "workbench:read-canvas-image",
+  "workbench:remove-canvas-image",
   "workbench:respond-config-draft",
   "projects:list",
   "projects:summary",
@@ -1779,6 +1871,8 @@ export const EVENT_CHANNELS = [
   "workbench:child-window",
   "workbench:inbox-notice",
   "workbench:open-panel",
+  "workbench:open-canvas",
+  "workbench:canvas-changed",
   "workbench:window-closed",
   "workbench:manager-grant",
   "workbench:config-draft",

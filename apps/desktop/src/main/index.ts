@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { createConfigStore, resolveGlobalLayout } from "@ff-pane/storage";
 import { app, BrowserWindow, dialog, ipcMain, session, shell } from "electron";
 import { registerInvokeHandlers } from "../shared-ipc/server";
+import { installAppMenu, resolveAppMenuLanguage } from "./app-menu";
 import { installCsp } from "./csp";
 import { createDataHandlers } from "./data";
 import { resolveGlobalRoot } from "./data-root";
@@ -143,6 +144,10 @@ function registerAppHandlers(): void {
     }),
     // T0.3 i18n：系统语言检测统一由主进程提供（renderer 侧 navigator.language 不可靠）
     "app:get-locale": () => ({ locale: app.getLocale() }),
+    "app:set-menu-language": (request) => {
+      installAppMenu(request.language === "en-US" ? "en-US" : "zh-CN");
+      return { ok: true as const };
+    },
     "app:ping": (request) => ({
       reply: "pong" as const,
       echoed: request.message,
@@ -154,6 +159,7 @@ function registerAppHandlers(): void {
 }
 
 async function bootstrap(): Promise<void> {
+  installAppMenu(resolveAppMenuLanguage(app.getLocale()));
   installCsp(session.defaultSession, devRendererUrl !== undefined);
   registerAppHandlers();
 

@@ -22,6 +22,7 @@ import {
   type WorkbenchRole,
 } from "@ff-pane/shared";
 import { resolveBriefPath, writeBriefFile, writeStatusFile } from "./brief-files";
+import type { CanvasRevisionForTool } from "./canvas-files";
 import { type CloseDescendantDeps, closeDescendantWindow } from "./close-descendant";
 import {
   canAddProjectMemory,
@@ -120,6 +121,25 @@ export interface WorkbenchToolDeps {
   ) => Promise<{ readonly running: boolean; readonly status: string; readonly text?: string }>;
   readonly closeDescendant: CloseDescendantDeps;
   readonly openPanel: (panel: WorkbenchPanelName, openerTitle: string, projectId: string) => void;
+  readonly openCanvas: (input: {
+    readonly projectId: string;
+    readonly projectRoot: string;
+    readonly openerTitle: string;
+    readonly imagePath: string;
+    readonly rowId?: string;
+    readonly asNewVersion?: boolean;
+  }) => Promise<
+    | {
+        readonly ok: true;
+        readonly relativePath: string;
+        readonly revision?: CanvasRevisionForTool;
+      }
+    | { readonly ok: false; readonly error: string }
+  >;
+  readonly deleteCanvasFile: (
+    projectRoot: string,
+    imagePath: string,
+  ) => Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }>;
   /** 只查传入的项目根。工具层不会把参数里的项目路径传进来。 */
   readonly searchProjectMemory: (
     projectRoot: string,
@@ -139,6 +159,7 @@ export interface WorkbenchToolDeps {
 
 const buckets = new Map<string, { t: number; n: number }>();
 const panelOpenedAt = new Map<string, number>();
+const canvasOpenedAt = new Map<string, number>();
 
 export function allowToolCall(windowId: string, now: number): boolean {
   const bucket = buckets.get(windowId);
@@ -159,9 +180,19 @@ export function allowOpenPanel(windowId: string, now: number): boolean {
   return true;
 }
 
+export function allowOpenCanvas(windowId: string, now: number): boolean {
+  const previous = canvasOpenedAt.get(windowId);
+  if (previous !== undefined && now - previous < OPEN_PANEL_MIN_INTERVAL_MS) {
+    return false;
+  }
+  canvasOpenedAt.set(windowId, now);
+  return true;
+}
+
 export function resetToolCallBuckets(): void {
   buckets.clear();
   panelOpenedAt.clear();
+  canvasOpenedAt.clear();
   resetMemoryAddSlots();
 }
 
@@ -257,6 +288,10 @@ export async function executeWorkbenchTool(
       return closeWindow(caller, args, tree, deps);
     case "ffpane_open_panel":
       return openPanel(caller, args, deps);
+    case "ffpane_open_canvas":
+      return openCanvas(caller, args, deps);
+    case "ffpane_delete_canvas_file":
+      return deleteCanvasFileTool(caller, args, deps);
     case "ffpane_memory_search":
       return searchMemory(caller, args, deps);
     case "ffpane_memory_add":
@@ -709,6 +744,54 @@ function openPanel(
   }
   deps.openPanel(panel, caller.title, caller.projectId);
   return ok({ ok: true, panel });
+}
+
+async function openCanvas(
+  caller: ToolWindowView,
+  args: Readonly<Record<string, unknown>>,
+  deps: WorkbenchToolDeps,
+): Promise<ToolTextResult> {
+  const imagePath = args["imagePath"];
+  if (typeof imagePath !== "string" || imagePath.trim() === "") {
+    return fail("ffpane_open_canvas 需要 imagePath（项目内 .ffpane/canvas/ 下的图片路径）。");
+  }
+  if (!allowOpenCanvas(caller.id, deps.now())) {
+    return fail("打开画板过于频繁，请稍后再试。");
+  }
+  const rowId = args["rowId"];
+  const asNewVersion = args["asNewVersion"] === true;
+  const result = await deps.openCanvas({
+    projectId: caller.projectId,
+    projectRoot: caller.projectRoot,
+    openerTitle: caller.title,
+    imagePath: imagePath.trim(),
+    ...(typeof rowId === "string" && rowId.trim() !== "" ? { rowId: rowId.trim() } : {}),
+    ...(asNewVersion ? { asNewVersion: true } : {}),
+  });
+  if (!result.ok) {
+    return fail(result.error);
+  }
+  return ok({
+    ok: true,
+    path: result.relativePath,
+    ...(result.revision !== undefined ? { revision: result.revision } : {}),
+  });
+}
+
+async function deleteCanvasFileTool(
+  caller: ToolWindowView,
+  args: Readonly<Record<string, unknown>>,
+  deps: WorkbenchToolDeps,
+): Promise<ToolTextResult> {
+  const imagePath = args["imagePath"];
+  if (typeof imagePath !== "string" || imagePath.trim() === "") {
+    return fail("ffpane_delete_canvas_file 需要 imagePath。");
+  }
+  const deleted = await deps.deleteCanvasFile(caller.projectRoot, imagePath.trim());
+  if (!deleted.ok) {
+    return fail(deleted.error);
+  }
+  return ok({ ok: true });
 }
 
 async function optionalBrief(

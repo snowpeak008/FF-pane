@@ -6,6 +6,7 @@
  * 后续工单只实现不改接口（开发计划 §1.6）。
  */
 
+export * from "./canvas-board.js";
 export * from "./common.js";
 export * from "./compact-percent.js";
 export * from "./config.js";

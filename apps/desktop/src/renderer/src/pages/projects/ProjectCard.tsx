@@ -1,5 +1,5 @@
 import { isProjectConfigVisibleTo, type ProjectConfig } from "@ff-pane/shared";
-import { AlertTriangle, Check, Trash2 } from "lucide-react";
+import { AlertTriangle, Check, Settings, Trash2 } from "lucide-react";
 import { type ReactElement, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -155,11 +155,13 @@ export function ProjectCard({
       </div>
       <Button
         type="button"
-        variant="ghost"
-        size="sm"
+        variant="secondary"
+        size="lg"
+        className="w-full"
         data-testid={`project-bind-config-${project.id}`}
         onClick={openBind}
       >
+        <Settings aria-hidden size={16} />
         {t("projects.card.configLabel")}
       </Button>
       <Dialog open={bindOpen} onOpenChange={setBindOpen}>

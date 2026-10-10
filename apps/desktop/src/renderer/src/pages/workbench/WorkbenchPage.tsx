@@ -12,15 +12,18 @@ import { collectWindowIds } from "../../../../shared/workbench/pane-tree";
 import { useCommandHandler, useShortcutScope } from "../../command";
 import { EmptyState } from "../../components/states/EmptyState";
 import { LoadingState } from "../../components/states/LoadingState";
+import { Button } from "../../components/ui/Button";
 import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
 import { useActiveProject } from "../../hooks/useActiveProject";
 import { invokeQuery, queryData } from "../../ipc/query";
 import { useInvokeQuery } from "../../ipc/useInvokeQuery";
 import { PageHeader } from "../../layout/PageHeader";
 import { useWorkbenchStore } from "../../stores/workbench";
+import { useWorkbenchCanvasStore } from "../../stores/workbench-canvas";
 import { NewWindowDialog, type NewWindowDialogResult } from "./NewWindowDialog";
 import { SplitLayout } from "./SplitLayout";
 import { TabBar } from "./TabBar";
+import { WorkbenchCanvasPanel } from "./WorkbenchCanvasPanel";
 import { WorkbenchDrawer } from "./WorkbenchDrawer";
 
 export function WorkbenchPage(): ReactElement {
@@ -274,6 +277,17 @@ export function WorkbenchPage(): ReactElement {
       <PageHeader
         title={t("nav.workbench.label")}
         description={t("workbench.cwd.project", { path: entry.rootPath })}
+        actions={
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            data-testid="open-canvas"
+            onClick={() => useWorkbenchCanvasStore.getState().openCanvas(null)}
+          >
+            {t("workbench.canvas.open")}
+          </Button>
+        }
       />
       <div className="relative flex min-h-0 flex-1 flex-col" data-testid="workbench-root">
         <TabBar
@@ -343,6 +357,7 @@ export function WorkbenchPage(): ReactElement {
           </div>
         )}
         <WorkbenchDrawer projectId={entry.id} />
+        <WorkbenchCanvasPanel projectId={entry.id} />
       </div>
       <ConfirmDialog
         open={confirmCloseTabId !== null}
