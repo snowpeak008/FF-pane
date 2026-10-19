@@ -791,6 +791,59 @@
         "override": "Using your override"
       }
     },
+    "imageGen": {
+      "title": "Image generation",
+      "introAll": "Every project and every window generates images through this setting.",
+      "introChat": "Chat windows still use Configs below. This setting does not change them.",
+      "modeLabel": "Method",
+      "loadError": "Failed to load",
+      "saveModeError": "Failed to save the image method",
+      "offHint": "Windows cannot make new images. The canvas can still show images that are already there.",
+      "mode": {
+        "off": "Don't generate yet",
+        "codex_subscription": "Codex subscription",
+        "relay": "Relay"
+      },
+      "switched": {
+        "off": "Now set to not generate images",
+        "codex_subscription": "Now using Codex subscription",
+        "relay": "Now using a relay"
+      },
+      "codex": {
+        "checking": "Checking",
+        "refresh": "Refresh",
+        "loginHint": "Log Codex in on this machine, then come back here and refresh.",
+        "noteLogin": "Uses the Codex account already logged in on this machine. No separate key.",
+        "noteCost": "Image generation counts against Codex usage, about 3 to 5 times a normal turn.",
+        "noteStripKey": "This run strips API keys from the process. If Codex sees a key, it bills the API instead of the subscription.",
+        "status": {
+          "logged_in": "Signed in",
+          "logged_out": "Not signed in",
+          "cli_missing": "Codex not found",
+          "unknown": "Could not tell"
+        }
+      },
+      "relay": {
+        "baseUrl": "Address",
+        "baseUrlPlaceholder": "The relay's image URL",
+        "apiKey": "Key",
+        "apiKeyHint": "After saving, only the last digits are shown.",
+        "apiKeySaved": "Saved, ending in {{tail}}. Leave blank to keep it.",
+        "apiKeySavedNoTail": "Saved. Leave blank to keep it.",
+        "model": "Model name",
+        "modelPlaceholder": "gpt-image-2",
+        "missingBaseUrl": "Enter an address.",
+        "invalidBaseUrl": "The address must be an http or https link.",
+        "missingApiKey": "Enter a key.",
+        "missingModel": "Enter a model name.",
+        "save": "Save",
+        "saved": "Image relay saved",
+        "saveError": "Failed to save the image relay",
+        "test": "Test (makes one test image, not added to any project)",
+        "testOk": "It works. Took {{ms}} ms.",
+        "testFailed": "The test did not succeed"
+      }
+    },
     "configs": {
       "title": "Configs",
       "subtitle": "Each project uses one config to choose the Claude, Codex, and Grok routes. Any route can be left unset.",

@@ -5,6 +5,7 @@ import { PageHeader } from "../../layout/PageHeader";
 import { AppearanceSection } from "./AppearanceSection";
 import { ConfigToolSection } from "./ConfigToolSection";
 import { ConfigsSection } from "./configs/ConfigsSection";
+import { ImageGenSection } from "./ImageGenSection";
 import { KnowledgeToolSection } from "./KnowledgeToolSection";
 import { LanguageSection } from "./LanguageSection";
 import { ProvidersSection } from "./providers/ProvidersSection";
@@ -36,6 +37,8 @@ export function SettingsPage(): ReactElement {
           <WorkbenchRoleManualsSection />
           <Separator />
           <ProvidersSection />
+          <Separator />
+          <ImageGenSection />
           <Separator />
           <ConfigsSection />
           <Separator />

@@ -69,6 +69,13 @@ import { type BrowserWindow, dialog, type OpenDialogOptions } from "electron";
 import type { InvokeHandlers } from "../shared-ipc/server";
 import { materializeProfileDraft, resetLegacyAgentConfigIfNeeded } from "./connection-mode";
 import { resolveGlobalRoot } from "./data-root";
+import {
+  type ImageGenStores,
+  readImageGenView,
+  saveImageGenRelay,
+  setImageGenMode,
+  testImageGenRelay,
+} from "./image-gen/settings";
 import { createMemoryIndexService, type MemoryIndexService } from "./memory-index";
 import { type ProjectSummarySources, summarizeProjects } from "./project-summary";
 import { resolveProbeOutlet } from "./provider-proxy";
@@ -98,6 +105,10 @@ type DataChannel =
   | "secrets:masked-tail"
   | "config:get"
   | "config:update"
+  | "image-gen:get"
+  | "image-gen:set-mode"
+  | "image-gen:save-relay"
+  | "image-gen:test-relay"
   | "workbench:get-layouts"
   | "workbench:save-layout"
   | "profiles:list"
@@ -289,6 +300,16 @@ export async function createDataHandlers(
     if (!visible) {
       throw new ProjectConfigNotVisibleError();
     }
+  };
+
+  const imageGenStores: ImageGenStores = {
+    readConfig: () => config.readConfig(),
+    updateConfig: (patch) => config.updateConfig(patch),
+    storeSecret: (plaintext) => secrets.storeSecret(plaintext),
+    revealSecret: (ref) => secrets.revealSecret(ref),
+    deleteSecret: (ref) => secrets.deleteSecret(ref),
+    hasSecret: (ref) => secrets.hasSecret(ref),
+    maskedTail: (ref) => secrets.maskedTail(ref),
   };
 
   return {
@@ -493,6 +514,14 @@ export async function createDataHandlers(
     "config:get": () => config.readConfig(),
 
     "config:update": (request) => config.updateConfig(request),
+
+    "image-gen:get": () => readImageGenView(imageGenStores),
+
+    "image-gen:set-mode": (request) => setImageGenMode(imageGenStores, request.mode),
+
+    "image-gen:save-relay": (request) => saveImageGenRelay(imageGenStores, request),
+
+    "image-gen:test-relay": (request) => testImageGenRelay(imageGenStores, request),
 
     "workbench:get-layouts": async () => {
       const all = await workbenchLayouts.readAll();

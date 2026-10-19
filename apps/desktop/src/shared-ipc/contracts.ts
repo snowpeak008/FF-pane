@@ -27,6 +27,7 @@ import type {
   HabitCategory,
   HabitEntry,
   HabitEntryId,
+  ImageGenMode,
   KnowledgeChunk,
   KnowledgeEntry,
   KnowledgeEntryId,
@@ -862,6 +863,41 @@ export interface MaskedTailRequest {
 /** config:update 请求：部分补丁（浅合并），返回合并后的完整设置。 */
 export type UpdateConfigRequest = Partial<GlobalConfig>;
 
+/**
+ * image-gen:get 的应答。
+ * 中转站地址和模型名在当前方案不是中转站时也返回，方便再选回来。
+ * 永不包含密钥明文。
+ */
+export interface ImageGenView {
+  readonly mode: ImageGenMode;
+  readonly baseUrl: string;
+  readonly model: string;
+  readonly hasKey: boolean;
+  /** 尾 4 位。没有密钥或不足 4 位时为空串。 */
+  readonly keyTail: string;
+}
+
+/** image-gen:set-mode 请求。只接受界面上的三项。 */
+export interface SetImageGenModeRequest {
+  readonly mode: ImageGenMode;
+}
+
+/**
+ * image-gen:save-relay 与 image-gen:test-relay 的请求。
+ * apiKey 只出现在这一次调用里：留空或不传表示不更换已保存的密钥。
+ * 测试用屏幕上的值，不写入设置。
+ */
+export interface ImageGenRelayRequest {
+  readonly baseUrl: string;
+  readonly model: string;
+  readonly apiKey?: string;
+}
+
+/** image-gen:test-relay 的应答。成功只有耗时，没有图片字节。 */
+export type TestImageGenRelayResponse =
+  | { readonly ok: true; readonly elapsedMs: number }
+  | { readonly ok: false; readonly reason: string };
+
 /** Profile 创建 / 更新草稿：除 id（store 生成）外的全部字段。 */
 export type ProfileDraftWire = Omit<AgentProfile, "id">;
 
@@ -1602,6 +1638,21 @@ export interface IpcInvokeContracts {
   "config:get": { request: undefined; response: GlobalConfig };
   /** 部分更新全局设置（浅合并），返回合并后的完整设置。 */
   "config:update": { request: UpdateConfigRequest; response: GlobalConfig };
+  /** 读取生图设置。缺省方案为 off。不返回密钥明文。 */
+  "image-gen:get": { request: undefined; response: ImageGenView };
+  /** 立刻保存生图方案。不删除已填写的中转站。 */
+  "image-gen:set-mode": { request: SetImageGenModeRequest; response: ImageGenView };
+  /** 保存中转站地址、模型名，以及（若填写了）新密钥。明文不进 config.json。 */
+  "image-gen:save-relay": { request: ImageGenRelayRequest; response: ImageGenView };
+  /**
+   * 用屏幕上的地址、密钥、模型名出一张测试图。
+   * 成功只返回耗时；图片字节丢掉，不写入任何项目。失败原因不含密钥。
+   * 测试不写入设置。
+   */
+  "image-gen:test-relay": {
+    request: ImageGenRelayRequest;
+    response: TestImageGenRelayResponse;
+  };
   /** 列出全部 Agent Profile（§4.4）。工作台开窗口不再读取。 */
   "profiles:list": { request: undefined; response: readonly AgentProfile[] };
   /** 列出项目配置。文件为空时先写入默认配置。 */
@@ -1815,6 +1866,10 @@ export const INVOKE_CHANNELS = [
   "secrets:masked-tail",
   "config:get",
   "config:update",
+  "image-gen:get",
+  "image-gen:set-mode",
+  "image-gen:save-relay",
+  "image-gen:test-relay",
   "profiles:list",
   "configs:list",
   "configs:create",

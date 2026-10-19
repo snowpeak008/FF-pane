@@ -791,6 +791,59 @@
         "override": "正在使用你的覆盖副本"
       }
     },
+    "imageGen": {
+      "title": "生图",
+      "introAll": "所有项目、所有窗口出图都走这里。",
+      "introChat": "聊天窗口仍用下面的「配置」，不受这项影响。",
+      "modeLabel": "方案",
+      "loadError": "读取失败",
+      "saveModeError": "保存生图方案失败",
+      "offHint": "窗口不能出新图，画板仍可看已有的图。",
+      "mode": {
+        "off": "先不生图",
+        "codex_subscription": "Codex 订阅",
+        "relay": "中转站"
+      },
+      "switched": {
+        "off": "已改用先不生图",
+        "codex_subscription": "已改用 Codex 订阅",
+        "relay": "已改用中转站"
+      },
+      "codex": {
+        "checking": "正在检查",
+        "refresh": "刷新",
+        "loginHint": "先在本机把 Codex 登录好，再回到这里点刷新。",
+        "noteLogin": "用本机已经登录的 Codex 出图，不另填密钥。",
+        "noteCost": "出图会计入 Codex 用量，大约是普通一轮的 3 到 5 倍。",
+        "noteStripKey": "这一次出图会拿掉进程里的 API 密钥。Codex 看到密钥会改走 API 计费，订阅就用不上了。",
+        "status": {
+          "logged_in": "已登录",
+          "logged_out": "未登录",
+          "cli_missing": "未找到 Codex",
+          "unknown": "查不清"
+        }
+      },
+      "relay": {
+        "baseUrl": "地址",
+        "baseUrlPlaceholder": "中转站的生图地址",
+        "apiKey": "密钥",
+        "apiKeyHint": "保存后只显示尾号。",
+        "apiKeySaved": "已保存，尾号 {{tail}}。留空表示不改。",
+        "apiKeySavedNoTail": "已保存。留空表示不改。",
+        "model": "模型名",
+        "modelPlaceholder": "gpt-image-2",
+        "missingBaseUrl": "请填写地址",
+        "invalidBaseUrl": "地址要写成 http 或 https 链接",
+        "missingApiKey": "请填写密钥",
+        "missingModel": "请填写模型名",
+        "save": "保存",
+        "saved": "生图中转站已保存",
+        "saveError": "保存生图中转站失败",
+        "test": "测试（会出一张测试图，不放进任何项目）",
+        "testOk": "通了，耗时 {{ms}} 毫秒",
+        "testFailed": "测试没有成功"
+      }
+    },
     "configs": {
       "title": "配置",
       "subtitle": "每个项目用一张配置决定 Claude、Codex 和 Grok 各走哪条路。可以只配一路。",

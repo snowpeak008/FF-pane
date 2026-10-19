@@ -6,6 +6,7 @@
  */
 
 import { DEFAULT_CONTEXT_WARN_PERCENT } from "./context-window.js";
+import type { ImageGenSettings } from "./image-gen.js";
 import type { AiOutputLanguage, AiOutputLanguageSetting } from "./language.js";
 import type { PermissionEnvelope } from "./permission.js";
 import { DEFAULT_MAX_WORKBENCH_WINDOWS } from "./workbench.js";
@@ -69,6 +70,11 @@ export interface GlobalConfig {
    * 出厂默认 DEFAULT_WORKBENCH_WINDOW_PERMISSION（edit）。
    */
   readonly defaultWorkbenchPermission: WorkbenchPermissionLevel;
+  /**
+   * 生图。所有项目、所有窗口共用。缺省 = 先不生图。
+   * 只含方案和中转站的地址、模型名、密钥引用，不含密钥明文。
+   */
+  readonly imageGen?: ImageGenSettings;
 }
 
 /** AI 输出语言的出厂默认（产品中文优先）。 */
@@ -138,7 +144,10 @@ export const DEFAULT_PERMISSION_PRESET: PermissionEnvelope = {
   dangerousOpsRequireApproval: true,
 };
 
-/** 出厂默认全局设置（config.json 不存在时的回退值）。 */
+/**
+ * 出厂默认全局设置（config.json 不存在时的回退值）。
+ * 不含 imageGen：缺这个字段就是先不生图。中转站只在用户保存后出现。
+ */
 export const DEFAULT_GLOBAL_CONFIG: GlobalConfig = {
   aiOutputLanguage: DEFAULT_AI_OUTPUT_LANGUAGE,
   defaultPermissionPreset: DEFAULT_PERMISSION_PRESET,

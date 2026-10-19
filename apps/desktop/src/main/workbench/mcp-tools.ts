@@ -136,6 +136,18 @@ export interface WorkbenchToolDeps {
       }
     | { readonly ok: false; readonly error: string }
   >;
+  readonly generateImage: (input: {
+    readonly projectId: string;
+    readonly projectRoot: string;
+    readonly openerTitle: string;
+    readonly prompt: string;
+    readonly sourceImagePath?: string;
+    readonly rowId?: string;
+    readonly asNewVersion?: boolean;
+  }) => Promise<
+    | { readonly ok: true; readonly relativePath: string }
+    | { readonly ok: false; readonly error: string }
+  >;
   readonly deleteCanvasFile: (
     projectRoot: string,
     imagePath: string,
@@ -290,6 +302,8 @@ export async function executeWorkbenchTool(
       return openPanel(caller, args, deps);
     case "ffpane_open_canvas":
       return openCanvas(caller, args, deps);
+    case "ffpane_generate_image":
+      return generateImage(caller, args, deps);
     case "ffpane_delete_canvas_file":
       return deleteCanvasFileTool(caller, args, deps);
     case "ffpane_memory_search":
@@ -776,6 +790,42 @@ async function openCanvas(
     path: result.relativePath,
     ...(result.revision !== undefined ? { revision: result.revision } : {}),
   });
+}
+
+async function generateImage(
+  caller: ToolWindowView,
+  args: Readonly<Record<string, unknown>>,
+  deps: WorkbenchToolDeps,
+): Promise<ToolTextResult> {
+  const prompt = args["prompt"];
+  if (typeof prompt !== "string" || prompt.trim() === "") {
+    return fail("ffpane_generate_image 需要 prompt（要画的画面）。");
+  }
+  const sourceImagePath = args["sourceImagePath"];
+  const rowId = args["rowId"];
+  const asNewVersion = args["asNewVersion"] === true;
+  let result:
+    | { readonly ok: true; readonly relativePath: string }
+    | { readonly ok: false; readonly error: string };
+  try {
+    result = await deps.generateImage({
+      projectId: caller.projectId,
+      projectRoot: caller.projectRoot,
+      openerTitle: caller.title,
+      prompt: prompt.trim(),
+      ...(typeof sourceImagePath === "string" && sourceImagePath.trim() !== ""
+        ? { sourceImagePath: sourceImagePath.trim() }
+        : {}),
+      ...(typeof rowId === "string" && rowId.trim() !== "" ? { rowId: rowId.trim() } : {}),
+      ...(asNewVersion ? { asNewVersion: true } : {}),
+    });
+  } catch {
+    return fail("出图失败。");
+  }
+  if (!result.ok) {
+    return fail(result.error);
+  }
+  return ok({ ok: true, path: result.relativePath });
 }
 
 async function deleteCanvasFileTool(

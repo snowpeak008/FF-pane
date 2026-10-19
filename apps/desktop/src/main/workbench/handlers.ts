@@ -36,6 +36,7 @@ import { app, type BrowserWindow, shell } from "electron";
 import type { InvokeHandlers } from "../../shared-ipc/server";
 import { publishEvent } from "../../shared-ipc/server";
 import { resolveGlobalRoot } from "../data-root";
+import { generateProjectImage } from "../image-gen/generate";
 import { createMemoryIndexService, type MemoryIndexService } from "../memory-index";
 import { createSafeStorageBackend, createSecretStore, resolveSecretsFile } from "../secrets";
 import { type ConfigDraftHub, createConfigDraftHub } from "../session/config-draft-hub";
@@ -1069,6 +1070,27 @@ export async function createWorkbenchCliLayer(
     },
   };
 
+  const publishCanvasOpened = (
+    projectId: string,
+    openerTitle: string,
+    focusPath: string,
+    projectRoot: string,
+  ): void => {
+    ensureCanvasWatcher(projectRoot);
+    const browser = options.getWindow();
+    if (browser === null || browser.isDestroyed()) {
+      return;
+    }
+    publishEvent(browser.webContents, "workbench:open-canvas", {
+      projectId: projectId as ProjectId,
+      openerTitle,
+      focusPath,
+    });
+    publishEvent(browser.webContents, "workbench:canvas-changed", {
+      projectId: projectId as ProjectId,
+    });
+  };
+
   const projectRootOf = async (projectId: string): Promise<string> => {
     const listed = await projects.listProjects();
     const project = listed.find((item) => item.id === projectId);
@@ -1383,23 +1405,51 @@ export async function createWorkbenchCliLayer(
           return placed;
         }
         const revision = await describeCanvasRevision(input.projectRoot, placed.relativePath);
-        ensureCanvasWatcher(input.projectRoot);
-        const browser = options.getWindow();
-        if (browser !== null && !browser.isDestroyed()) {
-          publishEvent(browser.webContents, "workbench:open-canvas", {
-            projectId: input.projectId as ProjectId,
-            openerTitle: input.openerTitle,
-            focusPath: placed.relativePath,
-          });
-          publishEvent(browser.webContents, "workbench:canvas-changed", {
-            projectId: input.projectId as ProjectId,
-          });
-        }
+        publishCanvasOpened(
+          input.projectId,
+          input.openerTitle,
+          placed.relativePath,
+          input.projectRoot,
+        );
         return {
           ok: true as const,
           relativePath: placed.relativePath,
           ...(revision !== undefined ? { revision } : {}),
         };
+      },
+      generateImage: async (input) => {
+        const outcome = await generateProjectImage(
+          {
+            projectRoot: input.projectRoot,
+            prompt: input.prompt,
+            ...(input.sourceImagePath !== undefined
+              ? { sourceImagePath: input.sourceImagePath }
+              : {}),
+            ...(input.rowId !== undefined ? { rowId: input.rowId } : {}),
+            ...(input.asNewVersion === true ? { asNewVersion: true } : {}),
+          },
+          {
+            stores: {
+              readConfig: () => config.readConfig(),
+              updateConfig: (patch) => config.updateConfig(patch),
+              storeSecret: (plaintext) => secrets.storeSecret(plaintext),
+              revealSecret: (ref) => secrets.revealSecret(ref),
+              deleteSecret: (ref) => secrets.deleteSecret(ref),
+              hasSecret: (ref) => secrets.hasSecret(ref),
+              maskedTail: (ref) => secrets.maskedTail(ref),
+            },
+          },
+        );
+        if (!outcome.ok) {
+          return outcome;
+        }
+        publishCanvasOpened(
+          input.projectId,
+          input.openerTitle,
+          outcome.relativePath,
+          input.projectRoot,
+        );
+        return outcome;
       },
       deleteCanvasFile: async (projectRoot, imagePath) =>
         deleteCanvasImageFile(projectRoot, imagePath),

@@ -23,6 +23,7 @@ export const WORKBENCH_MCP_TOOL_NAMES = [
   "ffpane_close_window",
   "ffpane_open_panel",
   "ffpane_open_canvas",
+  "ffpane_generate_image",
   "ffpane_delete_canvas_file",
   "ffpane_memory_search",
   "ffpane_memory_add",
@@ -262,6 +263,31 @@ export const WORKBENCH_MCP_TOOLS: readonly McpToolDefinition[] = [
         },
       },
       required: ["imagePath"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "ffpane_generate_image",
+    description:
+      "按设置里的生图方案出一张新图，或按原图改一张。任何窗口都可调用。图写入当前项目的 .ffpane/canvas/ 并打开画板。不要自己另找生图办法。sourceImagePath 可选，有则改这张已有的图，路径必须在该项目 .ffpane/canvas/ 内，且不能是 revisions 里的派生文件。有原图并且传了 rowId 与 asNewVersion 时，新图挂到那一行；否则新开一行。设置若是先不生图，会失败。失败只返回原因，不往别的窗口写正文。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        prompt: { type: "string", description: "用户要的画面。" },
+        sourceImagePath: {
+          type: "string",
+          description: "可选。要修改的原图，必须在 .ffpane/canvas/ 内。",
+        },
+        rowId: {
+          type: "string",
+          description: "可选。有原图时配合 asNewVersion，把新图挂到这一行。",
+        },
+        asNewVersion: {
+          type: "boolean",
+          description: "为 true 且同时有原图和 rowId 时，在该行追加新版本。",
+        },
+      },
+      required: ["prompt"],
       additionalProperties: false,
     },
   },

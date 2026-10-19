@@ -12,6 +12,7 @@ export * from "./compact-percent.js";
 export * from "./config.js";
 export * from "./context-window.js";
 export * from "./handoff.js";
+export * from "./image-gen.js";
 export * from "./knowledge.js";
 export * from "./language.js";
 export * from "./memory.js";

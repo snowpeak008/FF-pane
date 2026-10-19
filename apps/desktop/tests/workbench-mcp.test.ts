@@ -169,6 +169,7 @@ function harness(
       panels.push({ panel, title });
     },
     openCanvas: async () => ({ ok: true as const, relativePath: ".ffpane/canvas/a.png" }),
+    generateImage: async () => ({ ok: false as const, error: "测试里不生图。" }),
     deleteCanvasFile: async () => ({ ok: true as const }),
     searchProjectMemory: async () => [],
     addProjectMemory: async () => undefined,
@@ -298,6 +299,7 @@ describe("工具授权", () => {
     expect(byName.get("ffpane_close_window")).toContain("父级已关闭");
     expect(byName.get("ffpane_open_canvas")).toContain("revision");
     expect(byName.get("ffpane_open_canvas")).toContain("markedImage");
+    expect(byName.get("ffpane_generate_image")).toContain("任何窗口");
     expect(byName.get("ffpane_open_panel")).toContain("plan");
     expect(byName.get("ffpane_open_panel")).toContain("tasks");
     expect(byName.get("ffpane_open_panel")).toContain("runs");
@@ -338,6 +340,27 @@ describe("工具授权", () => {
     expect(result.isError).toBe(false);
     expect(result.text).toContain("太阳再大");
     expect(result.text).toContain("a.png.marked.png");
+  });
+
+  it("任何窗口都能生图，且不往别的窗口写正文", async () => {
+    const { deps, reminders } = harness(tempDir());
+    const seen: string[] = [];
+    const watched: WorkbenchToolDeps = {
+      ...deps,
+      generateImage: async (input) => {
+        seen.push(`${input.openerTitle}:${input.prompt}`);
+        return { ok: true, relativePath: ".ffpane/canvas/gen.png" };
+      },
+    };
+    const result = await call(watched, "B", "ffpane_generate_image", { prompt: "一只猫" });
+    expect(result.isError).toBe(false);
+    expect(result.text).toContain(".ffpane/canvas/gen.png");
+    expect(seen).toEqual(["子:一只猫"]);
+    expect(reminders).toEqual([]);
+    const missing = await call(watched, "E", "ffpane_generate_image", {});
+    expect(missing.isError).toBe(true);
+    expect(missing.text).toContain("prompt");
+    expect(reminders).toEqual([]);
   });
 });
 

@@ -7,7 +7,7 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DEFAULT_GLOBAL_CONFIG } from "@ff-pane/shared";
+import { type ApiKeyRef, DEFAULT_GLOBAL_CONFIG } from "@ff-pane/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   CONFIG_FILE_VERSION,
@@ -90,5 +90,84 @@ describe("ConfigStore", () => {
   it("顶层非对象：抛 ConfigFileInvalidError", async () => {
     await writeTextAtomic(configFile, JSON.stringify([1, 2, 3]));
     await expect(store.readConfig()).rejects.toThrow(ConfigFileInvalidError);
+  });
+
+  it("缺省没有生图设置，等于先不生图", async () => {
+    expect((await store.readConfig()).imageGen).toBeUndefined();
+    expect(DEFAULT_GLOBAL_CONFIG.imageGen).toBeUndefined();
+  });
+
+  it("只改生图方案时留下中转站的地址、模型和密钥引用", async () => {
+    await store.updateConfig({
+      imageGen: {
+        mode: "relay",
+        relay: {
+          baseUrl: "https://relay.example/v1",
+          model: "gpt-image-2",
+          apiKeyRef: "key-kept" as ApiKeyRef,
+        },
+      },
+    });
+    const off = await store.updateConfig({ imageGen: { mode: "off" } });
+    expect(off.imageGen?.mode).toBe("off");
+    expect(off.imageGen?.relay).toEqual({
+      baseUrl: "https://relay.example/v1",
+      model: "gpt-image-2",
+      apiKeyRef: "key-kept",
+    });
+    const back = await store.updateConfig({ imageGen: { mode: "relay" } });
+    expect(back.imageGen?.mode).toBe("relay");
+    expect(back.imageGen?.relay?.apiKeyRef).toBe("key-kept");
+  });
+
+  it("生图补丁里的明文密钥不进 config.json", async () => {
+    const secret = "sk-test-image-key-should-not-leak";
+    const dirty = {
+      mode: "relay",
+      apiKey: secret,
+      relay: {
+        baseUrl: "https://relay.example/v1",
+        model: "gpt-image-2",
+        apiKeyRef: "key-kept",
+        apiKey: secret,
+      },
+    };
+    await store.updateConfig({ imageGen: dirty as never });
+    const raw = await readFile(configFile, "utf8");
+    expect(raw).not.toContain(secret);
+    const parsed = JSON.parse(raw) as {
+      config: { imageGen: { apiKey?: unknown; relay: { apiKey?: unknown; apiKeyRef: string } } };
+    };
+    expect(parsed.config.imageGen.apiKey).toBeUndefined();
+    expect(parsed.config.imageGen.relay.apiKey).toBeUndefined();
+    expect(parsed.config.imageGen.relay.apiKeyRef).toBe("key-kept");
+  });
+
+  it("读到混进明文的生图设置时写回洗净结果", async () => {
+    const secret = "sk-test-image-key-should-not-leak";
+    await writeTextAtomic(
+      configFile,
+      JSON.stringify({
+        version: CONFIG_FILE_VERSION,
+        config: {
+          imageGen: {
+            mode: "codex_subscription",
+            apiKey: secret,
+            relay: {
+              baseUrl: "https://relay.example/v1",
+              model: "gpt-image-2",
+              apiKeyRef: "key-kept",
+              apiKey: secret,
+            },
+          },
+        },
+      }),
+    );
+    const loaded = await store.readConfig();
+    expect(loaded.imageGen?.mode).toBe("codex_subscription");
+    expect(loaded.imageGen?.relay?.model).toBe("gpt-image-2");
+    expect(JSON.stringify(loaded.imageGen)).not.toContain(secret);
+    const raw = await readFile(configFile, "utf8");
+    expect(raw).not.toContain(secret);
   });
 });

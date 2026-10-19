@@ -61,4 +61,15 @@ describe("IPC 通道契约", () => {
   it("T9.4b 推理强度档通道已登记到运行时清单", () => {
     expect(INVOKE_CHANNELS).toContain("runtimes:reasoning-effort-levels");
   });
+
+  it("生图设置通道已登记到运行时清单", () => {
+    for (const channel of [
+      "image-gen:get",
+      "image-gen:set-mode",
+      "image-gen:save-relay",
+      "image-gen:test-relay",
+    ]) {
+      expect(INVOKE_CHANNELS, `缺通道：${channel}`).toContain(channel);
+    }
+  });
 });
