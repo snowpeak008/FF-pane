@@ -33,8 +33,12 @@ export const CLAUDE_FILE_TOOLS: readonly string[] = [
   "MultiEdit",
 ];
 
-/** 命令类工具：其 tool_result 映射为 command。 */
-export const CLAUDE_COMMAND_TOOLS: readonly string[] = ["Bash"];
+/**
+ * 命令类工具：其 tool_result 映射为 command。
+ * Windows 上 Claude 2.1.302 的命令工具是 PowerShell（init.tools 实测没有 Bash），入参同样是 command。
+ * 漏掉它，PowerShell 的权限请求就不会按 shell 命令做风险判断。
+ */
+export const CLAUDE_COMMAND_TOOLS: readonly string[] = ["Bash", "PowerShell"];
 
 /** 只读类工具：权限请求映射为 read_path。 */
 export const CLAUDE_READ_TOOLS: readonly string[] = ["Read", "Glob", "Grep"];

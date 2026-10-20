@@ -12,6 +12,7 @@ import { randomUUID } from "node:crypto";
 import process from "node:process";
 import {
   assignProcessToNewJob,
+  jobObjectUnavailableReason,
   killProcessTree,
   type ProcessJob,
   resolveSpawnTarget,
@@ -36,6 +37,14 @@ import { DEFAULT_OUTPUT_BUFFER_BYTES, DEFAULT_OUTPUT_FLUSH_MS } from "./types";
 /** 自然退出后保留的已退出会话上限（含环形缓冲）；超出淘汰最旧。 */
 export const MAX_EXITED_SESSIONS = 8;
 
+/**
+ * Windows 上 @lydell/node-pty 刚 spawn 时 pid 是 0，要等 conpty 管道连上（约 100ms）才有真实值。
+ * 拿 0 去建 Job 必然失败，进程树就没圈禁（2026-10-20 实测）。正常走工厂的 onPid 同步圈禁；
+ * 工厂做不到时才退回轮询，pid 还是 0 就隔一会儿再试，最多等这么久。
+ */
+export const JOB_PID_RETRY_MS = 20;
+export const JOB_PID_WAIT_MAX_MS = 5000;
+
 interface Session {
   readonly id: string;
   readonly handle: PtyHandle;
@@ -44,7 +53,8 @@ interface Session {
   readonly createdAt: number;
   readonly buffer: ByteRingBuffer;
   readonly metadata: Readonly<Record<string, unknown>> | undefined;
-  readonly job: ProcessJob | undefined;
+  /** 进程号到手后才放进 Job，所以可能晚于创建。 */
+  job: ProcessJob | undefined;
   cols: number;
   rows: number;
   lastOutputAt: number;
@@ -139,7 +149,6 @@ export class PtyManager {
     });
 
     const createdAt = this.now();
-    const job = this.assignJob(handle.pid);
     const session: Session = {
       id,
       handle,
@@ -148,7 +157,7 @@ export class PtyManager {
       createdAt,
       buffer: new ByteRingBuffer(this.outputBufferBytes),
       metadata: options.metadata,
-      job,
+      job: undefined,
       cols,
       rows,
       lastOutputAt: createdAt,
@@ -158,6 +167,18 @@ export class PtyManager {
       pendingOutput: "",
     };
     this.sessions.set(id, session);
+    const notified =
+      handle.onPid?.((pid) => {
+        this.assignSession(session, pid);
+      }) ?? false;
+    if (!notified) {
+      if (process.platform === "win32" && handle.pid === 0) {
+        console.error(
+          "[terminal] pty gives no synchronous pid; waiting for it, early children may escape the job",
+        );
+      }
+      this.containSession(session, 0);
+    }
 
     handle.onData((data) => {
       if (session.exited) {
@@ -174,6 +195,37 @@ export class PtyManager {
     });
 
     return toRecord(session);
+  }
+
+  private assignSession(session: Session, pid: number): void {
+    if (session.exited || session.job !== undefined) {
+      return;
+    }
+    session.job = this.assignJob(pid);
+    const reason = session.job === undefined ? jobObjectUnavailableReason() : null;
+    if (reason !== null) {
+      // 没圈禁时关窗只能按父子关系结束，后台脱离出去的进程会留下。留个记录方便查。
+      console.error(`[terminal] job object unavailable for pid ${pid}: ${reason}`);
+    }
+  }
+
+  /** 工厂给不了同步 pid 时的退路：等 pid 到手再圈禁。会话已退出或已圈禁就停。 */
+  private containSession(session: Session, waitedMs: number): void {
+    if (session.exited || session.job !== undefined) {
+      return;
+    }
+    const pid = session.handle.pid;
+    if (pid > 0) {
+      this.assignSession(session, pid);
+      return;
+    }
+    if (waitedMs >= JOB_PID_WAIT_MAX_MS) {
+      console.error(`[terminal] pid still 0 after ${waitedMs}ms; process tree not contained`);
+      return;
+    }
+    setTimeout(() => {
+      this.containSession(session, waitedMs + JOB_PID_RETRY_MS);
+    }, JOB_PID_RETRY_MS);
   }
 
   write(id: string, data: string): void {
@@ -243,6 +295,17 @@ export class PtyManager {
     return session === undefined ? undefined : toRecord(session);
   }
 
+  /** 窗口进程组里现在有几个进程、合计占多少内存。没圈禁或查不到返回 undefined。 */
+  getStats(
+    id: string,
+  ): { readonly processCount: number; readonly workingSetBytes: number } | undefined {
+    const session = this.sessions.get(id);
+    if (session === undefined || session.exited) {
+      return undefined;
+    }
+    return session.job?.stats();
+  }
+
   /** 取回放缓冲。已退出但仍在 Map 内的会话可读；kill 删除后抛 unknown。 */
   getReplayBuffer(id: string): string {
     const session = this.requireSession(id);
@@ -305,13 +368,13 @@ export class PtyManager {
       void this.killTree(session.handle.pid);
     }
     // 主动 kill 时 exitCode 固定为 1（真实码可能随后到，但会话已删，忽略）
-    this.handleExit(session, 1, options);
+    this.handleExit(session, 1, { ...options, killed: true });
   }
 
   private handleExit(
     session: Session,
     exitCode: number,
-    options: { readonly remove: boolean },
+    options: { readonly remove: boolean; readonly killed?: boolean },
   ): void {
     if (session.exited) {
       if (options.remove) {
@@ -331,6 +394,7 @@ export class PtyManager {
       id: session.id,
       exitCode,
       ...(session.metadata !== undefined ? { metadata: session.metadata } : {}),
+      ...(options.killed === true ? { killed: true as const } : {}),
     });
     if (options.remove) {
       this.sessions.delete(session.id);
@@ -413,6 +477,7 @@ function toRecord(session: Session): TerminalRecord {
     exited: session.exited,
     exitCode: session.exitCode,
     metadata: session.metadata,
+    contained: session.job !== undefined,
   };
 }
 

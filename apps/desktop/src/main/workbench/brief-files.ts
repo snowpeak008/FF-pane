@@ -1,6 +1,7 @@
 /**
  * 任务说明落盘（T10.7a）：只写 `<项目根>/.ffpane/briefs/`。
- * 拒绝穿越、绝对路径、设备名和符号链接逃逸。重名加序号，不覆盖。
+ * 拒绝穿越、绝对路径、设备名和符号链接逃逸。
+ * 缺省重名加序号；mode=overwrite 同名覆盖，mode=append 追加到同名文件末尾。
  */
 
 import { lstat, mkdir, open, realpath } from "node:fs/promises";
@@ -8,6 +9,12 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { hasControlChar } from "./remind";
 
 export const BRIEF_MAX_BYTES = 256 * 1024;
+export const BRIEF_WRITE_MODES = ["new", "overwrite", "append"] as const;
+export type BriefWriteMode = (typeof BRIEF_WRITE_MODES)[number];
+
+export function isBriefWriteMode(value: unknown): value is BriefWriteMode {
+  return typeof value === "string" && (BRIEF_WRITE_MODES as readonly string[]).includes(value);
+}
 export const BRIEFS_DIR_NAME = ".ffpane";
 
 const DEVICE_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
@@ -81,6 +88,8 @@ export async function writeBriefFile(input: {
   readonly projectRoot: string;
   readonly name: string;
   readonly content: string;
+  /** 缺省 new。 */
+  readonly mode?: BriefWriteMode;
 }): Promise<
   | { readonly ok: true; readonly relativePath: string; readonly absolutePath: string }
   | { readonly ok: false; readonly error: string }
@@ -102,6 +111,9 @@ export async function writeBriefFile(input: {
     return { ok: false, error: "briefs 目录经符号链接指向了项目之外，已拒绝写入。" };
   }
   const realDir = await realpath(dir);
+  if (input.mode === "overwrite" || input.mode === "append") {
+    return writeSameName(realDir, named.fileName, input.content, input.mode);
+  }
   for (let n = 1; n <= 100; n += 1) {
     const fileName = withSuffix(named.fileName, n);
     if (isDevice(fileName)) {
@@ -141,6 +153,45 @@ export async function writeBriefFile(input: {
     };
   }
   return { ok: false, error: "briefs 目录里同名文件过多，无法分配新文件名。" };
+}
+
+async function writeSameName(
+  realDir: string,
+  fileName: string,
+  content: string,
+  mode: "overwrite" | "append",
+): Promise<
+  | { readonly ok: true; readonly relativePath: string; readonly absolutePath: string }
+  | { readonly ok: false; readonly error: string }
+> {
+  const full = join(realDir, fileName);
+  let existingBytes = 0;
+  try {
+    const st = await lstat(full);
+    if (st.isSymbolicLink() || !st.isFile()) {
+      return { ok: false, error: "同名路径不是 briefs 目录里的普通文件，已拒绝写入。" };
+    }
+    existingBytes = st.size;
+  } catch {
+    existingBytes = 0;
+  }
+  if (mode === "append" && existingBytes + Buffer.byteLength(content, "utf8") > BRIEF_MAX_BYTES) {
+    return { ok: false, error: "追加后超过 256KB。请另起一份说明。" };
+  }
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    handle = await open(full, mode === "append" ? "a" : "w");
+    await handle.writeFile(content, "utf8");
+  } catch {
+    return { ok: false, error: "写入说明失败。" };
+  } finally {
+    await handle?.close();
+  }
+  if (!(await assertRealInside(realDir, full))) {
+    return { ok: false, error: "写入结果越过了 briefs 目录，已拒绝。" };
+  }
+  const absolutePath = await realpath(full);
+  return { ok: true, relativePath: `.ffpane/briefs/${fileName}`, absolutePath };
 }
 
 /**

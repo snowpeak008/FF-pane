@@ -29,6 +29,12 @@ export interface PtyHandle {
   kill(): void;
   onData(listener: (data: string) => void): void;
   onExit(listener: (event: PtyExitEvent) => void): void;
+  /**
+   * 进程一创建出来就同步回调真实 pid（还没轮到它执行任何代码）。
+   * 在回调里放进 Job，它和它以后起的所有进程都在 Job 里，没有竞态。
+   * 返回 false 表示做不到同步通知，调用方自己等 pid。
+   */
+  onPid?(listener: (pid: number) => void): boolean;
 }
 
 export type PtyFactory = (options: PtyFactoryOptions) => PtyHandle;
@@ -75,6 +81,8 @@ export interface TerminalRecord {
   readonly exited: boolean;
   readonly exitCode: number | undefined;
   readonly metadata: Readonly<Record<string, unknown>> | undefined;
+  /** 进程树已放进 Job Object：关闭时连脱离父子关系的后台进程一起结束。 */
+  readonly contained: boolean;
 }
 
 export interface TerminalOutputBatch {
@@ -86,6 +94,8 @@ export interface TerminalExitNotice {
   readonly id: string;
   readonly exitCode: number;
   readonly metadata?: Readonly<Record<string, unknown>>;
+  /** 本软件主动结束（关窗、重启、清场）。缺省表示进程自己退出。 */
+  readonly killed?: true;
 }
 
 export interface PtyManagerListeners {

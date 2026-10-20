@@ -26,9 +26,11 @@ import { invokeQuery } from "../../ipc/query";
 import { useSubscription } from "../../ipc/useSubscription";
 import { cn } from "../../lib/cn";
 import { flushWorkbenchLayouts, useWorkbenchStore } from "../../stores/workbench";
+import { useWorkbenchRuntimeStore } from "../../stores/workbench-runtime";
 import { type ConversationLaunchPlan, planConversationLaunch } from "./conversation-launch";
 import { needsSensitiveLaunchConfirm, rememberSensitiveLaunchConfirm } from "./sensitive-launch";
 import { TerminalView } from "./TerminalView";
+import { RuntimeBadges } from "./WorkbenchRuntimeBar";
 
 export interface WindowPaneProps {
   readonly window: WorkbenchWindow;
@@ -81,6 +83,7 @@ export function WindowPane({
   const takeInitialPrompt = useWorkbenchStore((s) => s.takeInitialPrompt);
   const getProjectLayout = useWorkbenchStore((s) => s.getProjectLayout);
   const inbox = useWorkbenchStore((s) => s.inboxByWindow[window.id]);
+  const runtime = useWorkbenchRuntimeStore((s) => s.windows[window.id]);
 
   const isCli = isAiWorkbenchKind(window.kind);
   const permission = window.permission ?? DEFAULT_WORKBENCH_WINDOW_PERMISSION;
@@ -234,6 +237,9 @@ export function WindowPane({
     if (payload.windowId !== window.id) {
       return;
     }
+    if (payload.permission !== undefined && payload.permission !== window.permission) {
+      setWindowPermission(window.projectId, window.id, payload.permission);
+    }
     if (payload.modelOverride !== undefined || payload.effortOverride !== undefined) {
       patchWindow(window.projectId, window.id, {
         ...(payload.modelOverride !== undefined ? { modelOverride: payload.modelOverride } : {}),
@@ -372,6 +378,7 @@ export function WindowPane({
                 )}
               </span>
             ) : null}
+            {runtime !== undefined ? <RuntimeBadges status={runtime} /> : null}
             {isCli ? (
               <span className="ml-1 font-normal text-fg-muted" data-testid="workbench-window-route">
                 ·{" "}

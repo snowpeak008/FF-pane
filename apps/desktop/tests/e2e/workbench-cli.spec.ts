@@ -24,25 +24,16 @@ function writeFakeCli(dir: string, name: "claude" | "codex", envKey: string): vo
       `const key = ${JSON.stringify(envKey)};`,
       "process.stdout.write(tag + '_ENV_' + key + '=' + (process.env[key] ? 'present' : 'absent') + '\\n');",
       "process.stdout.write(tag + '_ENV_FF_PANE_WINDOW_TOKEN=' + (process.env.FF_PANE_WINDOW_TOKEN ? 'present' : 'absent') + '\\n');",
-      "if (tag === 'FAKE_CODEX' && process.env.CODEX_HOME) {",
-      "  const found = argv.join('\\n').match(/ffpane-claim:([0-9a-f-]{36})/i);",
-      "  if (found) {",
-      "    const fs = require('node:fs');",
-      "    const path = require('node:path');",
-      "    const id = found[1];",
-      "    const now = new Date();",
-      "    const y = String(now.getFullYear()).padStart(4, '0');",
-      "    const m = String(now.getMonth() + 1).padStart(2, '0');",
-      "    const d = String(now.getDate()).padStart(2, '0');",
-      "    const dir = path.join(process.env.CODEX_HOME, 'sessions', y, m, d);",
-      "    fs.mkdirSync(dir, { recursive: true });",
-      "    const cFlag = argv.indexOf('-C');",
-      "    const cwd = cFlag >= 0 && argv[cFlag + 1] ? argv[cFlag + 1] : process.cwd();",
-      "    const iso = now.toISOString();",
-      "    const meta = JSON.stringify({ type: 'session_meta', payload: { id, cwd, timestamp: iso } });",
-      "    const mark = JSON.stringify({ type: 'response_item', text: 'ffpane-claim:' + id });",
-      "    const file = path.join(dir, 'rollout-' + iso.replace(/[:.]/g, '-') + '-' + id + '.jsonl');",
-      "    fs.writeFileSync(file, meta + '\\n' + mark + '\\n');",
+      // 和真 Codex 一样：做完一轮后调用 notify，事件 JSON 里带 thread-id（会话编号）。
+      "if (tag === 'FAKE_CODEX') {",
+      "  const at = argv.findIndex((a) => a.startsWith('notify=['));",
+      "  if (at >= 0) {",
+      "    const notify = JSON.parse(argv[at].slice('notify='.length));",
+      "    const hex = Date.now().toString(16).padStart(12, '0');",
+      "    const rand = require('node:crypto').randomBytes(10).toString('hex');",
+      "    const id = hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-7' + rand.slice(0, 3) + '-8' + rand.slice(3, 6) + '-' + rand.slice(6, 18);",
+      "    const payload = JSON.stringify({ type: 'agent-turn-complete', 'thread-id': id, 'turn-id': id });",
+      "    require('node:child_process').spawnSync(notify[0], [...notify.slice(1), payload], { stdio: 'ignore' });",
       "  }",
       "}",
       "process.exit(0);",
@@ -465,7 +456,7 @@ test("Codex 窗口至少能启动并打印 argv", async () => {
   }
 });
 
-test("Codex 按记号认领会话，续接 argv 为 resume <id>", async () => {
+test("Codex 由 notify 报出会话编号，续接 argv 为 resume <id>", async () => {
   const fakeBinDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-wbclaim-"));
   const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-wbclaim-proj-"));
   const codexHome = mkdtempSync(join(tmpdir(), "ffpane-e2e-wbclaim-codex-"));

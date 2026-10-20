@@ -531,6 +531,21 @@
     },
     "limit": {
       "reached": "已达到同时运行窗口上限（{{max}}）。请先关闭一些窗口，或在设置中提高上限。"
+    },
+    "runtime": {
+      "idle": "空闲",
+      "busy": "忙",
+      "blocked": "等批准",
+      "unknown": "状态未知",
+      "quiet": "{{minutes}} 分钟无输出",
+      "holding": "持锁 {{names}}",
+      "waiting": "等锁 {{names}}",
+      "apiError": "上次出错：{{reason}}",
+      "resources": "可用内存 {{memory}} GB · 磁盘 {{disk}}",
+      "disk": "{{root}} {{free}} GB",
+      "low": "资源偏低，开新窗口会被拒绝",
+      "sep": "、",
+      "memory": "{{memory}} GB · {{count}} 个进程"
     }
   },
   "projects": {
@@ -841,7 +856,8 @@
         "saveError": "保存生图中转站失败",
         "test": "测试（会出一张测试图，不放进任何项目）",
         "testOk": "通了，耗时 {{ms}} 毫秒",
-        "testFailed": "测试没有成功"
+        "testFailed": "测试没有成功",
+        "keyMasked": "【已脱敏：API key】"
       }
     },
     "configs": {

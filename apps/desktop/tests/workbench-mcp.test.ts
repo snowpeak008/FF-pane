@@ -30,10 +30,17 @@ import {
   executeWorkbenchTool,
   resetToolCallBuckets,
   type ToolWindowView,
+  takeInboxDigest,
   type WorkbenchToolDeps,
 } from "../src/main/workbench/mcp-tools";
+import { createNamedLocks, type LockGrant } from "../src/main/workbench/named-locks";
 import { openChildWindow } from "../src/main/workbench/open-child";
-import { buildNewMessageReminder, sanitizeReminderTitle } from "../src/main/workbench/remind";
+import {
+  buildCoalescedReminder,
+  buildNewMessageReminder,
+  sanitizeReminderSummary,
+  sanitizeReminderTitle,
+} from "../src/main/workbench/remind";
 import {
   assertProjectFiles,
   formatThreadBlock,
@@ -42,6 +49,7 @@ import {
   teamFileSlug,
 } from "../src/main/workbench/thread-store";
 import { handleMcpLine } from "../src/mcp/protocol";
+import { inboxHookOutput, promptIsInboxReminder } from "../src/mcp/workbench-hook";
 import { callControlTool, createWorkbenchMcpOptions } from "../src/mcp/workbench-server";
 import { WORKBENCH_MCP_TOOL_NAMES, WORKBENCH_MCP_TOOLS } from "../src/mcp/workbench-tools";
 
@@ -108,6 +116,9 @@ function harness(
   outputCalls: { windowId: string; maxBytes: number }[];
   closedIds: string[];
   panels: { panel: string; title: string }[];
+  grants: LockGrant[];
+  selfClosed: string[];
+  permissionsSet: { windowId: string; permission: string }[];
   deps: WorkbenchToolDeps;
 } {
   const views: Record<string, ToolWindowView> = {
@@ -128,6 +139,9 @@ function harness(
   const outputCalls: { windowId: string; maxBytes: number }[] = [];
   const closedIds: string[] = [];
   const panels: { panel: string; title: string }[] = [];
+  const grants: LockGrant[] = [];
+  const selfClosed: string[] = [];
+  const permissionsSet: { windowId: string; permission: string }[] = [];
   const cursor = new Map<string, string>();
   const getCursor = cursorStore?.get.bind(cursorStore) ?? (async (id: string) => cursor.get(id));
   const setCursor =
@@ -144,13 +158,19 @@ function harness(
     openChild: async () => ({ ok: false, error: "测试里不从工具层启动。" }),
     remind: (windowId, textForCount) => {
       reminders.push({ windowId, text: textForCount(1) });
+      return "delivered";
     },
+    clearReminder: () => undefined,
     publishInbox: () => undefined,
     getCursor,
     setCursor,
     readOutput: async (windowId, maxBytes) => {
       outputCalls.push({ windowId, maxBytes });
       return { running: true, status: "运行中", text: "ok \u001b[31mRED\u001b[0m" };
+    },
+    readScreen: async (windowId, lines) => {
+      outputCalls.push({ windowId, maxBytes: -lines });
+      return { running: true, status: "运行中", text: "屏幕" };
     },
     closeDescendant: {
       findTerminalId: () => undefined,
@@ -174,8 +194,34 @@ function harness(
     searchProjectMemory: async () => [],
     addProjectMemory: async () => undefined,
     setModelEffort: async () => ({ ok: false as const, error: "unused" }),
+    locks: createNamedLocks(() => 1_700_000_000_000),
+    notifyLockGranted: (grant) => {
+      grants.push(grant);
+    },
+    windowState: (id) =>
+      id === "B"
+        ? { phase: "blocked", lastOutputAt: 1_700_000_000_000 - 65_000, pendingReminders: 2 }
+        : undefined,
+    closeSelfLater: (id) => {
+      selfClosed.push(id);
+    },
+    setPermission: async (input) => {
+      permissionsSet.push(input);
+      return { ok: true as const, message: "已排队，空闲时自动续接" };
+    },
   };
-  return { views, tree, reminders, outputCalls, closedIds, panels, deps };
+  return {
+    views,
+    tree,
+    reminders,
+    outputCalls,
+    closedIds,
+    panels,
+    grants,
+    selfClosed,
+    permissionsSet,
+    deps,
+  };
 }
 
 async function call(
@@ -364,6 +410,177 @@ describe("工具授权", () => {
   });
 });
 
+describe("清单新增工具", () => {
+  it("set_permission：只改后代，不得高于自己", async () => {
+    const { deps, permissionsSet } = harness(tempDir());
+    const okResult = await call(deps, "A", "ffpane_set_permission", {
+      windowId: "C",
+      permission: "read-only",
+    });
+    expect(okResult.json).toMatchObject({ ok: true, windowId: "C", permission: "read-only" });
+    expect(permissionsSet).toEqual([{ windowId: "C", permission: "read-only" }]);
+    const higher = await call(deps, "A", "ffpane_set_permission", {
+      windowId: "B",
+      permission: "yolo",
+    });
+    expect(higher.isError).toBe(true);
+    expect(higher.text).toContain("不能高于你自己的权限");
+    expect(
+      (await call(deps, "B", "ffpane_set_permission", { windowId: "A", permission: "edit" }))
+        .isError,
+    ).toBe(true);
+    expect(
+      (await call(deps, "A", "ffpane_set_permission", { windowId: "A", permission: "edit" }))
+        .isError,
+    ).toBe(true);
+    expect(
+      (await call(deps, "A", "ffpane_set_permission", { windowId: "B", permission: "root" }))
+        .isError,
+    ).toBe(true);
+    expect(permissionsSet).toHaveLength(1);
+  });
+
+  it("broadcast：发给全部后代或只发直接子窗口，各写一条", async () => {
+    const root = tempDir();
+    const { deps, reminders } = harness(root);
+    const all = await call(deps, "A", "ffpane_broadcast", { text: "全体暂停" });
+    const sentIds = (all.json as { sent: { windowId: string }[] }).sent.map(
+      (item) => item.windowId,
+    );
+    expect(sentIds.sort()).toEqual(["B", "C", "D"]);
+    expect(reminders.map((item) => item.windowId).sort()).toEqual(["B", "C", "D"]);
+    const children = await call(deps, "A", "ffpane_broadcast", {
+      text: "只给子窗口",
+      scope: "children",
+    });
+    expect(
+      (children.json as { sent: { windowId: string }[] }).sent.map((s) => s.windowId).sort(),
+    ).toEqual(["B", "D"]);
+    expect((await call(deps, "E", "ffpane_broadcast", { text: "x" })).isError).toBe(true);
+    expect((await call(deps, "A", "ffpane_broadcast", {})).isError).toBe(true);
+    expect((await readThreadIndex(root)).length).toBe(5);
+  });
+
+  it("lock：先到先得，排队，放锁交给下一个并提醒", async () => {
+    const { deps, grants } = harness(tempDir());
+    expect(
+      (await call(deps, "B", "ffpane_lock", { action: "acquire", name: "unity" })).json,
+    ).toMatchObject({
+      state: "held",
+    });
+    const queued = await call(deps, "D", "ffpane_lock", { action: "acquire", name: "unity" });
+    expect(queued.json).toMatchObject({ state: "queued", position: 1, holder: { windowId: "B" } });
+    const listed = await call(deps, "A", "ffpane_lock", { action: "list" });
+    expect(listed.json).toMatchObject({
+      locks: [{ name: "unity", holder: { windowId: "B", title: "子" }, waiting: ["D"] }],
+    });
+    const windows = await call(deps, "A", "ffpane_list_windows");
+    const b = (windows.json as { windows: Record<string, unknown>[] }).windows.find(
+      (item) => item["id"] === "B",
+    );
+    expect(b).toMatchObject({
+      holdingLocks: ["unity"],
+      state: "等用户批准",
+      quietSeconds: 65,
+      pendingReminders: 2,
+    });
+    expect(
+      (await call(deps, "B", "ffpane_lock", { action: "release", name: "unity" })).json,
+    ).toEqual({
+      released: true,
+      name: "unity",
+    });
+    expect(grants).toEqual([{ projectId: "proj-1", name: "unity", windowId: "D" }]);
+    expect(
+      (await call(deps, "B", "ffpane_lock", { action: "acquire", name: "../x" })).isError,
+    ).toBe(true);
+    expect((await call(deps, "B", "ffpane_lock", { action: "steal", name: "unity" })).isError).toBe(
+      true,
+    );
+  });
+
+  it("closeAfter：done 汇报后由上级关闭；别的状态或管理者不行", async () => {
+    const { deps, selfClosed } = harness(tempDir());
+    const done = await call(deps, "B", "ffpane_report", {
+      status: "done",
+      summary: "记录在 x",
+      closeAfter: true,
+    });
+    expect(done.json).toMatchObject({ closing: expect.stringContaining("由上级关闭") });
+    expect(selfClosed).toEqual(["B"]);
+    expect(
+      (
+        await call(deps, "B", "ffpane_report", {
+          status: "progress",
+          summary: "x",
+          closeAfter: true,
+        })
+      ).isError,
+    ).toBe(true);
+    expect(selfClosed).toEqual(["B"]);
+  });
+});
+
+describe("命名锁", () => {
+  it("窗口退出时放掉持有的锁并退出排队", () => {
+    const locks = createNamedLocks(() => 0);
+    locks.acquire("p", "unity", "w1");
+    locks.acquire("p", "unity", "w2");
+    locks.acquire("p", "unity", "w3");
+    locks.acquire("p", "gpu", "w2");
+    expect(locks.releaseWindow("w2")).toEqual([]);
+    expect(locks.of("w2")).toEqual({ holding: [], waiting: [] });
+    expect(locks.releaseWindow("w1")).toEqual([{ projectId: "p", name: "unity", windowId: "w3" }]);
+    expect(locks.list("p")).toEqual([{ name: "unity", holder: "w3", heldSince: 0, waiting: [] }]);
+    expect(locks.release("p", "unity", "w3")).toEqual({ released: true });
+    expect(locks.list("p")).toEqual([]);
+  });
+});
+
+describe("监管者观察", () => {
+  function watched(root: string) {
+    const h = harness(root);
+    h.views["S"] = view(root, "S", "监管", "supervisor", "A");
+    h.tree["S"] = node("S", "supervisor", "A");
+    const worker = h.views["B"];
+    if (worker === undefined) {
+      throw new Error("missing B");
+    }
+    h.views["B"] = { ...worker, watcherWindowId: "S" };
+    return h;
+  }
+
+  it("done 抄送给监管者、不叫醒上级；failed 照常叫醒", async () => {
+    const root = tempDir();
+    const { deps, reminders } = watched(root);
+    const done = await call(deps, "B", "ffpane_report", { status: "done", summary: "记录在 x" });
+    expect(done.json).toMatchObject({ delivery: "silent", cc: { windowId: "S" } });
+    expect(reminders.map((item) => item.windowId)).toEqual(["S"]);
+    const records = await readThreadIndex(root);
+    expect(records.map((record) => record.to.windowId).sort()).toEqual(["A", "S"]);
+
+    const failed = await call(deps, "B", "ffpane_report", { status: "failed", summary: "挂了" });
+    expect(failed.json).toMatchObject({ delivery: "delivered", cc: { windowId: "S" } });
+    expect(reminders.map((item) => item.windowId)).toEqual(["S", "A", "S"]);
+  });
+
+  it("监管者能读被观察窗口的终端、能在列表里看到它，但不能发消息或关窗", async () => {
+    const root = tempDir();
+    const { deps } = watched(root);
+    expect((await call(deps, "S", "ffpane_read_output", { windowId: "B" })).isError).toBe(false);
+    expect((await call(deps, "S", "ffpane_read_output", { windowId: "D" })).isError).toBe(true);
+    const listed = await call(deps, "S", "ffpane_list_windows");
+    const ids = (listed.json as { windows: { id: string }[] }).windows.map((item) => item.id);
+    expect(ids).toContain("B");
+    expect(ids).not.toContain("D");
+    expect(
+      (await call(deps, "S", "ffpane_send_message", { windowId: "B", text: "停" })).isError,
+    ).toBe(true);
+    expect((await call(deps, "S", "ffpane_close_window", { windowId: "B" })).isError).toBe(true);
+    expect((await call(deps, "D", "ffpane_read_output", { windowId: "B" })).isError).toBe(true);
+  });
+});
+
 describe("读取、关闭与打开面板", () => {
   it("只有祖先能读和关后代，任何人能打开面板，连点被拒绝", async () => {
     const { deps, closedIds, panels } = harness(tempDir());
@@ -394,10 +611,11 @@ describe("读取、关闭与打开面板", () => {
     expect((await call(deps, "A", "ffpane_open_panel", { panel: "nope" })).text).toContain("panel");
   });
 
-  it("读取去掉 ANSI，并夹紧字节上限", async () => {
+  it("raw 模式去掉 ANSI，并夹紧字节上限；缺省走屏幕模式", async () => {
     const { deps, outputCalls } = harness(tempDir());
     const capped = await call(deps, "A", "ffpane_read_output", {
       windowId: "B",
+      mode: "raw",
       maxBytes: 100_000,
     });
     expect(capped.isError).toBe(false);
@@ -405,14 +623,21 @@ describe("读取、关闭与打开面板", () => {
     expect(capped.json).toMatchObject({ running: true, text: "ok RED" });
     expect(String((capped.json as { text: string }).text)).not.toContain("\u001b");
 
-    const fallback = await call(deps, "A", "ffpane_read_output", { windowId: "C" });
+    const fallback = await call(deps, "A", "ffpane_read_output", { windowId: "C", mode: "raw" });
     expect(outputCalls[1]).toEqual({ windowId: "C", maxBytes: 8192 });
     expect(fallback.isError).toBe(false);
+
+    const screen = await call(deps, "A", "ffpane_read_output", { windowId: "B", lines: 9999 });
+    expect(screen.json).toMatchObject({ running: true, mode: "screen", text: "屏幕" });
+    expect(outputCalls[2]).toEqual({ windowId: "B", maxBytes: -300 });
+    expect(
+      (await call(deps, "A", "ffpane_read_output", { windowId: "B", mode: "x" })).isError,
+    ).toBe(true);
 
     const idle = await call(
       {
         ...deps,
-        readOutput: async () => ({ running: false, status: "该窗口的终端已退出。" }),
+        readScreen: async () => ({ running: false, status: "该窗口的终端已退出。" }),
       },
       "A",
       "ffpane_read_output",
@@ -459,6 +684,38 @@ describe("write_brief 与 files", () => {
     }
     const escaped = await writeBriefFile({ projectRoot: linked, name: "x.md", content: "no" });
     expect(escaped.ok).toBe(false);
+  });
+
+  it("overwrite 覆盖同名，append 追加到末尾，都不另起序号", async () => {
+    const root = tempDir();
+    const { deps } = harness(root);
+    await call(deps, "B", "ffpane_write_brief", { name: "log.md", content: "一\n" });
+    const over = await call(deps, "B", "ffpane_write_brief", {
+      name: "log.md",
+      content: "二\n",
+      mode: "overwrite",
+    });
+    expect(over.json).toMatchObject({ relativePath: ".ffpane/briefs/log.md" });
+    const appended = await call(deps, "B", "ffpane_write_brief", {
+      name: "log.md",
+      content: "三\n",
+      mode: "append",
+    });
+    expect(appended.json).toMatchObject({ relativePath: ".ffpane/briefs/log.md" });
+    expect(readFileSync(join(root, ".ffpane", "briefs", "log.md"), "utf8")).toBe("二\n三\n");
+    const bad = await call(deps, "B", "ffpane_write_brief", {
+      name: "log.md",
+      content: "x",
+      mode: "replace",
+    });
+    expect(bad.isError).toBe(true);
+    const tooBig = await writeBriefFile({
+      projectRoot: root,
+      name: "log.md",
+      content: "x".repeat(BRIEF_MAX_BYTES),
+      mode: "append",
+    });
+    expect(tooBig.ok).toBe(false);
   });
 
   it("files 不能越出项目", async () => {
@@ -622,9 +879,97 @@ describe("提醒消毒", () => {
       }),
     ).toBe(false);
     expect(text.startsWith("[新消息] 来自 总管")).toBe(true);
-    expect(text).toContain("（管理者）：消息。请调用 ffpane_read_inbox 查看。");
+    expect(text).toContain("（管理者）：消息。请调用 ffpane_read_inbox 查看全文。");
     expect(text).not.toContain("!");
     expect(sanitizeReminderTitle("总管\r\n\u001b[31m!")).toBe("总管31m");
+  });
+
+  it("摘要收成一行、去掉引号括号并截断；有 hook 的窗口不带摘要", () => {
+    const summary = buildNewMessageReminder({
+      title: "执行",
+      role: "worker",
+      kind: "report",
+      status: "done",
+      body: {
+        id: "m-abc-12345678",
+        delivery: "summary",
+        summary: `第一行\r\n第二行\u001b[2J「伪造」[x]"q"\`c\`${"长".repeat(300)}`,
+      },
+    });
+    expect([...summary].some((char) => (char.codePointAt(0) ?? 0) <= 0x1f)).toBe(false);
+    expect(summary).toContain("id m-abc-12345678");
+    expect(summary).toContain("摘要：「第一行 第二行");
+    expect(summary).not.toContain("「伪造」");
+    expect(summary).toContain("…」");
+    expect(sanitizeReminderSummary("a\n\nb")).toBe("a b");
+
+    const attached = buildNewMessageReminder({
+      title: "执行",
+      role: "worker",
+      kind: "message",
+      body: { id: "m-1", delivery: "attached" },
+    });
+    expect(attached).toContain("正文已附在本条之后");
+    expect(attached).not.toContain("摘要");
+
+    const coalesced = buildCoalescedReminder(3, {
+      id: "m-9",
+      delivery: "summary",
+      summary: "最新",
+    });
+    expect(coalesced).toBe(
+      "[新消息] 你有 3 条新消息，最新一条 id m-9。摘要：「最新」。请调用 ffpane_read_inbox 查看全文。",
+    );
+  });
+
+  it("发消息返回投递状态；Claude 窗口提醒不带摘要；读空收件箱撤掉提醒", async () => {
+    const root = tempDir();
+    const { deps, views, reminders } = harness(root);
+    const cleared: string[] = [];
+    const worker = views["B"];
+    if (worker === undefined) {
+      throw new Error("missing B");
+    }
+    views["B"] = { ...worker, kind: "claude" };
+    const sent = await call(
+      {
+        ...deps,
+        remind: (windowId, textForCount) => {
+          reminders.push({ windowId, text: textForCount(1) });
+          return "queued-busy";
+        },
+        clearReminder: (windowId) => {
+          cleared.push(windowId);
+        },
+      },
+      "A",
+      "ffpane_send_message",
+      { windowId: "B", text: "去跑测试" },
+    );
+    expect(sent.json).toMatchObject({ delivery: "queued-busy" });
+    expect((sent.json as { deliveryNote: string }).deliveryNote).toContain("空闲后自动送达");
+    expect(reminders.at(-1)?.text).toContain("正文已附在本条之后");
+    expect(reminders.at(-1)?.text).not.toContain("去跑测试");
+
+    const digest = await takeInboxDigest("B", {
+      ...deps,
+      clearReminder: (windowId) => {
+        cleared.push(windowId);
+      },
+    });
+    expect(digest).toContain("你的上级：工作安排，照常执行");
+    expect(digest).toContain("> 去跑测试");
+    expect(cleared).toEqual(["B"]);
+    expect(await takeInboxDigest("B", deps)).toBe("");
+  });
+
+  it("hook 只在提交的是新消息提醒时去取正文", () => {
+    expect(promptIsInboxReminder(JSON.stringify({ prompt: "[新消息] 来自 A" }))).toBe(true);
+    expect(promptIsInboxReminder(JSON.stringify({ prompt: "帮我看看 [新消息]" }))).toBe(false);
+    expect(promptIsInboxReminder("not json")).toBe(false);
+    expect(JSON.parse(inboxHookOutput("正文"))).toEqual({
+      hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: "正文" },
+    });
   });
 });
 

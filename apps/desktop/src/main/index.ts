@@ -249,7 +249,7 @@ async function bootstrap(): Promise<void> {
     const configStore = createConfigStore(resolveGlobalLayout(resolveGlobalRoot()).configFile);
     terminalLayer = createTerminalLayer(() => mainWindow, {
       getMaxWorkbenchWindows: async () => (await configStore.readConfig()).maxWorkbenchWindows,
-      onTerminalExit: (metadata, terminalId) => {
+      onTerminalExit: (metadata, terminalId, exit) => {
         const layer = workbenchCliLayer;
         if (layer !== null) {
           releaseMcpForTerminalMetadata(
@@ -261,6 +261,7 @@ async function bootstrap(): Promise<void> {
           layer.idleQueue.drop(terminalId);
           const windowId = metadata?.["windowId"];
           if (typeof windowId === "string" && windowId.trim() !== "") {
+            layer.noteWindowExit(windowId, exit);
             layer.modelEffort.noteTerminalExit(windowId);
             void layer.rolePromptTemps.release(windowId);
             void layer.releaseConfigHub(windowId);

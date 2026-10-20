@@ -15,6 +15,7 @@ import {
   type ToolWindowView,
   type WorkbenchToolDeps,
 } from "../src/main/workbench/mcp-tools";
+import { createNamedLocks } from "../src/main/workbench/named-locks";
 import { buildSupervisorWake } from "../src/main/workbench/status-handoff";
 import { readThreadIndex } from "../src/main/workbench/thread-store";
 
@@ -100,11 +101,14 @@ function harness(root: string): {
     openChild: async () => ({ ok: false, error: "测试里不启动。" }),
     remind: (windowId, textForCount) => {
       reminders.push({ windowId, text: textForCount(1) });
+      return "delivered";
     },
+    clearReminder: () => undefined,
     publishInbox: () => undefined,
     getCursor: async () => undefined,
     setCursor: async () => undefined,
     readOutput: async () => ({ running: true, status: "运行中", text: "" }),
+    readScreen: async () => ({ running: true, status: "运行中", text: "" }),
     closeDescendant: {
       findTerminalId: () => undefined,
       killTerminal: () => undefined,
@@ -123,6 +127,11 @@ function harness(root: string): {
     searchProjectMemory: async () => [],
     addProjectMemory: async () => undefined,
     setModelEffort: async () => ({ ok: false as const, error: "unused" }),
+    locks: createNamedLocks(),
+    notifyLockGranted: () => undefined,
+    windowState: () => undefined,
+    closeSelfLater: () => undefined,
+    setPermission: async () => ({ ok: false as const, error: "unused" }),
   };
   return { reminders, deps };
 }
@@ -242,7 +251,10 @@ describe("监管者交接", () => {
     expect(JSON.stringify(records)).not.toContain("MARKER-9f3a");
     expect(reminders).toHaveLength(1);
     expect(reminders[0]?.text).not.toContain(DETAIL);
-    expect(reminders[0]?.text).not.toContain("已跑 lint");
+    expect(reminders[0]?.text).not.toContain("MARKER-9f3a");
+    // 没有 hook 的窗口只带近况四行的摘要，不带详细记录。
+    expect(reminders[0]?.text).toContain("摘要");
+    expect(reminders[0]?.text).not.toContain("\n");
   });
 
   it("路径必须在 .ffpane/briefs/ 里", async () => {

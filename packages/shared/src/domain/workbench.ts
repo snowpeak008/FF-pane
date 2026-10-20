@@ -149,6 +149,11 @@ export interface WorkbenchWindow {
   readonly parentClosed?: boolean;
   /** 开启本窗口的上级窗口 id（自上而下下放）。 */
   readonly parentWindowId?: string;
+  /**
+   * 观察本窗口的监管者 id。监管者能读本窗口终端、收本窗口汇报的抄送，
+   * 不能发命令、不能关窗。只由管理者开窗时指定。
+   */
+  readonly watcherWindowId?: string;
   /** 开启者：界面用户或某窗口。 */
   readonly openedBy?: WorkbenchOpenedBy;
   /**

@@ -5,6 +5,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { isDescendantOf } from "@ff-pane/core";
 import {
   isWorkbenchPermissionLevel,
   isWorkbenchRole,
@@ -34,6 +35,8 @@ export interface OpenChildArgs {
   readonly title: string;
   readonly briefPath?: string;
   readonly message?: string;
+  /** 挂上观察本窗口的监管者。必须是调用者的后代，角色是监管者。 */
+  readonly supervisorWindowId?: string;
 }
 
 export interface OpenChildSuccess {
@@ -69,6 +72,8 @@ export interface OpenChildDeps {
   >;
   readonly aliveCount: () => number;
   readonly maxWindows: () => Promise<number>;
+  /** 开窗前查内存和磁盘。不够时返回原因。 */
+  readonly checkResources?: (projectRoot: string) => Promise<string | undefined>;
   readonly publish: (input: {
     readonly projectId: string;
     readonly window: WorkbenchWindow;
@@ -176,12 +181,37 @@ export async function openChildWindow(
     projectRoot: described.projectRoot,
   });
   if (!route.ok) {
-    return route;
+    return {
+      ok: false,
+      error: `${route.error}可以改用已经配好的 CLI 开窗，或请用户在设置里给这个配置补上这一路。不要反复重试。`,
+    };
   }
   const layouts = await deps.readLayouts();
   const layout = layouts[described.projectId];
   if (layout === undefined || layout.windows[callerId] === undefined) {
     return { ok: false, error: "布局里没有这个管理者窗口。" };
+  }
+  let watcherWindowId: string | undefined;
+  if (args.supervisorWindowId !== undefined && args.supervisorWindowId.trim() !== "") {
+    const watcherId = args.supervisorWindowId.trim();
+    const watcher = layout.windows[watcherId];
+    const watcherNode = deps.authRegistry.get(watcherId);
+    const role = watcherNode?.role ?? watcher?.role;
+    if (
+      watcher === undefined ||
+      role !== "supervisor" ||
+      !isDescendantOf(callerId, watcherId, deps.authRegistry.snapshot())
+    ) {
+      return {
+        ok: false,
+        error: "supervisorWindowId 必须是你开的、角色为监管者的窗口。",
+      };
+    }
+    watcherWindowId = watcherId;
+  }
+  const shortage = await deps.checkResources?.(described.projectRoot);
+  if (shortage !== undefined) {
+    return { ok: false, error: shortage };
   }
   const windowCount = Object.keys(layout.windows).length;
   if (windowCount >= max) {
@@ -249,6 +279,7 @@ export async function openChildWindow(
     permission: effective,
     openedBy,
     parentWindowId: callerId,
+    ...(watcherWindowId !== undefined ? { watcherWindowId } : {}),
     ...(launched.nativeSessionId !== undefined
       ? { nativeSessionId: launched.nativeSessionId }
       : {}),

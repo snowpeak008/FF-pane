@@ -25,6 +25,7 @@ import { SplitLayout } from "./SplitLayout";
 import { TabBar } from "./TabBar";
 import { WorkbenchCanvasPanel } from "./WorkbenchCanvasPanel";
 import { WorkbenchDrawer } from "./WorkbenchDrawer";
+import { WorkbenchRuntimeBar } from "./WorkbenchRuntimeBar";
 
 export function WorkbenchPage(): ReactElement {
   const { t } = useTranslation();
@@ -298,6 +299,7 @@ export function WorkbenchPage(): ReactElement {
           onRename={(tabId, title) => renameTab(entry.id, tabId, title)}
           onNewTab={handleNewTab}
         />
+        <WorkbenchRuntimeBar projectId={entry.id} />
         {!hasWindows || activeTab === null ? (
           <EmptyState
             icon={SquareTerminal}

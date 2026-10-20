@@ -74,6 +74,16 @@ export interface ProcessJob {
    * Job 内（见文件头「嵌套语义」一节），FF-pane 退出时会被一并终止——用户裁定为期望行为。
    */
   readonly close: () => void;
+  /**
+   * Job 里现在有几个进程、合计占多少内存（工作集）。后台脚本、脱离父子关系的孙进程都算在内。
+   * 查询失败返回 undefined。
+   */
+  readonly stats: () => ProcessJobStats | undefined;
+}
+
+export interface ProcessJobStats {
+  readonly processCount: number;
+  readonly workingSetBytes: number;
 }
 
 /**
@@ -101,11 +111,31 @@ interface Kernel32 {
   ) => boolean;
   readonly OpenProcess: (access: number, inherit: boolean, pid: number) => unknown;
   readonly CloseHandle: (handle: unknown) => boolean;
+  readonly QueryInformationJobObject: (
+    job: unknown,
+    cls: number,
+    info: Buffer,
+    len: number,
+    returned: null,
+  ) => boolean;
+  readonly K32GetProcessMemoryInfo: (proc: unknown, counters: Buffer, cb: number) => boolean;
 }
 
 /** PROCESS_SET_QUOTA | PROCESS_TERMINATE —— AssignProcessToJobObject 所需的最小权限。 */
 const PROCESS_SET_QUOTA = 0x0100;
 const PROCESS_TERMINATE = 0x0001;
+
+/** PROCESS_QUERY_LIMITED_INFORMATION —— 读内存计数所需的最小权限。 */
+const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+
+/** JOBOBJECTINFOCLASS::JobObjectBasicProcessIdList */
+const JOB_OBJECT_BASIC_PROCESS_ID_LIST = 3;
+/** 一次最多列这么多个进程。x64 下头 8 字节 + 每个 pid 8 字节。 */
+const JOB_PID_LIST_MAX = 1024;
+
+/** PROCESS_MEMORY_COUNTERS 在 x64 下 72 字节；WorkingSetSize 在偏移 16。 */
+const PROCESS_MEMORY_COUNTERS_SIZE = 72;
+const WORKING_SET_OFFSET = 16;
 
 /** JOBOBJECTINFOCLASS::JobObjectExtendedLimitInformation */
 const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9;
@@ -158,6 +188,12 @@ function loadKernel32(): Kernel32 | null {
       ),
       OpenProcess: lib.func("void* OpenProcess(uint32_t access, bool inherit, uint32_t pid)"),
       CloseHandle: lib.func("bool CloseHandle(void* h)"),
+      QueryInformationJobObject: lib.func(
+        "bool QueryInformationJobObject(void* job, int cls, void* info, uint32_t len, void* returned)",
+      ),
+      K32GetProcessMemoryInfo: lib.func(
+        "bool K32GetProcessMemoryInfo(void* proc, void* counters, uint32_t cb)",
+      ),
     } as unknown as Kernel32;
     unavailableReason = null;
     return kernel32;
@@ -217,6 +253,45 @@ export function assignProcessToNewJob(pid: number): ProcessJob | undefined {
 
     let closed = false;
     return {
+      stats: () => {
+        if (closed) {
+          return undefined;
+        }
+        try {
+          const list = Buffer.alloc(8 + 8 * JOB_PID_LIST_MAX);
+          if (
+            !api.QueryInformationJobObject(
+              job,
+              JOB_OBJECT_BASIC_PROCESS_ID_LIST,
+              list,
+              list.length,
+              null,
+            )
+          ) {
+            return undefined;
+          }
+          const assigned = list.readUInt32LE(0);
+          const listed = list.readUInt32LE(4);
+          let workingSetBytes = 0;
+          const counters = Buffer.alloc(PROCESS_MEMORY_COUNTERS_SIZE);
+          for (let index = 0; index < listed; index += 1) {
+            const pid = Number(list.readBigUInt64LE(8 + 8 * index));
+            const handle = api.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+            if (handle === null || handle === undefined) {
+              continue;
+            }
+            counters.fill(0);
+            counters.writeUInt32LE(PROCESS_MEMORY_COUNTERS_SIZE, 0);
+            if (api.K32GetProcessMemoryInfo(handle, counters, PROCESS_MEMORY_COUNTERS_SIZE)) {
+              workingSetBytes += Number(counters.readBigUInt64LE(WORKING_SET_OFFSET));
+            }
+            api.CloseHandle(handle);
+          }
+          return { processCount: assigned, workingSetBytes };
+        } catch {
+          return undefined;
+        }
+      },
       terminate: () => {
         if (closed) {
           return false;

@@ -4,7 +4,7 @@
  * 与 headless 适配器（-p / exec --json）分离——工作台窗口跑交互 TUI。
  */
 
-import { resolvePermissionCliArgs } from "@ff-pane/core";
+import { CLAUDE_COMMAND_TOOL_NAMES, resolvePermissionCliArgs } from "@ff-pane/core";
 import type { WorkbenchPermissionLevel } from "@ff-pane/shared";
 
 /** Claude Code 默认可执行文件名。 */
@@ -42,6 +42,16 @@ export interface BuildInteractiveClaudeArgsInput {
   readonly settingsFile?: string;
   /** T10.5：权限等级 → CLI 参数。 */
   readonly permission?: WorkbenchPermissionLevel;
+  /**
+   * 直接放行的工具（`--allowedTools`）。工作台协作工具放在这里，只读档也能写近况和汇报；
+   * 改项目文件的工具仍按权限档禁用。
+   */
+  readonly allowedTools?: readonly string[];
+  /**
+   * 只读档仍能跑查看类命令（监管者）：不禁命令工具，由 plan 模式只放行只读命令。
+   * 不加 Bash(前缀:*) 放行规则：find -delete、git diff --output 这类前缀也能写盘，放行规则会绕过 plan 的只读判断。
+   */
+  readonly readOnlyShell?: boolean;
 }
 
 /** 交互式 Codex 启动参数。 */
@@ -83,13 +93,19 @@ export function buildInteractiveClaudeArgs(input: BuildInteractiveClaudeArgsInpu
   } else if (input.sessionId !== undefined && input.sessionId.trim() !== "") {
     args.push("--session-id", input.sessionId.trim());
   }
+  const readOnlyShell = input.readOnlyShell === true && input.permission === "read-only";
   if (input.permission !== undefined) {
+    const permissionArgs = resolvePermissionCliArgs({
+      cli: "claude-code",
+      level: input.permission,
+      resume: input.resumeSessionId !== undefined && input.resumeSessionId.trim() !== "",
+    });
     args.push(
-      ...resolvePermissionCliArgs({
-        cli: "claude-code",
-        level: input.permission,
-        resume: input.resumeSessionId !== undefined && input.resumeSessionId.trim() !== "",
-      }),
+      ...(readOnlyShell
+        ? permissionArgs.filter(
+            (arg) => !(CLAUDE_COMMAND_TOOL_NAMES as readonly string[]).includes(arg),
+          )
+        : permissionArgs),
     );
   }
   if (input.model !== undefined && input.model.trim() !== "") {
@@ -98,7 +114,12 @@ export function buildInteractiveClaudeArgs(input: BuildInteractiveClaudeArgsInpu
   if (input.effort !== undefined && input.effort.trim() !== "") {
     args.push("--effort", input.effort.trim());
   }
+  const allowed = (input.allowedTools ?? []).filter((tool) => tool.trim() !== "");
   if (input.mcpConfigPath !== undefined && input.mcpConfigPath.trim() !== "") {
+    // 可变参数：紧跟 --mcp-config，免得把开场白当成工具名吞掉。没有 MCP 时也没有要放行的协作工具。
+    if (allowed.length > 0) {
+      args.push("--allowedTools", ...allowed);
+    }
     args.push("--mcp-config", input.mcpConfigPath.trim());
     if (input.strictMcp !== false) {
       args.push("--strict-mcp-config");

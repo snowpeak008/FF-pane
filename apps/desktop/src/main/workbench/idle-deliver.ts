@@ -17,11 +17,25 @@
  *   摘要计数只有用户再提交一次输入（UserPromptSubmit）或窗口重启才清。
  *   因此批准权限后的自动提醒会停住，直到用户再发一句。
  *   伪造的 Stop 在计数 > 0 时不解锁。id 配对减到 0 后记为 busy，还要再等一次 Stop 才投递。
+ * - 可按终端设回车延迟（submitDelayMs）：Codex 会把紧跟在一串字符后的回车当成粘贴里的换行，
+ *   正文写完隔一会儿再写回车。
+ * - 可按终端核对提交（verifySubmit）：回车后一段时间里没开始一轮，视为没提交，补一次回车；
+ *   仍然没有就报 not-submitted，并转回手动确认。有真信号来源（Codex rollout 的 task_started）时
+ *   只认真信号；没有时退回看终端有没有开工输出（干活时加载动画每秒都在刷新）。
+ * - 收件箱读空后 dropInbox 撤掉还没投递的提醒，避免已读的消息再提醒一遍。
  */
 
 export const DEFAULT_OUTPUT_QUIET_MS = 1500;
 export const DEFAULT_INPUT_QUIET_MS = 1500;
 export const DEFAULT_IDLE_POLL_MS = 200;
+export const DEFAULT_SUBMIT_VERIFY_MS = 4000;
+/** 回车后这段时间内的输出只算回显和重画，不算开工。 */
+export const SUBMIT_ECHO_GRACE_MS = 1500;
+/**
+ * Codex 正文与回车的间隔。真机实测（codex-cli 0.162.0，约 200 字的提醒行）：
+ * 紧跟回车和隔 150ms 都停在输入框；250ms、400ms、800ms 都能提交。取 800ms 留余量。
+ */
+export const CODEX_SUBMIT_DELAY_MS = 800;
 
 export type DeliverPhase = "unknown" | "idle" | "busy" | "blocked";
 
@@ -41,7 +55,7 @@ export type DeliverPendingMode = "manual" | "blocked" | "busy" | "clear";
 export interface IdleDeliverOutcome {
   readonly terminalId: string;
   readonly status: "delivered" | "dropped";
-  readonly reason?: "exited" | "invalid" | "write-failed" | "cancelled";
+  readonly reason?: "exited" | "invalid" | "write-failed" | "cancelled" | "not-submitted";
   readonly tag?: string;
 }
 
@@ -58,6 +72,9 @@ export interface IdleDeliverDeps {
   readonly write: (terminalId: string, data: string) => void;
   readonly now: () => number;
   readonly schedule: (delayMs: number, fn: () => void) => () => void;
+  /** 终端最近一次输出的时间。缺省时不核对提交。 */
+  readonly lastOutputAt?: (terminalId: string) => number | undefined;
+  readonly submitVerifyMs?: number;
   /** 排队之后才发生的结果。立即完成的结果由 enqueue 返回值表达。 */
   readonly onDeferred?: (outcome: IdleDeliverOutcome) => void;
   /** 待投递条数变化（手动确认 / 权限阻塞 / 清空）。 */
@@ -90,6 +107,12 @@ export interface IdleDeliverAttachOptions {
   /** 启动参数里带了 initialPrompt：SessionStart 不能当成“在等输入”。 */
   readonly initialPrompt?: boolean;
   readonly windowId?: string;
+  /** 正文与回车之间的间隔。0 表示紧接着写。 */
+  readonly submitDelayMs?: number;
+  /** 回车后核对是否真的提交了。 */
+  readonly verifySubmit?: boolean;
+  /** 一开始就有可靠的「一轮开始」信号来源（UserPromptSubmit hook）。 */
+  readonly turnStartSource?: boolean;
 }
 
 /** hook 上报里只带配对用的 id 或摘要，不带工具正文。 */
@@ -117,6 +140,15 @@ export interface IdleDeliverQueue {
   cancel(terminalId: string): void;
   /** 窗口退出：清空该终端队列，不再写入。 */
   drop(terminalId: string): void;
+  /** 收件箱已读空：撤掉还没投递的收件箱提醒。返回撤掉的条数。 */
+  dropInbox(terminalId: string): number;
+  /**
+   * 这个终端有了可靠的「一轮开始」信号来源（Codex rollout 的 task_started）。
+   * 有来源后，提交核对只认这个信号，不再看终端有没有输出。
+   */
+  setTurnStartSource(terminalId: string, available: boolean): void;
+  /** 一轮开始了：消息确实提交了。 */
+  noteTurnStarted(terminalId: string): void;
   pendingCount(terminalId: string): number;
   phaseOf(terminalId: string): DeliverPhase;
   dispose(): void;
@@ -141,6 +173,13 @@ interface Session {
   lastInputAt: number;
   windowId?: string;
   queue: QueuedItem[];
+  submitDelayMs: number;
+  verifySubmit: boolean;
+  /** 等写回车或等核对的定时器。 */
+  cancelSubmit?: () => void;
+  /** 有可靠的「一轮开始」信号来源。 */
+  turnStartSource: boolean;
+  lastTurnStartAt: number;
 }
 
 const TOOL_USE_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
@@ -206,6 +245,7 @@ export function createIdleDeliverQueue(deps: IdleDeliverDeps): IdleDeliverQueue 
   const outputQuietDefault = deps.outputQuietMs ?? DEFAULT_OUTPUT_QUIET_MS;
   const inputQuietMs = deps.inputQuietMs ?? DEFAULT_INPUT_QUIET_MS;
   const pollMs = deps.pollMs ?? DEFAULT_IDLE_POLL_MS;
+  const submitVerifyMs = deps.submitVerifyMs ?? DEFAULT_SUBMIT_VERIFY_MS;
 
   const ensure = (terminalId: string): Session => {
     const existing = sessions.get(terminalId);
@@ -220,6 +260,10 @@ export function createIdleDeliverQueue(deps: IdleDeliverDeps): IdleDeliverQueue 
       initialPromptPending: false,
       lastInputAt: 0,
       queue: [],
+      submitDelayMs: 0,
+      verifySubmit: false,
+      turnStartSource: false,
+      lastTurnStartAt: 0,
     };
     sessions.set(terminalId, created);
     return created;
@@ -290,14 +334,92 @@ export function createIdleDeliverQueue(deps: IdleDeliverDeps): IdleDeliverQueue 
     return deps.isIdle(terminalId, quietMs);
   };
 
-  const writeItem = (terminalId: string, item: QueuedItem): boolean => {
+  const clearSubmit = (session: Session): void => {
+    session.cancelSubmit?.();
+    delete session.cancelSubmit;
+  };
+
+  /** 回车后核对：有回合信号或开工输出就算提交；否则补一次回车，再不行就报没提交。 */
+  const verifyAfterEnter = (
+    terminalId: string,
+    session: Session,
+    enterAt: number,
+    retried: boolean,
+    tag: string | undefined,
+  ): void => {
+    const lastOutputAt = deps.lastOutputAt;
+    if (!session.verifySubmit || (lastOutputAt === undefined && !session.turnStartSource)) {
+      return;
+    }
+    session.cancelSubmit = deps.schedule(submitVerifyMs, () => {
+      delete session.cancelSubmit;
+      if (sessions.get(terminalId) !== session || !deps.isAlive(terminalId)) {
+        return;
+      }
+      if (session.phase !== "busy") {
+        return;
+      }
+      if (session.turnStartSource) {
+        // 有真信号就只认真信号：回车之后有没有开始一轮。
+        if (session.lastTurnStartAt >= enterAt) {
+          return;
+        }
+      } else {
+        const last = lastOutputAt?.(terminalId) ?? 0;
+        if (last >= enterAt + SUBMIT_ECHO_GRACE_MS) {
+          return;
+        }
+      }
+      if (!retried) {
+        try {
+          deps.write(terminalId, "\r");
+        } catch {
+          return;
+        }
+        verifyAfterEnter(terminalId, session, deps.now(), true, tag);
+        return;
+      }
+      session.phase = "unknown";
+      deps.onDeferred?.({
+        terminalId,
+        status: "dropped",
+        reason: "not-submitted",
+        ...(tag !== undefined ? { tag } : {}),
+      });
+      notifyPending(terminalId);
+    });
+  };
+
+  const writeItem = (terminalId: string, session: Session, item: QueuedItem): boolean => {
+    const tag = item.tag ?? session.windowId;
     try {
       deps.write(terminalId, item.text);
-      deps.write(terminalId, "\r");
-      return true;
     } catch {
       return false;
     }
+    clearSubmit(session);
+    const enter = (): boolean => {
+      try {
+        deps.write(terminalId, "\r");
+      } catch {
+        return false;
+      }
+      verifyAfterEnter(terminalId, session, deps.now(), false, tag);
+      return true;
+    };
+    if (session.submitDelayMs <= 0) {
+      return enter();
+    }
+    session.cancelSubmit = deps.schedule(session.submitDelayMs, () => {
+      delete session.cancelSubmit;
+      if (sessions.get(terminalId) !== session || !deps.isAlive(terminalId)) {
+        return;
+      }
+      if (!enter()) {
+        finishDropped(terminalId, "write-failed", true);
+      }
+    });
+    return true;
   };
 
   const deliverHead = (terminalId: string, notify: boolean): boolean => {
@@ -306,7 +428,7 @@ export function createIdleDeliverQueue(deps: IdleDeliverDeps): IdleDeliverQueue 
     if (session === undefined || item === undefined) {
       return false;
     }
-    if (!writeItem(terminalId, item)) {
+    if (!writeItem(terminalId, session, item)) {
       finishDropped(terminalId, "write-failed", notify);
       return false;
     }
@@ -361,6 +483,15 @@ export function createIdleDeliverQueue(deps: IdleDeliverDeps): IdleDeliverQueue 
       }
       if (options?.initialPrompt === true) {
         session.initialPromptPending = true;
+      }
+      if (options?.submitDelayMs !== undefined && Number.isFinite(options.submitDelayMs)) {
+        session.submitDelayMs = Math.max(0, Math.floor(options.submitDelayMs));
+      }
+      if (options?.verifySubmit !== undefined) {
+        session.verifySubmit = options.verifySubmit;
+      }
+      if (options?.turnStartSource !== undefined) {
+        session.turnStartSource = options.turnStartSource;
       }
     },
     noteHook(terminalId, signal, meta) {
@@ -505,8 +636,38 @@ export function createIdleDeliverQueue(deps: IdleDeliverDeps): IdleDeliverQueue 
       finishDropped(terminalId, "cancelled", true);
     },
     drop(terminalId) {
+      const session = sessions.get(terminalId);
+      if (session !== undefined) {
+        clearSubmit(session);
+      }
       finishDropped(terminalId, "exited", true);
       sessions.delete(terminalId);
+    },
+    setTurnStartSource(terminalId, available) {
+      ensure(terminalId).turnStartSource = available;
+    },
+    noteTurnStarted(terminalId) {
+      const session = ensure(terminalId);
+      session.lastTurnStartAt = deps.now();
+      if (session.phase !== "blocked") {
+        session.phase = "busy";
+      }
+    },
+    dropInbox(terminalId) {
+      const session = sessions.get(terminalId);
+      if (session === undefined) {
+        return 0;
+      }
+      const before = session.queue.length;
+      session.queue = session.queue.filter((item) => item.inboxCount === undefined);
+      const removed = before - session.queue.length;
+      if (removed > 0) {
+        if (session.queue.length === 0) {
+          cancelTimer(terminalId);
+        }
+        notifyPending(terminalId);
+      }
+      return removed;
     },
     pendingCount(terminalId) {
       return sessions.get(terminalId)?.queue.length ?? 0;

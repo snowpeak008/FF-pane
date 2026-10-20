@@ -183,6 +183,9 @@ function parseWindow(value: unknown, projectId: ProjectId): WorkbenchWindow | nu
     ...(typeof raw["parentWindowId"] === "string" && raw["parentWindowId"].trim() !== ""
       ? { parentWindowId: raw["parentWindowId"] }
       : {}),
+    ...(typeof raw["watcherWindowId"] === "string" && raw["watcherWindowId"].trim() !== ""
+      ? { watcherWindowId: raw["watcherWindowId"] }
+      : {}),
     ...(raw["parentClosed"] === true ? { parentClosed: true } : {}),
     ...(openedBy !== undefined ? { openedBy } : {}),
     ...(raw["permissionNeedsDowngrade"] === true ? { permissionNeedsDowngrade: true } : {}),

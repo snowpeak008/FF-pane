@@ -916,6 +916,9 @@ describe("映射器纯函数单测", () => {
       kind: "shell_command",
       command: "git status",
     });
+    expect(
+      toPermissionPayload("PowerShell", { command: "Remove-Item -Recurse x" }, cwd),
+    ).toStrictEqual({ kind: "shell_command", command: "Remove-Item -Recurse x" });
     expect(toPermissionPayload("Read", { file_path: "a.txt" }, cwd)).toStrictEqual({
       kind: "read_path",
       path: "a.txt",

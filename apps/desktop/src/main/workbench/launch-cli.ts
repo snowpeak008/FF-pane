@@ -57,7 +57,7 @@ import {
   CODEX_INTERACTIVE_COMMAND,
   GROK_INTERACTIVE_COMMAND,
 } from "./cli-args";
-import { type CodexSessionClaimer, withCodexClaimMarker } from "./codex-claim";
+import type { CodexSessionClaimer } from "./codex-claim";
 import { CODEX_AUTO_COMPACT_TOKEN_KEY, resolveManagerCompact } from "./compact-launch";
 import {
   bundledGrokHookPath,
@@ -70,7 +70,7 @@ import {
   releaseWindowHooks,
   resolveWorkbenchHookScriptPath,
 } from "./hook-launch";
-import type { IdleDeliverQueue } from "./idle-deliver";
+import { CODEX_SUBMIT_DELAY_MS, type IdleDeliverQueue } from "./idle-deliver";
 import { createWindowLaunchGate } from "./launch-gate";
 import { buildWorkbenchMcpSpec, WORKBENCH_MCP_SERVER_NAME } from "./mcp-server-spec";
 import {
@@ -469,7 +469,6 @@ async function launchCliWindowBody(
   let args: string[];
   let claimingSession = false;
   let resumePicker = false;
-  let claimMarker: string | undefined;
 
   if (runtime === "claude-code") {
     let serversForMcp = mcpServers;
@@ -497,7 +496,14 @@ async function launchCliWindowBody(
             ? { sessionId: nativeSessionId }
             : {}),
       permission,
-      ...(mcpTemp !== undefined ? { mcpConfigPath: mcpTemp.path, strictMcp: true } : {}),
+      ...(mcpTemp !== undefined
+        ? {
+            mcpConfigPath: mcpTemp.path,
+            strictMcp: true,
+            allowedTools: [`mcp__${WORKBENCH_MCP_SERVER_NAME}`],
+          }
+        : {}),
+      ...(role === "supervisor" ? { readOnlyShell: true } : {}),
       ...(roleInjection.claudePromptFile !== undefined
         ? { appendSystemPromptFile: roleInjection.claudePromptFile }
         : {}),
@@ -516,14 +522,10 @@ async function launchCliWindowBody(
     if (!resuming) {
       nativeSessionId = undefined;
     }
-    claimMarker = resuming ? undefined : randomUUID();
     if (resuming && nativeSessionId === undefined) {
       resumePicker = true;
     }
-    const developerInstructions =
-      claimMarker !== undefined
-        ? withCodexClaimMarker(roleInjection.developerInstructions, claimMarker)
-        : roleInjection.developerInstructions;
+    const developerInstructions = roleInjection.developerInstructions;
     args = buildInteractiveCodexArgs({
       cwd,
       ...(model !== undefined ? { model } : {}),
@@ -706,7 +708,6 @@ async function launchCliWindowBody(
     stringEnv[FF_PANE_WB_PIPE_ENV] = deps.controlPipe;
   }
 
-  const startedAtMs = deps.now?.() ?? Date.now();
   let terminal: TerminalRecord;
   try {
     terminal = deps.manager.create({
@@ -752,21 +753,29 @@ async function launchCliWindowBody(
   deps.idleQueue?.attach(terminal.id, {
     windowId: input.windowId,
     initialPrompt: input.initialPrompt !== undefined && input.initialPrompt.trim() !== "",
+    ...(runtime === "codex" ? { submitDelayMs: CODEX_SUBMIT_DELAY_MS, verifySubmit: true } : {}),
+    // Grok 没登录，没法真机核对回车时机，按 Codex 的间隔写回车，多等不到一秒没有坏处。
+    ...(runtime === "grok" ? { submitDelayMs: CODEX_SUBMIT_DELAY_MS } : {}),
+    // 有 UserPromptSubmit hook 的窗口有可靠的「一轮开始」信号，提交与否只认它。
+    ...((runtime === "claude-code" && nodePath !== undefined) ||
+    (runtime === "grok" && grokHookPath !== undefined)
+      ? { verifySubmit: true, turnStartSource: true }
+      : {}),
   });
 
+  // 编号还不知道（新开，或续接时走选择器）：等本窗口的 notify 报 thread-id。
+  // 没装上 notify（找不到 node）就报不来，直接标未识别，续接走选择器。
   if (
     runtime === "codex" &&
-    input.resume !== true &&
-    claimMarker !== undefined &&
-    deps.codexClaimer !== undefined
+    nativeSessionId === undefined &&
+    deps.codexClaimer !== undefined &&
+    hooks.notifyArgv.length > 0
   ) {
     claimingSession = true;
     const claimer = deps.codexClaimer;
     const windowId = input.windowId;
-    const marker = claimMarker;
-    // 同步启动认领；假 CLI 秒退时也能在 cancel 前完成认领。对不上则标未识别。
     void claimer
-      .start({ windowId, cwd, startedAtMs, claimMarker: marker })
+      .start({ windowId })
       .then((id) => {
         if (id === undefined) {
           deps.onCodexSessionUnidentified?.(windowId);

@@ -18,6 +18,7 @@ export interface TerminalLayerOptions {
   readonly onTerminalExit?: (
     metadata: Readonly<Record<string, unknown>> | undefined,
     terminalId: string,
+    exit: { readonly exitCode: number; readonly killed: boolean },
   ) => void;
   /**
    * 用户按键（不含空闲队列自己的 write）。
@@ -66,7 +67,10 @@ export function createTerminalLayer(
         publishEvent(window.webContents, "terminal:output", batch);
       },
       onExit: (notice) => {
-        options.onTerminalExit?.(notice.metadata, notice.id);
+        options.onTerminalExit?.(notice.metadata, notice.id, {
+          exitCode: notice.exitCode,
+          killed: notice.killed === true,
+        });
         const window = getWindow();
         if (window === null || window.isDestroyed()) {
           return;

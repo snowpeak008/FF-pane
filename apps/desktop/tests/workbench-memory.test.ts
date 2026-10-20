@@ -31,6 +31,7 @@ import {
   MEMORY_SEARCH_MAX_HITS,
   packMemorySearchHits,
 } from "../src/main/workbench/memory-policy";
+import { createNamedLocks } from "../src/main/workbench/named-locks";
 import {
   addCallerProjectMemory,
   searchCallerProjectMemory,
@@ -109,11 +110,13 @@ function harness(
     describe: async (id) => views[id],
     setRole: async () => ({ ok: true, role: "manager", delivery: "skipped" }),
     openChild: async () => ({ ok: false, error: "测试里不启动。" }),
-    remind: () => undefined,
+    remind: () => "delivered",
+    clearReminder: () => undefined,
     publishInbox: () => undefined,
     getCursor: async () => undefined,
     setCursor: async () => undefined,
     readOutput: async () => ({ running: false, status: "未运行" }),
+    readScreen: async () => ({ running: false, status: "未运行" }),
     closeDescendant: {
       findTerminalId: () => undefined,
       killTerminal: () => undefined,
@@ -142,6 +145,11 @@ function harness(
       added.push({ root: projectRoot, entry });
     },
     setModelEffort: async () => ({ ok: false as const, error: "unused" }),
+    locks: createNamedLocks(),
+    notifyLockGranted: () => undefined,
+    windowState: () => undefined,
+    closeSelfLater: () => undefined,
+    setPermission: async () => ({ ok: false as const, error: "unused" }),
   };
   return {
     views,

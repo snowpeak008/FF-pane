@@ -531,6 +531,21 @@
     },
     "limit": {
       "reached": "Reached the concurrent window limit ({{max}}). Close some windows, or raise the limit in Settings."
+    },
+    "runtime": {
+      "idle": "Idle",
+      "busy": "Busy",
+      "blocked": "Awaiting approval",
+      "unknown": "Status unknown",
+      "quiet": "No output for {{minutes}} min",
+      "holding": "Holds {{names}}",
+      "waiting": "Waiting for {{names}}",
+      "apiError": "Last error: {{reason}}",
+      "resources": "Free memory {{memory}} GB · Disk {{disk}}",
+      "disk": "{{root}} {{free}} GB",
+      "low": "Resources low; new windows will be refused",
+      "sep": ", ",
+      "memory": "{{memory}} GB · {{count}} processes"
     }
   },
   "projects": {
@@ -841,7 +856,8 @@
         "saveError": "Failed to save the image relay",
         "test": "Test (makes one test image, not added to any project)",
         "testOk": "It works. Took {{ms}} ms.",
-        "testFailed": "The test did not succeed"
+        "testFailed": "The test did not succeed",
+        "keyMasked": "[redacted: API key]"
       }
     },
     "configs": {

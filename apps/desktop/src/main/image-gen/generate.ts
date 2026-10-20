@@ -267,7 +267,7 @@ async function listFileNames(dir: string): Promise<ReadonlySet<string>> {
 }
 
 async function isPngFile(absolute: string): Promise<boolean> {
-  let handle;
+  let handle: Awaited<ReturnType<typeof open>>;
   try {
     handle = await open(absolute, "r");
   } catch {
@@ -352,7 +352,7 @@ export function launchCodexImageProcess(launch: CodexImageLaunch): Promise<void>
         resolvePromise();
       }
     };
-    let child;
+    let child: ReturnType<typeof spawn>;
     try {
       child = spawn(launch.file, [...launch.args], {
         cwd: launch.cwd,

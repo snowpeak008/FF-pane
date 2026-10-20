@@ -65,6 +65,8 @@ export interface McpToolDefinition {
   readonly description: string;
   /** JSON Schema（object 类型）。 */
   readonly inputSchema: Readonly<Record<string, unknown>>;
+  /** MCP 工具注解。readOnlyHint 为 true 时 Claude 的 plan 模式（只读档）才放行。 */
+  readonly annotations?: { readonly readOnlyHint?: boolean };
 }
 
 /** 工具执行结果：文本内容 + 是否为「工具自身出错」。 */

@@ -1,7 +1,10 @@
 /**
- * 终端回放尾部（T10.7b）：按字节截取，再去掉 ANSI / 控制序列。
+ * 终端回放尾部（T10.7b）：raw 模式按字节截取，再去掉 ANSI / 控制序列。
  * 默认 8KB，调用方可调，硬顶 32KB。
+ * 屏幕模式（缺省）：用无头终端重放，返回渲染后的最近若干行，不含转圈动画的中间帧。
  */
+
+import xtermHeadless from "@xterm/headless";
 
 export const READ_OUTPUT_DEFAULT_BYTES = 8 * 1024;
 export const READ_OUTPUT_MAX_BYTES = 32 * 1024;
@@ -83,4 +86,71 @@ export function stripTerminalControls(text: string): string {
     out += text.charAt(index);
   }
   return out;
+}
+
+export const READ_SCREEN_DEFAULT_LINES = 60;
+export const READ_SCREEN_MAX_LINES = 300;
+const SCREEN_SCROLLBACK = 2000;
+/** 只有加载动画字符、点和空白的行。 */
+const SPINNER_ONLY = /^[\s.·•…⠀-⣿✢✳✶✻✽✺✹✸✷✵✴✱✲*◐◓◑◒|/-]*$/u;
+
+export function clampReadScreenLines(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 1) {
+    return READ_SCREEN_DEFAULT_LINES;
+  }
+  return Math.min(Math.floor(value), READ_SCREEN_MAX_LINES);
+}
+
+/**
+ * 把回放缓冲按终端尺寸重放进无头终端，取渲染后的屏幕和滚动区文字。
+ * 光标移动、清行、重画都按终端语义落定，加载动画只留最后一帧；
+ * 再去掉只剩动画字符的行，连续空行收成一行，返回最后 maxLines 行。
+ */
+export async function renderTerminalText(
+  raw: string,
+  size: { readonly cols: number; readonly rows: number },
+  maxLines: number,
+): Promise<string> {
+  const terminal = new xtermHeadless.Terminal({
+    cols: Math.max(20, Math.floor(size.cols)),
+    rows: Math.max(5, Math.floor(size.rows)),
+    scrollback: SCREEN_SCROLLBACK,
+    allowProposedApi: true,
+  });
+  try {
+    await new Promise<void>((done) => {
+      terminal.write(raw, () => done());
+    });
+    const buffer = terminal.buffer.active;
+    const lines: string[] = [];
+    for (let index = 0; index < buffer.length; index += 1) {
+      const line = buffer.getLine(index);
+      if (line === undefined) {
+        continue;
+      }
+      const text = line.translateToString(true);
+      if (line.isWrapped && lines.length > 0) {
+        lines[lines.length - 1] = `${lines[lines.length - 1]}${text}`;
+        continue;
+      }
+      lines.push(text);
+    }
+    const kept: string[] = [];
+    for (const line of lines) {
+      const trimmed = line.trimEnd();
+      if (trimmed !== "" && SPINNER_ONLY.test(trimmed)) {
+        continue;
+      }
+      if (trimmed === "" && (kept.length === 0 || kept[kept.length - 1] === "")) {
+        continue;
+      }
+      kept.push(trimmed);
+    }
+    while (kept.length > 0 && kept[kept.length - 1] === "") {
+      kept.pop();
+    }
+    return kept.slice(Math.max(0, kept.length - maxLines)).join("\n");
+  } finally {
+    terminal.dispose();
+  }
 }

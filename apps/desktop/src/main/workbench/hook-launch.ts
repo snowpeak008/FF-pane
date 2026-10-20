@@ -19,6 +19,8 @@ export const WORKBENCH_HOOK_EVENTS = [
   "PostToolUse",
   "PostToolUseFailure",
   "Stop",
+  // 一轮因 API 错误（限流、过载、认证失败等）结束时代替 Stop 触发。不接它，窗口会一直算忙。
+  "StopFailure",
   "UserPromptSubmit",
   "SessionStart",
 ] as const;

@@ -17,6 +17,7 @@ export {
   assignProcessToNewJob,
   jobObjectUnavailableReason,
   type ProcessJob,
+  type ProcessJobStats,
 } from "./job-object.js";
 export {
   type KillTreeOutcome,

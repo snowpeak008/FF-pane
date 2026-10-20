@@ -4,7 +4,6 @@
 
 import { noteWorkbenchConversation, WORKBENCH_CONVERSATION_LIMIT } from "@ff-pane/shared";
 import { describe, expect, it } from "vitest";
-import { withCodexClaimMarker } from "../src/main/workbench/codex-claim";
 import { planConversationLaunch } from "../src/renderer/src/pages/workbench/conversation-launch";
 
 describe("planConversationLaunch", () => {
@@ -60,13 +59,5 @@ describe("noteWorkbenchConversation", () => {
     expect(history).toHaveLength(WORKBENCH_CONVERSATION_LIMIT);
     expect(history.some((item) => item.id === "old")).toBe(false);
     expect(history[0]?.id).toBe(`id-${WORKBENCH_CONVERSATION_LIMIT - 1}`);
-  });
-});
-
-describe("withCodexClaimMarker", () => {
-  it("记号接在说明末尾，不是窗口令牌", () => {
-    const marker = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
-    expect(withCodexClaimMarker("请用中文", marker)).toBe(`请用中文\nffpane-claim:${marker}`);
-    expect(withCodexClaimMarker(undefined, marker)).toBe(`ffpane-claim:${marker}`);
   });
 });

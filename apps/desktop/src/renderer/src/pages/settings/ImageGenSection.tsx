@@ -5,7 +5,7 @@ import {
   isImageGenMode,
 } from "@ff-pane/shared";
 import { RefreshCw } from "lucide-react";
-import { type ReactElement, useEffect, useState } from "react";
+import { type ReactElement, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import type { CliLoginProbeView } from "../../../../shared-ipc/contracts";
@@ -28,12 +28,13 @@ const LOGIN_STATUS_TONE = {
   unknown: "neutral",
 } as const;
 
-function hideKey(text: string, secret: string): string {
+/** 把报错里出现的密钥换成占位文字。占位文字随界面语言。 */
+function hideKey(text: string, secret: string, mask: string): string {
   const trimmed = secret.trim();
   if (trimmed === "") {
     return text;
   }
-  return text.split(trimmed).join("【已脱敏：API key】");
+  return text.split(trimmed).join(mask);
 }
 
 /**
@@ -44,13 +45,15 @@ function CodexSubscriptionBox(): ReactElement {
   const { t } = useTranslation();
   const [probing, setProbing] = useState(true);
   const [probe, setProbe] = useState<CliLoginProbeView | undefined>(undefined);
-  const [tick, setTick] = useState(0);
+  /** 每次检测加一；回来的结果不是最新一次的就丢掉（离开页面也算作作废）。 */
+  const probeSeq = useRef(0);
 
-  useEffect(() => {
-    let cancelled = false;
+  const runProbe = useCallback(() => {
+    probeSeq.current += 1;
+    const seq = probeSeq.current;
     setProbing(true);
     void invokeQuery("providers:probe-cli-login", { runtime: "codex" }).then((settled) => {
-      if (cancelled) {
+      if (seq !== probeSeq.current) {
         return;
       }
       setProbing(false);
@@ -60,10 +63,14 @@ function CodexSubscriptionBox(): ReactElement {
       }
       setProbe({ status: "unknown", detail: settled.error.message, probedWith: "" });
     });
+  }, []);
+
+  useEffect(() => {
+    runProbe();
     return () => {
-      cancelled = true;
+      probeSeq.current += 1;
     };
-  }, [tick]);
+  }, [runProbe]);
 
   const detail =
     probe === undefined || probing
@@ -87,12 +94,7 @@ function CodexSubscriptionBox(): ReactElement {
         ) : (
           <Badge tone="neutral">{t("settings.imageGen.codex.checking")}</Badge>
         )}
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={probing}
-          onClick={() => setTick((value) => value + 1)}
-        >
+        <Button variant="ghost" size="sm" disabled={probing} onClick={runProbe}>
           <RefreshCw aria-hidden size={14} />
           {t("settings.imageGen.codex.refresh")}
         </Button>
@@ -184,7 +186,7 @@ export function ImageGenSection(): ReactElement {
     setSaving(false);
     if (settled.status === "error") {
       toast.error(t("settings.imageGen.relay.saveError"), {
-        description: hideKey(settled.error.message, apiKey),
+        description: hideKey(settled.error.message, apiKey, t("settings.imageGen.relay.keyMasked")),
       });
       return;
     }
@@ -209,13 +211,13 @@ export function ImageGenSection(): ReactElement {
     });
     setTesting(false);
     if (settled.status === "error") {
-      const text = hideKey(settled.error.message, apiKey);
+      const text = hideKey(settled.error.message, apiKey, t("settings.imageGen.relay.keyMasked"));
       setTestLine({ ok: false, text });
       toast.error(text);
       return;
     }
     if (!settled.data.ok) {
-      const reason = hideKey(settled.data.reason, apiKey);
+      const reason = hideKey(settled.data.reason, apiKey, t("settings.imageGen.relay.keyMasked"));
       const text = reason.trim() === "" ? t("settings.imageGen.relay.testFailed") : reason;
       setTestLine({ ok: false, text });
       toast.error(text);

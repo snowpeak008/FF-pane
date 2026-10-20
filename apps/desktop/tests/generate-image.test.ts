@@ -3,7 +3,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
+import { type Dirent, existsSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, sep } from "node:path";
@@ -99,7 +99,7 @@ async function useRelay(): Promise<void> {
 
 async function filesUnder(dir: string): Promise<string[]> {
   const out: string[] = [];
-  let entries;
+  let entries: Dirent<string>[];
   try {
     entries = await readdir(dir, { withFileTypes: true });
   } catch {

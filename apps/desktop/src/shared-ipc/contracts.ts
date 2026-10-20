@@ -423,6 +423,26 @@ export interface WorkbenchInboxNoticeEvent {
   readonly lastReportStatus?: "done" | "blocked" | "failed" | "progress";
 }
 
+/** 平台看到的窗口运行状态（来自 hook、终端输出时间和命名锁），供标题栏显示。 */
+export interface WorkbenchWindowRuntimeStatus {
+  readonly phase: "idle" | "busy" | "blocked" | "unknown";
+  readonly quietSeconds?: number;
+  readonly holdingLocks: readonly string[];
+  readonly waitingLocks: readonly string[];
+  /** 上一轮因 API 错误中断的说明，例如「账号限流（429）」。 */
+  readonly lastApiError?: string;
+  /** 窗口进程组里的进程数和合计内存（工作集），含它起的后台进程。 */
+  readonly memory?: { readonly processCount: number; readonly workingSetBytes: number };
+}
+
+export interface WorkbenchRuntimeStatusResponse {
+  readonly windows: Readonly<Record<string, WorkbenchWindowRuntimeStatus>>;
+  readonly resources: {
+    readonly freeMemoryBytes: number;
+    readonly freeDiskBytes: Readonly<Record<string, number>>;
+  };
+}
+
 /** 冷启动后从线程索引尾部重算的标题栏徽章。 */
 export interface WorkbenchInboxBadgesResponse {
   readonly badges: Readonly<
@@ -568,6 +588,8 @@ export interface WorkbenchModelEffortEvent {
   readonly error?: string;
   readonly modelOverride?: string;
   readonly effortOverride?: string;
+  /** 管理者经 ffpane_set_permission 改过的权限。续接前先写回界面状态。 */
+  readonly permission?: WorkbenchPermissionLevel;
 }
 
 export interface TerminalOutputEvent {
@@ -1508,6 +1530,11 @@ export interface IpcInvokeContracts {
     request: undefined;
     response: WorkbenchInboxBadgesResponse;
   };
+  /** 本项目运行中窗口的状态、持锁与等锁，以及本机可用内存和磁盘。 */
+  "workbench:runtime-status": {
+    request: { readonly projectId: ProjectId };
+    response: WorkbenchRuntimeStatusResponse;
+  };
   /** 列出当前项目 `.ffpane/briefs/*.md`（只读，按修改时间倒序）。 */
   "workbench:list-briefs": {
     request: { readonly projectId: ProjectId };
@@ -1836,6 +1863,7 @@ export const INVOKE_CHANNELS = [
   "workbench:save-role-manual",
   "workbench:reset-role-manual",
   "workbench:inbox-badges",
+  "workbench:runtime-status",
   "workbench:list-briefs",
   "workbench:read-brief",
   "workbench:read-threads",

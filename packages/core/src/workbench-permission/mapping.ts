@@ -30,19 +30,25 @@ export interface WorkbenchPermissionMapping {
 }
 
 /**
- * Claude 只读：禁写工具 + Bash。
- * 工具名以 2.1.220 `--disallowedTools` 空格分隔为准。
+ * Claude 的命令工具。Windows 上 2.1.302 只给 PowerShell、不给 Bash（init.tools 实测），
+ * 所以两个都要列；只禁 Bash 时 acceptEdits 会自动批准 PowerShell 写文件（实测写成功）。
+ */
+export const CLAUDE_COMMAND_TOOL_NAMES = ["Bash", "PowerShell"] as const;
+
+/**
+ * Claude 只读：禁写工具 + 命令工具。
+ * 工具名以 2.1.220 `--disallowedTools` 空格分隔为准。2.1.220 起没有 MultiEdit，
+ * 写进来只会让 CLI 每次启动提示「matches no known tool」，所以不列。
  */
 export const CLAUDE_READ_ONLY_DISALLOWED_TOOLS = [
   "Edit",
   "Write",
   "NotebookEdit",
-  "MultiEdit",
-  "Bash",
+  ...CLAUDE_COMMAND_TOOL_NAMES,
 ] as const;
 
-/** Claude 可改文件：禁 Bash（命令仍不可自动跑）。 */
-export const CLAUDE_EDIT_DISALLOWED_TOOLS = ["Bash"] as const;
+/** Claude 可改文件：禁命令工具（命令仍不可自动跑）。 */
+export const CLAUDE_EDIT_DISALLOWED_TOOLS = [...CLAUDE_COMMAND_TOOL_NAMES] as const;
 
 /**
  * 权限 → CLI 参数映射表。

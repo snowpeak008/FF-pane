@@ -16,6 +16,52 @@ import {
 } from "../src/main/workbench/mcp-temp";
 
 describe("buildInteractiveClaudeArgs", () => {
+  it("只读档放行工作台协作工具；监管者只读档不禁命令工具，也不加前缀放行规则", () => {
+    const plain = buildInteractiveClaudeArgs({
+      permission: "read-only",
+      mcpConfigPath: "C:\\tmp\\mcp.json",
+      allowedTools: ["mcp__ffpane-workbench"],
+      initialPrompt: "开工",
+    });
+    expect(plain).toContain("Bash");
+    expect(plain).toContain("PowerShell");
+    const allowAt = plain.indexOf("--allowedTools");
+    expect(plain.slice(allowAt, allowAt + 3)).toEqual([
+      "--allowedTools",
+      "mcp__ffpane-workbench",
+      "--mcp-config",
+    ]);
+    expect(plain.at(-1)).toBe("开工");
+
+    const supervisor = buildInteractiveClaudeArgs({
+      permission: "read-only",
+      mcpConfigPath: "C:\\tmp\\mcp.json",
+      allowedTools: ["mcp__ffpane-workbench"],
+      readOnlyShell: true,
+    });
+    expect(supervisor).not.toContain("Bash");
+    expect(supervisor).not.toContain("PowerShell");
+    expect(supervisor).toContain("plan");
+    expect(supervisor).toContain("Edit");
+    expect(supervisor).toContain("Write");
+    expect(supervisor.some((arg) => arg.startsWith("Bash(") || arg.startsWith("PowerShell("))).toBe(
+      false,
+    );
+
+    const editSupervisor = buildInteractiveClaudeArgs({
+      permission: "edit",
+      mcpConfigPath: "C:\\tmp\\mcp.json",
+      readOnlyShell: true,
+    });
+    expect(editSupervisor).not.toContain("--allowedTools");
+    expect(editSupervisor).toContain("Bash");
+    expect(editSupervisor).toContain("PowerShell");
+
+    expect(buildInteractiveClaudeArgs({ allowedTools: ["mcp__x"] })).not.toContain(
+      "--allowedTools",
+    );
+  });
+
   it("没有编号时只打开选择器，不接最近一条", () => {
     const args = buildInteractiveClaudeArgs({ resumePicker: true });
     expect(args).toEqual(["--resume"]);

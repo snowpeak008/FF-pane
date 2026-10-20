@@ -12,19 +12,12 @@ export {
 export {
   assertTestCodexHomeIsolated,
   CodexSessionClaimer,
-  collectCodexSessionScanDayDirs,
   cwdEquals,
-  formatDayDir,
   isAutomatedTestEnv,
+  isCodexThreadId,
   isRealUserCodexPath,
-  localDayParts,
   normalizeWorkbenchCwd,
-  parseCodexRolloutSessionMeta,
-  pickCodexSessionForClaim,
-  readFileFirstLine,
   resolveCodexHome,
-  shiftDayParts,
-  utcDayParts,
 } from "./codex-claim";
 export {
   createWorkbenchCliLayer,

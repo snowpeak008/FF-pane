@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   extractHookPairing,
+  extractNotifyThreadId,
   extractToolUseId,
   mapNotifyArgument,
   permissionInputDigest,
@@ -111,5 +112,22 @@ describe("resolveReportedHookEvent", () => {
     expect(resolveReportedHookEvent(["node", "C:\\workbench-hook.js", "--codex-notify", "{"])).toBe(
       "",
     );
+  });
+});
+
+describe("extractNotifyThreadId", () => {
+  it("只取 notify 事件里的 thread-id，形状不对就不要", () => {
+    const id = "01a1588d-18e8-77a3-b90f-e5fcfd74f597";
+    const payload = JSON.stringify({
+      type: "agent-turn-complete",
+      "thread-id": id,
+      "input-messages": ["密钥 sk-xxx"],
+      "last-assistant-message": "好",
+    });
+    expect(extractNotifyThreadId(["node.exe", "hook.mjs", payload])).toBe(id);
+    expect(
+      extractNotifyThreadId(["node.exe", "hook.mjs", JSON.stringify({ "thread-id": "../x" })]),
+    ).toBeUndefined();
+    expect(extractNotifyThreadId(["node.exe", "hook.mjs", "Stop"])).toBeUndefined();
   });
 });

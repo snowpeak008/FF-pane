@@ -54,6 +54,8 @@ export interface WorkbenchControlServerOptions {
       readonly toolDigest?: string;
       readonly sessionId?: string;
       readonly releasePermissions?: boolean;
+      /** StopFailure 的错误类型（rate_limit、overloaded…）。 */
+      readonly errorType?: string;
     },
   ) => void;
   /**
@@ -260,6 +262,10 @@ export function createWorkbenchControlServer(
         const toolDigest = readToolDigest(body["toolDigest"]);
         const sessionId = readSessionId(body["sessionId"]);
         const releasePermissions = body["releasePermissions"] === true;
+        const errorType =
+          typeof body["errorType"] === "string" && /^[a-z_]{1,40}$/.test(body["errorType"])
+            ? body["errorType"]
+            : undefined;
         const signal = mapHookEvent(event, hookEvent);
         if (signal !== "ignore") {
           const meta =
@@ -267,13 +273,15 @@ export function createWorkbenchControlServer(
             toolUseId !== undefined ||
             toolDigest !== undefined ||
             sessionId !== undefined ||
-            releasePermissions
+            releasePermissions ||
+            errorType !== undefined
               ? {
                   ...(hookEvent !== undefined ? { hookEvent } : {}),
                   ...(toolUseId !== undefined ? { toolUseId } : {}),
                   ...(toolDigest !== undefined ? { toolDigest } : {}),
                   ...(sessionId !== undefined ? { sessionId } : {}),
                   ...(releasePermissions ? { releasePermissions: true } : {}),
+                  ...(errorType !== undefined ? { errorType } : {}),
                 }
               : undefined;
           options.onHook(windowId, signal, meta);

@@ -57,6 +57,7 @@ function start(options?: {
         ...(meta?.toolUseId !== undefined ? { toolUseId: meta.toolUseId } : {}),
         ...(meta?.sessionId !== undefined ? { sessionId: meta.sessionId } : {}),
         ...(meta?.releasePermissions === true ? { releasePermissions: true } : {}),
+        ...(meta?.errorType !== undefined ? { errorType: meta.errorType } : {}),
       });
     },
     log: (message) => {
@@ -153,6 +154,20 @@ describe("workbench control channel", () => {
     expect(hooks).toEqual([{ windowId: "win-9", signal: "permission-request" }]);
     expect(logs.join("\n")).not.toContain(token);
     expect(JSON.stringify(logs)).not.toContain(token);
+  });
+
+  it("StopFailure 当成回合结束，并带上合法的错误类型", async () => {
+    const { server, hooks, registry } = await start();
+    const token = registry.issue("win-9");
+    await sendHookReport(server.address, token, "StopFailure", undefined, undefined, "rate_limit");
+    await exchange(
+      server.address,
+      `${JSON.stringify({ v: 1, type: "hook", token, event: "StopFailure", errorType: "Bad Type!" })}\n`,
+    );
+    expect(hooks).toEqual([
+      { windowId: "win-9", signal: "stop", errorType: "rate_limit" },
+      { windowId: "win-9", signal: "stop" },
+    ]);
   });
 
   it("hook 只转发 tool_use_id，不转发工具正文", async () => {

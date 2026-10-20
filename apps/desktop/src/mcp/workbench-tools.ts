@@ -28,6 +28,9 @@ export const WORKBENCH_MCP_TOOL_NAMES = [
   "ffpane_memory_search",
   "ffpane_memory_add",
   "ffpane_set_model_effort",
+  "ffpane_set_permission",
+  "ffpane_broadcast",
+  "ffpane_lock",
 ] as const;
 
 export type WorkbenchMcpToolName = (typeof WORKBENCH_MCP_TOOL_NAMES)[number];
@@ -38,7 +41,27 @@ const REPORT_STATUS_ENUM = ["done", "blocked", "failed", "progress"] as const;
 const PANEL_ENUM = ["plan", "tasks", "runs"] as const;
 const MEMORY_CATEGORY_ENUM = ["decision", "rule", "lesson"] as const;
 
-export const WORKBENCH_MCP_TOOLS: readonly McpToolDefinition[] = [
+/**
+ * 只读档也要能用的协作工具：只读写 .ffpane/ 里的协作文件（briefs、threads）或只读状态，
+ * 不改项目代码，也不指挥别的窗口。Claude 只读档是 plan 模式，只放行 readOnlyHint 的工具
+ * （实测 2.1.302：没有这个注解时 --allowedTools 也放不开）。
+ * 开窗、发消息、关窗、改权限、生图这类会影响别的窗口或项目文件的工具不加。
+ */
+export const WORKBENCH_READ_ONLY_TOOL_NAMES: readonly WorkbenchMcpToolName[] = [
+  "ffpane_whoami",
+  "ffpane_list_windows",
+  "ffpane_write_brief",
+  "ffpane_write_status",
+  "ffpane_report",
+  "ffpane_read_inbox",
+  "ffpane_read_output",
+  "ffpane_open_panel",
+  "ffpane_open_canvas",
+  "ffpane_memory_search",
+  "ffpane_lock",
+];
+
+const TOOL_DEFINITIONS: readonly McpToolDefinition[] = [
   {
     name: "ffpane_whoami",
     description:
@@ -68,7 +91,7 @@ export const WORKBENCH_MCP_TOOLS: readonly McpToolDefinition[] = [
   {
     name: "ffpane_write_brief",
     description:
-      "在本窗口所属项目的 .ffpane/briefs/ 下写一份任务说明 Markdown，返回项目内相对路径和绝对路径。任何角色、任何权限（含只读）都可以调用，因为写入被限定在 briefs 目录。不要传绝对路径或 .. 。重名会自动加序号，不会覆盖。正文上限 256KB；更长的内容请拆分。",
+      "在本窗口所属项目的 .ffpane/briefs/ 下写一份任务说明 Markdown，返回项目内相对路径和绝对路径。任何角色、任何权限（含只读）都可以调用，因为写入被限定在 briefs 目录。不要传绝对路径或 .. 。mode 缺省 new：重名自动加序号。同一件事反复更新时用 overwrite 覆盖同名文件，或 append 追加到末尾，免得出现 -2、-3 多个版本。正文上限 256KB；更长的内容请拆分。",
     inputSchema: {
       type: "object",
       properties: {
@@ -77,6 +100,11 @@ export const WORKBENCH_MCP_TOOLS: readonly McpToolDefinition[] = [
           description: "文件名，例如 plan.md。只能是 briefs 目录内的文件名。",
         },
         content: { type: "string", description: "Markdown 正文。" },
+        mode: {
+          type: "string",
+          enum: ["new", "overwrite", "append"],
+          description: "new 重名加序号（缺省）；overwrite 覆盖同名；append 追加到同名末尾。",
+        },
       },
       required: ["name", "content"],
       additionalProperties: false,
@@ -127,6 +155,11 @@ export const WORKBENCH_MCP_TOOLS: readonly McpToolDefinition[] = [
           description: "任务说明的项目内相对路径或绝对路径，必须在 .ffpane/briefs/ 内。",
         },
         message: { type: "string", description: "附加给子窗口的第一句话。整段初始指令上限 32KB。" },
+        supervisorWindowId: {
+          type: "string",
+          description:
+            "可选。挂上观察这个窗口的监管者（你开的、角色为监管者）。监管者能读它的终端、收它汇报的抄送，不能下命令。挂了以后，它 done 和 progress 的汇报不叫醒你，blocked 和 failed 照常叫醒。",
+        },
       },
       required: ["cli", "role", "permission", "title"],
       additionalProperties: false,
@@ -173,6 +206,11 @@ export const WORKBENCH_MCP_TOOLS: readonly McpToolDefinition[] = [
           description:
             "可选。监管者交给管理者时，详细记录的路径，必须在 .ffpane/briefs/ 内。不要把正文放进来。",
         },
+        closeAfter: {
+          type: "boolean",
+          description:
+            "可选。只用于 done：汇报送出后几秒，由上级关闭本窗口。说明里要求做完自关时才用。管理者不能用。",
+        },
       },
       required: ["status", "summary"],
       additionalProperties: false,
@@ -198,14 +236,20 @@ export const WORKBENCH_MCP_TOOLS: readonly McpToolDefinition[] = [
   {
     name: "ffpane_read_output",
     description:
-      "读取后代窗口最近的终端输出。仅后代。返回环形缓冲尾部，已去掉 ANSI 和控制序列。默认最后 8KB，可用 maxBytes 调整，上限 32KB。窗口未运行时返回状态说明，而不是终端正文。",
+      "读取后代窗口最近的终端输出。仅后代。缺省 mode=screen：按终端重放后返回屏幕上最后若干行文字，加载动画只留最后一帧，缺省 60 行，最多 300 行。mode=raw 返回原始回放尾部（已去掉 ANSI 和控制序列），默认 8KB，可用 maxBytes 调整，上限 32KB。窗口未运行时返回状态说明，而不是终端正文。",
     inputSchema: {
       type: "object",
       properties: {
         windowId: { type: "string", description: "后代窗口 id。" },
+        mode: {
+          type: "string",
+          enum: ["screen", "raw"],
+          description: "screen 渲染后的屏幕文字（缺省）；raw 原始回放尾部。",
+        },
+        lines: { type: "number", description: "screen 模式返回的行数，缺省 60，最大 300。" },
         maxBytes: {
           type: "number",
-          description: "读取尾部的字节数，缺省 8192，最大 32768。",
+          description: "raw 模式读取尾部的字节数，缺省 8192，最大 32768。",
         },
       },
       required: ["windowId"],
@@ -357,4 +401,67 @@ export const WORKBENCH_MCP_TOOLS: readonly McpToolDefinition[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: "ffpane_set_permission",
+    description:
+      "改后代窗口的权限，不用关掉重开。不得高于你自己的权限，不能改自己和上级。改完记在那个窗口上：空闲时自动续接重启，上下文保留；正忙就排队。改成全放开（yolo）时不自动重启，要等用户确认。会话还不能续接时，留给下次手动重启。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        windowId: { type: "string", description: "后代窗口 id。" },
+        permission: {
+          type: "string",
+          enum: [...PERMISSION_ENUM],
+          description: "新权限。",
+        },
+      },
+      required: ["windowId", "permission"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "ffpane_broadcast",
+    description:
+      "一次给全部后代（缺省）或直接子窗口发同一条消息，例如全体暂停或改规则。每个窗口各写一条收件箱记录并提醒，返回每个窗口的投递状态。正文上限 8KB，长内容写 brief 后只传 briefPath。之后用 ffpane_list_windows 看谁已经空闲。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        text: { type: "string", description: "消息正文。" },
+        briefPath: { type: "string", description: "可选，项目 .ffpane/briefs/ 内的说明路径。" },
+        scope: {
+          type: "string",
+          enum: ["descendants", "children"],
+          description: "descendants 全部后代（缺省）；children 只发直接子窗口。",
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "ffpane_lock",
+    description:
+      "本项目的命名锁，给一台机器只能开一个的资源排队（如 unity）。acquire 拿锁：空着就拿到，有人占着就排队，轮到你时收到「[锁]」提醒，排队时结束本轮等提醒、不要轮询。release 放锁或退出排队，下一个排队的窗口自动拿到。窗口退出或被关闭时它的锁自动放掉。list 列出谁持有、谁在排队。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: {
+          type: "string",
+          enum: ["acquire", "release", "list"],
+          description: "acquire、release 或 list。",
+        },
+        name: {
+          type: "string",
+          description: "锁名，1 到 64 个字母、数字、点、下划线或减号。list 时不填。",
+        },
+      },
+      required: ["action"],
+      additionalProperties: false,
+    },
+  },
 ];
+
+export const WORKBENCH_MCP_TOOLS: readonly McpToolDefinition[] = TOOL_DEFINITIONS.map((tool) =>
+  (WORKBENCH_READ_ONLY_TOOL_NAMES as readonly string[]).includes(tool.name)
+    ? { ...tool, annotations: { readOnlyHint: true } }
+    : tool,
+);

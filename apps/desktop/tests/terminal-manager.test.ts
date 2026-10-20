@@ -103,6 +103,39 @@ describe("PtyManager（假 pty）", () => {
     rmSync(cwd, { recursive: true, force: true });
   });
 
+  it("pid 起初是 0（Windows conpty 实情）：等真实 pid 到手再圈禁，关窗走 Job 整组结束", async () => {
+    const { factory, spawned } = createFakeFactory();
+    const assigned: number[] = [];
+    const terminate = vi.fn(() => true);
+    const killTree = vi.fn(async () => undefined);
+    const manager = new PtyManager({
+      factory: (options) => {
+        const handle = factory(options) as FakePty & { pid: number };
+        const realPid = handle.pid;
+        let pid = 0;
+        setTimeout(() => {
+          pid = realPid;
+        }, 60);
+        Object.defineProperty(handle, "pid", { get: () => pid });
+        return handle;
+      },
+      assignJob: (pid) => {
+        assigned.push(pid);
+        return pid > 0 ? { terminate, close: vi.fn(), stats: () => undefined } : undefined;
+      },
+      killTree,
+    });
+    const created = manager.create({ cwd, cols: 80, rows: 24 });
+    expect(assigned).toEqual([]);
+    expect(created.contained).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(assigned).toEqual([spawned[0]?.pid]);
+    expect(manager.get(created.id)?.contained).toBe(true);
+    manager.kill(created.id);
+    expect(terminate).toHaveBeenCalledTimes(1);
+    expect(killTree).not.toHaveBeenCalled();
+  });
+
   it("create / write / resize / kill 基本路径；kill 后从 Map 删除", async () => {
     const { factory, spawned } = createFakeFactory();
     const batches: TerminalOutputBatch[] = [];

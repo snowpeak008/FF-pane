@@ -194,7 +194,7 @@ function mapToolUse(
   if (isCommandTool(name)) {
     const command = asString(input["command"]);
     if (command === undefined) {
-      return raw(value, "Bash 工具的入参缺 command");
+      return raw(value, `${name} 工具的入参缺 command`);
     }
     return { kind: "command", command, status: "started", actionId };
   }

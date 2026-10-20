@@ -2,9 +2,12 @@
  * 工作台观察型 hook（T10.6' / T10.7b）。
  * Claude：argv 里只有我们固定的事件名。stdin 上的事件 JSON 只取出 tool_use_id，
  * 以及 tool_name + 规范化 tool_input 的 SHA-256。工具正文不进入上报、不写文件、不交给 shell。
- * Codex notify：事件 JSON 是最后一个参数。只读取 type，agent-turn-complete 映射成 Stop。
+ * Codex notify：事件 JSON 是最后一个参数。只读取 type 和 thread-id：agent-turn-complete 映射成 Stop，
+ * thread-id 作为会话编号一并上报（主进程凭窗口令牌认窗口，凭它认会话，不去扫 sessions 目录）。
  * 从环境变量读取管道名和窗口令牌，上报后立刻退出 0。
- * 不写 stdout、不写日志、不把令牌落盘。退出码恒为 0，不返回 allow/deny。
+ * 不写日志、不把令牌落盘。退出码恒为 0，不返回 allow/deny。
+ * 唯一的 stdout：Claude 的 UserPromptSubmit 提交的是工作台「[新消息]」提醒时，
+ * 向主进程取未读正文，作为 additionalContext 交给模型（读出即标记已读）。取不到就什么也不写。
  */
 
 import { createHash } from "node:crypto";
@@ -13,6 +16,8 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const HOOK_REPORT_TIMEOUT_MS = 1500;
+export const INBOX_DIGEST_TIMEOUT_MS = 3000;
+export const INBOX_REMINDER_PREFIX = "[新消息]";
 
 const TOOL_USE_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
 const TOOL_DIGEST = /^[a-f0-9]{64}$/;
@@ -161,6 +166,8 @@ export function sendHookReport(
   event: string,
   toolUseId?: string,
   pairing?: { readonly toolName?: string; readonly toolDigest?: string },
+  errorType?: string,
+  sessionId?: string,
 ): Promise<void> {
   return new Promise((resolveReport) => {
     let settled = false;
@@ -177,6 +184,10 @@ export function sendHookReport(
     socket.on("timeout", finish);
     socket.on("error", finish);
     socket.on("close", finish);
+    socket.on("end", finish);
+    // 必须读掉回执：不读时连接停在暂停态，socket 超时又不保活，进程会在 resolve 之前直接退出，
+    // 后面取收件箱正文的步骤就跑不到。
+    socket.on("data", finish);
     socket.on("connect", () => {
       const payload: {
         v: 1;
@@ -186,7 +197,15 @@ export function sendHookReport(
         toolUseId?: string;
         toolName?: string;
         toolDigest?: string;
+        errorType?: string;
+        sessionId?: string;
       } = { v: 1, type: "hook", token, event };
+      if (sessionId !== undefined && THREAD_ID.test(sessionId)) {
+        payload.sessionId = sessionId;
+      }
+      if (errorType !== undefined && ERROR_TYPE.test(errorType)) {
+        payload.errorType = errorType;
+      }
       if (toolUseId !== undefined && TOOL_USE_ID.test(toolUseId)) {
         payload.toolUseId = toolUseId;
       }
@@ -204,11 +223,123 @@ export function sendHookReport(
   });
 }
 
+const ERROR_TYPE = /^[a-z_]{1,40}$/;
+const THREAD_ID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+/**
+ * Codex notify 的事件 JSON（最后一个参数）里的 thread-id，就是这个窗口的会话编号。
+ * 只取这一个字段，别的（输入消息、回复正文）一律不碰。
+ */
+export function extractNotifyThreadId(argv: readonly string[]): string | undefined {
+  for (let index = argv.length - 1; index >= 2; index -= 1) {
+    const trimmed = (argv[index] ?? "").trim();
+    if (!trimmed.startsWith("{")) {
+      continue;
+    }
+    try {
+      const value = JSON.parse(trimmed) as { "thread-id"?: unknown };
+      const id = value?.["thread-id"];
+      return typeof id === "string" && THREAD_ID.test(id) ? id : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+/** StopFailure 的 stdin 里只取错误类型（rate_limit 之类），不取错误正文。 */
+export function extractStopFailureType(raw: string): string | undefined {
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith("{")) {
+    return undefined;
+  }
+  try {
+    const value = JSON.parse(trimmed) as { error?: unknown };
+    return typeof value?.error === "string" && ERROR_TYPE.test(value.error)
+      ? value.error
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** UserPromptSubmit 的 stdin 里，prompt 是否是工作台打进来的新消息提醒。只返回真假。 */
+export function promptIsInboxReminder(raw: string): boolean {
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith("{")) {
+    return false;
+  }
+  try {
+    const value = JSON.parse(trimmed) as { prompt?: unknown };
+    return (
+      value !== null &&
+      typeof value === "object" &&
+      typeof value.prompt === "string" &&
+      value.prompt.trimStart().startsWith(INBOX_REMINDER_PREFIX)
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** 向控制通道取未读正文。超时、拒绝或断开都返回空串。 */
+export function requestInboxDigest(
+  pipePath: string,
+  token: string,
+  timeoutMs = INBOX_DIGEST_TIMEOUT_MS,
+): Promise<string> {
+  return new Promise((resolveDigest) => {
+    let settled = false;
+    let buffer = "";
+    const finish = (text: string): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      socket.destroy();
+      resolveDigest(text);
+    };
+    const socket = net.connect(pipePath);
+    socket.setTimeout(timeoutMs);
+    socket.on("timeout", () => finish(""));
+    socket.on("error", () => finish(""));
+    socket.on("close", () => finish(""));
+    socket.on("data", (chunk: Buffer | string) => {
+      buffer += chunk.toString();
+      const newline = buffer.indexOf("\n");
+      if (newline < 0) {
+        return;
+      }
+      try {
+        const parsed = JSON.parse(buffer.slice(0, newline)) as {
+          readonly ok?: unknown;
+          readonly result?: { readonly text?: unknown };
+        };
+        const text = parsed.ok === true ? parsed.result?.text : undefined;
+        finish(typeof text === "string" ? text : "");
+      } catch {
+        finish("");
+      }
+    });
+    socket.on("connect", () => {
+      socket.write(`${JSON.stringify({ v: 1, type: "inbox-digest", token })}\n`);
+    });
+  });
+}
+
+/** Claude UserPromptSubmit 的附加上下文输出。 */
+export function inboxHookOutput(text: string): string {
+  return JSON.stringify({
+    hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: text },
+  });
+}
+
 const NAMED_HOOK_EVENTS = new Set([
   "PermissionRequest",
   "PostToolUse",
   "PostToolUseFailure",
   "Stop",
+  "StopFailure",
   "UserPromptSubmit",
   "SessionStart",
 ]);
@@ -270,13 +401,31 @@ if (invokedDirectly()) {
     process.exit(0);
   }
   void readStdinText()
-    .then((raw) => {
+    .then(async (raw) => {
       const pairing = extractHookPairing(raw);
-      return sendHookReport(pipePath, token, event, pairing.toolUseId, {
-        ...(pairing.toolName !== undefined ? { toolName: pairing.toolName } : {}),
-        ...(pairing.toolDigest !== undefined ? { toolDigest: pairing.toolDigest } : {}),
-      });
+      await sendHookReport(
+        pipePath,
+        token,
+        event,
+        pairing.toolUseId,
+        {
+          ...(pairing.toolName !== undefined ? { toolName: pairing.toolName } : {}),
+          ...(pairing.toolDigest !== undefined ? { toolDigest: pairing.toolDigest } : {}),
+        },
+        event === "StopFailure" ? (extractStopFailureType(raw) ?? "unknown") : undefined,
+        extractNotifyThreadId(process.argv),
+      );
+      if (event !== "UserPromptSubmit" || !promptIsInboxReminder(raw)) {
+        return;
+      }
+      const digest = await requestInboxDigest(pipePath, token);
+      if (digest !== "") {
+        await new Promise<void>((done) => {
+          process.stdout.write(`${inboxHookOutput(digest)}\n`, () => done());
+        });
+      }
     })
+    .catch(() => undefined)
     .then(() => {
       process.exit(0);
     });

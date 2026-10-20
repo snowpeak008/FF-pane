@@ -192,6 +192,11 @@ export interface WorkbenchAuthRegistry {
    * 有父级时，随后的 sync 仍按祖先封顶。
    */
   applyUserPermission(windowId: string, permission: WorkbenchPermissionLevel): boolean;
+  /**
+   * 上级窗口经 ffpane_set_permission 改后代权限。调用方已按 adjust-permission 授权、
+   * 不超过上级自己的权限。不清清洗锁，不记 userElevated。
+   */
+  applyDelegatedPermission(windowId: string, permission: WorkbenchPermissionLevel): boolean;
   clear(): void;
 }
 
@@ -383,6 +388,16 @@ export function createWorkbenchAuthRegistry(): WorkbenchAuthRegistry {
       void _locked;
       void _down;
       remember(windowId, { ...rest, permission, userElevated: true });
+      return true;
+    },
+    applyDelegatedPermission(windowId, permission) {
+      const stored = byId.get(windowId);
+      if (stored === undefined || !isWorkbenchPermissionLevel(permission)) {
+        return false;
+      }
+      const { permissionNeedsDowngrade: _down, ...rest } = stored;
+      void _down;
+      remember(windowId, { ...rest, permission });
       return true;
     },
     clear() {
