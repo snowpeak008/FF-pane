@@ -78,12 +78,12 @@ describe("workbench role manuals", () => {
     expect(worker.content).toContain(marker);
     const bundled = await resolveRoleManual(resourcesDir, join(tempRoot, "missing"), "worker");
     expect(bundled.source).toBe("default");
-    expect(bundled.content).toContain("只改 brief 范围内的文件");
+    expect(bundled.content).toContain("只改 brief 写明范围内的文件");
 
     const none = await composeWindowRolePrompt(resourcesDir, tempRoot, "none");
     expect(none).toContain("ffpane_read_inbox");
     expect(none).not.toContain(marker);
-    expect(none).not.toContain("只改 brief 范围内的文件");
+    expect(none).not.toContain("只改 brief 写明范围内的文件");
 
     const composed = await composeWindowRolePrompt(resourcesDir, tempRoot, "worker");
     expect(composed).toContain("ffpane_read_inbox");

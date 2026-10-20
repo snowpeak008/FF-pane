@@ -138,6 +138,15 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
   }, UI_LANGUAGE_KEY);
   await page.reload();
   await page.waitForLoadState("domcontentloaded");
+  // 开窗资源门槛设为不检查：测试结果不该随这台机器当时剩多少内存变化。
+  // 和用户在设置里关掉检查走同一个接口；要测门槛的用例自己再改回来。
+  await page.evaluate(async () => {
+    // biome-ignore lint/suspicious/noExplicitAny: E2E
+    await (window as any).ffpane.invoke("config:update", {
+      workbenchMinFreeMemoryMb: 0,
+      workbenchMinFreeDiskMb: 0,
+    });
+  });
   await expect(page.locator("html")).toHaveAttribute("lang", "en-US");
 
   const cleanup = async (): Promise<void> => {

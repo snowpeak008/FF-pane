@@ -12,8 +12,11 @@
 
 import {
   clampMaxWorkbenchWindows,
+  clampResourceMb,
   DEFAULT_AI_OUTPUT_LANGUAGE,
   DEFAULT_GLOBAL_CONFIG,
+  DEFAULT_MIN_FREE_DISK_MB,
+  DEFAULT_MIN_FREE_MEMORY_MB,
   DEFAULT_WORKBENCH_WINDOW_PERMISSION,
   type GlobalConfig,
   type ImageGenSettings,
@@ -34,6 +37,22 @@ function normalizeConfig(config: GlobalConfig): GlobalConfig {
       ? config.aiOutputLanguage
       : DEFAULT_AI_OUTPUT_LANGUAGE,
     maxWorkbenchWindows: clampMaxWorkbenchWindows(config.maxWorkbenchWindows),
+    ...(config.workbenchMinFreeMemoryMb !== undefined
+      ? {
+          workbenchMinFreeMemoryMb: clampResourceMb(
+            config.workbenchMinFreeMemoryMb,
+            DEFAULT_MIN_FREE_MEMORY_MB,
+          ),
+        }
+      : {}),
+    ...(config.workbenchMinFreeDiskMb !== undefined
+      ? {
+          workbenchMinFreeDiskMb: clampResourceMb(
+            config.workbenchMinFreeDiskMb,
+            DEFAULT_MIN_FREE_DISK_MB,
+          ),
+        }
+      : {}),
     defaultWorkbenchPermission: isWorkbenchPermissionLevel(config.defaultWorkbenchPermission)
       ? config.defaultWorkbenchPermission
       : DEFAULT_WORKBENCH_WINDOW_PERMISSION,

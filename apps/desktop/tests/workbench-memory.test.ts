@@ -150,6 +150,9 @@ function harness(
     windowState: () => undefined,
     closeSelfLater: () => undefined,
     setPermission: async () => ({ ok: false as const, error: "unused" }),
+    nudge: () => "delivered",
+    requestDecision: () => ({ id: "d-1" }),
+    waitEvents: async () => ({ events: [], inbox: false, stop: false, timedOut: true }),
   };
   return {
     views,

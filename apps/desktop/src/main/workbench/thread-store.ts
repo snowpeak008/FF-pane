@@ -20,6 +20,9 @@ import {
   WORKBENCH_ROLE_LABEL,
 } from "./remind";
 
+/** 用户本人拍板时用作发信方的 id。不是窗口。 */
+export const USER_PARTY_ID = "user";
+
 export interface ThreadParty {
   readonly windowId: string;
   readonly title: string;

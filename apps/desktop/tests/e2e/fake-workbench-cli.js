@@ -134,6 +134,58 @@ async function main() {
     return;
   }
   const me = JSON.parse(who.text);
+  if (script === "online") {
+    // 在线监管：先请用户拍板，再循环 ffpane_wait_events；拍板结果和下线都从等待调用里拿。
+    const plan = await tool("ffpane_write_brief", { name: "online-plan.md", content: "# 计划" });
+    await tool("ffpane_request_decision", {
+      question: "要不要继续？",
+      options: ["继续", "先停"],
+      briefPath: JSON.parse(plan.text).relativePath,
+    });
+    process.stdout.write("FFPANE_ONLINE_LOOP=1\n");
+    for (let round = 0; round < 40; round += 1) {
+      const waited = await tool("ffpane_wait_events", { timeoutSec: 10 });
+      const outcome = JSON.parse(waited.text);
+      if (typeof outcome.messages === "string" && outcome.messages.includes("用户的决定")) {
+        process.stdout.write("FFPANE_ONLINE_GOT_DECISION=1\n");
+      }
+      if (outcome.stop === true) {
+        process.stdout.write("FFPANE_ONLINE_STOPPED=1\n");
+        break;
+      }
+    }
+    keepAlive();
+    return;
+  }
+  if (script === "decision") {
+    // 用户自己开的顶层窗口请用户拍板，等用户在界面上点选，再读回收件箱。
+    const plan = await tool("ffpane_write_brief", {
+      name: "decision-plan.md",
+      content:
+        "# 回归测试频率\n\n- 每晚跑：省时间，问题晚一天发现。\n- 每次提交都跑：慢，但马上发现。\n\n建议：每晚跑。",
+    });
+    const asked = await tool("ffpane_request_decision", {
+      question: "回归测试改成每晚跑一次吗？",
+      options: ["每晚跑", "保持每次提交都跑"],
+      briefPath: JSON.parse(plan.text).relativePath,
+    });
+    process.stdout.write(`FFPANE_DECISION_ASKED=${asked.isError ? "error" : "ok"}\n`);
+    let stdin = "";
+    process.stdin.on("data", (chunk) => {
+      stdin += chunk.toString("utf8");
+    });
+    process.stdin.resume();
+    for (let i = 0; i < 120 && !stdin.includes("[新消息]"); i += 1) {
+      fireStop(spec);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    const inbox = await tool("ffpane_read_inbox", { mode: "unread", limit: 20 });
+    process.stdout.write(`FFPANE_DECISION_REMINDER=${stdin.includes("[新消息]") ? "yes" : "no"}\n`);
+    process.stdout.write(`FFPANE_DECISION_INBOX=${inbox.text}\n`);
+    process.stdout.write("FFPANE_DECISION_DONE=1\n");
+    keepAlive();
+    return;
+  }
   if (script === "effort-self") {
     let changed = await tool("ffpane_set_model_effort", {
       windowId: me.windowId,

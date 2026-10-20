@@ -286,13 +286,14 @@ test("管理者起草配置须确认；非管理者没有该工具", async () =>
       }
       const before = await page.getByTestId("config-draft-field-name").innerText();
       await page.getByTestId("config-draft-cancel").click();
+      // 一次读完：先问在不在、再去读名字的话，最后一个取消后对话框正在卸载，读名字会一直等下去
       await expect
-        .poll(async () => {
-          if (!(await dialog.isVisible())) {
-            return "hidden";
-          }
-          return page.getByTestId("config-draft-field-name").innerText();
-        })
+        .poll(() =>
+          page.evaluate(() => {
+            const field = document.querySelector('[data-testid="config-draft-field-name"]');
+            return field instanceof HTMLElement ? field.innerText : "hidden";
+          }),
+        )
         .not.toBe(before);
     }
     await expect(page.getByTestId("config-draft-dialog")).toBeHidden({ timeout: 15_000 });

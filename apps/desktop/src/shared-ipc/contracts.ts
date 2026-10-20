@@ -431,8 +431,22 @@ export interface WorkbenchWindowRuntimeStatus {
   readonly waitingLocks: readonly string[];
   /** 上一轮因 API 错误中断的说明，例如「账号限流（429）」。 */
   readonly lastApiError?: string;
+  /** 正在在线监管（循环调用 ffpane_wait_events）。 */
+  readonly online: boolean;
   /** 窗口进程组里的进程数和合计内存（工作集），含它起的后台进程。 */
   readonly memory?: { readonly processCount: number; readonly workingSetBytes: number };
+}
+
+/** 窗口请用户拍板的一件事。用户选好后，结果作为消息发回给提问的窗口。 */
+export interface WorkbenchDecision {
+  readonly id: string;
+  readonly projectId: ProjectId;
+  readonly windowId: string;
+  readonly windowTitle: string;
+  readonly question: string;
+  readonly options: readonly string[];
+  readonly briefPath?: string;
+  readonly createdAt: number;
 }
 
 export interface WorkbenchRuntimeStatusResponse {
@@ -440,6 +454,9 @@ export interface WorkbenchRuntimeStatusResponse {
   readonly resources: {
     readonly freeMemoryBytes: number;
     readonly freeDiskBytes: Readonly<Record<string, number>>;
+    /** 设置里的开窗门槛（字节），0 表示不检查。 */
+    readonly minFreeMemoryBytes: number;
+    readonly minFreeDiskBytes: number;
   };
 }
 
@@ -1535,6 +1552,21 @@ export interface IpcInvokeContracts {
     request: { readonly projectId: ProjectId };
     response: WorkbenchRuntimeStatusResponse;
   };
+  /** 切换在线监管：上线给它一句固定的开始提示；下线通过等待调用告诉它停止。 */
+  "workbench:set-online": {
+    request: { readonly windowId: string; readonly online: boolean };
+    response: { readonly ok: true; readonly delivered: string };
+  };
+  /** 本项目还没拍板的事。 */
+  "workbench:list-decisions": {
+    request: { readonly projectId: ProjectId };
+    response: { readonly decisions: readonly WorkbenchDecision[] };
+  };
+  /** 用户拍板：choice 是选中的选项，或用户自己写的回答。 */
+  "workbench:answer-decision": {
+    request: { readonly id: string; readonly choice: string };
+    response: { readonly ok: true };
+  };
   /** 列出当前项目 `.ffpane/briefs/*.md`（只读，按修改时间倒序）。 */
   "workbench:list-briefs": {
     request: { readonly projectId: ProjectId };
@@ -1816,6 +1848,11 @@ export interface IpcEventContracts {
   "workbench:open-canvas": { payload: WorkbenchOpenCanvasEvent };
   "workbench:canvas-changed": { payload: { readonly projectId: ProjectId } };
   "workbench:window-closed": { payload: WorkbenchWindowClosedEvent };
+  "workbench:decision-requested": { payload: WorkbenchDecision };
+  "workbench:online-changed": { payload: { readonly windowId: string; readonly online: boolean } };
+  "workbench:decision-resolved": {
+    payload: { readonly id: string; readonly projectId: ProjectId };
+  };
   "workbench:manager-grant": { payload: WorkbenchManagerGrantEvent };
   "workbench:config-draft": { payload: WorkbenchConfigDraftEvent };
   "workbench:config-draft-resolved": { payload: WorkbenchConfigDraftResolvedEvent };
@@ -1864,6 +1901,9 @@ export const INVOKE_CHANNELS = [
   "workbench:reset-role-manual",
   "workbench:inbox-badges",
   "workbench:runtime-status",
+  "workbench:list-decisions",
+  "workbench:set-online",
+  "workbench:answer-decision",
   "workbench:list-briefs",
   "workbench:read-brief",
   "workbench:read-threads",
@@ -1957,6 +1997,9 @@ export const EVENT_CHANNELS = [
   "workbench:open-canvas",
   "workbench:canvas-changed",
   "workbench:window-closed",
+  "workbench:decision-requested",
+  "workbench:online-changed",
+  "workbench:decision-resolved",
   "workbench:manager-grant",
   "workbench:config-draft",
   "workbench:config-draft-resolved",

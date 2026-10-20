@@ -104,6 +104,11 @@ export function buildCodexMcpOverrides(
       overrides[`${prefix}.env_vars`] =
         `[${spec.envVars.map((name) => JSON.stringify(name)).join(", ")}]`;
     }
+    if (spec.toolTimeoutSec !== undefined && Number.isFinite(spec.toolTimeoutSec)) {
+      overrides[`${prefix}.tool_timeout_sec`] = String(
+        Math.max(1, Math.floor(spec.toolTimeoutSec)),
+      );
+    }
   }
   return overrides;
 }

@@ -24,6 +24,13 @@ function writeFakeCli(dir: string, name: "claude" | "codex", envKey: string): vo
       `const key = ${JSON.stringify(envKey)};`,
       "process.stdout.write(tag + '_ENV_' + key + '=' + (process.env[key] ? 'present' : 'absent') + '\\n');",
       "process.stdout.write(tag + '_ENV_FF_PANE_WINDOW_TOKEN=' + (process.env.FF_PANE_WINDOW_TOKEN ? 'present' : 'absent') + '\\n');",
+      // 临时 --mcp-config 在进程退出时就清掉，测试事后去读会扑空，所以活着时自己打印出来
+      "const mcpAt = argv.indexOf('--mcp-config');",
+      "if (mcpAt >= 0) {",
+      "  let body = 'MISSING';",
+      "  try { body = Buffer.from(require('node:fs').readFileSync(argv[mcpAt + 1], 'utf8')).toString('base64'); } catch {}",
+      "  process.stdout.write(tag + '_MCP_B64=' + body + '\\n');",
+      "}",
       // 和真 Codex 一样：做完一轮后调用 notify，事件 JSON 里带 thread-id（会话编号）。
       "if (tag === 'FAKE_CODEX') {",
       "  const at = argv.findIndex((a) => a.startsWith('notify=['));",
@@ -161,9 +168,14 @@ async function readReplayForWindow(page: LaunchedApp["page"], windowId: string):
     if (id === undefined || id.length === 0) {
       return "";
     }
-    // biome-ignore lint/suspicious/noExplicitAny: E2E
-    const replay = await (window as any).ffpane.invoke("terminal:get-replay", { id });
-    return typeof replay?.data === "string" ? replay.data : "";
+    // 重启、开新对话时界面上的编号会比终端晚一步换，旧编号查不到就当还没输出，留给轮询下一轮
+    try {
+      // biome-ignore lint/suspicious/noExplicitAny: E2E
+      const replay = await (window as any).ffpane.invoke("terminal:get-replay", { id });
+      return typeof replay?.data === "string" ? replay.data : "";
+    } catch {
+      return "";
+    }
   }, windowId);
 }
 
@@ -659,8 +671,14 @@ test("T10.5：只读 Claude 权限参数 + 令牌 env 存在 + 改 yolo 重启",
     const mcpPath = argv[mcpIdx + 1];
     expect(typeof mcpPath).toBe("string");
     if (typeof mcpPath === "string") {
-      const { readFileSync } = await import("node:fs");
-      const mcpText = readFileSync(mcpPath, "utf8");
+      const b64Marker = "FAKE_CLAUDE_MCP_B64=";
+      await expect
+        .poll(async () => readReplayForWindow(page, windowId), { timeout: 20_000 })
+        .toContain(b64Marker);
+      const flat = (await readReplayForWindow(page, windowId)).replace(/\r?\n/g, "");
+      const b64 = /^[A-Za-z0-9+/=]+/.exec(flat.slice(flat.indexOf(b64Marker) + b64Marker.length));
+      const mcpText = Buffer.from(b64?.[0] ?? "", "base64").toString("utf8");
+      expect(mcpText).toContain("mcpServers");
       expect(mcpText).toContain("$" + "{FF_PANE_WINDOW_TOKEN}");
       expect(mcpText).not.toMatch(/"FF_PANE_WINDOW_TOKEN"\s*:\s*"[a-f0-9]{64}"/i);
     }
@@ -767,7 +785,7 @@ test("T10.6：worker 说明书注入，运行中改管理者，设置覆盖进�
     const promptPath = argv[promptFlag + 1];
     expect(promptPath).toBeTruthy();
     const promptBody = readFileSync(promptPath ?? "", "utf8");
-    expect(promptBody).toContain("只改 brief 范围内的文件");
+    expect(promptBody).toContain("只改 brief 写明范围内的文件");
     const settingsFlag = argv.indexOf("--settings");
     expect(settingsFlag).toBeGreaterThanOrEqual(0);
     const settingsBody = readFileSync(argv[settingsFlag + 1] ?? "", "utf8");
@@ -819,7 +837,7 @@ test("T10.6：worker 说明书注入，运行中改管理者，设置覆盖进�
     await manual.scrollIntoViewIfNeeded();
     await manual.selectOption("worker");
     await expect(page.getByTestId("setting-workbench-role-manual-text")).toHaveValue(
-      /只改 brief 范围内的文件/,
+      /只改 brief 写明范围内的文件/,
     );
     const marker = "E2E-ROLE-OVERRIDE-WORKER";
     await page.getByTestId("setting-workbench-role-manual-text").fill(`${marker}\n`);

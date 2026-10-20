@@ -2,6 +2,7 @@
  * 工作台 CLI 启动 IPC（T10.4 / T10.4' / T10.5'）。
  */
 
+import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -47,6 +48,7 @@ import {
 } from "../session/config-tool";
 import { WORKBENCH_WINDOW_LIMIT_ERROR_PREFIX } from "../terminal/handlers";
 import type { PtyManager } from "../terminal/manager";
+import { API_ERROR_SAME_TURN_MS, createApiErrorTracker } from "./api-error-tracker";
 import { createWorkbenchAuthRegistry, type WorkbenchAuthRegistry } from "./auth-registry";
 import {
   deleteCanvasImageFile,
@@ -82,6 +84,7 @@ import { decideManagerGrantRestore } from "./manager-grant";
 import { cleanupStaleWorkbenchMcpDirs } from "./mcp-temp";
 import {
   executeWorkbenchTool,
+  hasInboxHook,
   type RemindDelivery,
   takeInboxDigest,
   type WorkbenchToolDeps,
@@ -94,6 +97,7 @@ import {
   withModelEffortOverrides,
 } from "./model-effort";
 import { createNamedLocks, type LockGrant } from "./named-locks";
+import { createOnlineHub } from "./online-hub";
 import { openChildWindow } from "./open-child";
 import { clampReadOutputBytes, renderTerminalText, takeUtf8Tail } from "./output-text";
 import {
@@ -106,9 +110,14 @@ import {
   resolveFfPaneFile,
 } from "./panel-files";
 import { addCallerProjectMemory, searchCallerProjectMemory } from "./project-memory";
-import { sanitizeReminderTitle } from "./remind";
+import {
+  buildCoalescedReminder,
+  buildNewMessageReminder,
+  sanitizeReminderTitle,
+  sanitizeThreadText,
+} from "./remind";
 import { resolveProjectLaunchRoute } from "./resolve-config";
-import { describeShortage, takeResourceSnapshot } from "./resource-guard";
+import { describeShortage, resourceLimitsFromConfig, takeResourceSnapshot } from "./resource-guard";
 import {
   composeWindowRolePrompt,
   listRoleManuals,
@@ -123,7 +132,16 @@ import {
   resolveWorkbenchRoleResourcesDir,
 } from "./role-resources";
 import { setWindowRole } from "./set-role";
-import { readThreadIndex, readThreadIndexTail, summarizeInboxBadges } from "./thread-store";
+import {
+  appendThreadRecord,
+  readThreadIndex,
+  readThreadIndexTail,
+  recordsAddressedTo,
+  summarizeInboxBadges,
+  type ThreadRecord,
+  teamFileSlug,
+  USER_PARTY_ID,
+} from "./thread-store";
 
 export interface WorkbenchCliLayer {
   readonly handlers: Pick<
@@ -139,6 +157,9 @@ export interface WorkbenchCliLayer {
     | "workbench:reset-role-manual"
     | "workbench:inbox-badges"
     | "workbench:runtime-status"
+    | "workbench:list-decisions"
+    | "workbench:set-online"
+    | "workbench:answer-decision"
     | "workbench:list-briefs"
     | "workbench:read-brief"
     | "workbench:read-threads"
@@ -295,6 +316,46 @@ export async function createWorkbenchCliLayer(
 
   const locks = createNamedLocks();
   /** 平台主动报告的状态，发给监管者（有的话）或上级。只发固定文案，不带终端正文。 */
+  /** 在线监管：窗口循环调用 ffpane_wait_events 时，提醒和新消息交给等待调用，不走终端。 */
+  const onlineHub = createOnlineHub({
+    now: () => Date.now(),
+    schedule: (delayMs, fn) => {
+      const timer = setTimeout(fn, delayMs);
+      return () => clearTimeout(timer);
+    },
+  });
+  const publishOnline = (windowId: string): void => {
+    const browser = options.getWindow();
+    if (browser === null || browser.isDestroyed()) {
+      return;
+    }
+    publishEvent(browser.webContents, "workbench:online-changed", {
+      windowId,
+      online: onlineHub.isOnline(windowId),
+    });
+  };
+  /** 给窗口一行平台提醒：在线就交给等待调用，否则打进终端。 */
+  const deliverLine = (windowId: string, text: string): RemindDelivery => {
+    if (onlineHub.offer(windowId, text)) {
+      return "online";
+    }
+    const terminalId = findLiveTerminalId(windowId);
+    if (terminalId === undefined) {
+      return "not-running";
+    }
+    const queued = idleQueue.enqueue({ terminalId, text, tag: windowId });
+    if (queued.status === "dropped") {
+      return "failed";
+    }
+    if (queued.status === "delivered") {
+      return "delivered";
+    }
+    return queued.mode === "manual"
+      ? "queued-manual"
+      : queued.mode === "blocked"
+        ? "queued-blocked"
+        : "queued-busy";
+  };
   const notifyOverseer = async (windowId: string, what: string): Promise<void> => {
     let found: import("@ff-pane/shared").WorkbenchWindow | undefined;
     for (const current of Object.values(await layouts.readAll())) {
@@ -312,15 +373,14 @@ export async function createWorkbenchCliLayer(
       if (overseer === undefined || overseer === windowId) {
         continue;
       }
-      const terminalId = findLiveTerminalId(overseer);
-      if (terminalId === undefined) {
+      // 监管者自己也刚因 API 错误停下（多半同一账号一起被限流），它叫不醒别人，改告诉上一级。
+      if (apiErrors.isRecentlyStalled(overseer, OVERSEER_ERROR_SKIP_MS)) {
         continue;
       }
-      idleQueue.enqueue({
-        terminalId,
-        text: `[状态] ${sanitizeReminderTitle(found.title)}（${windowId}）${what}`,
-        tag: overseer,
-      });
+      if (findLiveTerminalId(overseer) === undefined) {
+        continue;
+      }
+      deliverLine(overseer, `[状态] ${sanitizeReminderTitle(found.title)}（${windowId}）${what}`);
       return;
     }
   };
@@ -365,34 +425,19 @@ export async function createWorkbenchCliLayer(
       "已经空闲，但这一轮没有汇报。可以用 ffpane_read_output 看它停在哪里，再决定要不要发消息。",
     );
   };
-  /** 最近一次因 API 错误中断的类型和时间。下一次正常结束时清掉。 */
-  const lastApiError = new Map<string, { readonly type: string; readonly at: number }>();
-  const API_ERROR_TEXT: Readonly<Record<string, string>> = {
-    rate_limit: "账号限流（429）",
-    overloaded: "服务过载",
-    authentication_failed: "认证失败",
-    oauth_org_not_allowed: "组织不允许",
-    account_on_hold: "账号被暂停",
-    billing_error: "计费问题",
-    invalid_request: "请求无效",
-    model_not_found: "找不到模型",
-    server_error: "服务端错误",
-    max_output_tokens: "输出超长",
-    cloud_credential_error: "云凭据错误",
-  };
-  const noteApiError = (windowId: string, errorType: string): void => {
-    const previous = lastApiError.get(windowId);
-    lastApiError.set(windowId, { type: errorType, at: Date.now() });
-    // 同一类错误连着来只报一次，免得限流时刷屏。
-    if (previous?.type === errorType) {
-      return;
-    }
-    const label = API_ERROR_TEXT[errorType] ?? `API 错误（${errorType}）`;
-    void notifyOverseer(
-      windowId,
-      `这一轮因${label}中断，已经停下。它持有的锁还在；限流的话等一会儿再发消息让它继续，或请用户处理。`,
-    );
-  };
+  /** 监管者自己也刚因可重试的 API 错误停下多久以内，状态提醒改发上一级。 */
+  const OVERSEER_ERROR_SKIP_MS = 10 * 60_000;
+  const apiErrors = createApiErrorTracker({
+    now: () => Date.now(),
+    schedule: (delayMs, fn) => {
+      const timer = setTimeout(fn, delayMs);
+      return () => clearTimeout(timer);
+    },
+    isAlive: (windowId) => findLiveTerminalId(windowId) !== undefined,
+    notify: (windowId, text) => {
+      void notifyOverseer(windowId, text);
+    },
+  });
   /**
    * 显示在忙、终端却长时间一点输出都没有：CLI 干活时加载动画每秒都在刷新（实测间隔不到 0.5 秒），
    * 这种安静多半是卡住，或 Codex 这类没有出错信号的 CLI 因 API 错误停了。每段安静只报一次。
@@ -406,7 +451,11 @@ export async function createWorkbenchCliLayer(
       if (record.exited || typeof windowId !== "string") {
         continue;
       }
-      if (idleQueue.phaseOf(record.id) !== "busy" || now - record.lastOutputAt < STALL_NOTICE_MS) {
+      if (
+        idleQueue.phaseOf(record.id) !== "busy" ||
+        now - record.lastOutputAt < STALL_NOTICE_MS ||
+        onlineHub.isWaiting(windowId)
+      ) {
         continue;
       }
       if (stallNoticeKey.get(windowId) === record.lastOutputAt) {
@@ -420,7 +469,26 @@ export async function createWorkbenchCliLayer(
       );
     }
   };
-  const stallTimer = setInterval(checkStalls, 30_000);
+  /** 已经离线、还存着没交出去的提醒：打回终端，不丢。 */
+  const drainOffline = (): void => {
+    for (const backlog of onlineHub.drainOffline()) {
+      publishOnline(backlog.windowId);
+      const terminalId = findLiveTerminalId(backlog.windowId);
+      if (terminalId === undefined) {
+        continue;
+      }
+      for (const text of backlog.events) {
+        idleQueue.enqueue({ terminalId, text, tag: backlog.windowId });
+      }
+      if (backlog.inbox) {
+        idleQueue.enqueueInbox(terminalId, (count) => buildCoalescedReminder(count));
+      }
+    }
+  };
+  const stallTimer = setInterval(() => {
+    checkStalls();
+    drainOffline();
+  }, 30_000);
   stallTimer.unref?.();
   const PERMISSION_WAIT_NOTICE_MS = 90_000;
   const permissionTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -450,22 +518,18 @@ export async function createWorkbenchCliLayer(
     );
   };
   const notifyLockGranted = (grant: LockGrant): void => {
-    const terminalId = findLiveTerminalId(grant.windowId);
-    if (terminalId === undefined) {
-      return;
-    }
-    idleQueue.enqueue({
-      terminalId,
-      text: `[锁] 轮到你了，你已拿到锁 ${grant.name}，可以开始用。用完调用 ffpane_lock release。`,
-      tag: grant.windowId,
-    });
+    deliverLine(
+      grant.windowId,
+      `[锁] 轮到你了，你已拿到锁 ${grant.name}，可以开始用。用完调用 ffpane_lock release。`,
+    );
   };
   const noteWindowExit = (
     windowId: string,
     exit: { readonly exitCode: number; readonly killed: boolean },
   ): void => {
     clearPermissionTimer(windowId);
-    lastApiError.delete(windowId);
+    apiErrors.forget(windowId);
+    onlineHub.forget(windowId);
     stopCodexTail(windowId);
     for (const grant of locks.releaseWindow(windowId)) {
       notifyLockGranted(grant);
@@ -528,7 +592,7 @@ export async function createWorkbenchCliLayer(
       for (const senderId of senders) {
         const senderTerminal = findLiveTerminalId(senderId);
         if (senderTerminal !== undefined && senderTerminal !== terminalId) {
-          idleQueue.enqueue({ terminalId: senderTerminal, text, tag: senderId });
+          deliverLine(senderId, text);
         }
       }
     })();
@@ -588,7 +652,6 @@ export async function createWorkbenchCliLayer(
         | { readonly ok: true; readonly result?: unknown }
         | { readonly ok: false; readonly error: string }
       > = () => ({ ok: false, error: "unsupported" });
-  const API_ERROR_SAME_TURN_MS = 1500;
   const handleHookSignal = (
     windowId: string,
     signal: import("./idle-deliver").HookSignal,
@@ -630,23 +693,20 @@ export async function createWorkbenchCliLayer(
     } else if (signal === "stop" || signal === "user-prompt-submit") {
       clearPermissionTimer(windowId);
     }
+    if (signal === "user-prompt-submit") {
+      // 又开始干活了（被叫醒或用户接手），不再提示「可以叫醒」。
+      apiErrors.turnStarted(windowId);
+    }
     if (signal === "stop" && meta?.errorType !== undefined) {
-      noteApiError(windowId, meta.errorType);
+      apiErrors.note(windowId, meta.errorType);
     } else if (signal === "stop") {
-      const stopAt = Date.now();
-      const recent = lastApiError.get(windowId);
-      // 同一轮的正常结束信号和出错信号可能先后到（Codex 的 notify 立刻到，rollout 里的错误稍后读到）。
-      // 刚出过错就不清，也不再报「空闲没汇报」。
-      if (recent === undefined || stopAt - recent.at > API_ERROR_SAME_TURN_MS) {
-        setTimeout(() => {
-          const after = lastApiError.get(windowId);
-          if (after !== undefined && after.at >= stopAt - API_ERROR_SAME_TURN_MS) {
-            return;
-          }
-          lastApiError.delete(windowId);
+      // 同一轮的正常结束信号可能比出错信号先到（Codex 的 notify 立刻到，rollout 里的错误稍后读到）。
+      // 等一下再判断：这期间出了错，就只报错误，不清记录，也不报「空闲没汇报」。
+      setTimeout(() => {
+        if (apiErrors.turnCompleted(windowId)) {
           void noteIdleWithoutReport(windowId).catch(() => undefined);
-        }, API_ERROR_SAME_TURN_MS);
-      }
+        }
+      }, API_ERROR_SAME_TURN_MS);
     }
     if (signal === "stop" || signal === "user-prompt-submit") {
       const browser = options.getWindow();
@@ -1298,10 +1358,68 @@ export async function createWorkbenchCliLayer(
           waitingLocks: held.waiting,
           ...(state.lastApiError !== undefined ? { lastApiError: state.lastApiError.label } : {}),
           ...(state.memory !== undefined ? { memory: state.memory } : {}),
+          online: state.online === true,
         };
       }
       const snapshot = await takeResourceSnapshot(root);
-      return { windows, resources: snapshot };
+      const limits = resourceLimitsFromConfig(await config.readConfig());
+      return {
+        windows,
+        resources: {
+          ...snapshot,
+          minFreeMemoryBytes: limits.memory,
+          minFreeDiskBytes: limits.disk,
+        },
+      };
+    },
+    "workbench:set-online": (request) => {
+      if (!request.online) {
+        const wasOnline = onlineHub.requestStop(request.windowId);
+        publishOnline(request.windowId);
+        return {
+          ok: true as const,
+          delivered: wasOnline ? ("online" as const) : ("not-online" as const),
+        };
+      }
+      if (onlineHub.isOnline(request.windowId)) {
+        return { ok: true as const, delivered: "online" as const };
+      }
+      const delivery = deliverLine(
+        request.windowId,
+        "[在线监管] 请进入在线监管：循环调用 ffpane_wait_events，处理完返回的事件和消息就接着等，直到返回 stop。",
+      );
+      return { ok: true as const, delivered: delivery };
+    },
+    "workbench:list-decisions": (request) => ({
+      decisions: [...decisions.values()]
+        .filter((item) => item.projectId === request.projectId)
+        .map(({ projectRoot: _root, ...decision }) => {
+          void _root;
+          return decision;
+        }),
+    }),
+    "workbench:answer-decision": async (request) => {
+      const decision = decisions.get(request.id);
+      if (decision === undefined) {
+        throw new Error("这件事已经处理过了。");
+      }
+      const choice = sanitizeThreadText(request.choice.replace(/[\r\n\t]+/g, " "))
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 500);
+      if (choice === "") {
+        throw new Error("请选一项，或写下你的决定。");
+      }
+      decisions.delete(request.id);
+      const browser = options.getWindow();
+      if (browser !== null && !browser.isDestroyed()) {
+        publishEvent(browser.webContents, "workbench:decision-resolved", {
+          id: request.id,
+          projectId: decision.projectId,
+        });
+      }
+      await deliverDecisionAnswer(decision, choice);
+      return { ok: true as const };
     },
     "workbench:list-briefs": async (request) => {
       const root = await projectRootOf(request.projectId);
@@ -1530,7 +1648,97 @@ export async function createWorkbenchCliLayer(
     return { ok: true, result };
   };
 
+  /** 还没拍板的事。应用退出时窗口都会结束，所以只放内存。 */
+  const decisions = new Map<
+    string,
+    import("../../shared-ipc/contracts").WorkbenchDecision & { readonly projectRoot: string }
+  >();
+  /** 把用户的决定作为一条「来自用户」的消息写进提问窗口的收件箱，并提醒它。 */
+  const deliverDecisionAnswer = async (
+    decision: import("../../shared-ipc/contracts").WorkbenchDecision & {
+      readonly projectRoot: string;
+    },
+    choice: string,
+  ): Promise<void> => {
+    const date = new Date();
+    const day = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    const record: ThreadRecord = {
+      v: 1,
+      id: `m-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`,
+      ts: date.toISOString(),
+      projectId: decision.projectId,
+      from: { windowId: USER_PARTY_ID, title: "用户", role: "none" },
+      to: {
+        windowId: decision.windowId,
+        title: decision.windowTitle,
+        role: authRegistry.get(decision.windowId)?.role ?? "none",
+      },
+      kind: "message",
+      text: `拍板：${decision.question}\n用户的决定：${choice}`,
+      ...(decision.briefPath !== undefined ? { briefPath: decision.briefPath } : {}),
+      threadFile: `${day}-${teamFileSlug("拍板", decision.windowId)}.md`,
+    };
+    await appendThreadRecord(decision.projectRoot, record, date);
+    const deps = toolDeps();
+    const target = await deps.describe(decision.windowId);
+    const body =
+      target !== undefined && hasInboxHook(target)
+        ? { id: record.id, delivery: "attached" as const }
+        : { id: record.id, delivery: "summary" as const, summary: record.text };
+    deps.remind(
+      decision.windowId,
+      (count) =>
+        count <= 1
+          ? buildNewMessageReminder({ title: "用户", role: "none", kind: "message", body })
+          : buildCoalescedReminder(count, body),
+      USER_PARTY_ID,
+    );
+    const records = await readThreadIndex(decision.projectRoot);
+    const cursor = await cursors.get(decision.windowId);
+    deps.publishInbox({
+      windowId: decision.windowId,
+      unread: recordsAddressedTo(records, decision.windowId, cursor).length,
+    });
+  };
+
   const toolDeps = (): WorkbenchToolDeps => ({
+    nudge: (windowId) => {
+      const terminalId = findLiveTerminalId(windowId);
+      if (terminalId === undefined) {
+        return "not-running";
+      }
+      const reason = apiErrors.get(windowId)?.label;
+      return deliverLine(
+        windowId,
+        `[继续] 上一轮被打断了${reason !== undefined ? `（${reason}）` : ""}。从停下的地方接着做；做不了就用 ffpane_report blocked 说明原因。`,
+      );
+    },
+    waitEvents: async (windowId, timeoutMs) => {
+      const pending = onlineHub.wait(windowId, timeoutMs);
+      publishOnline(windowId);
+      const outcome = await pending;
+      publishOnline(windowId);
+      return outcome;
+    },
+    requestDecision: ({ caller, question, options: choices, briefPath }) => {
+      const id = `d-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
+      const decision = {
+        id,
+        projectId: caller.projectId as ProjectId,
+        windowId: caller.id,
+        windowTitle: caller.title,
+        question,
+        options: [...choices],
+        ...(briefPath !== undefined ? { briefPath } : {}),
+        createdAt: Date.now(),
+      };
+      decisions.set(id, { ...decision, projectRoot: caller.projectRoot });
+      const browser = options.getWindow();
+      if (browser !== null && !browser.isDestroyed()) {
+        publishEvent(browser.webContents, "workbench:decision-requested", decision);
+      }
+      return { id };
+    },
     now: () => Date.now(),
     snapshot: () => authRegistry.snapshot(),
     isManagerGranted: (windowId) => authRegistry.isManagerGranted(windowId),
@@ -1625,7 +1833,10 @@ export async function createWorkbenchCliLayer(
         },
         aliveCount: () => options.manager.aliveCount(),
         checkResources: async (projectRoot) =>
-          describeShortage(await takeResourceSnapshot(projectRoot)),
+          describeShortage(
+            await takeResourceSnapshot(projectRoot),
+            resourceLimitsFromConfig(await config.readConfig()),
+          ),
         maxWindows: async () => clampMaxWorkbenchWindows(await getMax()),
         publish: ({ projectId, window, managerWindowId }) => {
           const browser = options.getWindow();
@@ -1640,6 +1851,9 @@ export async function createWorkbenchCliLayer(
         },
       }),
     remind: (windowId, textForCount, fromWindowId): RemindDelivery => {
+      if (onlineHub.offerInbox(windowId)) {
+        return "online";
+      }
       const terminalId = findLiveTerminalId(windowId);
       if (terminalId === undefined) {
         return "not-running";
@@ -1766,7 +1980,7 @@ export async function createWorkbenchCliLayer(
         return undefined;
       }
       const record = options.manager.get(terminalId);
-      const apiError = lastApiError.get(windowId);
+      const apiError = apiErrors.get(windowId);
       const memory = options.manager.getStats(terminalId);
       return {
         phase: idleQueue.phaseOf(terminalId),
@@ -1774,7 +1988,7 @@ export async function createWorkbenchCliLayer(
           ? {
               lastApiError: {
                 type: apiError.type,
-                label: API_ERROR_TEXT[apiError.type] ?? apiError.type,
+                label: apiError.label,
                 at: apiError.at,
               },
             }
@@ -1783,6 +1997,7 @@ export async function createWorkbenchCliLayer(
           ? { lastOutputAt: record.lastOutputAt, contained: record.contained }
           : {}),
         pendingReminders: idleQueue.pendingCount(terminalId),
+        online: onlineHub.isOnline(windowId),
         ...(memory !== undefined ? { memory } : {}),
       };
     },
@@ -2005,6 +2220,8 @@ export async function createWorkbenchCliLayer(
     noteWindowExit,
     dispose: async () => {
       clearInterval(stallTimer);
+      apiErrors.dispose();
+      onlineHub.dispose();
       for (const windowId of [...codexTails.keys()]) {
         stopCodexTail(windowId);
       }

@@ -6,9 +6,30 @@
 import { statfs } from "node:fs/promises";
 import { freemem, tmpdir } from "node:os";
 import { parse } from "node:path";
+import {
+  clampResourceMb,
+  DEFAULT_MIN_FREE_DISK_MB,
+  DEFAULT_MIN_FREE_MEMORY_MB,
+} from "@ff-pane/shared";
 
-export const MIN_FREE_MEMORY_BYTES = 2 * 1024 ** 3;
-export const MIN_FREE_DISK_BYTES = 2 * 1024 ** 3;
+export interface ResourceLimits {
+  /** 最少可用内存（字节），0 不检查。 */
+  readonly memory: number;
+  /** 最少可用磁盘（字节），0 不检查。 */
+  readonly disk: number;
+}
+
+/** 按设置里的 MB 数换成字节门槛；没设就用默认。 */
+export function resourceLimitsFromConfig(config: {
+  readonly workbenchMinFreeMemoryMb?: number;
+  readonly workbenchMinFreeDiskMb?: number;
+}): ResourceLimits {
+  return {
+    memory:
+      clampResourceMb(config.workbenchMinFreeMemoryMb, DEFAULT_MIN_FREE_MEMORY_MB) * 1024 * 1024,
+    disk: clampResourceMb(config.workbenchMinFreeDiskMb, DEFAULT_MIN_FREE_DISK_MB) * 1024 * 1024,
+  };
+}
 
 export interface ResourceSnapshot {
   readonly freeMemoryBytes: number;
@@ -23,17 +44,14 @@ function gb(bytes: number): string {
 /** 不够时返回给模型看的原因，够了返回 undefined。 */
 export function describeShortage(
   snapshot: ResourceSnapshot,
-  limits: { readonly memory: number; readonly disk: number } = {
-    memory: MIN_FREE_MEMORY_BYTES,
-    disk: MIN_FREE_DISK_BYTES,
-  },
+  limits: ResourceLimits,
 ): string | undefined {
-  if (snapshot.freeMemoryBytes < limits.memory) {
-    return `可用内存只剩 ${gb(snapshot.freeMemoryBytes)} GB，低于 ${gb(limits.memory)} GB，没有开新窗口。先关掉不用的窗口或程序，再开。`;
+  if (limits.memory > 0 && snapshot.freeMemoryBytes < limits.memory) {
+    return `可用内存只剩 ${gb(snapshot.freeMemoryBytes)} GB，低于设置的 ${gb(limits.memory)} GB，没有开新窗口。先关掉不用的窗口或程序再开；门槛在设置的工作台窗口里调。`;
   }
   for (const [root, free] of Object.entries(snapshot.freeDiskBytes)) {
-    if (free < limits.disk) {
-      return `${root} 可用空间只剩 ${gb(free)} GB，低于 ${gb(limits.disk)} GB，没有开新窗口。先清理磁盘再开。`;
+    if (limits.disk > 0 && free < limits.disk) {
+      return `${root} 可用空间只剩 ${gb(free)} GB，低于设置的 ${gb(limits.disk)} GB，没有开新窗口。先清理磁盘再开；门槛在设置的工作台窗口里调。`;
     }
   }
   return undefined;

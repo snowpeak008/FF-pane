@@ -31,6 +31,9 @@ export const WORKBENCH_MCP_TOOL_NAMES = [
   "ffpane_set_permission",
   "ffpane_broadcast",
   "ffpane_lock",
+  "ffpane_nudge",
+  "ffpane_request_decision",
+  "ffpane_wait_events",
 ] as const;
 
 export type WorkbenchMcpToolName = (typeof WORKBENCH_MCP_TOOL_NAMES)[number];
@@ -59,9 +62,63 @@ export const WORKBENCH_READ_ONLY_TOOL_NAMES: readonly WorkbenchMcpToolName[] = [
   "ffpane_open_canvas",
   "ffpane_memory_search",
   "ffpane_lock",
+  "ffpane_nudge",
+  "ffpane_wait_events",
 ];
 
 const TOOL_DEFINITIONS: readonly McpToolDefinition[] = [
+  {
+    name: "ffpane_wait_events",
+    description:
+      "在线监管：挂着等跟你有关的事件，有事件立刻返回，没有就到点返回。事件包括平台状态提醒（限流、卡住、空闲没汇报、等批准、退出）、锁轮到你、投递失败，以及新消息（正文附在 messages 里，已标记已读）。处理完就再调用一次接着等，这样你会一直在线，回合不结束。返回 stop 为 true 表示用户叫停了，处理完手头的事就结束本轮，不要再调用。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        timeoutSec: {
+          type: "number",
+          description: "最多等多少秒，缺省 240，范围 10 到 540。",
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "ffpane_nudge",
+    description:
+      "叫醒被打断的窗口，让它从停下的地方接着做（例如限流、出错之后）。只能叫醒自己的后代，或挂在你名下的窗口（监管者用）。只打一句平台固定的「继续」，不带你的任何文字，所以不能用来下命令。对方正忙就排队，空闲后送达。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        windowId: { type: "string", description: "要叫醒的窗口 id。" },
+      },
+      required: ["windowId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "ffpane_request_decision",
+    description:
+      "请用户拍板，相当于把计划交给用户审：先用 ffpane_write_brief 把要处理的事写成计划（背景、要决定什么、每个选项意味着什么、你的建议），再调用本工具，question 写这一件要决定的事，options 给 2 到 4 个选项，briefPath 填计划路径。界面会直接显示计划和选项，用户点选或写下决定，结果作为一条消息发回给你。只有管理者，或用户自己开的顶层窗口能用。可以自己查清的事不要问。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        question: { type: "string", description: "要拍板的事，一句话，最多 500 字。" },
+        options: {
+          type: "array",
+          items: { type: "string" },
+          minItems: 2,
+          maxItems: 4,
+          description: "2 到 4 个互不相同的选项，每个最多 120 字。写清每个选项意味着什么。",
+        },
+        briefPath: {
+          type: "string",
+          description: "必填。计划在 .ffpane/briefs/ 里的路径，界面会直接显示。",
+        },
+      },
+      required: ["question", "options", "briefPath"],
+      additionalProperties: false,
+    },
+  },
   {
     name: "ffpane_whoami",
     description:

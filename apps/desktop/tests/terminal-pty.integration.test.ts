@@ -78,6 +78,37 @@ describe.skipIf(!isWindows || !probe.ok)("真 PTY 集成（Windows）", () => {
     }
   }, 20_000);
 
+  it("光标藏着时移动也原样转发：输入法跟着真光标走，Claude Code 移到输入处的光标不能丢", async () => {
+    const { createNodePtyFactory } = await import("../src/main/terminal/factory");
+    const { Terminal } = await import("@xterm/headless");
+    const script = [
+      "process.stdout.write('\\x1b[?25l\\x1b[5;10Hstatus\\x1b[2;3H');",
+      "setTimeout(() => {}, 1500);",
+    ].join("");
+    const handle = createNodePtyFactory()({
+      file: process.execPath,
+      args: ["-e", script],
+      name: "xterm-256color",
+      cols: 80,
+      rows: 24,
+      cwd,
+      env: { ...process.env } as Record<string, string>,
+    });
+    let output = "";
+    handle.onData((data) => {
+      output += data;
+    });
+    const exited = new Promise<void>((resolve) => {
+      handle.onExit(() => resolve());
+    });
+    await exited;
+    const term = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
+    await new Promise<void>((resolve) => term.write(output, resolve));
+    expect(term.buffer.active.getLine(4)?.translateToString(true)).toContain("status");
+    expect([term.buffer.active.cursorY + 1, term.buffer.active.cursorX + 1]).toEqual([2, 3]);
+    term.dispose();
+  }, 20_000);
+
   it("真 Job Object：pid 到手后圈禁成功，关窗时 Start-Process 起的后台进程一起结束", async () => {
     const { execSync } = await import("node:child_process");
     const { createNodePtyFactory } = await import("../src/main/terminal/factory");

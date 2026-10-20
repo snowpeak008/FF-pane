@@ -9,6 +9,7 @@
 import { createConnection } from "node:net";
 import { createInterface } from "node:readline";
 import { FF_PANE_WB_PIPE_ENV, FF_PANE_WINDOW_TOKEN_ENV } from "@ff-pane/core";
+import { clampWaitSeconds } from "../main/workbench/online-hub";
 import { handleMcpLine, type McpServerOptions, type McpToolResult } from "./protocol";
 import { WORKBENCH_MCP_SERVER_NAME, WORKBENCH_MCP_TOOLS } from "./workbench-tools";
 
@@ -102,7 +103,12 @@ export function createWorkbenchMcpOptions(
   ) => {
     const pipe = env[FF_PANE_WB_PIPE_ENV] ?? "";
     const token = env[FF_PANE_WINDOW_TOKEN_ENV] ?? "";
-    return callControlTool(pipe, token, name, args);
+    // 挂着等事件的工具：按它自己的等待时长放宽，多留 20 秒给主进程回结果。
+    const timeoutMs =
+      name === "ffpane_wait_events"
+        ? (clampWaitSeconds(args["timeoutSec"]) + 20) * 1000
+        : CALL_TIMEOUT_MS;
+    return callControlTool(pipe, token, name, args, timeoutMs);
   },
 ): McpServerOptions {
   const credentialError = workbenchCredentialError(env);

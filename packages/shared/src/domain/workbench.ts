@@ -12,6 +12,25 @@ import type { WorkbenchRole } from "./workbench-role.js";
 /** 出厂默认：同时运行的工作台窗口上限。 */
 export const DEFAULT_MAX_WORKBENCH_WINDOWS = 12;
 
+/**
+ * 开新窗口前要求的最少可用内存（MB）。0 表示不检查。
+ * 默认 1024：16GB 的机器开着浏览器、编辑器时可用内存常在 2GB 上下，门槛再高会频繁误拦；
+ * 低于 1GB 时 Claude Code 会以「系统内存严重不足」中止命令（实际遇到过）。
+ */
+export const DEFAULT_MIN_FREE_MEMORY_MB = 1024;
+export const MIN_FREE_MEMORY_MB_OPTIONS = [0, 512, 1024, 2048, 3072, 4096] as const;
+/** 开新窗口前要求项目盘和临时目录盘的最少可用空间（MB）。0 表示不检查。 */
+export const DEFAULT_MIN_FREE_DISK_MB = 2048;
+export const MIN_FREE_DISK_MB_OPTIONS = [0, 1024, 2048, 5120, 10240] as const;
+
+/** 资源门槛：非负整数 MB，缺省或无效时用默认值，最高 64GB。 */
+export function clampResourceMb(value: unknown, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return fallback;
+  }
+  return Math.min(65_536, Math.floor(value));
+}
+
 /** 上限可写入的下限（含）。 */
 export const MIN_MAX_WORKBENCH_WINDOWS = 1;
 

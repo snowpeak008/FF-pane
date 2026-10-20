@@ -71,6 +71,11 @@ export interface McpStdioServerSpec {
    */
   readonly envVars?: readonly string[];
   /**
+   * Codex：`mcp_servers.<name>.tool_timeout_sec`。Codex 默认 60 秒就判工具调用超时，
+   * 会挂着等事件的工具（工作台的 ffpane_wait_events）需要更长。
+   */
+  readonly toolTimeoutSec?: number;
+  /**
    * 该服务端中要**预先放行**的工具名（不带 `mcp__<服务器>__` 前缀，适配器自行加）。
    *
    * 支持逐工具审批的 Runtime（claude）据此免掉审批弹窗。只该列真正无副作用的工具：

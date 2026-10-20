@@ -208,6 +208,16 @@ export async function openChildWindow(
       };
     }
     watcherWindowId = watcherId;
+  } else if (args.role === "worker") {
+    // 没指定时：管理者手下正好一个监管者，就挂到它下面，免得漏挂后状态提醒都绕过监管者。
+    const supervisors = Object.values(layout.windows).filter(
+      (window) =>
+        window.parentWindowId === callerId &&
+        (deps.authRegistry.get(window.id)?.role ?? window.role) === "supervisor",
+    );
+    if (supervisors.length === 1) {
+      watcherWindowId = supervisors[0]?.id;
+    }
   }
   const shortage = await deps.checkResources?.(described.projectRoot);
   if (shortage !== undefined) {
@@ -293,9 +303,19 @@ export async function openChildWindow(
     window: child,
     managerWindowId: callerId,
   });
-  const note = actuallyCapped
-    ? `请求权限 ${args.permission} 高于你的 ${callerPermission}，已封顶为 ${effective}。`
-    : undefined;
+  const notes = [
+    ...(actuallyCapped
+      ? [`请求权限 ${args.permission} 高于你的 ${callerPermission}，已封顶为 ${effective}。`]
+      : []),
+    ...(watcherWindowId !== undefined
+      ? [
+          `已挂到监管者 ${cleanTitle(layout.windows[watcherWindowId]?.title ?? watcherWindowId)}（${watcherWindowId}）下。`,
+        ]
+      : args.role === "worker"
+        ? ["没有挂监管者：状态提醒会直接发给你。"]
+        : []),
+  ];
+  const note = notes.length > 0 ? notes.join("") : undefined;
   return {
     ok: true,
     windowId,

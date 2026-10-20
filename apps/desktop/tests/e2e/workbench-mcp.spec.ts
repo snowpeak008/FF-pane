@@ -277,6 +277,98 @@ test("管理者读取并关闭子窗口，再打开任务页", async () => {
   }
 });
 
+test("窗口请用户拍板：界面上点选项，决定作为消息发回给它", async () => {
+  test.setTimeout(150_000);
+  const fakeBinDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-mcp-decision-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-mcp-decision-proj-"));
+  seedFakeClaude(fakeBinDir);
+  const launched = await launchApp({
+    pathPrepend: fakeBinDir,
+    extraEnv: { FFPANE_WB_SCRIPT: "decision" },
+  });
+  try {
+    const { app, page } = launched;
+    await createProject(app, page, projectDir, "E2E Decision");
+    await page.getByRole("button", { name: /^E2E Decision/ }).click();
+    await seedClaudeProfile(page);
+    await gotoRoute(page, "/workbench");
+    await page.getByTestId("workbench-new-tab").click();
+    await expect(page.getByTestId("workbench-new-window-dialog")).toBeVisible();
+    await page.getByTestId("workbench-new-kind-claude").click();
+    await expect(page.getByTestId("workbench-new-confirm")).toBeEnabled({ timeout: 15_000 });
+    await page.getByTestId("workbench-new-confirm").click();
+
+    const asker = page.getByTestId("workbench-window").first();
+    const askerId = await asker.getAttribute("data-window-id");
+    expect(askerId).toBeTruthy();
+    const card = page.getByTestId("workbench-decision");
+    await expect(card).toBeVisible({ timeout: 90_000 });
+    await expect(card).toContainText("回归测试改成每晚跑一次吗？");
+    await expect(card.getByTestId("workbench-decision-plan")).toContainText("建议：每晚跑");
+    await card.getByRole("button", { name: "每晚跑", exact: true }).click();
+    await expect(page.getByTestId("workbench-decisions")).toHaveCount(0);
+
+    await expect
+      .poll(async () => readReplayForWindowId(page, askerId ?? ""), { timeout: 90_000 })
+      .toContain("FFPANE_DECISION_DONE=1");
+    const replay = await readReplayForWindowId(page, askerId ?? "");
+    expect(replay).toContain("FFPANE_DECISION_ASKED=ok");
+    expect(replay).toContain("FFPANE_DECISION_REMINDER=yes");
+    expect(replay).toContain("用户的决定：每晚跑");
+  } finally {
+    await launched.cleanup();
+  }
+});
+
+test("在线监管：一直挂着等事件，拍板结果从等待里拿到，点下线后停下", async () => {
+  test.setTimeout(150_000);
+  const fakeBinDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-mcp-online-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-mcp-online-proj-"));
+  seedFakeClaude(fakeBinDir);
+  const launched = await launchApp({
+    pathPrepend: fakeBinDir,
+    extraEnv: { FFPANE_WB_SCRIPT: "online" },
+  });
+  try {
+    const { app, page } = launched;
+    await createProject(app, page, projectDir, "E2E Online");
+    await page.getByRole("button", { name: /^E2E Online/ }).click();
+    await seedClaudeProfile(page);
+    await gotoRoute(page, "/workbench");
+    await page.getByTestId("workbench-new-tab").click();
+    await expect(page.getByTestId("workbench-new-window-dialog")).toBeVisible();
+    await page.getByTestId("workbench-new-kind-claude").click();
+    await expect(page.getByTestId("workbench-new-confirm")).toBeEnabled({ timeout: 15_000 });
+    await page.getByTestId("workbench-new-confirm").click();
+
+    const pane = page.getByTestId("workbench-window").first();
+    const windowId = await pane.getAttribute("data-window-id");
+    expect(windowId).toBeTruthy();
+    await pane.getByTestId("workbench-role-badge").click();
+    await pane.getByTestId("workbench-role-option-supervisor").click();
+    await expect
+      .poll(async () => readReplayForWindowId(page, windowId ?? ""), { timeout: 90_000 })
+      .toContain("FFPANE_ONLINE_LOOP=1");
+    await expect(pane.getByTestId("workbench-runtime-online")).toBeVisible({ timeout: 15_000 });
+    await expect(pane.getByTestId("workbench-online-toggle")).toHaveAttribute("data-online", "yes");
+
+    const card = page.getByTestId("workbench-decision");
+    await expect(card).toBeVisible({ timeout: 30_000 });
+    await card.getByRole("button", { name: "继续", exact: true }).click();
+    await expect
+      .poll(async () => readReplayForWindowId(page, windowId ?? ""), { timeout: 30_000 })
+      .toContain("FFPANE_ONLINE_GOT_DECISION=1");
+
+    await pane.getByTestId("workbench-online-toggle").click();
+    await expect
+      .poll(async () => readReplayForWindowId(page, windowId ?? ""), { timeout: 30_000 })
+      .toContain("FFPANE_ONLINE_STOPPED=1");
+    await expect(pane.getByTestId("workbench-runtime-online")).toHaveCount(0, { timeout: 15_000 });
+  } finally {
+    await launched.cleanup();
+  }
+});
+
 test("重启后子窗口仍被封顶，续接管理者可以再开窗口", async () => {
   test.setTimeout(120_000);
   const fakeBinDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-mcp-restart-"));

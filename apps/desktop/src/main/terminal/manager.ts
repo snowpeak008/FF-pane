@@ -18,6 +18,7 @@ import {
   resolveSpawnTarget,
 } from "@ff-pane/adapters";
 import { FF_PANE_WB_PIPE_ENV, FF_PANE_WINDOW_TOKEN_ENV } from "@ff-pane/core";
+import { TerminalModeState } from "./mode-state";
 import { ByteRingBuffer } from "./ring-buffer";
 import {
   assertValidCwd,
@@ -52,6 +53,8 @@ interface Session {
   readonly shell: string;
   readonly createdAt: number;
   readonly buffer: ByteRingBuffer;
+  /** 被挤出回放缓冲的输出里设过的终端模式，回放时补在前面。 */
+  readonly evictedModes: TerminalModeState;
   readonly metadata: Readonly<Record<string, unknown>> | undefined;
   /** 进程号到手后才放进 Job，所以可能晚于创建。 */
   job: ProcessJob | undefined;
@@ -149,13 +152,17 @@ export class PtyManager {
     });
 
     const createdAt = this.now();
+    const evictedModes = new TerminalModeState();
     const session: Session = {
       id,
       handle,
       cwd,
       shell: shellLabel,
       createdAt,
-      buffer: new ByteRingBuffer(this.outputBufferBytes),
+      buffer: new ByteRingBuffer(this.outputBufferBytes, (dropped) => {
+        evictedModes.feed(dropped.toString("utf8"));
+      }),
+      evictedModes,
       metadata: options.metadata,
       job: undefined,
       cols,
@@ -244,6 +251,10 @@ export class PtyManager {
     }
     const nextCols = clampTerminalDimension(cols);
     const nextRows = clampTerminalDimension(rows);
+    // ConPTY 每调一次尺寸都整屏重画，行列没变也照画（2026-10-20 实录），没变就不调
+    if (nextCols === session.cols && nextRows === session.rows) {
+      return;
+    }
     session.cols = nextCols;
     session.rows = nextRows;
     session.handle.resize(nextCols, nextRows);
@@ -306,11 +317,14 @@ export class PtyManager {
     return session.job?.stats();
   }
 
-  /** 取回放缓冲。已退出但仍在 Map 内的会话可读；kill 删除后抛 unknown。 */
+  /**
+   * 取回放缓冲。已退出但仍在 Map 内的会话可读；kill 删除后抛 unknown。
+   * 开头被截掉时，前面补上截掉那段设过的终端模式（光标显隐、括号粘贴等），重放完状态不走样。
+   */
   getReplayBuffer(id: string): string {
     const session = this.requireSession(id);
     this.flushSession(session);
-    return session.buffer.toString();
+    return session.evictedModes.prelude() + session.buffer.toString();
   }
 
   isIdle(id: string, quietMs: number): boolean {

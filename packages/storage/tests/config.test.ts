@@ -82,6 +82,23 @@ describe("ConfigStore", () => {
     expect(ok.maxWorkbenchWindows).toBe(8);
   });
 
+  it("开窗资源门槛：没设不出现；0 表示不检查；负数和非数回到默认；上限 64GB", async () => {
+    const fresh = await store.readConfig();
+    expect(fresh.workbenchMinFreeMemoryMb).toBeUndefined();
+    const off = await store.updateConfig({
+      workbenchMinFreeMemoryMb: 0,
+      workbenchMinFreeDiskMb: 0,
+    });
+    expect(off.workbenchMinFreeMemoryMb).toBe(0);
+    expect(off.workbenchMinFreeDiskMb).toBe(0);
+    const bad = await store.updateConfig({
+      workbenchMinFreeMemoryMb: -5,
+      workbenchMinFreeDiskMb: 1e9,
+    });
+    expect(bad.workbenchMinFreeMemoryMb).toBe(1024);
+    expect(bad.workbenchMinFreeDiskMb).toBe(65_536);
+  });
+
   it("版本不支持：抛 ConfigFileInvalidError", async () => {
     await writeTextAtomic(configFile, JSON.stringify({ version: 999, config: {} }));
     await expect(store.readConfig()).rejects.toThrow(ConfigFileInvalidError);

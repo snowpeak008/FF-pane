@@ -34,6 +34,7 @@ import {
   type WorkbenchToolDeps,
 } from "../src/main/workbench/mcp-tools";
 import { createNamedLocks, type LockGrant } from "../src/main/workbench/named-locks";
+import type { WaitOutcome } from "../src/main/workbench/online-hub";
 import { openChildWindow } from "../src/main/workbench/open-child";
 import {
   buildCoalescedReminder,
@@ -42,11 +43,13 @@ import {
   sanitizeReminderTitle,
 } from "../src/main/workbench/remind";
 import {
+  appendThreadRecord,
   assertProjectFiles,
   formatThreadBlock,
   readThreadIndex,
   readThreadIndexText,
   teamFileSlug,
+  USER_PARTY_ID,
 } from "../src/main/workbench/thread-store";
 import { handleMcpLine } from "../src/mcp/protocol";
 import { inboxHookOutput, promptIsInboxReminder } from "../src/mcp/workbench-hook";
@@ -119,6 +122,10 @@ function harness(
   grants: LockGrant[];
   selfClosed: string[];
   permissionsSet: { windowId: string; permission: string }[];
+  nudged: string[];
+  decisions: { windowId: string; question: string; options: readonly string[] }[];
+  waits: { windowId: string; timeoutMs: number }[];
+  setWaitOutcome: (next: WaitOutcome) => void;
   deps: WorkbenchToolDeps;
 } {
   const views: Record<string, ToolWindowView> = {
@@ -142,6 +149,10 @@ function harness(
   const grants: LockGrant[] = [];
   const selfClosed: string[] = [];
   const permissionsSet: { windowId: string; permission: string }[] = [];
+  const nudged: string[] = [];
+  const waits: { windowId: string; timeoutMs: number }[] = [];
+  let waitOutcome: WaitOutcome = { events: [], inbox: false, stop: false, timedOut: true };
+  const decisions: { windowId: string; question: string; options: readonly string[] }[] = [];
   const cursor = new Map<string, string>();
   const getCursor = cursorStore?.get.bind(cursorStore) ?? (async (id: string) => cursor.get(id));
   const setCursor =
@@ -209,6 +220,18 @@ function harness(
       permissionsSet.push(input);
       return { ok: true as const, message: "已排队，空闲时自动续接" };
     },
+    nudge: (id) => {
+      nudged.push(id);
+      return "delivered";
+    },
+    requestDecision: ({ caller, question, options }) => {
+      decisions.push({ windowId: caller.id, question, options });
+      return { id: "d-1" };
+    },
+    waitEvents: async (id, timeoutMs) => {
+      waits.push({ windowId: id, timeoutMs });
+      return waitOutcome;
+    },
   };
   return {
     views,
@@ -220,6 +243,12 @@ function harness(
     grants,
     selfClosed,
     permissionsSet,
+    nudged,
+    decisions,
+    waits,
+    setWaitOutcome: (next: WaitOutcome) => {
+      waitOutcome = next;
+    },
     deps,
   };
 }
@@ -518,6 +547,126 @@ describe("清单新增工具", () => {
       ).isError,
     ).toBe(true);
     expect(selfClosed).toEqual(["B"]);
+  });
+});
+
+describe("在线监管", () => {
+  it("wait_events：夹紧等待时长，事件原样返回，有新消息时附上正文，叫停时告诉它结束", async () => {
+    const root = tempDir();
+    const h = harness(root);
+    const idle = await call(h.deps, "A", "ffpane_wait_events", { timeoutSec: 9999 });
+    expect(h.waits).toEqual([{ windowId: "A", timeoutMs: 540_000 }]);
+    expect(idle.json).toMatchObject({ events: [], timedOut: true, stop: false });
+    expect((idle.json as { next: string }).next).toContain("接着等");
+
+    await call(h.deps, "A", "ffpane_send_message", { windowId: "B", text: "先跑单测" });
+    h.setWaitOutcome({ events: ["[状态] 执行限流"], inbox: true, stop: false, timedOut: false });
+    const busy = await call(h.deps, "B", "ffpane_wait_events");
+    expect(h.waits.at(-1)).toEqual({ windowId: "B", timeoutMs: 240_000 });
+    expect(busy.json).toMatchObject({ events: ["[状态] 执行限流"], timedOut: false });
+    expect((busy.json as { messages: string }).messages).toContain("> 先跑单测");
+
+    h.setWaitOutcome({ events: [], inbox: false, stop: true, timedOut: false });
+    const stopped = await call(h.deps, "B", "ffpane_wait_events");
+    expect((stopped.json as { next: string }).next).toContain("不要再调用");
+  });
+});
+
+describe("叫醒与拍板", () => {
+  it("nudge：能叫醒后代和挂在自己名下的窗口，叫不醒别人", async () => {
+    const root = tempDir();
+    const h = harness(root);
+    h.views["S"] = view(root, "S", "监管", "supervisor", "A");
+    h.tree["S"] = node("S", "supervisor", "A");
+    const worker = h.views["D"];
+    if (worker === undefined) {
+      throw new Error("missing D");
+    }
+    h.views["D"] = { ...worker, watcherWindowId: "S" };
+    expect((await call(h.deps, "A", "ffpane_nudge", { windowId: "C" })).json).toMatchObject({
+      delivery: "delivered",
+    });
+    expect((await call(h.deps, "S", "ffpane_nudge", { windowId: "D" })).isError).toBe(false);
+    expect((await call(h.deps, "S", "ffpane_nudge", { windowId: "B" })).isError).toBe(true);
+    expect((await call(h.deps, "B", "ffpane_nudge", { windowId: "A" })).isError).toBe(true);
+    expect((await call(h.deps, "B", "ffpane_nudge", { windowId: "B" })).isError).toBe(true);
+    expect(h.nudged).toEqual(["C", "D"]);
+  });
+
+  it("request_decision：管理者带计划推 2 到 4 个选项；没计划、下级、空选项、重复选项都被拒", async () => {
+    const h = harness(tempDir());
+    await call(h.deps, "A", "ffpane_write_brief", { name: "plan.md", content: "# 计划" });
+    const noPlan = await call(h.deps, "A", "ffpane_request_decision", {
+      question: "要不要改？",
+      options: ["改", "不改"],
+    });
+    expect(noPlan.isError).toBe(true);
+    expect(noPlan.text).toContain("写成计划");
+    const plan = ".ffpane/briefs/plan.md";
+    const okResult = await call(h.deps, "A", "ffpane_request_decision", {
+      question: "回归测试\n要不要改成每晚跑一次？",
+      options: ["每晚跑", "保持每次提交都跑"],
+      briefPath: plan,
+    });
+    expect(okResult.json).toMatchObject({ id: "d-1" });
+    expect(h.decisions).toEqual([
+      {
+        windowId: "A",
+        question: "回归测试 要不要改成每晚跑一次？",
+        options: ["每晚跑", "保持每次提交都跑"],
+      },
+    ]);
+    const worker = await call(h.deps, "B", "ffpane_request_decision", {
+      question: "x",
+      options: ["a", "b"],
+      briefPath: plan,
+    });
+    expect(worker.isError).toBe(true);
+    for (const options of [["只有一个"], ["a", "a"], ["a", "b", "c", "d", "e"], ["a", ""]]) {
+      expect(
+        (
+          await call(h.deps, "A", "ffpane_request_decision", {
+            question: "q",
+            options,
+            briefPath: plan,
+          })
+        ).isError,
+        JSON.stringify(options),
+      ).toBe(true);
+    }
+    expect(
+      (
+        await call(h.deps, "A", "ffpane_request_decision", {
+          question: "",
+          options: ["a", "b"],
+          briefPath: plan,
+        })
+      ).isError,
+    ).toBe(true);
+  });
+
+  it("用户的决定附给模型时标明是用户本人", async () => {
+    const root = tempDir();
+    const h = harness(root);
+    const date = new Date(1_700_000_000_000);
+    await appendThreadRecord(
+      root,
+      {
+        v: 1,
+        id: "m-user-1",
+        ts: date.toISOString(),
+        projectId: "proj-1",
+        from: { windowId: USER_PARTY_ID, title: "用户", role: "none" },
+        to: { windowId: "A", title: "总管", role: "manager" },
+        kind: "message",
+        text: "拍板：每晚跑吗\n用户的决定：每晚跑",
+        threadFile: "2023-11-14-拍板-A.md",
+      },
+      date,
+    );
+    const digest = await takeInboxDigest("A", h.deps);
+    expect(digest).toContain("来自 用户本人（拍板结果，照此执行）");
+    expect(digest).toContain("> 用户的决定：每晚跑");
   });
 });
 
@@ -1024,6 +1173,94 @@ describe("open_window", () => {
       focusedWindowId: "A",
     };
   }
+
+  it("只有一个监管者时执行自动挂上；资源不够不开", async () => {
+    const root = tempDir();
+    const registry = createWorkbenchAuthRegistry();
+    registry.pin(
+      { id: "A", permission: "edit", role: "manager", openedBy: "user" },
+      "proj-1" as never,
+    );
+    registry.grantManager("A");
+    const base = layout(root);
+    const withSupervisor: ProjectWorkbenchLayout = {
+      ...base,
+      windows: {
+        ...base.windows,
+        S: {
+          id: "S",
+          projectId: "proj-1" as never,
+          title: "监管",
+          kind: "claude",
+          cwd: root,
+          createdAt: 2,
+          permission: "read-only",
+          role: "supervisor",
+          openedBy: { windowId: "A" },
+          parentWindowId: "A",
+        },
+      },
+    };
+    const saved: ProjectWorkbenchLayout[] = [];
+    let ids = 0;
+    const deps = {
+      authRegistry: registry,
+      readLayouts: async () => ({ "proj-1": withSupervisor }),
+      saveLayout: async (next: ProjectWorkbenchLayout) => {
+        saved.push(next);
+      },
+      launch: async () =>
+        ({
+          terminal: { id: "term" },
+          kind: "claude",
+          effectivePermission: "edit",
+          permissionCapped: false,
+        }) as unknown as LaunchCliWindowResult,
+      resolveRoute: async () => ({
+        ok: true as const,
+        route: {
+          connectionMode: "local_cli" as const,
+          configId: "cfg" as never,
+          configName: "默认配置",
+        },
+      }),
+      describeCaller: async () => ({
+        title: "总管",
+        projectId: "proj-1",
+        projectRoot: root,
+        permission: "edit" as const,
+      }),
+      aliveCount: () => 2,
+      maxWindows: async () => 8,
+      publish: () => undefined,
+      newId: () => {
+        ids += 1;
+        return `w-${ids}`;
+      },
+    };
+    const opened = await openChildWindow(
+      "A",
+      { cli: "claude", role: "worker", permission: "edit", title: "执行" },
+      deps,
+    );
+    expect(opened).toMatchObject({ ok: true, note: expect.stringContaining("已挂到监管者 监管") });
+    expect(saved[0]?.windows["w-1"]?.watcherWindowId).toBe("S");
+
+    const reviewer = await openChildWindow(
+      "A",
+      { cli: "claude", role: "reviewer", permission: "edit", title: "检查" },
+      deps,
+    );
+    expect(reviewer.ok).toBe(true);
+    expect(saved[1]?.windows["w-2"]?.watcherWindowId).toBeUndefined();
+
+    const short = await openChildWindow(
+      "A",
+      { cli: "claude", role: "worker", permission: "edit", title: "执行2" },
+      { ...deps, checkResources: async () => "可用内存只剩 1.0 GB" },
+    );
+    expect(short).toEqual({ ok: false, error: "可用内存只剩 1.0 GB" });
+  });
 
   it("先登记父级再启动，超权封顶，非管理者与未授予者被拒，到上限不开", async () => {
     const root = tempDir();

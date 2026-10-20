@@ -545,7 +545,25 @@
       "disk": "{{root}} {{free}} GB",
       "low": "资源偏低，开新窗口会被拒绝",
       "sep": "、",
-      "memory": "{{memory}} GB · {{count}} 个进程"
+      "memory": "{{memory}} GB · {{count}} 个进程",
+      "online": "在线监管中"
+    },
+    "decision": {
+      "title": "待你拍板（{{count}}）",
+      "from": "来自 {{title}}",
+      "arrived": "{{title}} 请你拍板",
+      "sent": "已发回给提问的窗口",
+      "openBrief": "在外部打开计划",
+      "otherPlaceholder": "或者写下你的决定",
+      "submit": "确定"
+    },
+    "online": {
+      "start": "上线",
+      "stop": "下线",
+      "startHint": "让它进入在线监管：一直挂着等事件，有事马上处理",
+      "stopHint": "让它退出在线监管：处理完手头的事就停下",
+      "started": "已发出上线提示，它空闲时就会进入在线监管",
+      "stopped": "已通知它下线"
     }
   },
   "projects": {
@@ -774,7 +792,13 @@
       "hint": "所有项目合计的终端窗口数；到达后新建会被拒绝。主进程也会强制校验。",
       "option": "{{count}} 个",
       "loadError": "读取失败",
-      "error": "保存窗口上限失败"
+      "error": "保存窗口上限失败",
+      "memoryLabel": "开窗前最少可用内存",
+      "memoryHint": "可用内存低于这个数时，不开新窗口，免得命令行因内存不足中止。",
+      "diskLabel": "开窗前最少可用磁盘",
+      "diskHint": "项目盘或临时目录盘的可用空间低于这个数时，不开新窗口。",
+      "noCheck": "不检查",
+      "gb": "{{gb}} GB"
     },
     "workbenchPermission": {
       "title": "工作台权限",

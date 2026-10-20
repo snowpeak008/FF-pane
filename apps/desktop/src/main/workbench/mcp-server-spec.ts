@@ -14,6 +14,9 @@ export const WORKBENCH_MCP_SCRIPT = "workbench-mcp.js";
 
 export { WORKBENCH_MCP_SERVER_NAME };
 
+/** 工作台工具在 CLI 侧的超时：比 ffpane_wait_events 的上限（540 秒）再多一分钟。 */
+export const WORKBENCH_TOOL_TIMEOUT_SEC = 600;
+
 export function buildWorkbenchMcpSpec(
   moduleDir: string,
   execPath = process.execPath,
@@ -22,5 +25,7 @@ export function buildWorkbenchMcpSpec(
     command: execPath,
     args: [join(moduleDir, WORKBENCH_MCP_SCRIPT)],
     env: { ELECTRON_RUN_AS_NODE: "1" },
+    // ffpane_wait_events 最长挂 9 分钟，Codex 默认 60 秒会判超时。
+    toolTimeoutSec: WORKBENCH_TOOL_TIMEOUT_SEC,
   };
 }

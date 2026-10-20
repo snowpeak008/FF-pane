@@ -24,6 +24,7 @@ import { NewWindowDialog, type NewWindowDialogResult } from "./NewWindowDialog";
 import { SplitLayout } from "./SplitLayout";
 import { TabBar } from "./TabBar";
 import { WorkbenchCanvasPanel } from "./WorkbenchCanvasPanel";
+import { WorkbenchDecisions } from "./WorkbenchDecisions";
 import { WorkbenchDrawer } from "./WorkbenchDrawer";
 import { WorkbenchRuntimeBar } from "./WorkbenchRuntimeBar";
 
@@ -300,6 +301,7 @@ export function WorkbenchPage(): ReactElement {
           onNewTab={handleNewTab}
         />
         <WorkbenchRuntimeBar projectId={entry.id} />
+        <WorkbenchDecisions projectId={entry.id} />
         {!hasWindows || activeTab === null ? (
           <EmptyState
             icon={SquareTerminal}

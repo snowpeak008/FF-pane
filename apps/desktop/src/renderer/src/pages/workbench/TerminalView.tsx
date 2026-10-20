@@ -502,11 +502,15 @@ export function TerminalView({
       return true;
     });
 
+    // 容器每动一下都会回调；行列没变不发，免得伪终端整屏重画
+    let sentSize = "";
     const observer = new ResizeObserver(() => {
       try {
         fit.fit();
         const current = infoRef.current;
-        if (current !== null && !current.exited) {
+        const size = current === null ? "" : `${current.id}:${term.cols}x${term.rows}`;
+        if (current !== null && !current.exited && size !== sentSize) {
+          sentSize = size;
           void invokeQuery("terminal:resize", {
             id: current.id,
             cols: term.cols,

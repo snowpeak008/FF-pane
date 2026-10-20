@@ -15,7 +15,7 @@ import {
   WORKBENCH_PERMISSION_LEVELS,
   WORKBENCH_ROLES,
 } from "@ff-pane/shared";
-import { Bot, Columns2, Maximize2, Minimize2, Rows2, SquareTerminal, X } from "lucide-react";
+import { Bot, Columns2, Maximize2, Minimize2, Radio, Rows2, SquareTerminal, X } from "lucide-react";
 import { type ReactElement, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -534,6 +534,36 @@ export function WindowPane({
                 ? t("workbench.window.status.stopped")
                 : t("workbench.window.status.starting")}
         </span>
+        {isCli && (window.role === "supervisor" || window.role === "manager") ? (
+          <Tooltip
+            content={t(
+              runtime?.online === true ? "workbench.online.stopHint" : "workbench.online.startHint",
+            )}
+          >
+            <Button
+              variant="ghost"
+              size="sm"
+              data-testid="workbench-online-toggle"
+              data-online={runtime?.online === true ? "yes" : "no"}
+              onClick={() => {
+                const next = runtime?.online !== true;
+                void invokeQuery("workbench:set-online", {
+                  windowId: window.id,
+                  online: next,
+                }).then((settled) => {
+                  if (settled.status === "error") {
+                    toast.error(settled.error.message);
+                    return;
+                  }
+                  toast.message(t(next ? "workbench.online.started" : "workbench.online.stopped"));
+                });
+              }}
+            >
+              <Radio aria-hidden size={14} />
+              {t(runtime?.online === true ? "workbench.online.stop" : "workbench.online.start")}
+            </Button>
+          </Tooltip>
+        ) : null}
         <Tooltip content={t("workbench.window.splitRight")}>
           <Button
             variant="ghost"
@@ -797,157 +827,162 @@ export function WindowPane({
           </select>
         </div>
       ) : null}
-      {manualTurnSignal ? (
-        <div
-          className="shrink-0 border-b border-border bg-warning-surface px-2 py-1 text-2xs text-warning-text"
-          data-testid="workbench-manual-turn-signal"
-        >
-          {window.kind === "grok"
-            ? t("workbench.deliver.grokManual")
-            : t("workbench.deliver.noNode")}
-        </div>
-      ) : null}
-      {deliverPending.count > 0 && deliverPending.mode !== "clear" ? (
-        <div
-          className="flex shrink-0 items-center gap-2 border-b border-border bg-warning-surface px-2 py-1 text-2xs text-warning-text"
-          data-testid="workbench-deliver-pending"
-          data-deliver-mode={deliverPending.mode}
-        >
-          <span>{t("workbench.deliver.pending", { count: deliverPending.count })}</span>
-          {deliverPending.mode === "manual" ? (
-            <>
+      {/* 提示条浮在终端上沿，不占高度：它们随投递排队时有时无，挤占高度会让终端改行数、CLI 整屏重画 */}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-col">
+          {manualTurnSignal ? (
+            <div
+              className="pointer-events-auto border-b border-border bg-warning-surface px-2 py-1 text-2xs text-warning-text"
+              data-testid="workbench-manual-turn-signal"
+            >
+              {window.kind === "grok"
+                ? t("workbench.deliver.grokManual")
+                : t("workbench.deliver.noNode")}
+            </div>
+          ) : null}
+          {deliverPending.count > 0 && deliverPending.mode !== "clear" ? (
+            <div
+              className="pointer-events-auto flex flex-wrap items-center gap-2 border-b border-border bg-warning-surface px-2 py-1 text-2xs text-warning-text"
+              data-testid="workbench-deliver-pending"
+              data-deliver-mode={deliverPending.mode}
+            >
+              <span>{t("workbench.deliver.pending", { count: deliverPending.count })}</span>
+              {deliverPending.mode === "manual" ? (
+                <>
+                  <button
+                    type="button"
+                    className="rounded-sm bg-primary px-1.5 py-0.5 text-primary-fg"
+                    data-testid="workbench-deliver-now"
+                    onClick={() => {
+                      void invokeQuery("workbench:deliver-now", { windowId: window.id });
+                    }}
+                  >
+                    {t("workbench.deliver.send")}
+                  </button>
+                  {window.kind === "codex" ? (
+                    <span data-testid="workbench-codex-manual-hint">
+                      {t("workbench.deliver.codexManualHint")}
+                    </span>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <span data-testid="workbench-deliver-blocked">
+                    {deliverPending.mode === "blocked"
+                      ? t("workbench.deliver.blocked")
+                      : t("workbench.deliver.busy")}
+                  </span>
+                  {deliverPending.mode === "blocked" ? (
+                    <span data-testid="workbench-deliver-permission-hold">
+                      {t("workbench.deliver.permissionHold")}
+                    </span>
+                  ) : null}
+                </>
+              )}
               <button
                 type="button"
-                className="rounded-sm bg-primary px-1.5 py-0.5 text-primary-fg"
-                data-testid="workbench-deliver-now"
+                className="rounded-sm px-1.5 py-0.5 text-fg"
+                data-testid="workbench-deliver-cancel"
                 onClick={() => {
-                  void invokeQuery("workbench:deliver-now", { windowId: window.id });
+                  void invokeQuery("workbench:deliver-cancel", { windowId: window.id });
                 }}
               >
-                {t("workbench.deliver.send")}
+                {t("workbench.deliver.cancel")}
               </button>
-              {window.kind === "codex" ? (
-                <span data-testid="workbench-codex-manual-hint">
-                  {t("workbench.deliver.codexManualHint")}
-                </span>
-              ) : null}
-            </>
-          ) : (
-            <>
-              <span data-testid="workbench-deliver-blocked">
-                {deliverPending.mode === "blocked"
-                  ? t("workbench.deliver.blocked")
-                  : t("workbench.deliver.busy")}
+              <span className="text-fg-muted" data-testid="workbench-deliver-cancel-hint">
+                {t("workbench.deliver.cancelHint")}
               </span>
-              {deliverPending.mode === "blocked" ? (
-                <span data-testid="workbench-deliver-permission-hold">
-                  {t("workbench.deliver.permissionHold")}
-                </span>
-              ) : null}
-            </>
-          )}
-          <button
-            type="button"
-            className="rounded-sm px-1.5 py-0.5 text-fg"
-            data-testid="workbench-deliver-cancel"
-            onClick={() => {
-              void invokeQuery("workbench:deliver-cancel", { windowId: window.id });
-            }}
-          >
-            {t("workbench.deliver.cancel")}
-          </button>
-          <span className="text-fg-muted" data-testid="workbench-deliver-cancel-hint">
-            {t("workbench.deliver.cancelHint")}
-          </span>
+            </div>
+          ) : null}
         </div>
-      ) : null}
-      <TerminalView
-        key={`${window.id}-${window.kind}`}
-        windowId={window.id}
-        projectId={window.projectId}
-        cwd={window.cwd}
-        fallbackCwd={projectRoot}
-        onTerminalIdChange={onTerminalIdChange}
-        onExitCodeChange={setExitCode}
-        onCwdFallback={onCwdFallback}
-        launchNonce={launchNonce}
-        {...(isCli
-          ? {
-              cliLaunch: {
-                kind:
-                  window.kind === "codex"
-                    ? "codex"
-                    : window.kind === "grok"
-                      ? "grok"
-                      : window.kind === "deepseek"
-                        ? "deepseek"
-                        : "claude",
-                projectRoot,
-                autoStart: autoStart || resumeNext,
-                permission,
-                ...(window.role !== undefined ? { role: window.role } : {}),
-                ...(conversationPlan.kind === "resume"
-                  ? { nativeSessionId: conversationPlan.sessionId, resume: true }
-                  : conversationPlan.kind === "picker"
-                    ? { resume: true }
-                    : {}),
-                ...(initialPrompt !== undefined ? { initialPrompt } : {}),
-              },
-              onResume: () => {
-                queueConversationPlan(
-                  planConversationLaunch({
-                    action: "resume-current",
-                    ...(window.nativeSessionId !== undefined
-                      ? { currentId: window.nativeSessionId }
+        <TerminalView
+          key={`${window.id}-${window.kind}`}
+          windowId={window.id}
+          projectId={window.projectId}
+          cwd={window.cwd}
+          fallbackCwd={projectRoot}
+          onTerminalIdChange={onTerminalIdChange}
+          onExitCodeChange={setExitCode}
+          onCwdFallback={onCwdFallback}
+          launchNonce={launchNonce}
+          {...(isCli
+            ? {
+                cliLaunch: {
+                  kind:
+                    window.kind === "codex"
+                      ? "codex"
+                      : window.kind === "grok"
+                        ? "grok"
+                        : window.kind === "deepseek"
+                          ? "deepseek"
+                          : "claude",
+                  projectRoot,
+                  autoStart: autoStart || resumeNext,
+                  permission,
+                  ...(window.role !== undefined ? { role: window.role } : {}),
+                  ...(conversationPlan.kind === "resume"
+                    ? { nativeSessionId: conversationPlan.sessionId, resume: true }
+                    : conversationPlan.kind === "picker"
+                      ? { resume: true }
                       : {}),
-                    unidentified: window.sessionUnidentified === true,
-                  }),
-                );
-              },
-              onRestartFresh: () => {
-                queueConversationPlan({ kind: "fresh" });
-              },
-              onConvertToShell: () => {
-                convertWindowToShell(window.projectId, window.id);
-              },
-              onNativeSessionId: (nativeSessionId) => {
-                if (nativeSessionId !== undefined) {
-                  noteWindowSession(window.projectId, window.id, nativeSessionId);
-                }
-              },
-              onPermissionCapped: (effective) => {
-                setWindowPermission(window.projectId, window.id, effective);
-                setPermissionCappedHint(true);
-              },
-              onTurnSignal: (signal) => {
-                setManualTurnSignal(signal === "manual");
-              },
-              onLaunchRoute: (route) => {
-                patchWindow(window.projectId, window.id, { routeSnapshot: route });
-                if (modelEffortResumeRef.current || modelEffort !== null) {
+                  ...(initialPrompt !== undefined ? { initialPrompt } : {}),
+                },
+                onResume: () => {
+                  queueConversationPlan(
+                    planConversationLaunch({
+                      action: "resume-current",
+                      ...(window.nativeSessionId !== undefined
+                        ? { currentId: window.nativeSessionId }
+                        : {}),
+                      unidentified: window.sessionUnidentified === true,
+                    }),
+                  );
+                },
+                onRestartFresh: () => {
+                  queueConversationPlan({ kind: "fresh" });
+                },
+                onConvertToShell: () => {
+                  convertWindowToShell(window.projectId, window.id);
+                },
+                onNativeSessionId: (nativeSessionId) => {
+                  if (nativeSessionId !== undefined) {
+                    noteWindowSession(window.projectId, window.id, nativeSessionId);
+                  }
+                },
+                onPermissionCapped: (effective) => {
+                  setWindowPermission(window.projectId, window.id, effective);
+                  setPermissionCappedHint(true);
+                },
+                onTurnSignal: (signal) => {
+                  setManualTurnSignal(signal === "manual");
+                },
+                onLaunchRoute: (route) => {
+                  patchWindow(window.projectId, window.id, { routeSnapshot: route });
+                  if (modelEffortResumeRef.current || modelEffort !== null) {
+                    modelEffortResumeRef.current = false;
+                    setModelEffort(null);
+                    void invokeQuery("workbench:model-effort-settled", {
+                      windowId: window.id,
+                      ok: true,
+                    });
+                  }
+                },
+                onRelaunchSettled: (ok, error) => {
+                  if (ok || !modelEffortResumeRef.current) {
+                    return;
+                  }
                   modelEffortResumeRef.current = false;
-                  setModelEffort(null);
                   void invokeQuery("workbench:model-effort-settled", {
                     windowId: window.id,
-                    ok: true,
+                    ok: false,
+                    ...(error !== undefined && error !== "" ? { error } : {}),
                   });
-                }
-              },
-              onRelaunchSettled: (ok, error) => {
-                if (ok || !modelEffortResumeRef.current) {
-                  return;
-                }
-                modelEffortResumeRef.current = false;
-                void invokeQuery("workbench:model-effort-settled", {
-                  windowId: window.id,
-                  ok: false,
-                  ...(error !== undefined && error !== "" ? { error } : {}),
-                });
-              },
-            }
-          : {})}
-        beforeUserRelaunch={askSensitiveLaunch}
-      />
+                },
+              }
+            : {})}
+          beforeUserRelaunch={askSensitiveLaunch}
+        />
+      </div>
       <ConfirmDialog
         open={sensitiveOpen}
         onOpenChange={(open) => {

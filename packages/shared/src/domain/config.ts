@@ -65,6 +65,10 @@ export interface GlobalConfig {
    * 出厂默认 DEFAULT_MAX_WORKBENCH_WINDOWS（12）。
    */
   readonly maxWorkbenchWindows: number;
+  /** 开新窗口前要求的最少可用内存（MB），0 不检查。缺省 DEFAULT_MIN_FREE_MEMORY_MB。 */
+  readonly workbenchMinFreeMemoryMb?: number;
+  /** 开新窗口前要求的最少可用磁盘（MB），0 不检查。缺省 DEFAULT_MIN_FREE_DISK_MB。 */
+  readonly workbenchMinFreeDiskMb?: number;
   /**
    * T10.5 —— 界面新建 AI 窗口的默认权限等级。
    * 出厂默认 DEFAULT_WORKBENCH_WINDOW_PERMISSION（edit）。

@@ -1,6 +1,6 @@
 /**
  * 工作台运行状态条：每 3 秒取一次本项目窗口的状态和本机资源。
- * 资源低于开窗门槛（2GB）时标红：此时管理者开新窗口会被拒绝。
+ * 资源低于设置里的开窗门槛时标红：此时管理者开新窗口会被拒绝。
  */
 
 import type { ProjectId } from "@ff-pane/shared";
@@ -12,7 +12,6 @@ import { cn } from "../../lib/cn";
 import { useWorkbenchRuntimeStore } from "../../stores/workbench-runtime";
 
 const POLL_MS = 3000;
-const LOW_BYTES = 2 * 1024 ** 3;
 
 function gb(bytes: number): string {
   return (bytes / 1024 ** 3).toFixed(1);
@@ -51,16 +50,19 @@ export function WorkbenchRuntimeBar({
     return <div className="hidden" />;
   }
   const disks = Object.entries(resources.freeDiskBytes);
-  const low = resources.freeMemoryBytes < LOW_BYTES || disks.some(([, free]) => free < LOW_BYTES);
+  const low =
+    (resources.minFreeMemoryBytes > 0 &&
+      resources.freeMemoryBytes < resources.minFreeMemoryBytes) ||
+    (resources.minFreeDiskBytes > 0 && disks.some(([, free]) => free < resources.minFreeDiskBytes));
   return (
     <div
       className={cn(
-        "flex shrink-0 items-center gap-2 border-b border-border px-2 py-0.5 text-2xs",
+        "flex shrink-0 items-center gap-2 overflow-hidden whitespace-nowrap border-b border-border px-2 py-0.5 text-2xs",
         low ? "text-danger-text" : "text-fg-muted",
       )}
       data-testid="workbench-runtime-bar"
     >
-      <span>
+      <span className="min-w-0 truncate">
         {t("workbench.runtime.resources", {
           memory: gb(resources.freeMemoryBytes),
           disk: disks
@@ -87,6 +89,14 @@ export function RuntimeBadges({
   const badge = "ml-1 rounded-sm px-1 text-2xs";
   return (
     <>
+      {status.online ? (
+        <span
+          className={cn(badge, "bg-primary text-primary-fg")}
+          data-testid="workbench-runtime-online"
+        >
+          {t("workbench.runtime.online")}
+        </span>
+      ) : null}
       <span
         className={cn(
           badge,

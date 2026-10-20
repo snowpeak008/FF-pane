@@ -12,19 +12,39 @@
 import { spawn } from "@lydell/node-pty";
 import type { PtyFactory, PtyFactoryOptions, PtyHandle } from "./types";
 
+/**
+ * Windows 上用 node-pty 自带的 conpty.dll + OpenConsole.exe（1.25），不用系统里的 conhost。
+ * 系统自带的（Win11 22621 这一代）会把输出重新排版再发出来：光标藏着时不转发光标移动，
+ * Claude Code 移到输入处的真光标丢了，停在右下角或刚刷新的状态行，输入法的拼音和候选框跟着乱跳；
+ * 同步刷新（?2026）被拆成空帧，行列没变的调尺寸也整屏重画。自带的新版原样转发，三处都没有
+ * （2026-10-20 同一个 Claude 实录对比）。起不来时退回系统自带的，并记日志。
+ */
+const USE_BUNDLED_CONPTY = process.platform === "win32";
+
 export function createNodePtyFactory(): PtyFactory {
+  let bundledConptyFailed = false;
   return (options: PtyFactoryOptions): PtyHandle => {
-    const pty = spawn(
-      options.file,
-      typeof options.args === "string" ? options.args : [...options.args],
-      {
+    const spawnWith = (useConptyDll: boolean) =>
+      spawn(options.file, typeof options.args === "string" ? options.args : [...options.args], {
         name: options.name,
         cols: options.cols,
         rows: options.rows,
         cwd: options.cwd,
         env: options.env,
-      },
-    );
+        ...(useConptyDll ? { useConptyDll: true } : {}),
+      });
+    let pty: ReturnType<typeof spawn>;
+    if (USE_BUNDLED_CONPTY && !bundledConptyFailed) {
+      try {
+        pty = spawnWith(true);
+      } catch (error) {
+        bundledConptyFailed = true;
+        console.error("[terminal] bundled conpty failed, falling back to system conpty", error);
+        pty = spawnWith(false);
+      }
+    } else {
+      pty = spawnWith(false);
+    }
     const pidListeners: ((pid: number) => void)[] = [];
     const agent = (
       pty as unknown as {

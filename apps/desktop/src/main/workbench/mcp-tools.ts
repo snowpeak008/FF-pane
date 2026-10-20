@@ -42,6 +42,7 @@ import {
   sanitizeSourceWindowTitle,
 } from "./memory-policy";
 import { isLockName, type LockGrant, type NamedLocks } from "./named-locks";
+import { clampWaitSeconds, type WaitOutcome } from "./online-hub";
 import type { OpenChildArgs, OpenChildSuccess } from "./open-child";
 import { openChildWindow } from "./open-child";
 import { clampReadOutputBytes, clampReadScreenLines, stripTerminalControls } from "./output-text";
@@ -66,6 +67,7 @@ import {
   type ThreadRecord,
   teamAnchorId,
   teamFileSlug,
+  USER_PARTY_ID,
 } from "./thread-store";
 
 export const MESSAGE_MAX_BYTES = 8 * 1024;
@@ -109,6 +111,8 @@ export interface WindowRuntimeState {
   readonly pendingReminders: number;
   /** 进程树已圈禁，关闭时后台进程会一起结束。 */
   readonly contained?: boolean;
+  /** 正在在线监管（循环调用 ffpane_wait_events）。 */
+  readonly online?: boolean;
   /** 窗口进程组里的进程数和合计内存（含后台脚本、Unity 这类子进程）。 */
   readonly memory?: { readonly processCount: number; readonly workingSetBytes: number };
   /** 上一轮因 API 错误中断（Claude 的 StopFailure）。下一轮正常结束后清掉。 */
@@ -130,7 +134,8 @@ export type RemindDelivery =
   | "queued-blocked"
   | "not-running"
   | "failed"
-  | "silent";
+  | "silent"
+  | "online";
 
 const REMIND_DELIVERY_TEXT: Readonly<Record<RemindDelivery, string>> = {
   delivered: "提醒已打进对方终端。",
@@ -140,6 +145,7 @@ const REMIND_DELIVERY_TEXT: Readonly<Record<RemindDelivery, string>> = {
   "not-running": "对方终端没有运行，只写进了收件箱。",
   failed: "提醒没能写进对方终端，只写进了收件箱。",
   silent: "你挂了监管者：done 和 progress 只进上级收件箱、不叫醒它，监管者已收到抄送。",
+  online: "对方正在线监管，已直接交给它。",
 };
 
 export function remindDeliveryText(delivery: RemindDelivery): string {
@@ -224,6 +230,17 @@ export interface WorkbenchToolDeps {
     limit: number,
   ) => Promise<readonly MemoryEntry[]>;
   readonly addProjectMemory: (projectRoot: string, entry: MemoryEntry) => Promise<void>;
+  /** 在线监管：挂着等本窗口的事件，最长 timeoutMs。 */
+  readonly waitEvents: (windowId: string, timeoutMs: number) => Promise<WaitOutcome>;
+  /** 给被打断的窗口打一句平台固定的「继续」。不带调用方的任何文字。 */
+  readonly nudge: (windowId: string) => RemindDelivery;
+  /** 把要用户拍板的事推到界面上。用户选好后，以消息发回给提问的窗口。 */
+  readonly requestDecision: (input: {
+    readonly caller: ToolWindowView;
+    readonly question: string;
+    readonly options: readonly string[];
+    readonly briefPath?: string;
+  }) => { readonly id: string };
   /** 命名锁。窗口退出时由主进程放锁。 */
   readonly locks: NamedLocks;
   /** 排队的窗口拿到锁了：给它打一条提醒。 */
@@ -398,6 +415,12 @@ export async function executeWorkbenchTool(
       return broadcast(caller, args, tree, deps);
     case "ffpane_lock":
       return lockTool(caller, args, deps);
+    case "ffpane_wait_events":
+      return waitEvents(caller, args, deps);
+    case "ffpane_nudge":
+      return nudge(caller, args, tree, deps);
+    case "ffpane_request_decision":
+      return requestDecision(caller, args, deps);
     default:
       return fail(`未知工具：${name}`);
   }
@@ -441,6 +464,7 @@ async function listWindows(
                 }
               : {}),
             ...(state.pendingReminders > 0 ? { pendingReminders: state.pendingReminders } : {}),
+            ...(state.online === true ? { online: true } : {}),
             ...(state.memory !== undefined
               ? {
                   memory: `${(state.memory.workingSetBytes / 1024 ** 3).toFixed(2)} GB，${state.memory.processCount} 个进程`,
@@ -583,6 +607,106 @@ async function openWindow(
     permission: opened.permission,
     capped: opened.capped,
     ...(opened.note !== undefined ? { note: opened.note } : {}),
+  });
+}
+
+async function waitEvents(
+  caller: ToolWindowView,
+  args: Readonly<Record<string, unknown>>,
+  deps: WorkbenchToolDeps,
+): Promise<ToolTextResult> {
+  const seconds = clampWaitSeconds(args["timeoutSec"]);
+  const outcome = await deps.waitEvents(caller.id, seconds * 1000);
+  const messages = outcome.inbox ? await takeInboxDigest(caller.id, deps) : "";
+  return ok({
+    events: outcome.events,
+    ...(messages !== "" ? { messages } : {}),
+    stop: outcome.stop,
+    timedOut: outcome.timedOut,
+    next: outcome.stop
+      ? "用户叫停了在线监管：处理完手头的事就结束本轮，不要再调用 ffpane_wait_events。"
+      : "处理完上面的事件和消息，再调用 ffpane_wait_events 接着等。没有事件就直接接着等。",
+  });
+}
+
+export const DECISION_QUESTION_MAX_CHARS = 500;
+export const DECISION_OPTION_MAX_CHARS = 120;
+
+/** 一行文字：去掉控制字符，空白收成一个空格。 */
+function oneLine(text: string): string {
+  return sanitizeThreadText(text.replace(/[\r\n\t]+/g, " "))
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function nudge(
+  caller: ToolWindowView,
+  args: Readonly<Record<string, unknown>>,
+  tree: Readonly<Record<string, WorkbenchAuthNode>>,
+  deps: WorkbenchToolDeps,
+): Promise<ToolTextResult> {
+  const targetId = args["windowId"];
+  if (typeof targetId !== "string" || targetId.trim() === "") {
+    return fail("ffpane_nudge 需要 windowId。");
+  }
+  const allowed =
+    (targetId !== caller.id && isDescendantOf(caller.id, targetId, tree)) ||
+    (await watches(caller, targetId, deps));
+  if (!allowed) {
+    return fail("只能叫醒自己的后代，或挂在你名下的窗口。");
+  }
+  const delivery = deps.nudge(targetId);
+  return ok({ windowId: targetId, delivery, deliveryNote: remindDeliveryText(delivery) });
+}
+
+async function requestDecision(
+  caller: ToolWindowView,
+  args: Readonly<Record<string, unknown>>,
+  deps: WorkbenchToolDeps,
+): Promise<ToolTextResult> {
+  if (caller.role !== "manager" && caller.parentWindowId !== undefined) {
+    return fail(
+      "只有管理者，或用户自己开的顶层窗口，才能请用户拍板。其他窗口写进近况，交给管理者。",
+    );
+  }
+  const question = typeof args["question"] === "string" ? oneLine(args["question"]) : "";
+  if (question === "" || [...question].length > DECISION_QUESTION_MAX_CHARS) {
+    return fail(
+      `question 必填，最多 ${DECISION_QUESTION_MAX_CHARS} 字。长背景写进 brief，用 briefPath 传。`,
+    );
+  }
+  const rawOptions = args["options"];
+  if (!Array.isArray(rawOptions) || rawOptions.some((item) => typeof item !== "string")) {
+    return fail("options 必须是 2 到 4 个字符串。");
+  }
+  const options = (rawOptions as string[]).map(oneLine).filter((item) => item !== "");
+  if (
+    options.length < 2 ||
+    options.length > 4 ||
+    options.some((item) => [...item].length > DECISION_OPTION_MAX_CHARS) ||
+    new Set(options).size !== options.length
+  ) {
+    return fail(`options 要 2 到 4 个互不相同的选项，每个最多 ${DECISION_OPTION_MAX_CHARS} 字。`);
+  }
+  const briefRaw = typeof args["briefPath"] === "string" ? args["briefPath"] : undefined;
+  if (briefRaw === undefined || briefRaw.trim() === "") {
+    return fail(
+      "先用 ffpane_write_brief 把要拍板的事写成计划（背景、要决定什么、每个选项意味着什么、你的建议），再把路径填进 briefPath。",
+    );
+  }
+  const brief = await optionalBrief(caller.projectRoot, briefRaw);
+  if (!brief.ok) {
+    return fail(brief.error);
+  }
+  const { id } = deps.requestDecision({
+    caller,
+    question,
+    options,
+    ...(brief.path !== undefined ? { briefPath: brief.path } : {}),
+  });
+  return ok({
+    id,
+    note: "已推到用户的界面上。用户选好后会作为一条消息发回给你。先做不受影响的事，或结束本轮等消息，不要反复催。",
   });
 }
 
@@ -1040,12 +1164,16 @@ export async function takeInboxDigest(callerId: string, deps: WorkbenchToolDeps)
   let used = 0;
   for (const message of parsed.messages) {
     const what = message.kind === "report" ? ` 汇报:${message.status ?? "progress"}` : " 消息";
+    const fromUser = message.from.windowId === USER_PARTY_ID;
     const relation = isDescendantOf(message.from.windowId, callerId, tree)
       ? "，你的上级：工作安排，照常执行"
       : isDescendantOf(callerId, message.from.windowId, tree)
         ? "，你的下级：汇报，由你判断"
         : "";
-    const head = `### ${message.id} 来自 ${displayTitle(message.from.title)}（${WORKBENCH_ROLE_LABEL[message.from.role]}${relation}）${what}`;
+    const who = fromUser
+      ? "用户本人（拍板结果，照此执行）"
+      : `${displayTitle(message.from.title)}（${WORKBENCH_ROLE_LABEL[message.from.role]}${relation}）`;
+    const head = `### ${message.id} 来自 ${who}${what}`;
     const extra: string[] = [];
     if (message.briefPath !== undefined) {
       extra.push(`说明：${message.briefPath}`);

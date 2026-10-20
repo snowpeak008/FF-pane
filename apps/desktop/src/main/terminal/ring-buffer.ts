@@ -6,7 +6,11 @@ export class ByteRingBuffer {
   private chunks: Buffer[] = [];
   private totalBytes = 0;
 
-  constructor(private readonly maxBytes: number) {
+  /** onEvict 按写入顺序收到被挤掉的输出（整块或大块的前半截）。 */
+  constructor(
+    private readonly maxBytes: number,
+    private readonly onEvict?: (dropped: Buffer) => void,
+  ) {
     if (maxBytes <= 0) {
       throw new Error("ByteRingBuffer maxBytes must be positive");
     }
@@ -19,6 +23,12 @@ export class ByteRingBuffer {
       return;
     }
     if (chunk.byteLength >= this.maxBytes) {
+      for (const dropped of this.chunks) {
+        this.onEvict?.(dropped);
+      }
+      if (chunk.byteLength > this.maxBytes) {
+        this.onEvict?.(chunk.subarray(0, chunk.byteLength - this.maxBytes));
+      }
       this.chunks = [Buffer.from(chunk.subarray(chunk.byteLength - this.maxBytes))];
       this.totalBytes = this.maxBytes;
       return;
@@ -31,6 +41,7 @@ export class ByteRingBuffer {
         break;
       }
       this.totalBytes -= dropped.byteLength;
+      this.onEvict?.(dropped);
     }
   }
 

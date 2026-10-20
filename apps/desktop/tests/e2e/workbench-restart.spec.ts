@@ -64,6 +64,12 @@ async function typeInWindow(
   const host = pane.getByTestId("terminal-host");
   const termTextarea = host.locator("textarea.xterm-helper-textarea");
   await expect(termTextarea).toBeAttached({ timeout: 10_000 });
+  // xterm 拿到光标位置后才把输入框挪进视口；新版 ConPTY 原样转发，横幅先到、提示符后到，不能拿回放非空当就绪
+  await expect
+    .poll(() => termTextarea.evaluate((el) => el.getBoundingClientRect().x >= 0), {
+      timeout: 15_000,
+    })
+    .toBe(true);
   await termTextarea.click({ timeout: 15_000, force: true });
   await page.keyboard.type(text);
   await page.keyboard.press("Enter");

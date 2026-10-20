@@ -545,7 +545,25 @@
       "disk": "{{root}} {{free}} GB",
       "low": "Resources low; new windows will be refused",
       "sep": ", ",
-      "memory": "{{memory}} GB · {{count}} processes"
+      "memory": "{{memory}} GB · {{count}} processes",
+      "online": "Online"
+    },
+    "decision": {
+      "title": "Waiting for your decision ({{count}})",
+      "from": "From {{title}}",
+      "arrived": "{{title}} needs your decision",
+      "sent": "Sent back to the window that asked",
+      "openBrief": "Open plan externally",
+      "otherPlaceholder": "Or write your own answer",
+      "submit": "OK"
+    },
+    "online": {
+      "start": "Go online",
+      "stop": "Go offline",
+      "startHint": "Keep it online: it waits for events and handles them right away",
+      "stopHint": "Take it offline: it stops after finishing the current item",
+      "started": "Sent. It goes online once idle",
+      "stopped": "Told it to go offline"
     }
   },
   "projects": {
@@ -774,7 +792,13 @@
       "hint": "Total terminal windows across all projects. New ones are rejected at the limit; the main process enforces it too.",
       "option": "{{count}}",
       "loadError": "Failed to load",
-      "error": "Failed to save window limit"
+      "error": "Failed to save window limit",
+      "memoryLabel": "Minimum free memory to open a window",
+      "memoryHint": "No new window opens below this, so the CLI is not stopped for low memory.",
+      "diskLabel": "Minimum free disk to open a window",
+      "diskHint": "No new window opens when the project or temp drive has less space than this.",
+      "noCheck": "Do not check",
+      "gb": "{{gb}} GB"
     },
     "workbenchPermission": {
       "title": "Workbench permissions",
