@@ -41,6 +41,7 @@ import {
   sanitizeMemoryTitle,
   sanitizeSourceWindowTitle,
 } from "./memory-policy";
+import { parseModelEffortArgs } from "./model-effort";
 import { isLockName, type LockGrant, type NamedLocks } from "./named-locks";
 import { clampWaitSeconds, type WaitOutcome } from "./online-hub";
 import type { OpenChildArgs, OpenChildSuccess } from "./open-child";
@@ -104,6 +105,49 @@ export interface ToolWindowView {
   readonly watcherWindowId?: string;
 }
 
+/** 窗口现在用的模型和思考强度，以及排着还没生效的设置。 */
+export interface WindowModelInfo {
+  readonly model?: string;
+  readonly reasoningEffort?: string;
+  /** screen：读自 CLI 屏幕；launch：本次启动参数；config：CLI 用户配置的默认值。 */
+  readonly source: "screen" | "launch" | "config" | "unknown";
+  /** 记在窗口上、但当前进程还没用上的设置。 */
+  readonly pendingModel?: string;
+  readonly pendingReasoningEffort?: string;
+}
+
+/** 改模型 / 重启窗口的结果。 */
+export interface ModelEffortApplyResult {
+  /** applied：已生效；recorded：仅记录；queued：排队中；confirm：等用户确认。 */
+  readonly status: "applied" | "recorded" | "queued" | "confirm";
+  readonly message: string;
+  /** 怎么生效的：冷重启、续接、在窗口里切换。 */
+  readonly how?: "cold" | "resume" | "in-window";
+  readonly model?: string;
+  readonly reasoningEffort?: string;
+  readonly source?: WindowModelInfo["source"];
+}
+
+const MODEL_STATUS_TEXT: Readonly<Record<ModelEffortApplyResult["status"], string>> = {
+  applied: "已生效",
+  recorded: "仅记录",
+  queued: "排队中",
+  confirm: "等用户确认",
+};
+
+const MODEL_HOW_TEXT: Readonly<Record<NonNullable<ModelEffortApplyResult["how"]>, string>> = {
+  cold: "冷重启（还没聊过天）",
+  resume: "带新参数续接原对话",
+  "in-window": "在窗口里用 /model 只改本会话",
+};
+
+const MODEL_SOURCE_TEXT: Readonly<Record<WindowModelInfo["source"], string>> = {
+  screen: "CLI 屏幕上显示的",
+  launch: "启动参数",
+  config: "CLI 用户配置里的默认值",
+  unknown: "不知道",
+};
+
 /** 平台看到的窗口状态（来自 hook 和终端输出时间），不靠读终端文字猜。 */
 export interface WindowRuntimeState {
   readonly phase: "idle" | "busy" | "blocked" | "unknown";
@@ -116,7 +160,13 @@ export interface WindowRuntimeState {
   /** 窗口进程组里的进程数和合计内存（含后台脚本、Unity 这类子进程）。 */
   readonly memory?: { readonly processCount: number; readonly workingSetBytes: number };
   /** 上一轮因 API 错误中断（Claude 的 StopFailure）。下一轮正常结束后清掉。 */
-  readonly lastApiError?: { readonly type: string; readonly label: string; readonly at: number };
+  readonly lastApiError?: {
+    readonly type: string;
+    readonly label: string;
+    readonly at: number;
+    /** 因限流这一类错误暂停，等用户的指令。 */
+    readonly paused?: boolean;
+  };
 }
 
 const PHASE_TEXT: Readonly<Record<WindowRuntimeState["phase"], string>> = {
@@ -129,16 +179,20 @@ const PHASE_TEXT: Readonly<Record<WindowRuntimeState["phase"], string>> = {
 /** 提醒有没有打进对方终端。 */
 export type RemindDelivery =
   | "delivered"
+  | "not-submitted"
   | "queued-busy"
   | "queued-manual"
   | "queued-blocked"
   | "not-running"
   | "failed"
   | "silent"
-  | "online";
+  | "online"
+  | "held";
 
 const REMIND_DELIVERY_TEXT: Readonly<Record<RemindDelivery, string>> = {
-  delivered: "提醒已打进对方终端。",
+  delivered: "提醒已打进对方终端并提交。",
+  "not-submitted":
+    "提醒打进了对方输入框，但没有提交（补按一次回车也没开始干活）。消息还在它的收件箱里；可以稍后再发，或请用户在那个窗口按回车。",
   "queued-busy": "对方正忙，提醒排队，空闲后自动送达。",
   "queued-manual": "对方状态未知，提醒等用户在该窗口点立即发送。",
   "queued-blocked": "对方在等用户批准，批准后才送达提醒。",
@@ -146,6 +200,7 @@ const REMIND_DELIVERY_TEXT: Readonly<Record<RemindDelivery, string>> = {
   failed: "提醒没能写进对方终端，只写进了收件箱。",
   silent: "你挂了监管者：done 和 progress 只进上级收件箱、不叫醒它，监管者已收到抄送。",
   online: "对方正在线监管，已直接交给它。",
+  held: "对方因限流暂停或不在，已记进它的待处理，不打进它的终端；等用户叫醒它后它会看到。",
 };
 
 export function remindDeliveryText(delivery: RemindDelivery): string {
@@ -166,12 +221,16 @@ export interface WorkbenchToolDeps {
     callerId: string,
     args: OpenChildArgs,
   ) => Promise<OpenChildSuccess | { readonly ok: false; readonly error: string }>;
-  /** 给目标终端排一条提醒。fromWindowId 用于投递失败时回告发信方。 */
+  /**
+   * 给目标终端排一条提醒。fromWindowId 用于投递失败时回告发信方。
+   * waitSubmit：当场打进去的，等核对完有没有提交再返回。
+   */
   readonly remind: (
     windowId: string,
     textForCount: (count: number) => string,
     fromWindowId: string,
-  ) => RemindDelivery;
+    options?: { readonly waitSubmit?: boolean },
+  ) => RemindDelivery | Promise<RemindDelivery>;
   /** 收件箱已读空，撤掉还没打出去的提醒。 */
   readonly clearReminder: (windowId: string) => void;
   readonly publishInbox: (input: {
@@ -232,8 +291,28 @@ export interface WorkbenchToolDeps {
   readonly addProjectMemory: (projectRoot: string, entry: MemoryEntry) => Promise<void>;
   /** 在线监管：挂着等本窗口的事件，最长 timeoutMs。 */
   readonly waitEvents: (windowId: string, timeoutMs: number) => Promise<WaitOutcome>;
-  /** 给被打断的窗口打一句平台固定的「继续」。不带调用方的任何文字。 */
-  readonly nudge: (windowId: string) => RemindDelivery;
+  /** 给被打断的窗口打一句平台固定的「继续」。不带调用方的任何文字。状态未知也按回车。 */
+  readonly nudge: (windowId: string) => RemindDelivery | Promise<RemindDelivery>;
+  /** 窗口现在用的模型和强度。不在运行时只给记下的设置。 */
+  readonly modelInfo?: (windowId: string) => Promise<WindowModelInfo | undefined>;
+  /**
+   * 管理者重启自己开的只读窗口。能续接就续接，不能续接（或 fresh）就开新对话。
+   * 授权在实现里做。
+   */
+  readonly restartWindow?: (input: {
+    readonly callerId: string;
+    readonly windowId: string;
+    readonly fresh: boolean;
+  }) => Promise<
+    | {
+        readonly ok: true;
+        readonly how: "resume" | "fresh";
+        readonly model?: string;
+        readonly reasoningEffort?: string;
+        readonly source?: WindowModelInfo["source"];
+      }
+    | { readonly ok: false; readonly error: string }
+  >;
   /** 把要用户拍板的事推到界面上。用户选好后，以消息发回给提问的窗口。 */
   readonly requestDecision: (input: {
     readonly caller: ToolWindowView;
@@ -262,7 +341,8 @@ export interface WorkbenchToolDeps {
     readonly model?: unknown;
     readonly reasoningEffort?: unknown;
   }) => Promise<
-    { readonly ok: true; readonly message: string } | { readonly ok: false; readonly error: string }
+    | ({ readonly ok: true } & ModelEffortApplyResult)
+    | { readonly ok: false; readonly error: string }
   >;
 }
 
@@ -421,6 +501,8 @@ export async function executeWorkbenchTool(
       return nudge(caller, args, tree, deps);
     case "ffpane_request_decision":
       return requestDecision(caller, args, deps);
+    case "ffpane_restart_window":
+      return restartWindow(callerId, args, deps);
     default:
       return fail(`未知工具：${name}`);
   }
@@ -449,12 +531,27 @@ async function listWindows(
     const status = latestReportStatus(records, id);
     const state = view.running ? deps.windowState(id) : undefined;
     const locks = deps.locks.of(id);
+    const modelInfo =
+      view.kind !== undefined && view.kind !== "shell" ? await deps.modelInfo?.(id) : undefined;
     windows.push({
       id: view.id,
       title: view.title,
       role: view.role,
       permission: view.permission,
       running: view.running,
+      ...(modelInfo !== undefined
+        ? {
+            model: modelInfo.model ?? "不知道",
+            reasoningEffort: modelInfo.reasoningEffort ?? "不知道",
+            modelSource: MODEL_SOURCE_TEXT[modelInfo.source],
+            ...(modelInfo.pendingModel !== undefined ||
+            modelInfo.pendingReasoningEffort !== undefined
+              ? {
+                  pendingModelEffort: `${modelInfo.pendingModel ?? "不变"} / ${modelInfo.pendingReasoningEffort ?? "不变"}（已记下，还没生效）`,
+                }
+              : {}),
+          }
+        : {}),
       ...(state !== undefined
         ? {
             state: PHASE_TEXT[state.phase],
@@ -587,11 +684,26 @@ async function openWindow(
   ) {
     return fail("权限无效。");
   }
+  let model: string | undefined;
+  let reasoningEffort: string | undefined;
+  if (args["model"] !== undefined || args["reasoningEffort"] !== undefined) {
+    const parsed = parseModelEffortArgs({
+      model: args["model"],
+      reasoningEffort: args["reasoningEffort"],
+    });
+    if (!parsed.ok) {
+      return fail(parsed.error);
+    }
+    model = parsed.model;
+    reasoningEffort = parsed.reasoningEffort;
+  }
   const opened = await deps.openChild(callerId, {
     cli,
     role,
     permission,
     title,
+    ...(model !== undefined ? { model } : {}),
+    ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
     ...(typeof args["briefPath"] === "string" ? { briefPath: args["briefPath"] } : {}),
     ...(typeof args["message"] === "string" ? { message: args["message"] } : {}),
     ...(typeof args["supervisorWindowId"] === "string"
@@ -607,6 +719,11 @@ async function openWindow(
     permission: opened.permission,
     capped: opened.capped,
     ...(opened.note !== undefined ? { note: opened.note } : {}),
+    model: opened.model ?? "没指定：CLI 读用户自己的配置",
+    reasoningEffort: opened.reasoningEffort ?? "没指定：CLI 读用户自己的配置",
+    ...(reasoningEffort !== undefined && opened.reasoningEffort === undefined
+      ? { effortNote: `这一路不支持思考强度 ${reasoningEffort}，没有写进启动参数。` }
+      : {}),
   });
 }
 
@@ -655,7 +772,11 @@ async function nudge(
   if (!allowed) {
     return fail("只能叫醒自己的后代，或挂在你名下的窗口。");
   }
-  const delivery = deps.nudge(targetId);
+  // 限流这一类暂停等用户的指令：监管者不能叫醒；管理者被用户叫醒后自己决定。
+  if (caller.role === "supervisor" && deps.windowState(targetId)?.lastApiError?.paused === true) {
+    return fail("它因限流这一类错误暂停，开发在等用户的指令，监管者不能叫醒。写进近况就行。");
+  }
+  const delivery = await deps.nudge(targetId);
   return ok({ windowId: targetId, delivery, deliveryNote: remindDeliveryText(delivery) });
 }
 
@@ -739,6 +860,7 @@ async function broadcast(
       },
       tree,
       deps,
+      false,
     );
     if (sent.isError === true) {
       // 正文、路径这类对所有人都一样的错误，第一条就返回。
@@ -859,6 +981,8 @@ async function sendMessage(
   args: Readonly<Record<string, unknown>>,
   tree: Readonly<Record<string, WorkbenchAuthNode>>,
   deps: WorkbenchToolDeps,
+  /** 当场打进去的，等核对完有没有提交再返回。广播时一个个等太慢，不等。 */
+  waitSubmit = true,
 ): Promise<ToolTextResult> {
   const targetId = args["windowId"];
   if (typeof targetId !== "string" || targetId.trim() === "") {
@@ -920,7 +1044,15 @@ async function sendMessage(
     tree,
     deps,
   );
-  const delivery = remindTarget(target, caller, "message", undefined, record, deps);
+  const delivery = await remindTarget(
+    target,
+    caller,
+    "message",
+    undefined,
+    record,
+    deps,
+    waitSubmit,
+  );
   await publishUnread(target, deps);
   return ok({
     id: record.id,
@@ -1026,14 +1158,18 @@ async function report(
     caller.watcherWindowId !== undefined && caller.watcherWindowId !== target.id
       ? await deps.describe(caller.watcherWindowId)
       : undefined;
-  // 挂了监管者：例行的 done / progress 交给监管者看，不打断上级；卡住和失败照常叫醒。
+  // 挂了监管者且它在线：例行的 done / progress 交给监管者看，不打断上级；卡住和失败照常叫醒。
+  // 监管者掉线或暂停时照常交给上级。
+  const watcherState = watcher !== undefined ? deps.windowState(watcher.id) : undefined;
   const quietParent =
     watcher !== undefined &&
+    watcherState?.online === true &&
+    watcherState.lastApiError?.paused !== true &&
     targetId === node?.parentWindowId &&
     (deliveredStatus === "done" || deliveredStatus === "progress");
   const delivery = quietParent
     ? "silent"
-    : remindTarget(target, caller, "report", deliveredStatus, record, deps);
+    : await remindTarget(target, caller, "report", deliveredStatus, record, deps, true);
   await publishUnread(target, deps);
   let ccId: string | undefined;
   if (watcher !== undefined) {
@@ -1051,7 +1187,7 @@ async function report(
       deps,
     );
     ccId = cc.id;
-    remindTarget(watcher, caller, "report", deliveredStatus, cc, deps);
+    void remindTarget(watcher, caller, "report", deliveredStatus, cc, deps, false);
     await publishUnread(watcher, deps);
   }
   deps.publishInbox({ windowId: caller.id, lastReportStatus: deliveredStatus });
@@ -1470,7 +1606,8 @@ function remindTarget(
   status: ReportStatus | undefined,
   record: ThreadRecord,
   deps: WorkbenchToolDeps,
-): RemindDelivery {
+  waitSubmit: boolean,
+): Promise<RemindDelivery> {
   const body: ReminderBody = hasInboxHook(target)
     ? { id: record.id, delivery: "attached" }
     : {
@@ -1479,7 +1616,7 @@ function remindTarget(
         summary:
           record.briefPath !== undefined ? `${record.text} 说明：${record.briefPath}` : record.text,
       };
-  return deps.remind(
+  const delivery = deps.remind(
     target.id,
     (count) =>
       count <= 1
@@ -1492,7 +1629,9 @@ function remindTarget(
           })
         : buildCoalescedReminder(count, body),
     from.id,
+    { waitSubmit },
   );
+  return Promise.resolve(delivery);
 }
 
 async function publishUnread(target: ToolWindowView, deps: WorkbenchToolDeps): Promise<void> {
@@ -1625,7 +1764,57 @@ async function setModelEffort(
   if (!result.ok) {
     return fail(result.error);
   }
-  return ok({ ok: true, windowId: windowId.trim(), message: result.message });
+  return ok({
+    ok: true,
+    windowId: windowId.trim(),
+    status: MODEL_STATUS_TEXT[result.status],
+    message: result.message,
+    ...(result.how !== undefined ? { how: MODEL_HOW_TEXT[result.how] } : {}),
+    ...(result.status === "applied"
+      ? {
+          model: result.model ?? "不知道",
+          reasoningEffort: result.reasoningEffort ?? "不知道",
+          ...(result.source !== undefined ? { source: MODEL_SOURCE_TEXT[result.source] } : {}),
+        }
+      : {}),
+    ...(result.status === "queued"
+      ? { next: "生效后平台会给你发一条「[模型]」提醒，不用反复调用。" }
+      : {}),
+  });
+}
+
+async function restartWindow(
+  callerId: string,
+  args: Readonly<Record<string, unknown>>,
+  deps: WorkbenchToolDeps,
+): Promise<ToolTextResult> {
+  const windowId = args["windowId"];
+  if (typeof windowId !== "string" || windowId.trim() === "") {
+    return fail("ffpane_restart_window 需要 windowId。");
+  }
+  if (args["fresh"] !== undefined && typeof args["fresh"] !== "boolean") {
+    return fail("fresh 只能是 true 或 false。");
+  }
+  if (deps.restartWindow === undefined) {
+    return fail("这个版本不支持重启窗口。");
+  }
+  const result = await deps.restartWindow({
+    callerId,
+    windowId: windowId.trim(),
+    fresh: args["fresh"] === true,
+  });
+  if (!result.ok) {
+    return fail(result.error);
+  }
+  return ok({
+    ok: true,
+    windowId: windowId.trim(),
+    how: result.how === "resume" ? "续接原对话" : "开了新对话（原对话没有续接）",
+    model: result.model ?? "不知道",
+    reasoningEffort: result.reasoningEffort ?? "不知道",
+    ...(result.source !== undefined ? { source: MODEL_SOURCE_TEXT[result.source] } : {}),
+    next: "窗口重启后状态未知，平台看到输入提示符就会判为空闲；给它发消息照常用 ffpane_send_message。",
+  });
 }
 
 export { openChildWindow };

@@ -278,6 +278,7 @@
       "resume": "Resume last session",
       "resumePickerHint": "Session id was not recognized. A picker is open. Choose the conversation in the terminal. The latest one is not resumed automatically.",
       "restartFresh": "Start fresh",
+      "platformRestarting": "The platform is restarting this window. It reconnects automatically.",
       "convertToShell": "Convert to PowerShell",
       "copy": "Copy",
       "paste": "Paste",
@@ -527,6 +528,11 @@
         "notStatus": "This is the command line's own summary, not the supervisor's four-line status.",
         "grokCap": "Grok already summarizes around 85%. A higher slider still sends 85% for this process, so it does not wait longer.",
         "percent": "{{percent}}%"
+      },
+      "teamPaused": {
+        "title": "The team is paused until you wake the manager",
+        "body": "The manager has stopped and no supervisor is online. Reports and status updates are kept in .ffpane/briefs/待处理-<manager id>.md. Send the manager a message in this window; it reads the pending page first.",
+        "dismiss": "Got it"
       }
     },
     "limit": {

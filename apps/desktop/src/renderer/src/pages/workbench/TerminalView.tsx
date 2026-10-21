@@ -603,6 +603,36 @@ export function TerminalView({
     onNativeSessionIdRef.current?.(payload.nativeSessionId);
   });
 
+  // 平台正在重启这个窗口：旧终端结束到新终端接上之间不给重启按钮。
+  const [platformRestarting, setPlatformRestarting] = useState(false);
+  useSubscription("workbench:terminal-relaunching", (payload) => {
+    if (payload.windowId === windowId) {
+      setPlatformRestarting(payload.active);
+    }
+  });
+
+  // 平台自己重启了这个窗口：旧终端已结束，改接新终端。
+  useSubscription("workbench:terminal-replaced", (payload) => {
+    const term = termRef.current;
+    const fit = fitRef.current;
+    if (payload.windowId !== windowId || term === null || fit === null) {
+      return;
+    }
+    setPlatformRestarting(false);
+    if (infoRef.current?.id === payload.terminalId) {
+      return;
+    }
+    setError(undefined);
+    setExitCode(undefined);
+    setStopped(false);
+    setResumePickerHint(false);
+    onExitCodeChangeRef.current?.(undefined);
+    nativeSessionIdRef.current = payload.nativeSessionId;
+    onTurnSignalRef.current?.(payload.turnSignal);
+    fit.fit();
+    void attachExisting(payload.terminalId, Math.max(term.cols, 2), Math.max(term.rows, 2));
+  });
+
   const copySelection = (): void => {
     const selection = termRef.current?.getSelection() ?? "";
     if (selection.length > 0) {
@@ -620,7 +650,8 @@ export function TerminalView({
     setMenu(null);
   };
 
-  const showCliActions = cliLaunch !== undefined && (stopped || exitCode !== undefined);
+  const showCliActions =
+    cliLaunch !== undefined && !platformRestarting && (stopped || exitCode !== undefined);
 
   return (
     <div className={cn("relative flex min-h-0 flex-1 flex-col bg-surface-sunken", className)}>
@@ -631,6 +662,14 @@ export function TerminalView({
           <Button className="ml-2" size="sm" variant="secondary" onClick={() => void restart()}>
             {t("workbench.terminal.restart")}
           </Button>
+        </div>
+      ) : null}
+      {platformRestarting ? (
+        <div
+          className="absolute inset-x-0 bottom-0 z-10 border-t border-border bg-surface px-3 py-2 text-xs text-fg-muted"
+          data-testid="terminal-platform-restarting"
+        >
+          {t("workbench.terminal.platformRestarting")}
         </div>
       ) : null}
       {resumePickerHint && !showCliActions ? (

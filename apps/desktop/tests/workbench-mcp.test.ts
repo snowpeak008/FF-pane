@@ -699,9 +699,20 @@ describe("监管者观察", () => {
     return h;
   }
 
-  it("done 抄送给监管者、不叫醒上级；failed 照常叫醒", async () => {
+  /** 监管者在线（在等事件）。 */
+  function supervisorOnline(deps: WorkbenchToolDeps): WorkbenchToolDeps {
+    return {
+      ...deps,
+      windowState: (id) =>
+        id === "S" ? { phase: "idle", pendingReminders: 0, online: true } : deps.windowState(id),
+    };
+  }
+
+  it("监管者在线：done 抄送给监管者、不叫醒上级；failed 照常叫醒", async () => {
     const root = tempDir();
-    const { deps, reminders } = watched(root);
+    const watchedHarness = watched(root);
+    const reminders = watchedHarness.reminders;
+    const deps = supervisorOnline(watchedHarness.deps);
     const done = await call(deps, "B", "ffpane_report", { status: "done", summary: "记录在 x" });
     expect(done.json).toMatchObject({ delivery: "silent", cc: { windowId: "S" } });
     expect(reminders.map((item) => item.windowId)).toEqual(["S"]);
@@ -711,6 +722,34 @@ describe("监管者观察", () => {
     const failed = await call(deps, "B", "ffpane_report", { status: "failed", summary: "挂了" });
     expect(failed.json).toMatchObject({ delivery: "delivered", cc: { windowId: "S" } });
     expect(reminders.map((item) => item.windowId)).toEqual(["S", "A", "S"]);
+  });
+
+  it("监管者掉线：done 也叫醒上级，抄送照样留给监管者", async () => {
+    const root = tempDir();
+    const { deps, reminders } = watched(root);
+    const done = await call(deps, "B", "ffpane_report", { status: "done", summary: "记录在 x" });
+    expect(done.json).toMatchObject({ delivery: "delivered", cc: { windowId: "S" } });
+    expect(reminders.map((item) => item.windowId).sort()).toEqual(["A", "S"]);
+  });
+
+  it("监管者不能叫醒因限流暂停的窗口", async () => {
+    const root = tempDir();
+    const h = watched(root);
+    const deps: WorkbenchToolDeps = {
+      ...h.deps,
+      windowState: (id) =>
+        id === "B"
+          ? {
+              phase: "idle",
+              pendingReminders: 0,
+              lastApiError: { type: "rate_limit", label: "账号限流（429）", at: 1, paused: true },
+            }
+          : h.deps.windowState(id),
+    };
+    const nudged = await call(deps, "S", "ffpane_nudge", { windowId: "B" });
+    expect(nudged.isError).toBe(true);
+    expect(nudged.text).toContain("等用户的指令");
+    expect((await call(deps, "A", "ffpane_nudge", { windowId: "B" })).isError).toBe(false);
   });
 
   it("监管者能读被观察窗口的终端、能在列表里看到它，但不能发消息或关窗", async () => {
@@ -1582,5 +1621,255 @@ describe("Codex MCP 注入与 shell 环境", () => {
         process.env[FF_PANE_WB_PIPE_ENV] = previousPipe;
       }
     }
+  });
+});
+
+describe("模型、思考强度与就地修复", () => {
+  it("open_window 带上模型和强度传给开窗；强度不合法直接拒", async () => {
+    const h = harness(tempDir());
+    const seen: unknown[] = [];
+    const deps: WorkbenchToolDeps = {
+      ...h.deps,
+      openChild: async (_caller, args) => {
+        seen.push(args);
+        return {
+          ok: true,
+          windowId: "w-1",
+          title: args.title,
+          permission: args.permission,
+          capped: false,
+          ...(args.model !== undefined ? { model: args.model } : {}),
+          ...(args.reasoningEffort !== undefined ? { reasoningEffort: args.reasoningEffort } : {}),
+        };
+      },
+    };
+    const opened = await call(deps, "A", "ffpane_open_window", {
+      cli: "codex",
+      role: "supervisor",
+      permission: "read-only",
+      title: "监管",
+      model: "gpt-6.1-sol",
+      reasoningEffort: "low",
+    });
+    expect(seen[0]).toMatchObject({ model: "gpt-6.1-sol", reasoningEffort: "low" });
+    expect(opened.json).toMatchObject({ model: "gpt-6.1-sol", reasoningEffort: "low" });
+    const bad = await call(deps, "A", "ffpane_open_window", {
+      cli: "codex",
+      role: "supervisor",
+      permission: "read-only",
+      title: "监管",
+      reasoningEffort: "ultra",
+    });
+    expect(bad.isError).toBe(true);
+    expect(seen).toHaveLength(1);
+    const plain = await call(deps, "A", "ffpane_open_window", {
+      cli: "codex",
+      role: "worker",
+      permission: "edit",
+      title: "执行",
+    });
+    expect((plain.json as { model: string }).model).toContain("用户自己的配置");
+  });
+
+  it("开子窗口：模型和强度进启动参数，也记在窗口上", async () => {
+    const root = tempDir();
+    const registry = createWorkbenchAuthRegistry();
+    registry.pin(
+      { id: "A", permission: "edit", role: "manager", openedBy: "user" },
+      "proj-1" as never,
+    );
+    registry.grantManager("A");
+    const manager: WorkbenchWindow = {
+      id: "A",
+      projectId: "proj-1" as never,
+      title: "总管",
+      kind: "claude",
+      cwd: root,
+      createdAt: 1,
+      permission: "edit",
+      role: "manager",
+      openedBy: "user",
+    };
+    const saved: ProjectWorkbenchLayout[] = [];
+    const routes: unknown[] = [];
+    const opened = await openChildWindow(
+      "A",
+      {
+        cli: "codex",
+        role: "supervisor",
+        permission: "read-only",
+        title: "监管",
+        model: "gpt-6.1-sol",
+        reasoningEffort: "low",
+      },
+      {
+        authRegistry: registry,
+        readLayouts: async () => ({
+          "proj-1": {
+            projectId: "proj-1" as never,
+            tabs: [{ id: "tab-1", title: "Tab", root: { type: "leaf", windowId: "A" } }],
+            activeTabId: "tab-1",
+            windows: { A: manager },
+            maximizedWindowId: null,
+            focusedWindowId: "A",
+          },
+        }),
+        saveLayout: async (next) => {
+          saved.push(next);
+        },
+        launch: async (input) => {
+          routes.push(input.route);
+          return {
+            terminal: { id: "term" },
+            kind: "codex",
+            effectivePermission: "read-only",
+            permissionCapped: false,
+            model: input.route.model,
+            reasoningEffort: input.route.reasoningEffort,
+          } as unknown as LaunchCliWindowResult;
+        },
+        resolveRoute: async () => ({
+          ok: true as const,
+          route: {
+            connectionMode: "local_cli" as const,
+            configId: "cfg" as never,
+            configName: "默认配置",
+          },
+        }),
+        describeCaller: async () => ({
+          title: "总管",
+          projectId: "proj-1",
+          projectRoot: root,
+          permission: "edit" as const,
+        }),
+        aliveCount: () => 1,
+        maxWindows: async () => 8,
+        publish: () => undefined,
+        newId: () => "w-1",
+      },
+    );
+    expect(routes[0]).toMatchObject({ model: "gpt-6.1-sol", reasoningEffort: "low" });
+    expect(opened).toMatchObject({ ok: true, model: "gpt-6.1-sol", reasoningEffort: "low" });
+    expect(saved[0]?.windows["w-1"]).toMatchObject({
+      modelOverride: "gpt-6.1-sol",
+      effortOverride: "low",
+    });
+  });
+
+  it("set_model_effort 写明已生效还是仅记录，已生效时带实际值", async () => {
+    const h = harness(tempDir());
+    const applied = await call(
+      {
+        ...h.deps,
+        setModelEffort: async () => ({
+          ok: true as const,
+          status: "applied" as const,
+          message: "已生效",
+          how: "resume" as const,
+          model: "gpt-6.1-sol",
+          reasoningEffort: "low",
+          source: "screen" as const,
+        }),
+      },
+      "A",
+      "ffpane_set_model_effort",
+      { windowId: "B", reasoningEffort: "low" },
+    );
+    expect(applied.json).toMatchObject({
+      status: "已生效",
+      how: "带新参数续接原对话",
+      model: "gpt-6.1-sol",
+      reasoningEffort: "low",
+      source: "CLI 屏幕上显示的",
+    });
+    const recorded = await call(
+      {
+        ...h.deps,
+        setModelEffort: async () => ({
+          ok: true as const,
+          status: "recorded" as const,
+          message: "仅记录：现在没法让它生效，下次启动时生效",
+        }),
+      },
+      "A",
+      "ffpane_set_model_effort",
+      { windowId: "B", model: "x" },
+    );
+    expect(recorded.json).toMatchObject({ status: "仅记录" });
+    expect(recorded.json).not.toHaveProperty("model");
+  });
+
+  it("list_windows 带上现在的模型、强度和没生效的设置", async () => {
+    const h = harness(tempDir());
+    const views = h.views;
+    for (const id of Object.keys(views)) {
+      const current = views[id];
+      if (current !== undefined) {
+        views[id] = { ...current, kind: "codex" };
+      }
+    }
+    const listed = await call(
+      {
+        ...h.deps,
+        modelInfo: async (id) =>
+          id === "B"
+            ? {
+                model: "gpt-6.1-sol",
+                reasoningEffort: "ultra",
+                source: "config" as const,
+                pendingReasoningEffort: "low",
+              }
+            : undefined,
+      },
+      "A",
+      "ffpane_list_windows",
+    );
+    const b = (listed.json as { windows: Record<string, unknown>[] }).windows.find(
+      (item) => item["id"] === "B",
+    );
+    expect(b).toMatchObject({
+      model: "gpt-6.1-sol",
+      reasoningEffort: "ultra",
+      modelSource: "CLI 用户配置里的默认值",
+      pendingModelEffort: expect.stringContaining("low"),
+    });
+  });
+
+  it("send_message 当场打进去却没提交：直接返回 not-submitted", async () => {
+    const h = harness(tempDir());
+    const sent = await call(
+      { ...h.deps, remind: async () => "not-submitted" as const },
+      "A",
+      "ffpane_send_message",
+      { windowId: "B", text: "改一下" },
+    );
+    expect(sent.json).toMatchObject({ delivery: "not-submitted" });
+  });
+
+  it("restart_window 把结果和实际模型带回来", async () => {
+    const h = harness(tempDir());
+    const calls: unknown[] = [];
+    const restarted = await call(
+      {
+        ...h.deps,
+        restartWindow: async (input) => {
+          calls.push(input);
+          return {
+            ok: true as const,
+            how: "resume" as const,
+            model: "gpt-6.1-sol",
+            source: "screen" as const,
+          };
+        },
+      },
+      "A",
+      "ffpane_restart_window",
+      { windowId: "B" },
+    );
+    expect(calls).toEqual([{ callerId: "A", windowId: "B", fresh: false }]);
+    expect(restarted.json).toMatchObject({ how: "续接原对话", model: "gpt-6.1-sol" });
+    expect(
+      (await call(h.deps, "A", "ffpane_restart_window", { windowId: "B", fresh: "yes" })).isError,
+    ).toBe(true);
   });
 });

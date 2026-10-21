@@ -130,16 +130,8 @@ export function WindowPane({
     if (modelEffortConfirmRef.current) {
       modelEffortConfirmRef.current = false;
       if (accepted) {
-        modelEffortResumeRef.current = true;
-        setConversationPlan(
-          planConversationLaunch({
-            action: "resume-current",
-            ...(window.nativeSessionId !== undefined ? { currentId: window.nativeSessionId } : {}),
-            unidentified: window.sessionUnidentified === true,
-          }),
-        );
-        setResumeNext(true);
-        setLaunchNonce((n) => n + 1);
+        // 主进程按有没有聊过天决定冷重启还是续接，并负责重启。
+        void invokeQuery("workbench:model-effort-confirm", { windowId: window.id, accepted });
       }
     }
   };
@@ -251,19 +243,10 @@ export function WindowPane({
       return;
     }
     if (payload.action === "resume") {
+      // 重启由主进程做（窗口不在当前标签页时这里收不到），这里只收起提示。
       modelEffortConfirmRef.current = false;
       setSensitiveOpen(false);
       setModelEffort(null);
-      modelEffortResumeRef.current = true;
-      setConversationPlan(
-        planConversationLaunch({
-          action: "resume-current",
-          ...(window.nativeSessionId !== undefined ? { currentId: window.nativeSessionId } : {}),
-          unidentified: window.sessionUnidentified === true,
-        }),
-      );
-      setResumeNext(true);
-      setLaunchNonce((n) => n + 1);
       return;
     }
     setModelEffort({
@@ -276,6 +259,21 @@ export function WindowPane({
       modelEffortConfirmRef.current = true;
       setSensitiveOpen(true);
     }
+  });
+
+  // 团队停下了（管理者因限流停下且监管者也不在线）：在管理者窗口上盖一层半透明提示，等用户叫醒管理者。
+  const [teamPaused, setTeamPaused] = useState<{ reason?: string; dismissed: boolean } | null>(
+    null,
+  );
+  useSubscription("workbench:team-paused", (payload) => {
+    if (payload.windowId !== window.id) {
+      return;
+    }
+    setTeamPaused(
+      payload.paused
+        ? { ...(payload.reason !== undefined ? { reason: payload.reason } : {}), dismissed: false }
+        : null,
+    );
   });
 
   useSubscription("workbench:role-notice", (payload) => {
@@ -829,6 +827,30 @@ export function WindowPane({
       ) : null}
       {/* 提示条浮在终端上沿，不占高度：它们随投递排队时有时无，挤占高度会让终端改行数、CLI 整屏重画 */}
       <div className="relative flex min-h-0 flex-1 flex-col">
+        {teamPaused !== null && !teamPaused.dismissed ? (
+          <div
+            className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-surface-sunken/70 px-6 text-center backdrop-blur-[1px]"
+            data-testid="workbench-team-paused"
+          >
+            <div className="text-sm font-medium text-fg">
+              {t("workbench.window.teamPaused.title")}
+            </div>
+            {teamPaused.reason !== undefined ? (
+              <div className="text-xs text-fg-muted">{teamPaused.reason}</div>
+            ) : null}
+            <div className="max-w-md text-xs text-fg-muted">
+              {t("workbench.window.teamPaused.body")}
+            </div>
+            <Button
+              size="sm"
+              variant="secondary"
+              data-testid="workbench-team-paused-dismiss"
+              onClick={() => setTeamPaused({ ...teamPaused, dismissed: true })}
+            >
+              {t("workbench.window.teamPaused.dismiss")}
+            </Button>
+          </div>
+        ) : null}
         <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-col">
           {manualTurnSignal ? (
             <div

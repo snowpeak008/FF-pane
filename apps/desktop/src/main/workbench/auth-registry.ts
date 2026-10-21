@@ -79,6 +79,9 @@ function applyAuthNode(window: WorkbenchWindow, node: WorkbenchAuthNode): Workbe
     ...(node.parentWindowId !== undefined ? { parentWindowId: node.parentWindowId } : {}),
     ...(node.parentClosed === true ? { parentClosed: true } : {}),
     ...(node.permissionNeedsDowngrade === true ? { permissionNeedsDowngrade: true } : {}),
+    // 挂的监管者只由主进程开窗时写；界面存布局时由 workbench:save-layout 换回主进程那份。
+    // 漏了它，界面一存布局执行就和监管者断开，状态提醒和汇报抄送全落到管理者身上。
+    ...(window.watcherWindowId !== undefined ? { watcherWindowId: window.watcherWindowId } : {}),
   };
 }
 

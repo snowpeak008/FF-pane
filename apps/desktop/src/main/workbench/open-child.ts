@@ -25,6 +25,7 @@ import {
   type LaunchCliWindowResult,
   MAX_INITIAL_PROMPT_CHARS,
 } from "./launch-cli";
+import { withModelEffortOverrides } from "./model-effort";
 import { stripControls, WORKBENCH_ROLE_LABEL } from "./remind";
 import type { LaunchCliRoute } from "./resolve-config";
 
@@ -37,6 +38,10 @@ export interface OpenChildArgs {
   readonly message?: string;
   /** 挂上观察本窗口的监管者。必须是调用者的后代，角色是监管者。 */
   readonly supervisorWindowId?: string;
+  /** 已校验的模型名。写进启动参数，也记在窗口上，以后重启照用。 */
+  readonly model?: string;
+  /** 已校验的思考强度。 */
+  readonly reasoningEffort?: string;
 }
 
 export interface OpenChildSuccess {
@@ -46,6 +51,9 @@ export interface OpenChildSuccess {
   readonly permission: WorkbenchPermissionLevel;
   readonly capped: boolean;
   readonly note?: string;
+  /** 实际写进启动参数的模型和强度。没有就是 CLI 读用户自己的配置。 */
+  readonly model?: string;
+  readonly reasoningEffort?: string;
 }
 
 export interface OpenChildDeps {
@@ -256,7 +264,10 @@ export async function openChildWindow(
       projectId: described.projectId as LaunchCliWindowInput["projectId"],
       projectRoot: described.projectRoot,
       kind: args.cli,
-      route: route.route,
+      route: withModelEffortOverrides(route.route, {
+        ...(args.model !== undefined ? { modelOverride: args.model } : {}),
+        ...(args.reasoningEffort !== undefined ? { effortOverride: args.reasoningEffort } : {}),
+      }),
       cols: 80,
       rows: 24,
       cwd: described.projectRoot,
@@ -286,6 +297,8 @@ export async function openChildWindow(
     ...(launched.providerName !== undefined ? { routeProviderName: launched.providerName } : {}),
     ...(launched.model !== undefined ? { routeModel: launched.model } : {}),
     ...(launched.reasoningEffort !== undefined ? { routeEffort: launched.reasoningEffort } : {}),
+    ...(args.model !== undefined ? { modelOverride: args.model } : {}),
+    ...(args.reasoningEffort !== undefined ? { effortOverride: args.reasoningEffort } : {}),
     permission: effective,
     openedBy,
     parentWindowId: callerId,
@@ -295,7 +308,32 @@ export async function openChildWindow(
       : {}),
     ...(actuallyCapped ? { permissionNeedsDowngrade: true } : {}),
   };
-  const placed = placeOpenedWindow(layout, callerId, child, `tab-${randomUUID().slice(0, 12)}`);
+  let placed = placeOpenedWindow(layout, callerId, child, `tab-${randomUUID().slice(0, 12)}`);
+  // 新开监管者：自己名下还没有监管者（或原来那个已经关了）的执行、检查窗口改挂到它下面。
+  // 否则换了监管者以后，旧执行的状态提醒全落到管理者身上。
+  const adopted: string[] = [];
+  if (args.role === "supervisor") {
+    const windows = { ...placed.windows };
+    for (const window of Object.values(placed.windows)) {
+      const node = deps.authRegistry.get(window.id);
+      const parentId = node?.parentWindowId ?? window.parentWindowId;
+      const role = node?.role ?? window.role;
+      const watcherAlive =
+        window.watcherWindowId !== undefined &&
+        placed.windows[window.watcherWindowId] !== undefined;
+      if (
+        window.id === windowId ||
+        parentId !== callerId ||
+        (role !== "worker" && role !== "reviewer") ||
+        watcherAlive
+      ) {
+        continue;
+      }
+      windows[window.id] = { ...window, watcherWindowId: windowId };
+      adopted.push(cleanTitle(window.title));
+    }
+    placed = { ...placed, windows };
+  }
   await deps.saveLayout(placed);
   deps.authRegistry.unpin(windowId);
   deps.publish({
@@ -314,6 +352,9 @@ export async function openChildWindow(
       : args.role === "worker"
         ? ["没有挂监管者：状态提醒会直接发给你。"]
         : []),
+    ...(adopted.length > 0
+      ? [`原来没有监管者（或监管者已关闭）的 ${adopted.join("、")} 已改挂到它下面。`]
+      : []),
   ];
   const note = notes.length > 0 ? notes.join("") : undefined;
   return {
@@ -323,5 +364,9 @@ export async function openChildWindow(
     permission: effective,
     capped: actuallyCapped,
     ...(note !== undefined ? { note } : {}),
+    ...(launched.model !== undefined ? { model: launched.model } : {}),
+    ...(launched.reasoningEffort !== undefined
+      ? { reasoningEffort: launched.reasoningEffort }
+      : {}),
   };
 }

@@ -18,7 +18,7 @@ export function clampWaitSeconds(value: unknown): number {
 }
 
 /** 等待返回之后，留给它处理这一批再回来等的时间。超过就算离线。 */
-export const ONLINE_PROCESSING_GRACE_MS = 3 * 60_000;
+export const ONLINE_PROCESSING_GRACE_MS = 5 * 60_000;
 
 export interface WaitOutcome {
   readonly events: readonly string[];

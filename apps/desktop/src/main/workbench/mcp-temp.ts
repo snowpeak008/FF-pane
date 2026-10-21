@@ -58,7 +58,13 @@ export function writeWorkbenchClaudeMcpFile(
 }
 
 /**
- * 清扫 os.tmpdir() 下陈旧的 `ff-pane-wb-mcp-*` 目录（仅此前缀）。
+ * 本应用在 os.tmpdir() 下建的临时目录前缀：MCP 配置、窗口钩子配置。
+ * 正常关窗时会删；应用被强退或崩溃时会留下（2026-10-21 实测攒了两千多个钩子目录，每个几 KB）。
+ */
+const WORKBENCH_TEMP_DIR_PREFIXES = [WORKBENCH_MCP_DIR_PREFIX, "ffpane-wb-hooks-"] as const;
+
+/**
+ * 清扫 os.tmpdir() 下本应用留下的陈旧临时目录（只认上面这几个前缀）。
  * 崩溃残留用；正在使用的目录 mtime 新，不会被误删。
  */
 export async function cleanupStaleWorkbenchMcpDirs(
@@ -75,7 +81,7 @@ export async function cleanupStaleWorkbenchMcpDirs(
     return 0;
   }
   for (const name of entries) {
-    if (!name.startsWith(WORKBENCH_MCP_DIR_PREFIX)) {
+    if (!WORKBENCH_TEMP_DIR_PREFIXES.some((prefix) => name.startsWith(prefix))) {
       continue;
     }
     const full = join(root, name);

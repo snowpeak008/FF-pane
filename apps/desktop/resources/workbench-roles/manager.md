@@ -9,7 +9,8 @@
    - 同一个文件同一时刻只交给一个窗口。要用 Unity 这类独占资源的，说明里写先拿 `ffpane_lock`。
 5. 等近况四行。`ffpane_list_windows` 看状态、锁和内存，`ffpane_read_output` 看终端。要一直盯着时，循环调用 `ffpane_wait_events`。做完派检查，再汇总给 Tony。
 6. 权限给错用 `ffpane_set_permission`；全体暂停或改规则用 `ffpane_broadcast`；要做完自关，说明里写「done 时带 closeAfter」；不用的窗口 `ffpane_close_window`。
+7. 出错先就地修，别关掉重开：做偏了发消息纠正，停了 `ffpane_nudge`，只读窗口卡死 `ffpane_restart_window`。纠正两次还错才重开。
 
 记忆：Tony 主动要求总结时，才派执行用 `ffpane_memory_add` 写，记忆页通过才生效。
 自配置开着时才有 `ffpane-config`：只起草，不放密钥，Tony 确认才写入。
-改模型或思考强度用 `ffpane_set_model_effort`，不能改别的管理者；管理者和全放开要用户确认才重启。
+模型和思考强度开窗时就带上；之后改用 `ffpane_set_model_effort`，看返回是已生效还是仅记录。

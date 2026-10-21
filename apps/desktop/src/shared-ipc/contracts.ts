@@ -335,6 +335,44 @@ export interface WorkbenchSessionClaimedEvent {
   readonly nativeSessionId: string;
 }
 
+/**
+ * 平台自己重启了这个窗口（改模型 / 思考强度，或管理者重启只读窗口）。
+ * 旧终端已经结束，界面改接新终端；窗口不在当前标签页时，下次显示再接上。
+ */
+export interface WorkbenchTerminalReplacedEvent {
+  readonly projectId: ProjectId;
+  readonly windowId: string;
+  readonly terminalId: string;
+  readonly nativeSessionId?: string;
+  readonly route: {
+    readonly connectionMode: "local_cli" | "relay";
+    readonly providerName?: string;
+    readonly model?: string;
+    readonly reasoningEffort?: string;
+  };
+  readonly effectivePermission: WorkbenchPermissionLevel;
+  readonly permissionCapped: boolean;
+  readonly turnSignal: "auto" | "manual";
+  /** false = 开了新对话，界面清掉旧的当前编号。 */
+  readonly resumed: boolean;
+}
+
+/**
+ * 团队停下了：管理者因限流停下（或不在），也没有在线的监管者。界面在管理者窗口上盖一层半透明提示，
+ * 等用户叫醒管理者。paused 为 false 时撤掉。
+ */
+export interface WorkbenchTeamPausedEvent {
+  readonly windowId: string;
+  readonly paused: boolean;
+  readonly reason?: string;
+}
+
+/** 平台开始（active）或放弃（!active）重启这个窗口。重启期间界面不给重启按钮。 */
+export interface WorkbenchTerminalRelaunchingEvent {
+  readonly windowId: string;
+  readonly active: boolean;
+}
+
 /** 记号没对上。界面标编号未识别，续接走选择器。 */
 export interface WorkbenchSessionUnidentifiedEvent {
   readonly windowId: string;
@@ -1529,6 +1567,11 @@ export interface IpcInvokeContracts {
     request: ModelEffortSettledRequest;
     response: { readonly ok: true };
   };
+  /** 用户确认了重启（管理者或 yolo 窗口改模型 / 权限）。由主进程自己重启。 */
+  "workbench:model-effort-confirm": {
+    request: { readonly windowId: string; readonly accepted: boolean };
+    response: { readonly ok: true };
+  };
   /** 设置页：角色说明书（覆盖副本优先）。 */
   "workbench:list-role-manuals": {
     request: undefined;
@@ -1843,6 +1886,9 @@ export interface IpcEventContracts {
   "workbench:deliver-pending": { payload: WorkbenchDeliverPendingEvent };
   "workbench:model-effort": { payload: WorkbenchModelEffortEvent };
   "workbench:child-window": { payload: WorkbenchChildWindowEvent };
+  "workbench:terminal-replaced": { payload: WorkbenchTerminalReplacedEvent };
+  "workbench:terminal-relaunching": { payload: WorkbenchTerminalRelaunchingEvent };
+  "workbench:team-paused": { payload: WorkbenchTeamPausedEvent };
   "workbench:inbox-notice": { payload: WorkbenchInboxNoticeEvent };
   "workbench:open-panel": { payload: WorkbenchOpenPanelEvent };
   "workbench:open-canvas": { payload: WorkbenchOpenCanvasEvent };
@@ -1896,6 +1942,7 @@ export const INVOKE_CHANNELS = [
   "workbench:deliver-now",
   "workbench:deliver-cancel",
   "workbench:model-effort-settled",
+  "workbench:model-effort-confirm",
   "workbench:list-role-manuals",
   "workbench:save-role-manual",
   "workbench:reset-role-manual",
@@ -1992,6 +2039,9 @@ export const EVENT_CHANNELS = [
   "workbench:deliver-pending",
   "workbench:model-effort",
   "workbench:child-window",
+  "workbench:terminal-replaced",
+  "workbench:terminal-relaunching",
+  "workbench:team-paused",
   "workbench:inbox-notice",
   "workbench:open-panel",
   "workbench:open-canvas",

@@ -278,6 +278,7 @@
       "resume": "续接上次会话",
       "resumePickerHint": "编号未识别，已打开选择器。请在终端里选要续接的对话，不会自动接最近一条。",
       "restartFresh": "重新开始",
+      "platformRestarting": "平台正在重启这个窗口，稍等片刻会自动接上。",
       "convertToShell": "转为 PowerShell",
       "copy": "复制",
       "paste": "粘贴",
@@ -527,6 +528,11 @@
         "notStatus": "压缩仍是命令行自己的摘要，不是监管者那一页四行近况。",
         "grokCap": "Grok 自己大约到 85% 就收。滑块再高，这一次也按 85% 传，不会更晚。",
         "percent": "{{percent}}%"
+      },
+      "teamPaused": {
+        "title": "团队已暂停，等你叫醒管理者",
+        "body": "管理者停下了，监管者也不在线。期间的汇报和状态都记在 .ffpane/briefs/待处理-<管理者编号>.md 里，不会丢。你在这个窗口里给管理者发一句话，它醒来后会先看待处理。",
+        "dismiss": "知道了"
       }
     },
     "limit": {

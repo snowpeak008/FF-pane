@@ -3,6 +3,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -62,7 +63,8 @@ import {
 } from "./canvas-files";
 import { ensureCanvasWatcher } from "./canvas-watcher";
 import { closeDescendantWindow } from "./close-descendant";
-import { CodexSessionClaimer, resolveCodexHome } from "./codex-claim";
+import { CodexSessionClaimer, isAutomatedTestEnv, resolveCodexHome } from "./codex-claim";
+import { switchCodexModelInWindow } from "./codex-model-switch";
 import {
   type CodexRolloutTail,
   codexRolloutPathFor,
@@ -77,22 +79,31 @@ import {
 } from "./control-channel";
 import { grokHookSessionMatches } from "./grok-hook-config";
 import { releaseWindowHooks } from "./hook-launch";
-import { createIdleDeliverQueue, type IdleDeliverQueue } from "./idle-deliver";
+import { createIdleDeliverQueue, type IdleDeliverQueue, type SubmitResult } from "./idle-deliver";
 import { createInboxCursorStore, inboxCursorPath } from "./inbox-cursor";
-import { assertLaunchCliIpcSafe, launchCliWindow, WorkbenchMcpTempRegistry } from "./launch-cli";
+import {
+  assertLaunchCliIpcSafe,
+  type LaunchCliWindowResult,
+  launchCliWindow,
+  WorkbenchMcpTempRegistry,
+} from "./launch-cli";
 import { decideManagerGrantRestore } from "./manager-grant";
 import { cleanupStaleWorkbenchMcpDirs } from "./mcp-temp";
 import {
   executeWorkbenchTool,
   hasInboxHook,
+  type ModelEffortApplyResult,
   type RemindDelivery,
   takeInboxDigest,
+  type WindowModelInfo,
   type WorkbenchToolDeps,
 } from "./mcp-tools";
 import {
   canSetModelEffort,
   createModelEffortController,
+  type ModelEffortApplyMode,
   type ModelEffortController,
+  modelEffortApplyMode,
   parseModelEffortArgs,
   withModelEffortOverrides,
 } from "./model-effort";
@@ -110,6 +121,11 @@ import {
   resolveFfPaneFile,
 } from "./panel-files";
 import { addCallerProjectMemory, searchCallerProjectMemory } from "./project-memory";
+import {
+  createPromptWatch,
+  type PromptRuntime,
+  inputStillHolds as readInputStillHolds,
+} from "./prompt-ready";
 import {
   buildCoalescedReminder,
   buildNewMessageReminder,
@@ -132,6 +148,7 @@ import {
   resolveWorkbenchRoleResourcesDir,
 } from "./role-resources";
 import { setWindowRole } from "./set-role";
+import { createTeamDigest } from "./team-digest";
 import {
   appendThreadRecord,
   readThreadIndex,
@@ -152,6 +169,7 @@ export interface WorkbenchCliLayer {
     | "workbench:deliver-now"
     | "workbench:deliver-cancel"
     | "workbench:model-effort-settled"
+    | "workbench:model-effort-confirm"
     | "workbench:list-role-manuals"
     | "workbench:save-role-manual"
     | "workbench:reset-role-manual"
@@ -317,12 +335,17 @@ export async function createWorkbenchCliLayer(
   const locks = createNamedLocks();
   /** 平台主动报告的状态，发给监管者（有的话）或上级。只发固定文案，不带终端正文。 */
   /** 在线监管：窗口循环调用 ffpane_wait_events 时，提醒和新消息交给等待调用，不走终端。 */
+  // 掉线判定：等待返回后 5 分钟没再来等就算掉线。只有自动化测试能用环境变量改短。
+  const testGraceMs = isAutomatedTestEnv()
+    ? Number(process.env["FF_PANE_ONLINE_GRACE_MS"] ?? "")
+    : Number.NaN;
   const onlineHub = createOnlineHub({
     now: () => Date.now(),
     schedule: (delayMs, fn) => {
       const timer = setTimeout(fn, delayMs);
       return () => clearTimeout(timer);
     },
+    ...(Number.isFinite(testGraceMs) && testGraceMs > 0 ? { graceMs: testGraceMs } : {}),
   });
   const publishOnline = (windowId: string): void => {
     const browser = options.getWindow();
@@ -335,7 +358,14 @@ export async function createWorkbenchCliLayer(
     });
   };
   /** 给窗口一行平台提醒：在线就交给等待调用，否则打进终端。 */
-  const deliverLine = (windowId: string, text: string): RemindDelivery => {
+  const deliverLine = (
+    windowId: string,
+    text: string,
+    extra?: {
+      readonly allowUnknown?: boolean;
+      readonly onSubmit?: (result: SubmitResult) => void;
+    },
+  ): RemindDelivery => {
     if (onlineHub.offer(windowId, text)) {
       return "online";
     }
@@ -343,7 +373,13 @@ export async function createWorkbenchCliLayer(
     if (terminalId === undefined) {
       return "not-running";
     }
-    const queued = idleQueue.enqueue({ terminalId, text, tag: windowId });
+    const queued = idleQueue.enqueue({
+      terminalId,
+      text,
+      tag: windowId,
+      ...(extra?.allowUnknown === true ? { allowUnknown: true } : {}),
+      ...(extra?.onSubmit !== undefined ? { onSubmit: extra.onSubmit } : {}),
+    });
     if (queued.status === "dropped") {
       return "failed";
     }
@@ -356,33 +392,120 @@ export async function createWorkbenchCliLayer(
         ? "queued-blocked"
         : "queued-busy";
   };
-  const notifyOverseer = async (windowId: string, what: string): Promise<void> => {
-    let found: import("@ff-pane/shared").WorkbenchWindow | undefined;
+  /**
+   * 当场打进去的提醒等核对完再返回：提交了才算送达，没提交（补按一次回车也不行）直接报失败。
+   * 核对最长约 10 秒（Codex 回车延迟 0.8 秒 + 核对 4 秒 + 补回车后再核对 4 秒）。
+   */
+  const SUBMIT_WAIT_MAX_MS = 20_000;
+  const awaitSubmit = async (
+    delivery: RemindDelivery,
+    submitted: Promise<SubmitResult>,
+  ): Promise<RemindDelivery> => {
+    if (delivery !== "delivered") {
+      return delivery;
+    }
+    const result = await Promise.race([
+      submitted,
+      new Promise<undefined>((done) => {
+        setTimeout(() => done(undefined), SUBMIT_WAIT_MAX_MS).unref?.();
+      }),
+    ]);
+    if (result === "not-submitted") {
+      return "not-submitted";
+    }
+    return result === "dropped" ? "failed" : "delivered";
+  };
+  const deliverLineAndWait = (
+    windowId: string,
+    text: string,
+    extra?: { readonly allowUnknown?: boolean },
+  ): Promise<RemindDelivery> => {
+    let settle: (result: SubmitResult) => void = () => undefined;
+    const submitted = new Promise<SubmitResult>((done) => {
+      settle = done;
+    });
+    return awaitSubmit(deliverLine(windowId, text, { ...extra, onSubmit: settle }), submitted);
+  };
+  /**
+   * 汇报和状态的去向（用户 2026-10-22 定的规则）：监管者在线就交给监管者；监管者掉线或暂停就交给上级；
+   * 上级也暂停（限流）或不在，就记进上级的「待处理」，不打进任何终端，等用户叫醒它。
+   */
+  const teamDigest = createTeamDigest({ now: () => Date.now() });
+  /** 能不能把事交给这个窗口：终端在跑、没因错误暂停；当监管者用时还要在线（在等事件）。 */
+  const canReceive = (windowId: string, asSupervisor: boolean): boolean =>
+    findLiveTerminalId(windowId) !== undefined &&
+    !apiErrors.isPaused(windowId) &&
+    (!asSupervisor || onlineHub.isOnline(windowId));
+  const findStoredWindow = async (
+    windowId: string,
+  ): Promise<
+    { window: import("@ff-pane/shared").WorkbenchWindow; projectRoot: string } | undefined
+  > => {
     for (const current of Object.values(await layouts.readAll())) {
-      found = current.windows[windowId];
-      if (found !== undefined) {
-        break;
+      const window = current.windows[windowId];
+      if (window !== undefined) {
+        const project = (await projects.listProjects()).find((p) => p.id === current.projectId);
+        return { window, projectRoot: project?.rootPath ?? window.cwd };
       }
     }
-    if (found === undefined) {
+    return undefined;
+  };
+  /** 上级收不了：记进它的待处理。 */
+  const holdForManager = async (
+    managerId: string,
+    aboutWindowId: string,
+    text: string,
+  ): Promise<void> => {
+    const about = await findStoredWindow(aboutWindowId);
+    const manager = await findStoredWindow(managerId);
+    if (manager === undefined) {
       return;
     }
+    await teamDigest.note({
+      managerId,
+      projectRoot: manager.projectRoot,
+      windowId: aboutWindowId,
+      title: about?.window.title ?? aboutWindowId,
+      text,
+    });
+  };
+  const notifyOverseer = async (
+    windowId: string,
+    what: string,
+    routeOptions?: { readonly skipSupervisor?: boolean },
+  ): Promise<void> => {
+    const stored = await findStoredWindow(windowId);
+    if (stored === undefined) {
+      return;
+    }
+    const found = stored.window;
     const parentId = authRegistry.get(windowId)?.parentWindowId ?? found.parentWindowId;
-    const candidates = [found.watcherWindowId, parentId];
-    for (const overseer of candidates) {
-      if (overseer === undefined || overseer === windowId) {
-        continue;
-      }
-      // 监管者自己也刚因 API 错误停下（多半同一账号一起被限流），它叫不醒别人，改告诉上一级。
-      if (apiErrors.isRecentlyStalled(overseer, OVERSEER_ERROR_SKIP_MS)) {
-        continue;
-      }
-      if (findLiveTerminalId(overseer) === undefined) {
-        continue;
-      }
-      deliverLine(overseer, `[状态] ${sanitizeReminderTitle(found.title)}（${windowId}）${what}`);
+    const watcherId =
+      found.watcherWindowId !== undefined && found.watcherWindowId !== windowId
+        ? found.watcherWindowId
+        : undefined;
+    const line = `[状态] ${sanitizeReminderTitle(found.title)}（${windowId}）${what}`;
+    if (
+      watcherId !== undefined &&
+      routeOptions?.skipSupervisor !== true &&
+      canReceive(watcherId, true)
+    ) {
+      deliverLine(watcherId, line);
       return;
     }
+    if (parentId === undefined || parentId === windowId) {
+      return;
+    }
+    if (canReceive(parentId, false)) {
+      const note =
+        watcherId !== undefined && routeOptions?.skipSupervisor !== true
+          ? `（它的监管者不在线，改交给你；可以用 ffpane_nudge 叫醒监管者）`
+          : "";
+      deliverLine(parentId, `${line}${note}`);
+      return;
+    }
+    // 上级也停了：不打进终端，记进待处理，等用户叫醒它。
+    await holdForManager(parentId, windowId, what);
   };
   /** 每个窗口最近一次因「空闲没汇报」提醒过的依据，同一依据只提醒一次。 */
   const idleNoticeKey = new Map<string, string>();
@@ -425,8 +548,6 @@ export async function createWorkbenchCliLayer(
       "已经空闲，但这一轮没有汇报。可以用 ffpane_read_output 看它停在哪里，再决定要不要发消息。",
     );
   };
-  /** 监管者自己也刚因可重试的 API 错误停下多久以内，状态提醒改发上一级。 */
-  const OVERSEER_ERROR_SKIP_MS = 10 * 60_000;
   const apiErrors = createApiErrorTracker({
     now: () => Date.now(),
     schedule: (delayMs, fn) => {
@@ -436,6 +557,15 @@ export async function createWorkbenchCliLayer(
     isAlive: (windowId) => findLiveTerminalId(windowId) !== undefined,
     notify: (windowId, text) => {
       void notifyOverseer(windowId, text);
+      checkTeams();
+    },
+    // 网络或服务端的临时故障：平台自己让它接着做，不用谁思考。
+    autoContinue: (windowId, label) => {
+      void deliverLineAndWait(
+        windowId,
+        `[继续] 上一轮因${label}中断，平台自动让你接着做。从停下的地方接着做；做不了就用 ffpane_report blocked 说明原因。`,
+        { allowUnknown: true },
+      );
     },
   });
   /**
@@ -469,10 +599,17 @@ export async function createWorkbenchCliLayer(
       );
     }
   };
-  /** 已经离线、还存着没交出去的提醒：打回终端，不丢。 */
+  /** 已经离线、还存着没交出去的提醒：监管者的交给上级；别的打回终端。都不丢。 */
   const drainOffline = (): void => {
     for (const backlog of onlineHub.drainOffline()) {
       publishOnline(backlog.windowId);
+      if (authRegistry.get(backlog.windowId)?.role === "supervisor") {
+        // 监管者掉线了：它没处理的提醒交给它的上级（上级也停了就进待处理）。新消息留在它的收件箱里。
+        for (const text of backlog.events) {
+          void notifyOverseer(backlog.windowId, `掉线前还有一条没处理的提醒：${text}`);
+        }
+        continue;
+      }
       const terminalId = findLiveTerminalId(backlog.windowId);
       if (terminalId === undefined) {
         continue;
@@ -485,9 +622,124 @@ export async function createWorkbenchCliLayer(
       }
     }
   };
+  /** 平台叫停的监管者（管理者暂停、执行也都停了），以及用户点了下线的：掉线不算异常。 */
+  const stopRequested = new Set<string>();
+  const supervisorWasOnline = new Map<string, boolean>();
+  /** 监管者从在线变成掉线（超过 5 分钟没来等事件）：告诉它的上级，路线改走上级。 */
+  const checkSupervisors = (): void => {
+    for (const record of options.manager.list()) {
+      const windowId = record.metadata?.["windowId"];
+      if (record.exited || typeof windowId !== "string") {
+        continue;
+      }
+      if (authRegistry.get(windowId)?.role !== "supervisor") {
+        continue;
+      }
+      const online = onlineHub.isOnline(windowId);
+      const before = supervisorWasOnline.get(windowId);
+      supervisorWasOnline.set(windowId, online);
+      if (online) {
+        stopRequested.delete(windowId);
+        continue;
+      }
+      if (before === true && !stopRequested.has(windowId)) {
+        const reason = apiErrors.get(windowId)?.label;
+        void notifyOverseer(
+          windowId,
+          `掉线了：超过 5 分钟没在等事件${reason !== undefined ? `（${reason}）` : "（可能出错，或这一轮结束了）"}。它名下窗口的提醒和汇报改交给你；需要的话用 ffpane_nudge 叫醒它。`,
+        );
+      }
+    }
+  };
+  /** 团队暂停状态：管理者停了（限流或不在）且没有在线的监管者时，在管理者窗口上盖一层提示。 */
+  const teamPaused = new Map<string, string>();
+  const publishTeamPaused = (managerId: string, reason: string | undefined): void => {
+    if ((teamPaused.get(managerId) ?? "") === (reason ?? "")) {
+      return;
+    }
+    if (reason === undefined) {
+      teamPaused.delete(managerId);
+    } else {
+      teamPaused.set(managerId, reason);
+    }
+    const browser = options.getWindow();
+    if (browser !== null && !browser.isDestroyed()) {
+      publishEvent(browser.webContents, "workbench:team-paused", {
+        windowId: managerId,
+        paused: reason !== undefined,
+        ...(reason !== undefined ? { reason } : {}),
+      });
+    }
+  };
+  /**
+   * 管理者暂停时：还有执行在干活，监管者就继续在线收汇报；都停了，监管者也下线。
+   * 管理者和监管者都不在线，团队就停下，等用户叫醒管理者。
+   */
+  const checkTeams = (): void => {
+    const tree = authRegistry.snapshot();
+    for (const [managerId, node] of Object.entries(tree)) {
+      if (node.role !== "manager") {
+        continue;
+      }
+      const team = Object.keys(tree).filter((id) => {
+        let cursor = tree[id]?.parentWindowId;
+        for (let depth = 0; cursor !== undefined && depth < 16; depth += 1) {
+          if (cursor === managerId) {
+            return true;
+          }
+          cursor = tree[cursor]?.parentWindowId;
+        }
+        return false;
+      });
+      if (team.length === 0) {
+        publishTeamPaused(managerId, undefined);
+        continue;
+      }
+      const managerTerminal = findLiveTerminalId(managerId);
+      const managerError = apiErrors.get(managerId);
+      const managerDown = managerTerminal === undefined || managerError?.paused === true;
+      if (!managerDown) {
+        publishTeamPaused(managerId, undefined);
+        continue;
+      }
+      const working = team.some((id) => {
+        if (tree[id]?.role === "supervisor") {
+          return false;
+        }
+        const terminalId = findLiveTerminalId(id);
+        if (terminalId === undefined || apiErrors.isPaused(id)) {
+          return false;
+        }
+        const phase = idleQueue.phaseOf(terminalId);
+        return phase === "busy" || phase === "blocked";
+      });
+      const supervisors = team.filter((id) => tree[id]?.role === "supervisor");
+      if (!working) {
+        for (const supervisorId of supervisors) {
+          if (onlineHub.isOnline(supervisorId)) {
+            stopRequested.add(supervisorId);
+            onlineHub.requestStop(supervisorId);
+            publishOnline(supervisorId);
+          }
+        }
+      }
+      if (supervisors.some((id) => onlineHub.isOnline(id))) {
+        publishTeamPaused(managerId, undefined);
+        continue;
+      }
+      publishTeamPaused(
+        managerId,
+        managerTerminal === undefined
+          ? "管理者窗口没在运行"
+          : `管理者因${managerError?.label ?? "错误"}停下`,
+      );
+    }
+  };
   const stallTimer = setInterval(() => {
     checkStalls();
     drainOffline();
+    checkSupervisors();
+    checkTeams();
   }, 30_000);
   stallTimer.unref?.();
   const PERMISSION_WAIT_NOTICE_MS = 90_000;
@@ -529,6 +781,15 @@ export async function createWorkbenchCliLayer(
   ): void => {
     clearPermissionTimer(windowId);
     apiErrors.forget(windowId);
+    supervisorWasOnline.delete(windowId);
+    stopRequested.delete(windowId);
+    if (exit.killed) {
+      // 被关掉的窗口：在上级待处理里的那一行不用再管。
+      const parentId = authRegistry.get(windowId)?.parentWindowId;
+      if (parentId !== undefined) {
+        void teamDigest.clear(parentId, windowId);
+      }
+    }
     onlineHub.forget(windowId);
     stopCodexTail(windowId);
     for (const grant of locks.releaseWindow(windowId)) {
@@ -608,6 +869,14 @@ export async function createWorkbenchCliLayer(
       options.manager.write(terminalId, data);
     },
     lastOutputAt: (terminalId) => options.manager.get(terminalId)?.lastOutputAt,
+    inputStillHolds: async (terminalId, text) => {
+      const runtime = promptRuntimeOf(options.manager.get(terminalId)?.metadata);
+      if (runtime === undefined) {
+        return undefined;
+      }
+      const screen = await renderTail(terminalId);
+      return screen === undefined ? undefined : readInputStillHolds(screen, runtime, text);
+    },
     now: () => Date.now(),
     schedule: (delayMs, fn) => {
       const timer = setTimeout(fn, delayMs);
@@ -694,7 +963,7 @@ export async function createWorkbenchCliLayer(
       clearPermissionTimer(windowId);
     }
     if (signal === "user-prompt-submit") {
-      // 又开始干活了（被叫醒或用户接手），不再提示「可以叫醒」。
+      // 又开始干活了（被叫醒或用户接手）：不再算暂停，也不再自动接着做。
       apiErrors.turnStarted(windowId);
     }
     if (signal === "stop" && meta?.errorType !== undefined) {
@@ -705,8 +974,19 @@ export async function createWorkbenchCliLayer(
       setTimeout(() => {
         if (apiErrors.turnCompleted(windowId)) {
           void noteIdleWithoutReport(windowId).catch(() => undefined);
+          // 暂停期间攒下的事：醒来后一句话告诉它去看待处理，不逐条打进来。
+          if (teamDigest.takeAnnouncement(windowId)) {
+            deliverLine(
+              windowId,
+              `[待处理] 你暂停期间团队里有 ${teamDigest.count(windowId)} 个窗口有事，见 ${teamDigest.relativePath(windowId)}。先读这一页，要细节再看对应的汇报；你给哪个窗口发过消息、叫醒或关掉它，那一行会自动划掉。`,
+            );
+          }
+          checkTeams();
         }
       }, API_ERROR_SAME_TURN_MS);
+    }
+    if (signal === "user-prompt-submit") {
+      checkTeams();
     }
     if (signal === "stop" || signal === "user-prompt-submit") {
       const browser = options.getWindow();
@@ -770,6 +1050,12 @@ export async function createWorkbenchCliLayer(
         handleHookSignal(windowId, "user-prompt-submit");
         return;
       }
+      if (event.kind === "turn-aborted") {
+        // 用户按 Esc 打断：notify 不报，不清掉就一直显示忙。只清状态，不当成「空闲没汇报」。
+        idleQueue.noteHook(live, "stop");
+        afterIdleHook(windowId);
+        return;
+      }
       if (event.errorType !== undefined) {
         handleHookSignal(windowId, "stop", { errorType: event.errorType });
         return;
@@ -784,6 +1070,60 @@ export async function createWorkbenchCliLayer(
     });
     codexTails.set(windowId, tail);
   };
+
+  /** 终端对应哪种 CLI 屏幕。Grok 的屏幕没核对过，不看。 */
+  const promptRuntimeOf = (
+    metadata: Readonly<Record<string, unknown>> | undefined,
+  ): PromptRuntime | undefined => {
+    const kind = metadata?.["kind"];
+    if (kind === "claude" || kind === "deepseek") {
+      return "claude-code";
+    }
+    return kind === "codex" ? "codex" : undefined;
+  };
+  /** 看屏幕只要最后一段：输入框和状态行每帧都重画，开头的横幅由 observe 缓存。 */
+  const SCREEN_TAIL_BYTES = 256 * 1024;
+  const renderTail = async (terminalId: string): Promise<string | undefined> => {
+    const record = options.manager.get(terminalId);
+    if (record === undefined || record.exited) {
+      return undefined;
+    }
+    try {
+      return await renderTerminalText(
+        takeUtf8Tail(options.manager.getReplayBuffer(terminalId), SCREEN_TAIL_BYTES),
+        { cols: record.cols, rows: record.rows },
+        60,
+      );
+    } catch {
+      return undefined;
+    }
+  };
+  /** 重启过的窗口看到输入提示符就判为空闲；被 Esc 打断、一直显示忙的也清掉。 */
+  const promptWatch = createPromptWatch({
+    targets: () => {
+      const out = [];
+      for (const record of options.manager.list()) {
+        const windowId = record.metadata?.["windowId"];
+        const runtime = promptRuntimeOf(record.metadata);
+        if (record.exited || typeof windowId !== "string" || runtime === undefined) {
+          continue;
+        }
+        out.push({ terminalId: record.id, windowId, runtime, lastOutputAt: record.lastOutputAt });
+      }
+      return out;
+    },
+    phaseOf: (terminalId) => idleQueue.phaseOf(terminalId),
+    render: renderTail,
+    notePromptReady: (terminalId, opts) => idleQueue.notePromptReady(terminalId, opts),
+    onReady: (windowId) => {
+      afterIdleHook(windowId);
+    },
+    now: () => Date.now(),
+  });
+  const promptTimer = setInterval(() => {
+    void promptWatch.tick().catch(() => undefined);
+  }, 1000);
+  promptTimer.unref?.();
 
   const control = await createWorkbenchControlServer({
     tokens: tokenRegistry,
@@ -1088,6 +1428,10 @@ export async function createWorkbenchCliLayer(
     readonly reason: "busy" | "confirm" | "not-running" | "no-session" | "failed";
     readonly error?: string;
   }): void => {
+    if (notice.action === "resume" && !modelEffortRuns.has(notice.windowId)) {
+      // 由主进程自己重启，不靠界面：窗口不在当前标签页时界面收不到这条事件。
+      void runModelEffort(notice.windowId);
+    }
     const browser = options.getWindow();
     if (browser === null || browser.isDestroyed()) {
       return;
@@ -1129,11 +1473,429 @@ export async function createWorkbenchCliLayer(
       (isWorkbenchPermissionLevel(stored?.permission)
         ? stored.permission
         : DEFAULT_WORKBENCH_WINDOW_PERMISSION);
+    const kind = record?.metadata?.["kind"] ?? stored?.kind;
+    // Codex 的编号由 notify 报来，界面不在当前标签页时布局里可能还没记上，以主进程记的为准。
+    const codexSession = kind === "codex" ? codexSessionOf.get(windowId) : undefined;
+    const resumeId = codexSession ?? sessionId;
+    const hadConversation =
+      terminalId !== undefined &&
+      (record?.metadata?.["resumed"] === true ||
+        record?.metadata?.["initialPrompt"] === true ||
+        idleQueue.hadTurn(terminalId));
     return {
       running: terminalId !== undefined,
       phase: terminalId !== undefined ? idleQueue.phaseOf(terminalId) : ("unknown" as const),
-      canResume: terminalId !== undefined && sessionId !== undefined && sessionId.trim() !== "",
+      canResume: terminalId !== undefined && resumeId !== undefined && resumeId.trim() !== "",
       needsConfirm: role === "manager" || permission === "yolo",
+      hadConversation,
+      // 改权限只能靠重启；/model 只换模型和强度。
+      canSwitchInWindow: kind === "codex" && !permissionChangePending.has(windowId),
+      ...(resumeId !== undefined && resumeId.trim() !== "" ? { sessionId: resumeId } : {}),
+      kind: typeof kind === "string" ? kind : undefined,
+      permission,
+      title: stored?.title ?? windowId,
+      stored,
+    };
+  };
+
+  /** 改了权限、还没重启生效的窗口：不能用 /model 代替重启。 */
+  const permissionChangePending = new Set<string>();
+  type ModelEffortRunOutcome =
+    | {
+        readonly ok: true;
+        readonly how: ModelEffortApplyMode;
+        readonly model?: string;
+        readonly reasoningEffort?: string;
+        readonly source: WindowModelInfo["source"];
+      }
+    | { readonly ok: false; readonly error: string };
+  /** 正在让新设置生效的那一次。 */
+  const modelEffortRuns = new Map<string, Promise<ModelEffortRunOutcome>>();
+  /** 有工具调用在等结果的那几次：完成时由工具调用自己回报，不再发提醒。 */
+  const awaitedRuns = new WeakSet<Promise<ModelEffortRunOutcome>>();
+  /** 谁要求改的模型：排队后生效或失败时告诉它。 */
+  const modelEffortRequester = new Map<string, string>();
+  const MODEL_EFFORT_AWAIT_MS = 60_000;
+  const sleep = (ms: number): Promise<void> =>
+    new Promise((done) => {
+      setTimeout(done, ms);
+    });
+
+  /** Codex 没带参数时读的是用户 config.toml 顶层的 model 和 model_reasoning_effort。只读不改。 */
+  const readCodexDefaults = async (): Promise<{ model?: string; effort?: string }> => {
+    try {
+      const text = await readFile(join(resolveCodexHome(), "config.toml"), "utf8");
+      const top = text.split(/^\s*\[/m)[0] ?? "";
+      const model = /^\s*model\s*=\s*"([^"]+)"/m.exec(top)?.[1];
+      const effort = /^\s*model_reasoning_effort\s*=\s*"([^"]+)"/m.exec(top)?.[1];
+      return {
+        ...(model !== undefined ? { model } : {}),
+        ...(effort !== undefined ? { effort } : {}),
+      };
+    } catch {
+      return {};
+    }
+  };
+
+  /** 窗口现在用的模型和强度：屏幕上显示的优先，其次本次启动参数，再次 CLI 用户配置。 */
+  const describeModel = async (windowId: string): Promise<WindowModelInfo | undefined> => {
+    let stored: import("@ff-pane/shared").WorkbenchWindow | undefined;
+    for (const current of Object.values(await layouts.readAll())) {
+      stored = current.windows[windowId];
+      if (stored !== undefined) {
+        break;
+      }
+    }
+    const terminalId = findLiveTerminalId(windowId);
+    const record = terminalId !== undefined ? options.manager.get(terminalId) : undefined;
+    if (record === undefined || terminalId === undefined) {
+      if (stored === undefined) {
+        return undefined;
+      }
+      const model = stored.modelOverride ?? stored.routeModel;
+      const effort = stored.effortOverride ?? stored.routeEffort;
+      return {
+        ...(model !== undefined ? { model } : {}),
+        ...(effort !== undefined ? { reasoningEffort: effort } : {}),
+        source: model !== undefined || effort !== undefined ? "launch" : "unknown",
+      };
+    }
+    const launchModel = record.metadata?.["launchModel"];
+    const launchEffort = record.metadata?.["launchEffort"];
+    const runtime = promptRuntimeOf(record.metadata);
+    const seen = runtime !== undefined ? await promptWatch.observe(terminalId, runtime) : undefined;
+    const defaults =
+      record.metadata?.["kind"] === "codex" ? await readCodexDefaults() : ({} as const);
+    const fromLaunchModel = typeof launchModel === "string" ? launchModel : undefined;
+    const fromLaunchEffort = typeof launchEffort === "string" ? launchEffort : undefined;
+    const model = seen?.model ?? fromLaunchModel ?? defaults.model;
+    const effort = seen?.effort ?? fromLaunchEffort ?? defaults.effort;
+    const source: WindowModelInfo["source"] =
+      seen?.model !== undefined
+        ? "screen"
+        : fromLaunchModel !== undefined || fromLaunchEffort !== undefined
+          ? "launch"
+          : defaults.model !== undefined || defaults.effort !== undefined
+            ? "config"
+            : "unknown";
+    const pendingModel =
+      stored?.modelOverride !== undefined && stored.modelOverride !== fromLaunchModel
+        ? stored.modelOverride
+        : undefined;
+    const pendingEffort =
+      stored?.effortOverride !== undefined && stored.effortOverride !== fromLaunchEffort
+        ? stored.effortOverride
+        : undefined;
+    // 在窗口里切换过的，屏幕上已经是新值，不算没生效。
+    const switched =
+      seen?.model !== undefined &&
+      (pendingModel === undefined || seen.model.toLowerCase() === pendingModel.toLowerCase()) &&
+      (pendingEffort === undefined || seen.effort === pendingEffort);
+    return {
+      ...(model !== undefined ? { model } : {}),
+      ...(effort !== undefined ? { reasoningEffort: effort } : {}),
+      source,
+      ...(!switched && pendingModel !== undefined ? { pendingModel } : {}),
+      ...(!switched && pendingEffort !== undefined
+        ? { pendingReasoningEffort: pendingEffort }
+        : {}),
+    };
+  };
+
+  /** 重启后等它停在输入框上，再读屏幕上的模型和强度。等不到就用启动参数。 */
+  const settleActualModel = async (
+    windowId: string,
+    launched: LaunchCliWindowResult | undefined,
+  ): Promise<{
+    readonly model?: string;
+    readonly reasoningEffort?: string;
+    readonly source: WindowModelInfo["source"];
+  }> => {
+    const deadline = Date.now() + 20_000;
+    const terminalId = launched?.terminal.id ?? findLiveTerminalId(windowId);
+    const runtime =
+      terminalId !== undefined
+        ? promptRuntimeOf(options.manager.get(terminalId)?.metadata)
+        : undefined;
+    while (terminalId !== undefined && runtime !== undefined && Date.now() < deadline) {
+      const seen = await promptWatch.observe(terminalId, runtime);
+      if (seen?.ready === true && seen.model !== undefined) {
+        return {
+          model: seen.model,
+          ...(seen.effort !== undefined ? { reasoningEffort: seen.effort } : {}),
+          source: "screen",
+        };
+      }
+      await sleep(500);
+    }
+    const info = await describeModel(windowId);
+    return {
+      ...(info?.model !== undefined ? { model: info.model } : {}),
+      ...(info?.reasoningEffort !== undefined ? { reasoningEffort: info.reasoningEffort } : {}),
+      source: info?.source ?? "unknown",
+    };
+  };
+
+  /**
+   * 主进程自己重启窗口（不靠窗口在当前标签页）：结束旧终端，按布局里记的设置重新启动，
+   * 再告诉界面改接新终端。resume 时必须有对话编号。
+   */
+  const relaunchWindow = async (
+    windowId: string,
+    plan: { readonly resume: boolean; readonly nativeSessionId?: string },
+  ): Promise<
+    | { readonly ok: true; readonly result: LaunchCliWindowResult }
+    | { readonly ok: false; readonly error: string }
+  > => {
+    const all = await layouts.readAll();
+    let stored: import("@ff-pane/shared").WorkbenchWindow | undefined;
+    for (const current of Object.values(all)) {
+      stored = current.windows[windowId];
+      if (stored !== undefined) {
+        break;
+      }
+    }
+    if (stored === undefined) {
+      return { ok: false, error: "找不到这个窗口。" };
+    }
+    const kind = stored.kind;
+    if (kind !== "claude" && kind !== "codex" && kind !== "grok" && kind !== "deepseek") {
+      return { ok: false, error: "只能重启 AI 窗口。" };
+    }
+    if (plan.resume && (plan.nativeSessionId === undefined || plan.nativeSessionId.trim() === "")) {
+      return { ok: false, error: "没有对话编号，没法续接。" };
+    }
+    const project = (await projects.listProjects()).find((item) => item.id === stored.projectId);
+    if (project === undefined) {
+      return { ok: false, error: "找不到窗口所属的项目。" };
+    }
+    const resolved = await resolveProjectLaunchRoute({
+      projectRoot: project.rootPath,
+      projectId: stored.projectId,
+      kind,
+      configs: projectConfigs,
+      getProvider: async (id) => {
+        const provider = await providers.getProvider(id as never);
+        return provider === undefined ? undefined : { id: provider.id, name: provider.name };
+      },
+    });
+    if (!resolved.ok) {
+      return { ok: false, error: resolved.error };
+    }
+    const node = authRegistry.get(windowId);
+    const permission =
+      node?.permission ??
+      (isWorkbenchPermissionLevel(stored.permission)
+        ? stored.permission
+        : DEFAULT_WORKBENCH_WINDOW_PERMISSION);
+    const role =
+      node?.role ?? (isWorkbenchRole(stored.role) ? stored.role : DEFAULT_WORKBENCH_ROLE);
+    const oldId = findLiveTerminalId(windowId);
+    const oldRecord = oldId !== undefined ? options.manager.get(oldId) : undefined;
+    const announce = (active: boolean): void => {
+      const browser = options.getWindow();
+      if (browser !== null && !browser.isDestroyed()) {
+        publishEvent(browser.webContents, "workbench:terminal-relaunching", { windowId, active });
+      }
+    };
+    // 先告诉界面在重启，免得用户在旧终端结束、新终端还没接上时点重启，开出第二个进程。
+    announce(true);
+    if (oldId !== undefined) {
+      options.manager.kill(oldId);
+      // 等旧进程和它的临时文件清理完（角色说明临时文件按窗口固定命名），再起新的。
+      await sleep(500);
+    }
+    let result: LaunchCliWindowResult;
+    try {
+      result = await launchCliWindow(
+        {
+          windowId,
+          projectId: stored.projectId,
+          projectRoot: project.rootPath,
+          kind,
+          route: withModelEffortOverrides(resolved.route, stored),
+          cols: oldRecord?.cols ?? 120,
+          rows: oldRecord?.rows ?? 32,
+          ...(stored.cwd.trim() !== "" ? { cwd: stored.cwd } : {}),
+          ...(plan.resume ? { resume: true } : {}),
+          ...(plan.resume && plan.nativeSessionId !== undefined
+            ? { nativeSessionId: plan.nativeSessionId }
+            : {}),
+          permission,
+          role,
+          ...(stored.compactPercent !== undefined ? { compactPercent: stored.compactPercent } : {}),
+        },
+        launchDeps(),
+      );
+    } catch (thrown) {
+      announce(false);
+      return { ok: false, error: thrown instanceof Error ? thrown.message : String(thrown) };
+    }
+    if (
+      result.kind === "codex" &&
+      result.claimingSession !== true &&
+      result.nativeSessionId !== undefined
+    ) {
+      startCodexTail(windowId, result.nativeSessionId);
+    }
+    const browser = options.getWindow();
+    if (browser !== null && !browser.isDestroyed()) {
+      publishEvent(browser.webContents, "workbench:terminal-replaced", {
+        projectId: stored.projectId,
+        windowId,
+        terminalId: result.terminal.id,
+        ...(result.nativeSessionId !== undefined
+          ? { nativeSessionId: result.nativeSessionId }
+          : {}),
+        route: {
+          connectionMode: result.connectionMode,
+          ...(result.providerName !== undefined ? { providerName: result.providerName } : {}),
+          ...(result.model !== undefined ? { model: result.model } : {}),
+          ...(result.reasoningEffort !== undefined
+            ? { reasoningEffort: result.reasoningEffort }
+            : {}),
+        },
+        effectivePermission: result.effectivePermission,
+        permissionCapped: result.permissionCapped,
+        turnSignal: result.turnSignal,
+        resumed: plan.resume,
+      });
+    }
+    return { ok: true, result };
+  };
+
+  /** 在 Codex 窗口里用 /model 只改本会话。期间暂停自动投递。 */
+  const switchInWindow = async (
+    windowId: string,
+    target: { readonly model?: string; readonly effort?: string },
+  ): Promise<ModelEffortRunOutcome> => {
+    const terminalId = findLiveTerminalId(windowId);
+    if (terminalId === undefined) {
+      return { ok: false, error: "窗口已经不在运行。" };
+    }
+    idleQueue.setPaused(terminalId, true);
+    try {
+      const switched = await switchCodexModelInWindow(
+        {
+          write: (data) => {
+            options.manager.write(terminalId, data);
+          },
+          screen: async () => (await renderTail(terminalId)) ?? "",
+          sleep,
+          now: () => Date.now(),
+        },
+        target,
+      );
+      if (!switched.ok) {
+        return switched;
+      }
+      return {
+        ok: true,
+        how: "in-window",
+        model: switched.model,
+        reasoningEffort: switched.effort,
+        source: "screen",
+      };
+    } finally {
+      idleQueue.setPaused(terminalId, false);
+    }
+  };
+
+  const runModelEffort = (windowId: string): Promise<ModelEffortRunOutcome> => {
+    const run = (async (): Promise<ModelEffortRunOutcome> => {
+      const generationBeforeRead = modelEffort.generation(windowId);
+      const facts = await modelEffortFacts(windowId);
+      modelEffort.noteLaunchRead(windowId, generationBeforeRead);
+      if (!facts.running) {
+        return { ok: false, error: "窗口已经不在运行。" };
+      }
+      const mode = modelEffortApplyMode(facts);
+      if (mode === undefined) {
+        return { ok: false, error: "没有可续接的对话编号，也没法在窗口里切换。" };
+      }
+      if (mode === "in-window") {
+        return switchInWindow(windowId, {
+          ...(facts.stored?.modelOverride !== undefined
+            ? { model: facts.stored.modelOverride }
+            : {}),
+          ...(facts.stored?.effortOverride !== undefined
+            ? { effort: facts.stored.effortOverride }
+            : {}),
+        });
+      }
+      const relaunched = await relaunchWindow(windowId, {
+        resume: mode === "resume",
+        ...(mode === "resume" && facts.sessionId !== undefined
+          ? { nativeSessionId: facts.sessionId }
+          : {}),
+      });
+      if (!relaunched.ok) {
+        return relaunched;
+      }
+      permissionChangePending.delete(windowId);
+      const actual = await settleActualModel(windowId, relaunched.result);
+      return { ok: true, how: mode, ...actual };
+    })().catch(
+      (thrown: unknown): ModelEffortRunOutcome => ({
+        ok: false,
+        error: thrown instanceof Error ? thrown.message : String(thrown),
+      }),
+    );
+    modelEffortRuns.set(windowId, run);
+    void run.then(async (outcome) => {
+      if (modelEffortRuns.get(windowId) === run) {
+        modelEffortRuns.delete(windowId);
+      }
+      modelEffort.settled(windowId, outcome.ok, outcome.ok ? undefined : outcome.error);
+      const requester = modelEffortRequester.get(windowId);
+      if (awaitedRuns.has(run) || requester === undefined || requester === windowId) {
+        return;
+      }
+      const facts = await modelEffortFacts(windowId).catch(() => undefined);
+      const title = sanitizeReminderTitle(facts?.title ?? windowId);
+      deliverLine(
+        requester,
+        outcome.ok
+          ? `[模型] ${title}（${windowId}）的新设置已生效：模型 ${outcome.model ?? "不知道"}，思考强度 ${outcome.reasoningEffort ?? "不知道"}（${outcome.how === "in-window" ? "在窗口里切换" : outcome.how === "resume" ? "续接" : "冷重启"}）。`
+          : `[模型] ${title}（${windowId}）的新设置没能生效：${sanitizeThreadText(outcome.error.replace(/[\r\n]+/g, " ")).slice(0, 200)}。已记下，下次启动时生效。`,
+      );
+    });
+    return run;
+  };
+
+  /** 把一次生效的结果换成工具返回。等太久就当排队中，完成后再发提醒。 */
+  const awaitModelEffortRun = async (
+    windowId: string,
+    readOnly: boolean,
+  ): Promise<ModelEffortApplyResult | undefined> => {
+    const run = modelEffortRuns.get(windowId);
+    if (run === undefined) {
+      return undefined;
+    }
+    awaitedRuns.add(run);
+    const outcome = await Promise.race([run, sleep(MODEL_EFFORT_AWAIT_MS).then(() => undefined)]);
+    if (outcome === undefined) {
+      awaitedRuns.delete(run);
+      return {
+        status: "queued",
+        message: "排队中：正在重启，还没完成；完成后平台会发「[模型]」提醒。",
+      };
+    }
+    if (!outcome.ok) {
+      return {
+        status: "recorded",
+        message: `仅记录：这次没能生效（${outcome.error}）。下次启动时生效${readOnly ? "；它是只读窗口，可以用 ffpane_restart_window 重启" : "；需要现在生效请用户在那个窗口重启"}。`,
+      };
+    }
+    return {
+      status: "applied",
+      message: "已生效",
+      how: outcome.how,
+      ...(outcome.model !== undefined ? { model: outcome.model } : {}),
+      ...(outcome.reasoningEffort !== undefined
+        ? { reasoningEffort: outcome.reasoningEffort }
+        : {}),
+      source: outcome.source,
     };
   };
 
@@ -1276,6 +2038,10 @@ export async function createWorkbenchCliLayer(
       }
       return { ok: true as const };
     },
+    "workbench:model-effort-confirm": (request) => {
+      modelEffort.confirm(request.windowId, request.accepted);
+      return { ok: true as const };
+    },
     "workbench:model-effort-settled": (request) => {
       const error = request.error?.trim();
       modelEffort.settled(
@@ -1374,6 +2140,7 @@ export async function createWorkbenchCliLayer(
     },
     "workbench:set-online": (request) => {
       if (!request.online) {
+        stopRequested.add(request.windowId);
         const wasOnline = onlineHub.requestStop(request.windowId);
         publishOnline(request.windowId);
         return {
@@ -1703,15 +2470,64 @@ export async function createWorkbenchCliLayer(
 
   const toolDeps = (): WorkbenchToolDeps => ({
     nudge: (windowId) => {
+      const parentId = authRegistry.get(windowId)?.parentWindowId;
+      if (parentId !== undefined) {
+        void teamDigest.clear(parentId, windowId);
+      }
       const terminalId = findLiveTerminalId(windowId);
       if (terminalId === undefined) {
         return "not-running";
       }
       const reason = apiErrors.get(windowId)?.label;
-      return deliverLine(
+      // 被打断或刚重启的窗口常常状态未知，「继续」是平台固定文案，未知时也直接按回车。
+      return deliverLineAndWait(
         windowId,
         `[继续] 上一轮被打断了${reason !== undefined ? `（${reason}）` : ""}。从停下的地方接着做；做不了就用 ffpane_report blocked 说明原因。`,
+        { allowUnknown: true },
       );
+    },
+    modelInfo: (windowId) => describeModel(windowId),
+    restartWindow: async ({ callerId, windowId, fresh }) => {
+      const caller = authRegistry.get(callerId);
+      if (caller?.role !== "manager" || !authRegistry.isManagerGranted(callerId)) {
+        return { ok: false, error: "只有管理者能重启窗口。" };
+      }
+      const facts = await modelEffortFacts(windowId);
+      const node = authRegistry.get(windowId);
+      const openedBy = node?.openedBy ?? facts.stored?.openedBy;
+      const parentId = node?.parentWindowId ?? facts.stored?.parentWindowId;
+      const openedByCaller =
+        typeof openedBy === "object" && openedBy !== null
+          ? openedBy.windowId === callerId
+          : parentId === callerId;
+      if (facts.stored === undefined || !openedByCaller) {
+        return { ok: false, error: "只能重启你自己开的窗口。" };
+      }
+      if (facts.permission !== "read-only") {
+        return {
+          ok: false,
+          error: "只能重启只读窗口。别的窗口请用 ffpane_set_model_effort，或请用户在那个窗口重启。",
+        };
+      }
+      if (facts.phase === "blocked") {
+        return { ok: false, error: "它在等用户批准，先不重启。" };
+      }
+      if (modelEffortRuns.has(windowId)) {
+        return { ok: false, error: "它正在重启。" };
+      }
+      // 没聊过天的会话没有可续接的记录（Claude 续接空会话会报错），直接开新的。
+      const resume = !fresh && facts.canResume && facts.hadConversation;
+      const relaunched = await relaunchWindow(windowId, {
+        resume,
+        ...(resume && facts.sessionId !== undefined ? { nativeSessionId: facts.sessionId } : {}),
+      });
+      if (!relaunched.ok) {
+        return relaunched;
+      }
+      permissionChangePending.delete(windowId);
+      modelEffort.drop(windowId);
+      const actual = await settleActualModel(windowId, relaunched.result);
+      return { ok: true, how: resume ? "resume" : "fresh", ...actual };
     },
     waitEvents: async (windowId, timeoutMs) => {
       const pending = onlineHub.wait(windowId, timeoutMs);
@@ -1850,19 +2666,49 @@ export async function createWorkbenchCliLayer(
           });
         },
       }),
-    remind: (windowId, textForCount, fromWindowId): RemindDelivery => {
+    remind: (windowId, textForCount, fromWindowId, remindOptions) => {
+      // 上级给这个窗口发了消息：它在上级待处理里的那一行算处理过了。
+      void teamDigest.clear(fromWindowId, windowId);
       if (onlineHub.offerInbox(windowId)) {
         return "online";
       }
       const terminalId = findLiveTerminalId(windowId);
+      // 对方因限流暂停或不在：不打进终端（打进去它又会去调接口），记进它的待处理，等用户叫醒它。
+      if (apiErrors.isPaused(windowId) || terminalId === undefined) {
+        const hasTeam = Object.values(authRegistry.snapshot()).some(
+          (node) => node.parentWindowId === windowId,
+        );
+        if (hasTeam) {
+          return holdForManager(windowId, fromWindowId, textForCount(1)).then(
+            (): RemindDelivery => "held",
+            (): RemindDelivery => (terminalId === undefined ? "not-running" : "failed"),
+          );
+        }
+        if (terminalId === undefined) {
+          return "not-running";
+        }
+      }
       if (terminalId === undefined) {
         return "not-running";
       }
-      const queued = idleQueue.enqueueInbox(terminalId, textForCount);
+      const waitSubmit = remindOptions?.waitSubmit === true;
+      let settle: (result: SubmitResult) => void = () => undefined;
+      const submitted = new Promise<SubmitResult>((done) => {
+        settle = done;
+      });
+      const queued = idleQueue.enqueueInbox(
+        terminalId,
+        textForCount,
+        waitSubmit ? settle : undefined,
+      );
       if (queued.status === "dropped") {
         return "failed";
       }
       if (queued.status === "delivered") {
+        if (waitSubmit) {
+          // 结果由这次调用直接返回，不再另发「投递失败」提醒。
+          return awaitSubmit("delivered", submitted);
+        }
         inflightSenders.set(terminalId, new Set([fromWindowId]));
         return "delivered";
       }
@@ -1990,6 +2836,7 @@ export async function createWorkbenchCliLayer(
                 type: apiError.type,
                 label: apiError.label,
                 at: apiError.at,
+                paused: apiError.paused,
               },
             }
           : {}),
@@ -2044,11 +2891,22 @@ export async function createWorkbenchCliLayer(
         });
         const previous = modelEffortView.get(input.windowId);
         modelEffortView.set(input.windowId, { ...previous, permission: input.permission });
+        permissionChangePending.add(input.windowId);
         const facts = await modelEffortFacts(input.windowId);
         const decision = modelEffort.request(input.windowId, facts, {
           ...(window.modelOverride !== undefined ? { model: window.modelOverride } : {}),
           ...(window.effortOverride !== undefined ? { effort: window.effortOverride } : {}),
         });
+        if (decision.launch) {
+          const applied = await awaitModelEffortRun(input.windowId, false);
+          if (applied !== undefined) {
+            return {
+              ok: true,
+              message:
+                applied.status === "applied" ? "已生效：窗口已按新权限重启。" : applied.message,
+            };
+          }
+        }
         return { ok: true, message: decision.message };
       }
       return { ok: false, error: "找不到这个窗口。" };
@@ -2130,12 +2988,36 @@ export async function createWorkbenchCliLayer(
           ? { effortOverride: nextWindow.effortOverride }
           : {}),
       });
+      modelEffortRequester.set(input.windowId, input.callerId);
       const facts = await modelEffortFacts(input.windowId);
       const decision = modelEffort.request(input.windowId, facts, {
         ...(nextWindow.modelOverride !== undefined ? { model: nextWindow.modelOverride } : {}),
         ...(nextWindow.effortOverride !== undefined ? { effort: nextWindow.effortOverride } : {}),
       });
-      return { ok: true, message: decision.message };
+      const readOnly = facts.permission === "read-only";
+      if (decision.launch) {
+        const applied = await awaitModelEffortRun(input.windowId, readOnly);
+        if (applied !== undefined) {
+          return { ok: true, ...applied };
+        }
+      }
+      if (decision.outcome === "confirm") {
+        return { ok: true, status: "confirm", message: decision.message };
+      }
+      if (decision.outcome === "deferred") {
+        return {
+          ok: true,
+          status: "recorded",
+          message: `${decision.message}${
+            decision.reason === "no-session" && readOnly
+              ? "。它是只读窗口，可以用 ffpane_restart_window 重启让它生效"
+              : decision.reason === "no-session"
+                ? "。需要现在生效请用户在那个窗口重启"
+                : ""
+          }。`,
+        };
+      }
+      return { ok: true, status: "queued", message: decision.message };
     },
     openPanel: (panel, openerTitle, projectId) => {
       const browser = options.getWindow();
@@ -2220,6 +3102,7 @@ export async function createWorkbenchCliLayer(
     noteWindowExit,
     dispose: async () => {
       clearInterval(stallTimer);
+      clearInterval(promptTimer);
       apiErrors.dispose();
       onlineHub.dispose();
       for (const windowId of [...codexTails.keys()]) {

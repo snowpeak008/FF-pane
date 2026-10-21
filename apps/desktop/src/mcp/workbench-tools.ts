@@ -34,6 +34,7 @@ export const WORKBENCH_MCP_TOOL_NAMES = [
   "ffpane_nudge",
   "ffpane_request_decision",
   "ffpane_wait_events",
+  "ffpane_restart_window",
 ] as const;
 
 export type WorkbenchMcpToolName = (typeof WORKBENCH_MCP_TOOL_NAMES)[number];
@@ -68,6 +69,23 @@ export const WORKBENCH_READ_ONLY_TOOL_NAMES: readonly WorkbenchMcpToolName[] = [
 
 const TOOL_DEFINITIONS: readonly McpToolDefinition[] = [
   {
+    name: "ffpane_restart_window",
+    description:
+      "重启你自己开的只读窗口（比如改模型没能生效、窗口卡住）。只有管理者能用，只能重启你开的、权限是只读的窗口；在等用户批准时不重启。能续接就续接原对话并带上窗口上记的模型和思考强度；续接不了，或 fresh 为 true，就开一段新对话（原对话不续）。返回实际的模型和思考强度。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        windowId: { type: "string", description: "要重启的窗口 id。" },
+        fresh: {
+          type: "boolean",
+          description: "true = 不续接，开新对话。缺省 false：能续接就续接。",
+        },
+      },
+      required: ["windowId"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "ffpane_wait_events",
     description:
       "在线监管：挂着等跟你有关的事件，有事件立刻返回，没有就到点返回。事件包括平台状态提醒（限流、卡住、空闲没汇报、等批准、退出）、锁轮到你、投递失败，以及新消息（正文附在 messages 里，已标记已读）。处理完就再调用一次接着等，这样你会一直在线，回合不结束。返回 stop 为 true 表示用户叫停了，处理完手头的事就结束本轮，不要再调用。",
@@ -85,7 +103,7 @@ const TOOL_DEFINITIONS: readonly McpToolDefinition[] = [
   {
     name: "ffpane_nudge",
     description:
-      "叫醒被打断的窗口，让它从停下的地方接着做（例如限流、出错之后）。只能叫醒自己的后代，或挂在你名下的窗口（监管者用）。只打一句平台固定的「继续」，不带你的任何文字，所以不能用来下命令。对方正忙就排队，空闲后送达。",
+      "叫醒被打断或卡住的窗口，让它从停下的地方接着做。网络或服务端的临时故障平台会自己让它接着做，不用叫；因限流这一类暂停的窗口在等用户的指令，监管者不能叫醒。只能叫醒自己的后代，或挂在你名下的窗口（监管者用）。只打一句平台固定的「继续」，不带你的任何文字，所以不能用来下命令。对方正忙就排队，空闲后送达；状态未知（比如刚重启）也会直接按回车。当场打进去的会核对有没有真的提交，没提交补一次回车，还不行就返回 not-submitted。",
     inputSchema: {
       type: "object",
       properties: {
@@ -128,7 +146,7 @@ const TOOL_DEFINITIONS: readonly McpToolDefinition[] = [
   {
     name: "ffpane_list_windows",
     description:
-      "列出本窗口可见的窗口：自己、自己的后代、以及上级链。不含兄弟和无关窗口。每项含角色、权限、是否在运行、最近一次汇报状态。",
+      "列出本窗口可见的窗口：自己、自己的后代、以及上级链。不含兄弟和无关窗口。每项含角色、权限、是否在运行、最近一次汇报状态，以及现在用的模型和思考强度（modelSource 说明是读自屏幕、启动参数还是 CLI 用户配置；pendingModelEffort 是已记下还没生效的设置）。",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
@@ -216,6 +234,16 @@ const TOOL_DEFINITIONS: readonly McpToolDefinition[] = [
           type: "string",
           description:
             "可选。挂上观察这个窗口的监管者（你开的、角色为监管者）。监管者能读它的终端、收它汇报的抄送，不能下命令。挂了以后，它 done 和 progress 的汇报不叫醒你，blocked 和 failed 照常叫醒。",
+        },
+        model: {
+          type: "string",
+          description:
+            "可选。子窗口的模型，用启动参数传给 CLI（Claude 的 --model、Codex 的 -m），也记在窗口上，以后重启照用。不填就是 CLI 读用户自己的配置。",
+        },
+        reasoningEffort: {
+          type: "string",
+          description:
+            "可选。子窗口的思考强度：none、minimal、low、medium、high、xhigh、max。用启动参数传（Claude 的 --effort、Codex 的 -c model_reasoning_effort），不改用户的全局配置。",
         },
       },
       required: ["cli", "role", "permission", "title"],
@@ -443,7 +471,7 @@ const TOOL_DEFINITIONS: readonly McpToolDefinition[] = [
   {
     name: "ffpane_set_model_effort",
     description:
-      "改某个窗口的模型或思考强度。只填要改的那一项，另一项保持原样。改完记在那个窗口上：空闲时自动续接重启并带上新参数；窗口正忙就排队，同一窗口新的请求会覆盖还没生效的旧请求。管理者窗口和全放开窗口不会自动重启，要等用户确认。会话还不能续接时不会硬重启，留给下次手动重启。不能用来改别的管理者。模型名只能是字母、数字和 . _ : @ / -，可以带 [1m] 这类后缀，最多 128 个字符。思考强度只能是 none、minimal、low、medium、high、xhigh、max。",
+      "改某个窗口的模型或思考强度。只填要改的那一项，另一项保持原样。改完记在那个窗口上，由平台自己让它生效，不用窗口在当前标签页：还没聊过天就直接冷重启；聊过、能续接就带新参数续接；Codex 续接不了就在窗口里用 /model 只改本会话（不写用户的 config.toml）。窗口正忙就排队，空闲后自动做，生效后给你发一条「[模型]」提醒；同一窗口新的请求会覆盖还没生效的旧请求。返回的 status 是 已生效 / 仅记录 / 排队中 / 等用户确认，已生效时带上实际的模型和思考强度。管理者窗口和全放开窗口重启前要等用户确认。都做不到时只记下，下次启动生效；只读窗口可以再用 ffpane_restart_window 重启。不能用来改别的管理者。模型名只能是字母、数字和 . _ : @ / -，可以带 [1m] 这类后缀，最多 128 个字符。思考强度只能是 none、minimal、low、medium、high、xhigh、max。",
     inputSchema: {
       type: "object",
       properties: {

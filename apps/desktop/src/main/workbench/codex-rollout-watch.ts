@@ -5,6 +5,7 @@
  * 也不报 API 错误。rollout 里有：
  * - event_msg / task_started：一轮开始（消息已经提交）；
  * - event_msg / task_complete：一轮结束，API 出错时带 error（里面有状态码和错误类型）。
+ * - event_msg / turn_aborted：一轮被打断（用户按 Esc，reason 为 interrupted）。notify 不报这种结束。
  * 只读文件末尾新增的行，只取事件类型和错误类型，不取对话正文。
  */
 
@@ -13,7 +14,8 @@ import { join } from "node:path";
 
 export type CodexTurnEvent =
   | { readonly kind: "turn-started" }
-  | { readonly kind: "turn-complete"; readonly errorType?: string };
+  | { readonly kind: "turn-complete"; readonly errorType?: string }
+  | { readonly kind: "turn-aborted" };
 
 /** 一次最多读这么多新增字节，避免一轮巨大的输出卡住主进程。 */
 export const CODEX_ROLLOUT_READ_MAX_BYTES = 4 * 1024 * 1024;
@@ -69,6 +71,9 @@ export function parseCodexRolloutLine(line: string): CodexTurnEvent | undefined 
   }
   if (value.payload.type === "task_started") {
     return { kind: "turn-started" };
+  }
+  if (value.payload.type === "turn_aborted") {
+    return { kind: "turn-aborted" };
   }
   if (value.payload.type === "task_complete") {
     const error = value.payload.error;

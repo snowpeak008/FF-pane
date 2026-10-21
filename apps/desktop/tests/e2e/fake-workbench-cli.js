@@ -87,6 +87,38 @@ function fireStop(spec) {
   child.unref();
 }
 
+/** 触发一个钩子事件，stdin 给 JSON。 */
+function fireHook(spec, event, stdin) {
+  const script = Array.isArray(spec.args) ? spec.args[0] : undefined;
+  if (typeof script !== "string") {
+    return;
+  }
+  const hook = join(dirname(script), "workbench-hook.mjs");
+  const child = spawn(process.execPath, [hook, event], {
+    env: process.env,
+    windowsHide: true,
+    stdio: ["pipe", "ignore", "ignore"],
+  });
+  child.stdin.end(stdin);
+  child.unref();
+}
+
+/** 模拟 Claude 的 StopFailure：这一轮因 API 错误结束（只带错误类型）。 */
+function fireStopFailure(spec, errorType) {
+  const script = Array.isArray(spec.args) ? spec.args[0] : undefined;
+  if (typeof script !== "string") {
+    return;
+  }
+  const hook = join(dirname(script), "workbench-hook.mjs");
+  const child = spawn(process.execPath, [hook, "StopFailure"], {
+    env: process.env,
+    windowsHide: true,
+    stdio: ["pipe", "ignore", "ignore"],
+  });
+  child.stdin.end(JSON.stringify({ error: errorType }));
+  child.unref();
+}
+
 function keepAlive() {
   setInterval(() => undefined, 60_000);
 }
@@ -239,6 +271,11 @@ async function main() {
       keepAlive();
       return;
     }
+    // 给测试留时间先把子窗口所在的标签页切走。
+    await new Promise((resolve) =>
+      setTimeout(resolve, Number(process.env.FFPANE_WB_EFFORT_DELAY_MS ?? "0")),
+    );
+    process.stdout.write("FFPANE_EFFORT_SENDING=1\n");
     let changed = await tool("ffpane_set_model_effort", {
       windowId: child.windowId,
       reasoningEffort: "high",
@@ -257,6 +294,122 @@ async function main() {
   if (script === "effort-worker") {
     process.stdout.write("FFPANE_CHILD_MARKER=1\n");
     fireStop(spec);
+    keepAlive();
+    return;
+  }
+  if (script === "team") {
+    // 管理者限流、监管者等一次就不再等（掉线），之后执行汇报 done：汇报应记进管理者的待处理。
+    if (me.parent === null || me.parent === undefined) {
+      const open = async (args) => {
+        let opened = await tool("ffpane_open_window", args);
+        for (let attempt = 0; attempt < 20 && opened.isError; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 400));
+          opened = await tool("ffpane_open_window", args);
+        }
+        return opened;
+      };
+      const sup = await open({
+        cli: "claude",
+        role: "supervisor",
+        permission: "read-only",
+        title: "监管",
+      });
+      process.stdout.write(`FFPANE_TEAM_SUP=${sup.text}\n`);
+      const worker = await open({
+        cli: "claude",
+        role: "worker",
+        permission: "edit",
+        title: "执行",
+      });
+      process.stdout.write(`FFPANE_TEAM_WORKER=${worker.text}\n`);
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      // 把打进来的每一行原样报出来，测试据此看平台往管理者终端里打了什么。
+      let typed = "";
+      process.stdin.on("data", (chunk) => {
+        // 去掉括号粘贴的起止标记（ESC[200~ / ESC[201~），不用正则免得带控制字符。
+        typed += chunk.toString("utf8").split("\u001b[200~").join("").split("\u001b[201~").join("");
+        const parts = typed.split("\r");
+        typed = parts.pop() ?? "";
+        for (const part of parts) {
+          if (part.trim() !== "") {
+            process.stdout.write(`FFPANE_TEAM_TYPED=${part.trim()}\n`);
+          }
+        }
+      });
+      process.stdin.resume();
+      fireStopFailure(spec, "rate_limit");
+      process.stdout.write("FFPANE_TEAM_MANAGER_LIMITED=1\n");
+      // 模拟用户过一会儿叫醒管理者：新的一轮开始，然后正常结束。
+      await new Promise((resolve) => setTimeout(resolve, 50000));
+      fireHook(spec, "UserPromptSubmit", JSON.stringify({ prompt: "继续" }));
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      fireStop(spec);
+      process.stdout.write("FFPANE_TEAM_MANAGER_WOKE=1\n");
+      keepAlive();
+      return;
+    }
+    if (me.role === "supervisor") {
+      const waited = await tool("ffpane_wait_events", { timeoutSec: 10 });
+      process.stdout.write(`FFPANE_TEAM_SUP_WAITED=${waited.isError ? "error" : "ok"}\n`);
+      // 不再等：模拟掉线。
+      keepAlive();
+      return;
+    }
+    process.stdout.write("FFPANE_CHILD_MARKER=1\n");
+    await new Promise((resolve) => setTimeout(resolve, 20000));
+    const report = await tool("ffpane_report", { status: "done", summary: "执行做完了" });
+    process.stdout.write(`FFPANE_TEAM_REPORT=${report.text}\n`);
+    keepAlive();
+    return;
+  }
+  if (script === "watch") {
+    // 监管者挂接：管理者先开监管者再开执行；监管者在线等事件；执行等界面存过布局后再汇报。
+    if (me.parent === null || me.parent === undefined) {
+      const open = async (args) => {
+        let opened = await tool("ffpane_open_window", args);
+        for (let attempt = 0; attempt < 20 && opened.isError; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 400));
+          opened = await tool("ffpane_open_window", args);
+        }
+        return opened;
+      };
+      const sup = await open({
+        cli: "claude",
+        role: "supervisor",
+        permission: "read-only",
+        title: "监管",
+      });
+      process.stdout.write(`FFPANE_WATCH_SUP=${sup.text}\n`);
+      const worker = await open({
+        cli: "claude",
+        role: "worker",
+        permission: "edit",
+        title: "执行",
+      });
+      process.stdout.write(`FFPANE_WATCH_WORKER=${worker.text}\n`);
+      fireStop(spec);
+      keepAlive();
+      return;
+    }
+    if (me.role === "supervisor") {
+      process.stdout.write("FFPANE_WATCH_ONLINE=1\n");
+      for (let round = 0; round < 30; round += 1) {
+        const waited = await tool("ffpane_wait_events", { timeoutSec: 10 });
+        const outcome = JSON.parse(waited.text);
+        if (outcome.events.length > 0 || typeof outcome.messages === "string") {
+          process.stdout.write(
+            `FFPANE_WATCH_GOT=${JSON.stringify({ events: outcome.events, messages: outcome.messages ?? "" }).slice(0, 300)}\n`,
+          );
+        }
+      }
+      keepAlive();
+      return;
+    }
+    process.stdout.write("FFPANE_CHILD_MARKER=1\n");
+    // 留时间给界面收下子窗口并把布局存回去，再汇报。
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+    const report = await tool("ffpane_report", { status: "done", summary: "执行做完了" });
+    process.stdout.write(`FFPANE_WATCH_REPORT=${report.text}\n`);
     keepAlive();
     return;
   }

@@ -70,7 +70,7 @@ import {
   releaseWindowHooks,
   resolveWorkbenchHookScriptPath,
 } from "./hook-launch";
-import { CODEX_SUBMIT_DELAY_MS, type IdleDeliverQueue } from "./idle-deliver";
+import { CLEAR_INPUT_KEYS, CODEX_SUBMIT_DELAY_MS, type IdleDeliverQueue } from "./idle-deliver";
 import { createWindowLaunchGate } from "./launch-gate";
 import { buildWorkbenchMcpSpec, WORKBENCH_MCP_SERVER_NAME } from "./mcp-server-spec";
 import {
@@ -726,6 +726,14 @@ async function launchCliWindowBody(
         kind,
         configId: route.configId,
         ...(nativeSessionId !== undefined ? { nativeSessionId } : {}),
+        // 这次进程实际带上的模型和强度。没带就是 CLI 自己读用户配置。
+        ...(model !== undefined ? { launchModel: model } : {}),
+        ...(effort !== undefined ? { launchEffort: effort } : {}),
+        // 续接来的或带着初始提示开的：算聊过天，改模型时不能冷重启。
+        ...(input.resume === true ? { resumed: true } : {}),
+        ...(input.initialPrompt !== undefined && input.initialPrompt.trim() !== ""
+          ? { initialPrompt: true }
+          : {}),
       },
     });
   } catch (error) {
@@ -753,7 +761,13 @@ async function launchCliWindowBody(
   deps.idleQueue?.attach(terminal.id, {
     windowId: input.windowId,
     initialPrompt: input.initialPrompt !== undefined && input.initialPrompt.trim() !== "",
-    ...(runtime === "codex" ? { submitDelayMs: CODEX_SUBMIT_DELAY_MS, verifySubmit: true } : {}),
+    // 回车后都核对有没有真的提交：没有回合信号来源的就看终端有没有开工输出。
+    verifySubmit: true,
+    // Claude：长串中文会被当成粘贴，紧跟的回车变成换行（真机复现）。用括号粘贴标出起止。
+    ...(runtime === "claude-code" ? { bracketedPaste: true, clearInput: CLEAR_INPUT_KEYS } : {}),
+    ...(runtime === "codex"
+      ? { submitDelayMs: CODEX_SUBMIT_DELAY_MS, clearInput: CLEAR_INPUT_KEYS }
+      : {}),
     // Grok 没登录，没法真机核对回车时机，按 Codex 的间隔写回车，多等不到一秒没有坏处。
     ...(runtime === "grok" ? { submitDelayMs: CODEX_SUBMIT_DELAY_MS } : {}),
     // 有 UserPromptSubmit hook 的窗口有可靠的「一轮开始」信号，提交与否只认它。

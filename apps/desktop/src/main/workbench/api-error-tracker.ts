@@ -1,11 +1,13 @@
 /**
- * 窗口因 API 错误停下的记录和后续提醒。
+ * 窗口因 API 错误停下的记录和后续处理（用户 2026-10-22 定的规则）。
  *
+ * - 限流这一类（429、额度、计费、认证、模型不存在……）：开发暂停，等用户的指令。
+ *   不倒计时、不提醒「可以叫醒」，监管者也不能叫醒它；窗口保留，之后可以续接。
+ * - 网络或服务端的临时故障（服务端出错、过载、说不清的）：不用谁思考，平台隔一会儿自己让它接着做。
+ *   连着失败 3 次就不再自己接着做，按暂停处理。
  * - 一轮因错误结束（Claude 的 StopFailure、Codex rollout 里带 error 的 task_complete）时记下类型和时间，
- *   马上告诉监管者或上级。同一轮的重复信号（notify 和 rollout 各报一次）只算一次，也不改原来的时间。
- * - 等一会儿就可能好的错误（限流、过载、服务端出错、说不清的），停下后第 1、3、10 分钟再提醒「可以叫醒了」，
- *   由监管者用 ffpane_nudge 叫醒。窗口又开始干活、退出，或出了新的错误，旧的提醒就作废。
- * - 等也不会好的错误（认证、计费、模型不存在……）只报一次，交给用户处理。
+ *   告诉监管者或上级。同一轮的重复信号（notify 和 rollout 各报一次）只算一次，也不改原来的时间。
+ * - 又开始一轮（用户接手或被叫醒）就不算暂停；一轮正常结束就清掉记录。
  */
 
 export const API_ERROR_TEXT: Readonly<Record<string, string>> = {
@@ -22,15 +24,17 @@ export const API_ERROR_TEXT: Readonly<Record<string, string>> = {
   cloud_credential_error: "云凭据错误",
 };
 
-export const RETRYABLE_API_ERRORS: ReadonlySet<string> = new Set([
-  "rate_limit",
+/** 网络或服务端的临时故障：平台自己让它接着做。其余一律暂停等用户。 */
+export const TRANSIENT_API_ERRORS: ReadonlySet<string> = new Set([
   "overloaded",
   "server_error",
   "unknown",
 ]);
 
-/** 停下后隔多久提醒一次「可以叫醒了」。 */
-export const RETRY_NUDGE_AFTER_MS = [60_000, 180_000, 600_000] as const;
+/** 临时故障后隔多久让它接着做。 */
+export const TRANSIENT_RETRY_AFTER_MS = 30_000;
+/** 临时故障连着这么多次就不再自己接着做。 */
+export const TRANSIENT_RETRY_MAX = 3;
 /** 两个信号相隔这么近，算同一轮。 */
 export const API_ERROR_SAME_TURN_MS = 3_000;
 
@@ -42,15 +46,19 @@ export interface ApiErrorRecord {
   readonly type: string;
   readonly label: string;
   readonly at: number;
+  /** 开发暂停，等用户的指令（限流这一类，或临时故障连着失败太多次）。 */
+  readonly paused: boolean;
 }
 
 export interface ApiErrorTracker {
   /** 一轮因 API 错误结束。 */
   note(windowId: string, type: string): void;
   get(windowId: string): ApiErrorRecord | undefined;
-  /** 最近 withinMs 内因可重试的错误停下（多半同一账号被限流），叫不醒别人。 */
+  /** 因错误停下、在等用户的指令（又开始一轮之后就不算）。 */
+  isPaused(windowId: string): boolean;
+  /** 最近 withinMs 内因错误停下、还没又开始一轮。 */
   isRecentlyStalled(windowId: string, withinMs: number): boolean;
-  /** 又开始一轮了（被叫醒或用户接手）：不再提醒「可以叫醒」，记录留到这一轮正常结束。 */
+  /** 又开始一轮了（被叫醒或用户接手）：不再算暂停，记录留到这一轮正常结束。 */
   turnStarted(windowId: string): void;
   /** 一轮正常结束。紧跟在出错之后的（同一轮的另一个信号）不算，返回 false。 */
   turnCompleted(windowId: string): boolean;
@@ -59,19 +67,28 @@ export interface ApiErrorTracker {
   dispose(): void;
 }
 
+interface Record_ {
+  type: string;
+  at: number;
+  paused: boolean;
+  resumed: boolean;
+}
+
 export function createApiErrorTracker(deps: {
   readonly now: () => number;
   readonly schedule: (delayMs: number, fn: () => void) => () => void;
   readonly isAlive: (windowId: string) => boolean;
   readonly notify: (windowId: string, text: string) => void;
+  /** 临时故障：平台让它接着做（只发固定的「继续」）。 */
+  readonly autoContinue?: (windowId: string, label: string) => void;
 }): ApiErrorTracker {
-  const records = new Map<string, { type: string; at: number }>();
-  const pending = new Map<string, (() => void)[]>();
+  const records = new Map<string, Record_>();
+  /** 每个窗口连着几次临时故障。一轮正常结束清零。 */
+  const transientStreak = new Map<string, number>();
+  const pending = new Map<string, () => void>();
 
-  const cancelFollowUps = (windowId: string): void => {
-    for (const cancel of pending.get(windowId) ?? []) {
-      cancel();
-    }
+  const cancelFollowUp = (windowId: string): void => {
+    pending.get(windowId)?.();
     pending.delete(windowId);
   };
 
@@ -82,50 +99,67 @@ export function createApiErrorTracker(deps: {
       if (previous?.type === type && now - previous.at < API_ERROR_SAME_TURN_MS) {
         return;
       }
-      records.set(windowId, { type, at: now });
-      cancelFollowUps(windowId);
+      cancelFollowUp(windowId);
       const label = apiErrorLabel(type);
-      if (!RETRYABLE_API_ERRORS.has(type)) {
+      const transient = TRANSIENT_API_ERRORS.has(type);
+      const streak = transient ? (transientStreak.get(windowId) ?? 0) + 1 : 0;
+      if (transient) {
+        transientStreak.set(windowId, streak);
+      }
+      const paused = !transient || streak > TRANSIENT_RETRY_MAX || deps.autoContinue === undefined;
+      records.set(windowId, { type, at: now, paused, resumed: false });
+      if (paused) {
         deps.notify(
           windowId,
-          `这一轮因${label}中断，已经停下，它持有的锁还在。这类错误等也不会好，要用户处理（例如重新登录、改配置），写进近况报给管理者。`,
+          transient
+            ? `连着 ${streak} 次因${label}中断，平台不再自动让它接着做。开发暂停，等用户的指令；它的窗口和锁都保留，之后可以续接。不要叫醒它。`
+            : `这一轮因${label}停下。开发暂停，等用户的指令；它的窗口和锁都保留，之后可以续接。不要叫醒它。`,
         );
         return;
       }
-      deps.notify(
-        windowId,
-        `这一轮因${label}中断，已经停下，它持有的锁还在。过一会儿平台会提示「可以叫醒」，到时用 ffpane_nudge 叫醒它。`,
-      );
+      if (streak === 1) {
+        deps.notify(
+          windowId,
+          `这一轮因${label}中断（网络或服务端的临时故障），平台会在 ${Math.round(TRANSIENT_RETRY_AFTER_MS / 1000)} 秒后自己让它接着做，不用处理。`,
+        );
+      }
       pending.set(
         windowId,
-        RETRY_NUDGE_AFTER_MS.map((delay) =>
-          deps.schedule(delay, () => {
-            const still = records.get(windowId);
-            if (still === undefined || still.at !== now || !deps.isAlive(windowId)) {
-              return;
-            }
-            deps.notify(
-              windowId,
-              `因${label}停下已经 ${Math.round(delay / 60_000)} 分钟，可以叫醒了：用 ffpane_nudge 让它接着做。叫醒后还被限流，平台会再报。`,
-            );
-          }),
-        ),
+        deps.schedule(TRANSIENT_RETRY_AFTER_MS, () => {
+          pending.delete(windowId);
+          const still = records.get(windowId);
+          if (still === undefined || still.at !== now || still.resumed || !deps.isAlive(windowId)) {
+            return;
+          }
+          deps.autoContinue?.(windowId, label);
+        }),
       );
     },
     get(windowId) {
       const record = records.get(windowId);
-      return record === undefined ? undefined : { ...record, label: apiErrorLabel(record.type) };
+      return record === undefined
+        ? undefined
+        : {
+            type: record.type,
+            label: apiErrorLabel(record.type),
+            at: record.at,
+            paused: record.paused && !record.resumed,
+          };
+    },
+    isPaused(windowId) {
+      const record = records.get(windowId);
+      return record?.paused === true && !record.resumed;
     },
     isRecentlyStalled(windowId, withinMs) {
       const record = records.get(windowId);
-      return (
-        record !== undefined &&
-        RETRYABLE_API_ERRORS.has(record.type) &&
-        deps.now() - record.at < withinMs
-      );
+      return record !== undefined && !record.resumed && deps.now() - record.at < withinMs;
     },
     turnStarted(windowId) {
-      cancelFollowUps(windowId);
+      cancelFollowUp(windowId);
+      const record = records.get(windowId);
+      if (record !== undefined) {
+        record.resumed = true;
+      }
     },
     turnCompleted(windowId) {
       const record = records.get(windowId);
@@ -133,18 +167,21 @@ export function createApiErrorTracker(deps: {
         return false;
       }
       records.delete(windowId);
-      cancelFollowUps(windowId);
+      transientStreak.delete(windowId);
+      cancelFollowUp(windowId);
       return true;
     },
     forget(windowId) {
       records.delete(windowId);
-      cancelFollowUps(windowId);
+      transientStreak.delete(windowId);
+      cancelFollowUp(windowId);
     },
     dispose() {
       for (const windowId of [...pending.keys()]) {
-        cancelFollowUps(windowId);
+        cancelFollowUp(windowId);
       }
       records.clear();
+      transientStreak.clear();
     },
   };
 }

@@ -1,18 +1,21 @@
 /**
- * API 错误记录与「可以叫醒」的后续提醒。
+ * API 错误记录（2026-10-22 规则）：限流这一类暂停等用户的指令，不倒计时；
+ * 网络或服务端的临时故障由平台自己让它接着做，连着 3 次以后按暂停处理。
  */
 
 import { describe, expect, it } from "vitest";
 import {
   API_ERROR_SAME_TURN_MS,
   createApiErrorTracker,
-  RETRY_NUDGE_AFTER_MS,
+  TRANSIENT_RETRY_AFTER_MS,
+  TRANSIENT_RETRY_MAX,
 } from "../src/main/workbench/api-error-tracker";
 
 function harness() {
   let now = 1_000_000;
   const alive = new Set(["w"]);
   const notices: { at: number; windowId: string; text: string }[] = [];
+  const continued: { at: number; windowId: string; label: string }[] = [];
   const timers: { at: number; fn: () => void; cancelled: boolean }[] = [];
   const tracker = createApiErrorTracker({
     now: () => now,
@@ -26,6 +29,9 @@ function harness() {
     isAlive: (id) => alive.has(id),
     notify: (windowId, text) => {
       notices.push({ at: now, windowId, text });
+    },
+    autoContinue: (windowId, label) => {
+      continued.push({ at: now, windowId, label });
     },
   });
   const advance = (ms: number): void => {
@@ -43,74 +49,88 @@ function harness() {
     }
     now = target;
   };
-  return { tracker, notices, advance, alive };
+  return { tracker, notices, continued, advance, alive };
 }
 
 describe("API 错误记录", () => {
-  it("限流：马上报一次，之后第 1、3、10 分钟提示可以叫醒", () => {
+  it("限流：报一次「开发暂停，等用户的指令」，之后不倒计时、不自动接着做", () => {
     const h = harness();
     h.tracker.note("w", "rate_limit");
     expect(h.notices).toHaveLength(1);
     expect(h.notices[0]?.text).toContain("账号限流（429）");
-    h.advance(RETRY_NUDGE_AFTER_MS[2]);
-    expect(h.notices.map((n) => n.text.includes("可以叫醒了"))).toEqual([false, true, true, true]);
-    expect(h.notices[1]?.text).toContain("1 分钟");
-    expect(h.notices[3]?.text).toContain("10 分钟");
-  });
-
-  it("同一轮的重复信号只算一次，且不让后续提醒失效（回归）", () => {
-    const h = harness();
-    h.tracker.note("w", "rate_limit");
-    h.advance(500);
-    h.tracker.note("w", "rate_limit");
+    expect(h.notices[0]?.text).toContain("等用户的指令");
+    expect(h.tracker.isPaused("w")).toBe(true);
+    h.advance(60 * 60_000);
     expect(h.notices).toHaveLength(1);
-    h.advance(RETRY_NUDGE_AFTER_MS[0]);
-    expect(h.notices.filter((n) => n.text.includes("可以叫醒了"))).toHaveLength(1);
+    expect(h.continued).toEqual([]);
   });
 
-  it("被叫醒又开始干活：不再提示；又被限流是新的一次，照常报", () => {
+  it("用户叫醒（又开始一轮）后不算暂停；正常结束清掉记录", () => {
     const h = harness();
     h.tracker.note("w", "rate_limit");
-    h.advance(RETRY_NUDGE_AFTER_MS[0]);
-    expect(h.notices).toHaveLength(2);
     h.tracker.turnStarted("w");
-    h.advance(RETRY_NUDGE_AFTER_MS[2]);
-    expect(h.notices).toHaveLength(2);
-    h.tracker.note("w", "rate_limit");
-    expect(h.notices).toHaveLength(3);
-    expect(h.notices[2]?.text).toContain("中断");
-  });
-
-  it("认证这类错误只报一次，交给用户，不提示叫醒", () => {
-    const h = harness();
-    h.tracker.note("w", "authentication_failed");
-    h.advance(RETRY_NUDGE_AFTER_MS[2]);
-    expect(h.notices).toHaveLength(1);
-    expect(h.notices[0]?.text).toContain("要用户处理");
-  });
-
-  it("正常结束紧跟在出错之后不清记录；隔久了的正常结束才清", () => {
-    const h = harness();
-    h.tracker.note("w", "rate_limit");
-    h.advance(API_ERROR_SAME_TURN_MS - 1);
-    expect(h.tracker.turnCompleted("w")).toBe(false);
-    expect(h.tracker.get("w")?.type).toBe("rate_limit");
-    h.advance(RETRY_NUDGE_AFTER_MS[0]);
+    expect(h.tracker.isPaused("w")).toBe(false);
+    h.advance(API_ERROR_SAME_TURN_MS + 1);
     expect(h.tracker.turnCompleted("w")).toBe(true);
     expect(h.tracker.get("w")).toBeUndefined();
-    h.advance(RETRY_NUDGE_AFTER_MS[2]);
-    expect(h.notices.filter((n) => n.text.includes("可以叫醒了"))).toHaveLength(1);
   });
 
-  it("窗口退出后不再提示；刚因可重试错误停下的算叫不醒别人", () => {
+  it("临时故障：报一次，30 秒后平台自己让它接着做，不算暂停", () => {
+    const h = harness();
+    h.tracker.note("w", "server_error");
+    expect(h.tracker.isPaused("w")).toBe(false);
+    expect(h.notices[0]?.text).toContain("临时故障");
+    h.advance(TRANSIENT_RETRY_AFTER_MS);
+    expect(h.continued).toEqual([
+      { at: 1_000_000 + TRANSIENT_RETRY_AFTER_MS, windowId: "w", label: "服务端错误" },
+    ]);
+  });
+
+  it("临时故障连着超过 3 次：不再自己接着做，按暂停处理", () => {
+    const h = harness();
+    for (let round = 0; round < TRANSIENT_RETRY_MAX; round += 1) {
+      h.tracker.note("w", "overloaded");
+      h.advance(TRANSIENT_RETRY_AFTER_MS);
+      h.tracker.turnStarted("w");
+      h.advance(API_ERROR_SAME_TURN_MS + 1);
+    }
+    expect(h.continued).toHaveLength(TRANSIENT_RETRY_MAX);
+    h.tracker.note("w", "overloaded");
+    expect(h.tracker.isPaused("w")).toBe(true);
+    expect(h.notices.at(-1)?.text).toContain("不再自动让它接着做");
+    h.advance(TRANSIENT_RETRY_AFTER_MS);
+    expect(h.continued).toHaveLength(TRANSIENT_RETRY_MAX);
+  });
+
+  it("一轮正常结束后，临时故障的次数重新算", () => {
     const h = harness();
     h.tracker.note("w", "overloaded");
-    expect(h.tracker.isRecentlyStalled("w", 60_000)).toBe(true);
-    h.alive.delete("w");
-    h.advance(RETRY_NUDGE_AFTER_MS[2]);
+    h.advance(TRANSIENT_RETRY_AFTER_MS + API_ERROR_SAME_TURN_MS + 1);
+    expect(h.tracker.turnCompleted("w")).toBe(true);
+    h.tracker.note("w", "overloaded");
+    // 又是第一次：会报「临时故障」并安排接着做。
+    expect(h.notices.at(-1)?.text).toContain("临时故障");
+    expect(h.tracker.isPaused("w")).toBe(false);
+  });
+
+  it("等的时候窗口又开始干活或已经退出：不再自己接着做", () => {
+    const h = harness();
+    h.tracker.note("w", "server_error");
+    h.tracker.turnStarted("w");
+    h.advance(TRANSIENT_RETRY_AFTER_MS);
+    expect(h.continued).toEqual([]);
+    const g = harness();
+    g.tracker.note("w", "server_error");
+    g.alive.delete("w");
+    g.advance(TRANSIENT_RETRY_AFTER_MS);
+    expect(g.continued).toEqual([]);
+  });
+
+  it("同一轮的两个出错信号只算一次", () => {
+    const h = harness();
+    h.tracker.note("w", "rate_limit");
+    h.advance(1000);
+    h.tracker.note("w", "rate_limit");
     expect(h.notices).toHaveLength(1);
-    expect(h.tracker.isRecentlyStalled("w", 60_000)).toBe(false);
-    h.tracker.note("x", "billing_error");
-    expect(h.tracker.isRecentlyStalled("x", 60_000)).toBe(false);
   });
 });

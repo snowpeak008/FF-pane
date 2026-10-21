@@ -1,6 +1,11 @@
 /**
  * 管理者改窗口的模型 / 思考强度（T10.12b，§9.9）。
- * 覆盖记在窗口布局上。空闲时自动续接；忙则排队；不往终端写命令。
+ * 覆盖记在窗口布局上，由主进程自己重启生效，不靠窗口在不在当前标签页：
+ * - 没聊过天：直接冷重启，带上新参数；
+ * - 聊过、有对话编号：空闲时带新参数续接；
+ * - 聊过、没有编号（Codex 第一轮没做完就被打断）：空闲时在窗口里用 /model 只改这个会话；
+ * - 都不行：只记下，下次启动生效。
+ * 忙或在等批准就排队，空闲后自动做。
  */
 
 import { isDescendantOf, type WorkbenchAuthNode } from "@ff-pane/core";
@@ -13,9 +18,9 @@ import {
 } from "@ff-pane/shared";
 import type { DeliverPhase } from "./idle-deliver";
 
-export const MODEL_EFFORT_AUTO_MESSAGE = "已排队，空闲时自动续接";
-export const MODEL_EFFORT_CONFIRM_MESSAGE = "等用户确认";
-export const MODEL_EFFORT_DEFERRED_MESSAGE = "无法续接，待下次重启";
+export const MODEL_EFFORT_AUTO_MESSAGE = "排队中：窗口在忙，空闲后自动重启生效";
+export const MODEL_EFFORT_CONFIRM_MESSAGE = "等用户确认：管理者或 yolo 窗口重启前要用户点确认";
+export const MODEL_EFFORT_DEFERRED_MESSAGE = "仅记录：现在没法让它生效，下次启动时生效";
 
 const DESCENDANT_ROLES: readonly WorkbenchRole[] = [
   "planner",
@@ -36,6 +41,23 @@ export interface ModelEffortFacts {
   readonly phase: DeliverPhase;
   readonly canResume: boolean;
   readonly needsConfirm: boolean;
+  /** 聊过天（这个进程跑过一轮、带着初始提示启动，或是续接来的）。缺省当聊过。 */
+  readonly hadConversation?: boolean;
+  /** 续接不了时能在窗口里切换（Codex 的 /model）。 */
+  readonly canSwitchInWindow?: boolean;
+}
+
+/** 这次怎么让新设置生效。 */
+export type ModelEffortApplyMode = "cold" | "resume" | "in-window";
+
+export function modelEffortApplyMode(facts: ModelEffortFacts): ModelEffortApplyMode | undefined {
+  if (facts.hadConversation === false) {
+    return "cold";
+  }
+  if (facts.canResume) {
+    return "resume";
+  }
+  return facts.canSwitchInWindow === true ? "in-window" : undefined;
 }
 
 export interface ModelEffortDecision {
@@ -132,7 +154,8 @@ export function decideModelEffort(facts: ModelEffortFacts): ModelEffortDecision 
       launch: false,
     };
   }
-  if (!facts.canResume) {
+  const mode = modelEffortApplyMode(facts);
+  if (mode === undefined) {
     return {
       outcome: "deferred",
       message: MODEL_EFFORT_DEFERRED_MESSAGE,
@@ -140,7 +163,9 @@ export function decideModelEffort(facts: ModelEffortFacts): ModelEffortDecision 
       launch: false,
     };
   }
-  if (facts.phase !== "idle") {
+  // 没聊过天的窗口状态未知也不怕：冷重启丢不了什么。
+  const ready = facts.phase === "idle" || (facts.phase === "unknown" && mode === "cold");
+  if (!ready) {
     return {
       outcome: "queued",
       message: MODEL_EFFORT_AUTO_MESSAGE,
@@ -148,7 +173,8 @@ export function decideModelEffort(facts: ModelEffortFacts): ModelEffortDecision 
       launch: false,
     };
   }
-  if (facts.needsConfirm) {
+  // 在窗口里切换不重启进程，不用确认。
+  if (facts.needsConfirm && mode !== "in-window") {
     return {
       outcome: "confirm",
       message: MODEL_EFFORT_CONFIRM_MESSAGE,
@@ -250,6 +276,8 @@ export interface ModelEffortController {
    */
   noteLaunchRead(windowId: string, generationBeforeRead: number): ModelEffortSnapshot | undefined;
   onPossibleIdle(windowId: string, facts: ModelEffortFacts): void;
+  /** 用户在确认框里点了确认：开始重启。点了取消就留着等再次确认。 */
+  confirm(windowId: string, accepted: boolean): void;
   drop(windowId: string): void;
   noteTerminalExit(windowId: string): void;
   settled(windowId: string, ok: boolean, error?: string): void;
@@ -369,6 +397,16 @@ export function createModelEffortController(deps: {
         slot.reason = "confirm";
         emit(windowId, "confirm", "confirm");
       }
+    },
+    confirm(windowId, accepted) {
+      const slot = slots.get(windowId);
+      if (slot === undefined || slot.status !== "confirm" || !accepted) {
+        return;
+      }
+      slot.status = "resuming";
+      slot.reason = "busy";
+      slot.pendingFollowUp = false;
+      emit(windowId, "resume", "busy");
     },
     drop(windowId) {
       if (!slots.has(windowId)) {

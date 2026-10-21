@@ -545,13 +545,16 @@ export async function createDataHandlers(
       const authRegistry = options.authRegistry;
       const previous = (await workbenchLayouts.readAll())[request.layout.projectId];
       const windows = { ...request.layout.windows };
-      if (previous !== undefined) {
-        for (const [id, window] of Object.entries(windows)) {
-          const prior = previous.windows[id];
-          if (prior !== undefined) {
-            windows[id] = keepModelEffortOverrides(window, prior);
-          }
-        }
+      for (const [id, window] of Object.entries(windows)) {
+        const prior = previous?.windows[id];
+        const kept = prior !== undefined ? keepModelEffortOverrides(window, prior) : window;
+        // 监管者挂接只认主进程写下的那份，界面传来的不算（防伪造，也防旧副本把它冲掉）。
+        const { watcherWindowId: _fromRenderer, ...rest } = kept;
+        void _fromRenderer;
+        windows[id] =
+          prior?.watcherWindowId !== undefined
+            ? { ...rest, watcherWindowId: prior.watcherWindowId }
+            : rest;
       }
       const incoming = { ...request.layout, windows };
       const layout = authRegistry !== undefined ? authRegistry.syncLayout(incoming) : incoming;
