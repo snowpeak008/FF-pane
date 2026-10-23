@@ -19,6 +19,7 @@ import {
 } from "@ff-pane/adapters";
 import { FF_PANE_WB_PIPE_ENV, FF_PANE_WINDOW_TOKEN_ENV } from "@ff-pane/core";
 import { TerminalModeState } from "./mode-state";
+import { type ReplyFilterResult, TerminalReplyGate } from "./reply-gate";
 import { ByteRingBuffer } from "./ring-buffer";
 import {
   assertValidCwd,
@@ -55,6 +56,8 @@ interface Session {
   readonly buffer: ByteRingBuffer;
   /** 被挤出回放缓冲的输出里设过的终端模式，回放时补在前面。 */
   readonly evictedModes: TerminalModeState;
+  /** 界面 xterm 写回来的终端应答只放行刚问过的。 */
+  readonly replyGate: TerminalReplyGate;
   readonly metadata: Readonly<Record<string, unknown>> | undefined;
   /** 进程号到手后才放进 Job，所以可能晚于创建。 */
   job: ProcessJob | undefined;
@@ -163,6 +166,7 @@ export class PtyManager {
         evictedModes.feed(dropped.toString("utf8"));
       }),
       evictedModes,
+      replyGate: new TerminalReplyGate(this.now),
       metadata: options.metadata,
       job: undefined,
       cols,
@@ -192,6 +196,7 @@ export class PtyManager {
         return;
       }
       session.buffer.append(data);
+      session.replyGate.noteOutput(data);
       session.lastOutputAt = this.now();
       session.pendingOutput += data;
       this.scheduleFlush();
@@ -242,6 +247,19 @@ export class PtyManager {
     }
     session.lastInputAt = this.now();
     session.handle.write(data);
+  }
+
+  /**
+   * 界面 xterm 写来的内容：过期或重复的终端应答丢掉，其余照写。
+   * 全被丢掉时不写，也不算一次输入。
+   */
+  writeFromView(id: string, data: string): ReplyFilterResult {
+    const session = this.requireSession(id);
+    const filtered = session.replyGate.filterInput(data);
+    if (filtered.data.length > 0) {
+      this.write(id, filtered.data);
+    }
+    return filtered;
   }
 
   resize(id: string, cols: number, rows: number): void {

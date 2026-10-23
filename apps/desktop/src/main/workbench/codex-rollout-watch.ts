@@ -101,19 +101,18 @@ function pad(value: number): string {
   return String(value).padStart(2, "0");
 }
 
-/**
- * 只算这个会话自己的文件：sessions/YYYY/MM/DD/rollout-YYYY-MM-DDTHH-mm-ss-<id>.jsonl（本地时间）。
- * 用编号里的时间拼出候选名逐个查是否存在，不列目录，不碰别的会话。
- */
-export function codexRolloutPathFor(
-  sessionsDir: string,
-  threadId: string,
-  exists: (path: string) => boolean = existsSync,
-): string | undefined {
+/** 按编号里的时间拼出 rollout 文件名可能带的本地时间（前后各差几秒）。 */
+function rolloutStamps(threadId: string): readonly {
+  readonly y: string;
+  readonly m: string;
+  readonly d: string;
+  readonly name: string;
+}[] {
   const createdMs = codexThreadIdTimeMs(threadId);
   if (createdMs === undefined) {
-    return undefined;
+    return [];
   }
+  const out: { y: string; m: string; d: string; name: string }[] = [];
   for (
     let offset = -ROLLOUT_NAME_SECONDS_BEFORE;
     offset <= ROLLOUT_NAME_SECONDS_AFTER;
@@ -124,7 +123,40 @@ export function codexRolloutPathFor(
     const m = pad(at.getMonth() + 1);
     const d = pad(at.getDate());
     const stamp = `${y}-${m}-${d}T${pad(at.getHours())}-${pad(at.getMinutes())}-${pad(at.getSeconds())}`;
-    const candidate = join(sessionsDir, y, m, d, `rollout-${stamp}-${threadId}.jsonl`);
+    out.push({ y, m, d, name: `rollout-${stamp}-${threadId}.jsonl` });
+  }
+  return out;
+}
+
+/**
+ * 只算这个会话自己的文件：sessions/YYYY/MM/DD/rollout-YYYY-MM-DDTHH-mm-ss-<id>.jsonl（本地时间）。
+ * 用编号里的时间拼出候选名逐个查是否存在，不列目录，不碰别的会话。
+ */
+export function codexRolloutPathFor(
+  sessionsDir: string,
+  threadId: string,
+  exists: (path: string) => boolean = existsSync,
+): string | undefined {
+  for (const { y, m, d, name } of rolloutStamps(threadId)) {
+    const candidate = join(sessionsDir, y, m, d, name);
+    if (exists(candidate)) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * 已归档的同一个会话：archived_sessions/rollout-…-<id>.jsonl（不分日期目录）。
+ * Codex 桌面版和命令行共用 CODEX_HOME，桌面版里归档了，命令行就续接不上。
+ */
+export function codexArchivedRolloutPathFor(
+  archivedDir: string,
+  threadId: string,
+  exists: (path: string) => boolean = existsSync,
+): string | undefined {
+  for (const { name } of rolloutStamps(threadId)) {
+    const candidate = join(archivedDir, name);
     if (exists(candidate)) {
       return candidate;
     }

@@ -10,10 +10,21 @@ import {
   type WorkbenchRole,
 } from "@ff-pane/shared";
 
-/** Claude / DeepSeek：上下文窗口的 token 整数。必须和百分比一起设。 */
+/**
+ * DeepSeek：上下文窗口的 token 整数。Claude 窗口不设。
+ *
+ * Claude Code 2.1.302 的压缩点（从程序里读出）：E = 窗口 − 20000，
+ * 压缩点 = min(E × 百分比, E × (1 − 缓冲比例))，缓冲比例默认 0.2、服务端可以下发别的值。
+ * 窗口不设时用它认得的模型窗口（Opus 5.5 是 1M）。以前给 Claude 一律设 200000，
+ * 管理者实际每到约 90k 就压一次（E = 180k，本机缓冲比例 0.5），扣掉开场固定占的约 50k，
+ * 干活只剩约 40k，十几分钟丢一次上下文（2026-10-23 管理者实录）；不设时约 490k 才压。
+ */
 export const CLAUDE_AUTO_COMPACT_WINDOW_ENV = "CLAUDE_CODE_AUTO_COMPACT_WINDOW";
 
-/** Claude / DeepSeek：到达这个百分比就压。只设它、不设窗口，往往不生效。 */
+/**
+ * Claude / DeepSeek：到达这个百分比就压，按命令行自己认得的窗口算。
+ * 比它自己的缓冲还晚时不起作用，所以只能让它更早压，不能更晚。
+ */
 export const CLAUDE_AUTOCOMPACT_PCT_ENV = "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE";
 
 /** Grok：只给这个进程的百分比。 */
@@ -51,7 +62,12 @@ export function resolveManagerCompact(input: {
   if (percent === undefined) {
     return EMPTY;
   }
-  if (input.kind === "claude" || input.kind === "deepseek") {
+  if (input.kind === "claude") {
+    // 不设窗口：百分比乘在 Claude Code 自己认得的模型窗口上，才是真正的百分比。
+    return { env: { [CLAUDE_AUTOCOMPACT_PCT_ENV]: String(percent) } };
+  }
+  if (input.kind === "deepseek") {
+    // DeepSeek 经 Claude Code 连接，命令行不认得它的模型，按它真实的窗口设。
     const tokens = contextTokens(input.kind, input.model);
     return {
       env: {
@@ -73,10 +89,9 @@ export function resolveManagerCompact(input: {
  * 百分比要乘在已知的上下文窗口上。
  * DeepSeek 不借用 Claude 的 200K 默认，认不出模型时用保守的 128K，避免压得更晚。
  */
-function contextTokens(kind: "claude" | "codex" | "deepseek", model: string | undefined): number {
+function contextTokens(kind: "codex" | "deepseek", model: string | undefined): number {
   if (kind === "deepseek") {
     return resolveContextWindow(model).tokens;
   }
-  const runtime = kind === "codex" ? "codex" : "claude-code";
-  return resolveContextWindow(model, runtime).tokens;
+  return resolveContextWindow(model, "codex").tokens;
 }

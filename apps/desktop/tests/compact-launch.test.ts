@@ -131,18 +131,16 @@ describe("resolveManagerCompact", () => {
     }
   });
 
-  it("Claude 和 DeepSeek 同时给窗口 token 和百分比，Grok 只给百分比，Codex 换成 token", () => {
+  it("Claude 只给百分比（按它自己认得的模型窗口算），DeepSeek 同时给窗口和百分比，Grok 只给百分比，Codex 换成 token", () => {
     const claude = resolveManagerCompact({
       role: "manager",
       kind: "claude",
       percent: 80,
       model: "claude-sonnet",
     });
-    expect(claude.env[CLAUDE_AUTO_COMPACT_WINDOW_ENV]).toBe("200000");
-    expect(claude.env[CLAUDE_AUTOCOMPACT_PCT_ENV]).toBe("80");
-    expect(claude.env[GROK_AUTO_COMPACT_PERCENT_ENV]).toBeUndefined();
+    // 设 200000 会把 Opus 5.5 的 1M 窗口砍到五分之一，管理者约 90k 就压（2026-10-23 实录）。
+    expect(claude.env).toEqual({ [CLAUDE_AUTOCOMPACT_PCT_ENV]: "80" });
     expect(claude.codexTokenLimit).toBeUndefined();
-    assertPlainToken(claude.env[CLAUDE_AUTO_COMPACT_WINDOW_ENV] ?? "");
 
     const deepseek = resolveManagerCompact({
       role: "manager",
@@ -283,11 +281,10 @@ describe("launchCliWindow 管理者压缩", () => {
       compactPercent: 80,
       model: "claude-sonnet",
     });
-    expect(claude.env[CLAUDE_AUTO_COMPACT_WINDOW_ENV]).toBe("200000");
+    expect(claude.env[CLAUDE_AUTO_COMPACT_WINDOW_ENV]).toBeUndefined();
     expect(claude.env[CLAUDE_AUTOCOMPACT_PCT_ENV]).toBe("80");
     expect(claude.env[GROK_AUTO_COMPACT_PERCENT_ENV]).toBeUndefined();
     expect(claude.args.join("\n")).not.toContain(CODEX_AUTO_COMPACT_TOKEN_KEY);
-    assertPlainToken(claude.env[CLAUDE_AUTO_COMPACT_WINDOW_ENV] ?? "");
     assertNoUserConfig(claude.env, claude.args);
 
     const resumed = await launch({
@@ -299,7 +296,7 @@ describe("launchCliWindow 管理者压缩", () => {
       resume: true,
     });
     expect(resumed.env[CLAUDE_AUTOCOMPACT_PCT_ENV]).toBe("80");
-    expect(resumed.env[CLAUDE_AUTO_COMPACT_WINDOW_ENV]).toBe("200000");
+    expect(resumed.env[CLAUDE_AUTO_COMPACT_WINDOW_ENV]).toBeUndefined();
 
     const unspecified = await launch({
       windowId: "mgr-claude-default",

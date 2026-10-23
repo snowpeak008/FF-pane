@@ -3,6 +3,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,6 +22,7 @@ import {
   isWorkbenchRoleManualId,
   type ProjectId,
   type Provider,
+  type WorkbenchWindow,
 } from "@ff-pane/shared";
 import {
   createConfigStore,
@@ -135,6 +137,11 @@ import {
 import { resolveProjectLaunchRoute } from "./resolve-config";
 import { describeShortage, resourceLimitsFromConfig, takeResourceSnapshot } from "./resource-guard";
 import {
+  planResume as planResumeLaunch,
+  type ResumeHandoffReason,
+  resumeHandoffText,
+} from "./resume-handoff";
+import {
   composeWindowRolePrompt,
   listRoleManuals,
   RolePromptTempRegistry,
@@ -148,7 +155,7 @@ import {
   resolveWorkbenchRoleResourcesDir,
 } from "./role-resources";
 import { setWindowRole } from "./set-role";
-import { createTeamDigest } from "./team-digest";
+import { createTeamDigest, digestRelativePath } from "./team-digest";
 import {
   appendThreadRecord,
   readThreadIndex,
@@ -1138,6 +1145,47 @@ export async function createWorkbenchCliLayer(
   });
 
   const cursors = createInboxCursorStore(inboxCursorPath(layout.rootDir));
+
+  /** 应用这次运行里启动过的窗口。没启动过又要续接的，是重开项目后用户点了「续接」。 */
+  const launchedThisRun = new Set<string>();
+  const planResume = (input: Parameters<typeof planResumeLaunch>[0]) =>
+    planResumeLaunch(input, { codexHome: resolveCodexHome() });
+  /** 续接上之后补发一句交接：角色、未读、待处理。普通窗口不发。 */
+  const sendResumeHandoff = async (input: {
+    readonly reason: ResumeHandoffReason;
+    readonly windowId: string;
+    readonly projectRoot: string;
+    readonly window: WorkbenchWindow;
+    readonly windows: Readonly<Record<string, WorkbenchWindow>>;
+  }): Promise<void> => {
+    const role = authRegistry.get(input.windowId)?.role ?? input.window.role;
+    if (role === undefined || role === "none") {
+      return;
+    }
+    try {
+      const records = await readThreadIndex(input.projectRoot);
+      const cursor = await cursors.get(input.windowId);
+      const unread = recordsAddressedTo(records, input.windowId, cursor).length;
+      const digestPath = digestRelativePath(input.windowId);
+      const hasDigest = role === "manager" && existsSync(join(input.projectRoot, digestPath));
+      const parentId =
+        authRegistry.get(input.windowId)?.parentWindowId ?? input.window.parentWindowId;
+      const openerTitle = parentId !== undefined ? input.windows[parentId]?.title : undefined;
+      deliverLine(
+        input.windowId,
+        resumeHandoffText({
+          reason: input.reason,
+          title: input.window.title,
+          role,
+          unread,
+          ...(openerTitle !== undefined ? { openerTitle } : {}),
+          ...(hasDigest ? { digestPath } : {}),
+        }),
+      );
+    } catch (error) {
+      console.error(`[wb-resume] handoff for ${input.windowId} failed: ${String(error)}`);
+    }
+  };
   const roleDeps = () => ({
     authRegistry,
     readLayouts: () => layouts.readAll(),
@@ -1939,9 +1987,20 @@ export async function createWorkbenchCliLayer(
         throw new Error(resolved.error);
       }
       const generationBeforeRead = modelEffort.generation(request.windowId);
-      const storedWindow = (await layouts.readAll())[request.projectId]?.windows[request.windowId];
+      const projectLayout = (await layouts.readAll())[request.projectId];
+      const storedWindow = projectLayout?.windows[request.windowId];
       modelEffort.noteLaunchRead(request.windowId, generationBeforeRead);
       const route = withModelEffortOverrides(resolved.route, storedWindow);
+      const resumePlan = await planResume({
+        kind,
+        resume: request.resume === true,
+        firstLaunchThisRun: !launchedThisRun.has(request.windowId),
+        ...(request.nativeSessionId !== undefined
+          ? { nativeSessionId: request.nativeSessionId }
+          : {}),
+        conversations: storedWindow?.conversations,
+      });
+      launchedThisRun.add(request.windowId);
       const result = await launchCliWindow(
         {
           windowId: request.windowId,
@@ -1953,9 +2012,9 @@ export async function createWorkbenchCliLayer(
           rows: request.rows,
           ...(request.cwd !== undefined ? { cwd: request.cwd } : {}),
           ...(request.initialPrompt !== undefined ? { initialPrompt: request.initialPrompt } : {}),
-          ...(request.resume === true ? { resume: true } : {}),
-          ...(request.nativeSessionId !== undefined
-            ? { nativeSessionId: request.nativeSessionId }
+          ...(resumePlan.resume ? { resume: true } : {}),
+          ...(resumePlan.nativeSessionId !== undefined
+            ? { nativeSessionId: resumePlan.nativeSessionId }
             : {}),
           ...(permission !== undefined ? { permission } : {}),
           ...(isWorkbenchRole(request.role) ? { role: request.role } : {}),
@@ -1971,6 +2030,15 @@ export async function createWorkbenchCliLayer(
         result.nativeSessionId !== undefined
       ) {
         startCodexTail(request.windowId, result.nativeSessionId);
+      }
+      if (resumePlan.handoff !== undefined && storedWindow !== undefined) {
+        void sendResumeHandoff({
+          reason: resumePlan.handoff,
+          windowId: request.windowId,
+          projectRoot: request.projectRoot,
+          window: storedWindow,
+          windows: projectLayout?.windows ?? {},
+        });
       }
       return {
         terminal: result.terminal,

@@ -162,6 +162,23 @@ describe("读屏幕：是不是停在空闲的输入提示符上", () => {
     expect(inputStillHolds("没有输入框", "claude-code", nudge)).toBeUndefined();
   });
 
+  it("输入框前面先有别的字、正文折到下一行：仍认出没提交（2026-10-23 监管者实录）", () => {
+    const nudge = "[新消息] 你有 1 条新消息。请调用 ffpane_read_inbox 查看全文。";
+    const junk = "[?1;2c]10;rgb:e7e7/eaea/f0f0\\]11;rgb:0a0a/0d0d/1111\\";
+    const stuck = CODEX_IDLE.replace(
+      "› Ask Codex to do anything",
+      `› ${junk}[新消息] 你有 1\n  条新消息。请调用 ffpane_read_inbox 查看全文。`,
+    );
+    expect(inputStillHolds(stuck, "codex", nudge)).toBe(true);
+    const otherOnly = CODEX_IDLE.replace("› Ask Codex to do anything", `› ${junk}`);
+    expect(inputStillHolds(otherOnly, "codex", nudge)).toBe(false);
+    const claudeWrapped = CLAUDE_IDLE.replace(
+      "❯ ",
+      `❯ 先前留下的字 [新消息] 你\n  有 1 条新消息。`,
+    );
+    expect(inputStillHolds(claudeWrapped, "claude-code", nudge)).toBe(true);
+  });
+
   it("显示名和模型名按同一写法比较", () => {
     expect(sameModelName("GPT-6.1-Sol", "gpt-6.1-sol")).toBe(true);
     expect(sameModelName("GPT-6-Sol", "gpt-6.1-sol")).toBe(false);

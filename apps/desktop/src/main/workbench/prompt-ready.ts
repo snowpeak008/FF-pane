@@ -144,9 +144,14 @@ export function readPromptScreen(text: string, runtime: PromptRuntime): PromptSc
   };
 }
 
+/** 输入框折行后最多看这么多行。 */
+const INPUT_MAX_LINES = 8;
+
 /**
  * 输入框里是不是还留着这段文字（回车没提交）。看不到输入框返回 undefined。
- * 只比开头一小段：长文字会折行，粘贴后 Claude 也可能把它显示成「[Pasted text …]」。
+ * 只找开头一小段：长文字会折行，粘贴后 Claude 也可能把它显示成「[Pasted text …]」。
+ * 不要求在最前面：输入框里原先就有别的字（比如终端应答漏进来的 `[?1;2c…`）时，
+ * 这段接在后面，只看开头会误判成已经提交，文字其实还卡在框里（2026-10-23 实录）。
  */
 export function inputStillHolds(
   text: string,
@@ -164,14 +169,36 @@ export function inputStillHolds(
     if (runtime === "claude-code" && !RULE.test(lines[index - 1] ?? "")) {
       continue;
     }
-    const body = line.slice(1).trim();
+    const body = [line.slice(1), ...inputContinuation(lines, index + 1, runtime)]
+      .map((part) => part.trim())
+      .join("");
     if (body === "") {
       return false;
     }
-    const head = wanted.trim().slice(0, 12);
-    return body.startsWith(head) || /^\[Pasted text/i.test(body);
+    const head = wanted.trim().slice(0, 12).replace(/\s+/g, "");
+    return body.replace(/\s+/g, "").includes(head) || /\[Pasted (text|Content)/i.test(body);
   }
   return undefined;
+}
+
+/** 输入框折到下面几行的部分：到下沿横线、Codex 状态行或空行为止。 */
+function inputContinuation(
+  lines: readonly string[],
+  from: number,
+  runtime: PromptRuntime,
+): string[] {
+  const out: string[] = [];
+  for (let index = from; index < Math.min(lines.length, from + INPUT_MAX_LINES); index += 1) {
+    const line = lines[index] ?? "";
+    if (line.trim() === "" || RULE.test(line)) {
+      break;
+    }
+    if (runtime === "codex" && (/\? for shortcuts/.test(line) || CODEX_STATUS.test(line))) {
+      break;
+    }
+    out.push(line);
+  }
+  return out;
 }
 
 /** 显示名（GPT-6.1-Sol）和模型名（gpt-6.1-sol）按同一个写法比较。 */

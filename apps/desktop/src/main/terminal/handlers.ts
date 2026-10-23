@@ -49,6 +49,22 @@ export function isWorkbenchWindowLimitError(message: string): boolean {
 }
 
 /**
+ * 界面 xterm 写来的内容：过期或重复的终端应答由闸门丢掉。
+ * 终端应答不是用户在打字：不推迟投递，也不当成提交，所以只把剩下的按键交给 onUserInput。
+ */
+export function writeFromView(
+  manager: PtyManager,
+  terminalId: string,
+  data: string,
+  onUserInput: TerminalLayerOptions["onUserInput"],
+): void {
+  const written = manager.writeFromView(terminalId, data);
+  if (written.typed.length > 0) {
+    onUserInput?.(terminalId, written.typed);
+  }
+}
+
+/**
  * 创建终端层：推送事件绑定到当前主窗口；cwd 缺省时回退用户主目录。
  */
 export function createTerminalLayer(
@@ -100,8 +116,7 @@ export function createTerminalLayer(
       });
     },
     "terminal:write": (request) => {
-      manager.write(request.id, request.data);
-      options.onUserInput?.(request.id, request.data);
+      writeFromView(manager, request.id, request.data, options.onUserInput);
       return { ok: true as const };
     },
     "terminal:resize": (request) => {

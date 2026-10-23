@@ -301,6 +301,8 @@ export function TerminalView({
       setResumePickerHint(settled.data.resumePicker === true);
       const replay = await invokeQuery("terminal:get-replay", { id: settled.data.terminal.id });
       if (replay.status === "success" && replay.data.data.length > 0) {
+        // 等回放期间已经写进来的实时输出也在回放里：先清掉，免得写两遍。
+        term.reset();
         term.write(replay.data.data);
       }
       return;
@@ -324,6 +326,7 @@ export function TerminalView({
     onTerminalIdChangeRef.current?.(settled.data.id);
     const replay = await invokeQuery("terminal:get-replay", { id: settled.data.id });
     if (replay.status === "success" && replay.data.data.length > 0) {
+      term.reset();
       term.write(replay.data.data);
     }
   }, [attachExisting, createWithCwd, cwd, fallbackCwd, launchCli, windowId]);
@@ -412,6 +415,7 @@ export function TerminalView({
         setResumePickerHint(settled.data.resumePicker === true);
         const replay = await invokeQuery("terminal:get-replay", { id: settled.data.terminal.id });
         if (replay.status === "success" && replay.data.data.length > 0) {
+          term.reset();
           term.write(replay.data.data);
         }
       } finally {
