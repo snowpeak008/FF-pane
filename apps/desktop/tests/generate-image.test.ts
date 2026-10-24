@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type CodexImageLaunch,
   codexGeneratedImagesDir,
+  createCodexOutputReader,
   generateProjectImage,
   IMAGE_GEN_CODEX_NO_IMAGE_ERROR,
   IMAGE_GEN_OFF_ERROR,
@@ -435,6 +436,8 @@ describe("ffpane_generate_image", () => {
           expect(launch.file.toLowerCase().endsWith(".bat")).toBe(false);
           expect(launch.args).toContain("exec");
           expect(launch.args).toContain("--ephemeral");
+          expect(launch.args).toContain("--skip-git-repo-check");
+          expect(launch.args).toContain("--json");
           expect(launch.args.some((arg) => arg.endsWith("codex.js"))).toBe(true);
           expect(launch.args.some((arg) => basename(arg).toLowerCase() === "cmd.exe")).toBe(false);
           expect(launch.env["OPENAI_API_KEY"]).toBeUndefined();
@@ -454,6 +457,7 @@ describe("ffpane_generate_image", () => {
           await utimes(early, past, past);
           await utimes(newer, new Date(Date.now() - 30_000), new Date(Date.now() - 30_000));
           await utimes(fake, new Date(), new Date());
+          return {};
         },
       },
     );
@@ -507,6 +511,7 @@ describe("ffpane_generate_image", () => {
           expect(basename(launch.file).toLowerCase()).not.toMatch(
             /^(cmd|powershell|pwsh)(\.exe)?$/,
           );
+          return {};
         },
       },
     );
@@ -521,5 +526,114 @@ describe("ffpane_generate_image", () => {
       file.toLowerCase().endsWith(".png"),
     );
     expect(canvasFiles).toEqual([]);
+  });
+
+  it("Codex 把图放在会话 id 子文件夹里时，只拿这次会话的图", async () => {
+    await setImageGenMode(stores, "codex_subscription");
+    const codexHome = join(tempRoot, "codex-home");
+    const imagesDir = join(codexHome, "generated_images");
+    const threadId = "01a16bf5-2452-7f52-b054-19d1cf152248";
+    const otherThreadDir = join(imagesDir, "01a16926-1492-73d2-b51d-e51a463d008f");
+    const ownPng = sourcePng();
+    const otherPngBytes = otherPng();
+    await mkdir(imagesDir, { recursive: true });
+    const result = await generateProjectImage(
+      { projectRoot, prompt: "一只红猫" },
+      {
+        stores,
+        homeDir: join(tempRoot, "fallback-home"),
+        baseEnv: { ...process.env, CODEX_HOME: codexHome },
+        launchCodex: async () => {
+          await mkdir(join(imagesDir, threadId), { recursive: true });
+          await writeFile(join(imagesDir, threadId, "exec-own.png"), ownPng);
+          // 用户别的 Codex 会话同时出的图，更新，但不是这一次的。
+          await mkdir(otherThreadDir, { recursive: true });
+          const otherFile = join(otherThreadDir, "exec-other.png");
+          await writeFile(otherFile, otherPngBytes);
+          await utimes(otherFile, new Date(Date.now() + 60_000), new Date(Date.now() + 60_000));
+          return { threadId };
+        },
+      },
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+    expect(Buffer.compare(await readFile(join(projectRoot, result.relativePath)), ownPng)).toBe(0);
+    expect(existsSync(join(imagesDir, threadId))).toBe(false);
+    expect(
+      Buffer.compare(await readFile(join(otherThreadDir, "exec-other.png")), otherPngBytes),
+    ).toBe(0);
+  });
+
+  it("会话 id 带路径分隔符时不拿来拼路径", async () => {
+    await setImageGenMode(stores, "codex_subscription");
+    const codexHome = join(tempRoot, "codex-home");
+    const imagesDir = join(codexHome, "generated_images");
+    const outside = join(codexHome, "outside");
+    await mkdir(outside, { recursive: true });
+    await writeFile(join(outside, "x.png"), sourcePng());
+    const result = await generateProjectImage(
+      { projectRoot, prompt: "一只红猫" },
+      {
+        stores,
+        homeDir: join(tempRoot, "fallback-home"),
+        baseEnv: { ...process.env, CODEX_HOME: codexHome },
+        launchCodex: async () => ({ threadId: "../outside" }),
+      },
+    );
+    expect(result.ok).toBe(false);
+    expect(existsSync(join(outside, "x.png"))).toBe(true);
+    expect(existsSync(imagesDir)).toBe(false);
+  });
+
+  it("Codex 没出图时把它说的原因带上", async () => {
+    await setImageGenMode(stores, "codex_subscription");
+    const codexHome = join(tempRoot, "codex-home");
+    const result = await generateProjectImage(
+      { projectRoot, prompt: "一只红猫" },
+      {
+        stores,
+        homeDir: join(tempRoot, "fallback-home"),
+        baseEnv: { ...process.env, CODEX_HOME: codexHome },
+        launchCodex: async () => ({
+          reason: "Not inside a trusted directory and --skip-git-repo-check was not specified.",
+        }),
+      },
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.startsWith(IMAGE_GEN_CODEX_NO_IMAGE_ERROR)).toBe(true);
+      expect(result.error).toContain("--skip-git-repo-check");
+    }
+  });
+});
+
+describe("createCodexOutputReader", () => {
+  it("从 --json 输出里读出会话 id，原因优先取报错事件", () => {
+    const reader = createCodexOutputReader();
+    reader.pushStdout('{"type":"thread.started","thread_id":"01a16bf5-2452"}\n{"type":"turn.st');
+    reader.pushStdout(
+      'arted"}\n{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"好的"}}\n',
+    );
+    reader.pushStdout('{"type":"turn.failed","error":{"message":"usage limit reached"}}');
+    reader.pushStderr("Reading additional input from stdin...\n");
+    expect(reader.result()).toEqual({ threadId: "01a16bf5-2452", reason: "usage limit reached" });
+  });
+
+  it("没有报错事件时取 stderr，滤掉读 stdin 的提示", () => {
+    const reader = createCodexOutputReader();
+    reader.pushStderr(
+      "Reading additional input from stdin...\nNot inside a trusted directory and --skip-git-repo-check was not specified.\n",
+    );
+    expect(reader.result()).toEqual({
+      reason: "Not inside a trusted directory and --skip-git-repo-check was not specified.",
+    });
+  });
+
+  it("什么都没有时不给原因", () => {
+    const reader = createCodexOutputReader();
+    reader.pushStderr("Reading additional input from stdin...\n");
+    expect(reader.result()).toEqual({});
   });
 });

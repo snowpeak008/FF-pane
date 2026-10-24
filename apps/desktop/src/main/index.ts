@@ -26,6 +26,10 @@ const moduleDir = dirname(fileURLToPath(import.meta.url));
 const isSmokeMode = process.argv.includes("--smoke");
 /** electron-vite dev 会注入渲染层 dev server 地址；生产/冒烟模式下为空。 */
 const devRendererUrl = process.env["ELECTRON_RENDERER_URL"];
+/** 开发态窗口和任务栏图标；打包后窗口直接取 exe 自带图标（electron-builder win.icon）。 */
+const devWindowIcon = app.isPackaged
+  ? undefined
+  : join(app.getAppPath(), "resources", "icon", "icon.ico");
 
 /** 当前主窗口引用（目录选择器等原生弹窗挂靠父窗口时惰性取用）。 */
 let mainWindow: BrowserWindow | null = null;
@@ -41,6 +45,7 @@ function createMainWindow(options: {
   const state = loadWindowState();
   const window = new BrowserWindow({
     title: "FF-pane",
+    ...(devWindowIcon !== undefined ? { icon: devWindowIcon } : {}),
     width: state.width,
     height: state.height,
     ...(state.x !== undefined && state.y !== undefined ? { x: state.x, y: state.y } : {}),

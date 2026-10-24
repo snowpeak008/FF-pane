@@ -3,8 +3,10 @@
  *
  * 中转站把 PNG 直接写进当前项目的 .ffpane/canvas/。
  * Codex 订阅没有可指定的输出路径（内置 image_gen 不认目标目录），
- * 图先落在 CODEX_HOME/generated_images（没有 CODEX_HOME 则是用户主目录下的 .codex）。
+ * 图先落在 CODEX_HOME/generated_images/<会话 id>/（没有 CODEX_HOME 则是用户主目录下的 .codex）。
+ * 会话 id 从 codex exec --json 的 thread.started 读出；旧版直接落在 generated_images 这一层，也认。
  * 进程结束后只搬走这一次新出现的 PNG，并从那个目录删掉这一张。
+ * 临时目录不是 git 仓库，必须带 --skip-git-repo-check，否则 Codex 一启动就退出。
  * 不读、不改 auth.json 和 config.toml。不设置 CODEX_HOME。环境里拿掉 OPENAI_。
  */
 
@@ -20,6 +22,7 @@ import {
   readFile,
   rename,
   rm,
+  rmdir,
   unlink,
   writeFile,
 } from "node:fs/promises";
@@ -47,6 +50,8 @@ export const IMAGE_GEN_CODEX_NO_IMAGE_ERROR = "Codex 没有出图。";
 export const IMAGE_GEN_CODEX_SHELL_ERROR = "Codex 出图不能经 cmd 启动。";
 
 const CODEX_IMAGE_TIMEOUT_MS = 180_000;
+const CODEX_REASON_MAX = 300;
+const CODEX_STDERR_KEEP = 4000;
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] as const;
 
 /** 假进程测试注入的启动请求。shell 固定为 false。 */
@@ -56,6 +61,12 @@ export interface CodexImageLaunch {
   readonly cwd: string;
   readonly env: Readonly<Record<string, string>>;
   readonly shell: false;
+}
+
+/** 这一次 codex exec 交回来的东西：会话 id 用来找图，reason 用来在没出图时告诉用户为什么。 */
+export interface CodexImageRun {
+  readonly threadId?: string;
+  readonly reason?: string;
 }
 
 export interface GenerateProjectImageInput {
@@ -73,7 +84,7 @@ export interface GenerateProjectImageDeps {
   readonly baseEnv?: NodeJS.ProcessEnv;
   /** CODEX_HOME 未设置时用它代替 os.homedir()。测试指向临时目录。 */
   readonly homeDir?: string;
-  readonly launchCodex?: (launch: CodexImageLaunch) => Promise<void>;
+  readonly launchCodex?: (launch: CodexImageLaunch) => Promise<CodexImageRun>;
 }
 
 export type GenerateProjectImageResult =
@@ -101,6 +112,117 @@ export function codexGeneratedImagesDir(env: NodeJS.ProcessEnv, homeDir?: string
   const configured = env["CODEX_HOME"]?.trim() ?? "";
   const root = configured !== "" ? configured : join(homeDir ?? homedir(), ".codex");
   return join(root, "generated_images");
+}
+
+/** 会话 id 只允许字母、数字、横线、下划线，拼路径时跑不出 generated_images。 */
+function codexThreadImagesDir(imagesDir: string, threadId: string | undefined): string | undefined {
+  const id = threadId?.trim() ?? "";
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(id)) {
+    return undefined;
+  }
+  return join(imagesDir, id);
+}
+
+function shortReason(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length <= CODEX_REASON_MAX ? flat : `${flat.slice(0, CODEX_REASON_MAX)}…`;
+}
+
+/**
+ * 逐行读 codex exec --json 的输出，只留会话 id、最后一条报错、最后一句回复。
+ * stderr 只留尾巴，去掉「Reading additional input from stdin...」这种提示。
+ */
+export function createCodexOutputReader(): {
+  readonly pushStdout: (chunk: string) => void;
+  readonly pushStderr: (chunk: string) => void;
+  readonly result: (extraReason?: string) => CodexImageRun;
+} {
+  let pending = "";
+  let stderrTail = "";
+  let threadId: string | undefined;
+  let errorMessage = "";
+  let lastAgentMessage = "";
+
+  const readLine = (line: string): void => {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{")) {
+      return;
+    }
+    let event: Record<string, unknown>;
+    try {
+      event = JSON.parse(trimmed) as Record<string, unknown>;
+    } catch {
+      return;
+    }
+    const type = event["type"];
+    if (type === "thread.started" && typeof event["thread_id"] === "string") {
+      threadId = event["thread_id"];
+    } else if (type === "error" && typeof event["message"] === "string") {
+      errorMessage = event["message"];
+    } else if (type === "turn.failed") {
+      const error = event["error"];
+      const message =
+        typeof error === "object" && error !== null
+          ? (error as Record<string, unknown>)["message"]
+          : undefined;
+      if (typeof message === "string") {
+        errorMessage = message;
+      }
+    } else if (type === "item.completed") {
+      const item = event["item"];
+      if (typeof item === "object" && item !== null) {
+        const record = item as Record<string, unknown>;
+        if (record["type"] === "agent_message" && typeof record["text"] === "string") {
+          lastAgentMessage = record["text"];
+        }
+      }
+    }
+  };
+
+  return {
+    pushStdout: (chunk) => {
+      pending += chunk;
+      let newline = pending.indexOf("\n");
+      while (newline !== -1) {
+        readLine(pending.slice(0, newline));
+        pending = pending.slice(newline + 1);
+        newline = pending.indexOf("\n");
+      }
+    },
+    pushStderr: (chunk) => {
+      stderrTail = (stderrTail + chunk).slice(-CODEX_STDERR_KEEP);
+    },
+    result: (extraReason) => {
+      if (pending !== "") {
+        readLine(pending);
+        pending = "";
+      }
+      const stderrText = stderrTail
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(
+          (line) => line !== "" && !/^Reading (additional )?(input|prompt) from stdin/i.test(line),
+        )
+        .slice(-3)
+        .join(" ");
+      const reason = [extraReason ?? "", errorMessage, stderrText, lastAgentMessage].find(
+        (text) => text.trim() !== "",
+      );
+      return {
+        ...(threadId !== undefined ? { threadId } : {}),
+        ...(reason !== undefined ? { reason: shortReason(reason) } : {}),
+      };
+    },
+  };
+}
+
+function noImageFailure(reason: string | undefined): GenerateProjectImageResult {
+  const text = reason?.trim() ?? "";
+  return failure(
+    text === ""
+      ? IMAGE_GEN_CODEX_NO_IMAGE_ERROR
+      : `${IMAGE_GEN_CODEX_NO_IMAGE_ERROR}Codex 说：${text}`,
+  );
 }
 
 function isForbiddenLauncher(file: string): boolean {
@@ -331,14 +453,15 @@ async function moveFile(source: string, destination: string): Promise<void> {
 }
 
 /** 生产启动：shell 必须是 false，可执行文件不能是 cmd / PowerShell。 */
-export function launchCodexImageProcess(launch: CodexImageLaunch): Promise<void> {
+export function launchCodexImageProcess(launch: CodexImageLaunch): Promise<CodexImageRun> {
   if (launch.shell !== false || isForbiddenLauncher(launch.file)) {
     return Promise.reject(new Error(IMAGE_GEN_CODEX_SHELL_ERROR));
   }
   return new Promise((resolvePromise, reject) => {
+    const reader = createCodexOutputReader();
     let settled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const done = (error?: Error): void => {
+    const done = (error?: Error, extraReason?: string): void => {
       if (settled) {
         return;
       }
@@ -349,7 +472,7 @@ export function launchCodexImageProcess(launch: CodexImageLaunch): Promise<void>
       if (error !== undefined) {
         reject(error);
       } else {
-        resolvePromise();
+        resolvePromise(reader.result(extraReason));
       }
     };
     let child: ReturnType<typeof spawn>;
@@ -359,15 +482,23 @@ export function launchCodexImageProcess(launch: CodexImageLaunch): Promise<void>
         env: { ...launch.env },
         shell: false,
         windowsHide: true,
-        stdio: "ignore",
+        stdio: ["ignore", "pipe", "pipe"],
       });
     } catch (error) {
       done(error instanceof Error ? error : new Error(IMAGE_GEN_CODEX_NO_IMAGE_ERROR));
       return;
     }
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      reader.pushStdout(chunk);
+    });
+    child.stderr?.on("data", (chunk: string) => {
+      reader.pushStderr(chunk);
+    });
     timer = setTimeout(() => {
       child.kill();
-      done();
+      done(undefined, `超过 ${CODEX_IMAGE_TIMEOUT_MS / 60_000} 分钟还没出图，已停止。`);
     }, CODEX_IMAGE_TIMEOUT_MS);
     child.once("error", (error) => {
       done(error);
@@ -438,7 +569,13 @@ async function runCodex(
   const baseEnv = deps.baseEnv ?? process.env;
   const { env } = buildAgentEnv({ baseEnv, inject: {}, stripApiKeyEnv: true });
   const imagesDir = codexGeneratedImagesDir(env, deps.homeDir);
-  const cliArgs = ["exec", "--ephemeral", codexPrompt(input.prompt, sourceAbsolute, revisionNote)];
+  const cliArgs = [
+    "exec",
+    "--ephemeral",
+    "--skip-git-repo-check",
+    "--json",
+    codexPrompt(input.prompt, sourceAbsolute, revisionNote),
+  ];
   const target = resolveDirectCliTarget("codex", cliArgs, env);
   if (target === undefined || isForbiddenLauncher(target.file)) {
     return failure(
@@ -460,16 +597,27 @@ async function runCodex(
     }
     const before = await listFileNames(imagesDir);
     const launchCodex = deps.launchCodex ?? launchCodexImageProcess;
+    let run: CodexImageRun = {};
     try {
-      await launchCodex({ ...launch, cwd: workDir });
-    } catch {
+      run = await launchCodex({ ...launch, cwd: workDir });
+    } catch (error) {
       // 进程没正常结束也先看这一次有没有新图，没有再失败。
+      run = { reason: shortReason(messageOf(error)) };
     }
-    const picked = await pickNewestNewPng(imagesDir, before);
-    if (picked === undefined) {
-      return failure(IMAGE_GEN_CODEX_NO_IMAGE_ERROR);
+    // 先找这次会话自己的文件夹，不碰别的会话的图；没有再按旧版去最外层找。
+    const threadDir = codexThreadImagesDir(imagesDir, run.threadId);
+    let source: string | undefined;
+    if (threadDir !== undefined) {
+      const picked = await pickNewestNewPng(threadDir, new Set());
+      source = picked === undefined ? undefined : join(threadDir, picked);
     }
-    const source = join(imagesDir, picked);
+    if (source === undefined) {
+      const picked = await pickNewestNewPng(imagesDir, before);
+      source = picked === undefined ? undefined : join(imagesDir, picked);
+    }
+    if (source === undefined) {
+      return noImageFailure(run.reason);
+    }
     const allocated = await allocateCanvasPng(input.projectRoot);
     if (!allocated.ok) {
       return allocated;
@@ -479,6 +627,10 @@ async function runCodex(
       await moveFile(source, allocated.absolute);
     } catch {
       return failure("没能把图放进画板。");
+    }
+    if (threadDir !== undefined) {
+      // 只删空文件夹；里面还有别的文件就留着。
+      await rmdir(threadDir).catch(() => undefined);
     }
     return await placeNewImage(input.projectRoot, allocated.relative, input, "");
   } finally {

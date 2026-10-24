@@ -1,5 +1,5 @@
 # T0.5 打包链路：electron-builder 最小可用配置（docs/技术选型.md §9，先只出 Windows NSIS）。
-# 图标未配置，使用 Electron 默认图标：正式图标属 Phase 3 设计系统任务（T3.1）。
+# 图标：resources/icon/icon.ico，由 scripts/build-icon.mjs 从同目录两张 SVG 生成。
 
 appId: com.ffpane.app
 productName: FF-pane
@@ -80,6 +80,8 @@ extraResources:
     to: ffpane-grok-hook.exe
 
 win:
+  # 安装包、安装后的 exe、窗口和任务栏都用它（打包后窗口默认取 exe 自带图标）。
+  icon: resources/icon/icon.ico
   target:
     - target: nsis
       arch:

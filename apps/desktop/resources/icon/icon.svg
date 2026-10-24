@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <title>FF-pane</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1d2738"/>
+      <stop offset="1" stop-color="#0b0e13"/>
+    </linearGradient>
+    <linearGradient id="blue" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5b93ff"/>
+      <stop offset="1" stop-color="#2563eb"/>
+    </linearGradient>
+    <linearGradient id="light" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f4f7fb"/>
+      <stop offset="1" stop-color="#d3dbe8"/>
+    </linearGradient>
+  </defs>
+  <rect x="32" y="32" width="960" height="960" rx="216" fill="url(#bg)"/>
+  <rect x="33" y="33" width="958" height="958" rx="215" fill="none" stroke="#fff" stroke-opacity=".09" stroke-width="2"/>
+  <!-- F 由三个分屏窗口拼成：竖笔 = 当前终端，两横 = 另外两个 Agent 窗口 -->
+  <rect x="232" y="208" width="232" height="608" rx="56" fill="url(#blue)"/>
+  <rect x="496" y="208" width="296" height="232" rx="56" fill="url(#light)"/>
+  <rect x="496" y="472" width="208" height="176" rx="48" fill="url(#light)"/>
+  <!-- 终端提示符 >_ -->
+  <path d="M286 292 L340 340 L286 388" fill="none" stroke="#fff" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M366 388 H414" stroke="#fff" stroke-width="34" stroke-linecap="round"/>
+  <!-- 窗口里的文字行 -->
+  <rect x="544" y="276" width="196" height="30" rx="15" fill="#94a3b8"/>
+  <rect x="544" y="342" width="128" height="30" rx="15" fill="#b4c0d0"/>
+  <rect x="544" y="545" width="112" height="30" rx="15" fill="#2563eb"/>
+</svg>
