@@ -1,10 +1,11 @@
 /**
  * 项目画板数据：只读写 `<项目根>/.ffpane/canvas/`（board.json、图片、修改要求）。
  * 原图像素不改。文字和带标记的预览写在 `revisions/`。
+ * 同一个项目的画板读改写排队（withCanvasLock）：自动收图、放图、标注、删图、界面操作同时来也不会互相覆盖。
  */
 
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, open, readdir, readFile, rename, unlink } from "node:fs/promises";
+import { lstat, mkdir, open, readdir, readFile, rename, stat, unlink } from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import {
   activePage,
@@ -106,6 +107,40 @@ export async function resolveCanvasImage(
   return { ok: true, absolute: resolved.absolute, relative: lexical.relative };
 }
 
+const canvasQueues = new Map<string, Promise<unknown>>();
+
+/** 同一个项目的画板读改写一次一个。画板数据只能在这里面读出来改、再写回去。 */
+export function withCanvasLock<T>(projectRoot: string, task: () => Promise<T>): Promise<T> {
+  const key = resolve(projectRoot).toLowerCase();
+  const previous = canvasQueues.get(key) ?? Promise.resolve();
+  const run = previous.then(task, task);
+  const tail = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  canvasQueues.set(key, tail);
+  void tail.then(() => {
+    if (canvasQueues.get(key) === tail) {
+      canvasQueues.delete(key);
+    }
+  });
+  return run;
+}
+
+/** 读画板数据。改了要写回时，读和写都要在 withCanvasLock 里。 */
+export async function readCanvasBoardFile(projectRoot: string): Promise<CanvasBoard> {
+  return readBoardFile(projectRoot);
+}
+
+/** 写回画板数据并同步修改要求。只能在 withCanvasLock 里调用。 */
+export async function writeCanvasBoardFile(projectRoot: string, board: CanvasBoard): Promise<void> {
+  await writeBoardFile(projectRoot, board);
+}
+
+export function canvasDirectory(projectRoot: string): string {
+  return canvasDirLexical(projectRoot);
+}
+
 async function readBoardFile(projectRoot: string): Promise<CanvasBoard> {
   const boardPath = join(canvasDirLexical(projectRoot), CANVAS_BOARD_NAME);
   try {
@@ -120,18 +155,73 @@ async function readBoardFile(projectRoot: string): Promise<CanvasBoard> {
   return defaultCanvasBoard();
 }
 
-async function writeAtomic(target: string, data: Buffer | string): Promise<void> {
+/** Windows 上目标文件被别的程序（杀毒、索引、看图软件）短暂占着时改名会失败，重试几次。 */
+const RENAME_RETRY_CODES = new Set(["EPERM", "EBUSY", "EACCES"]);
+const RENAME_ATTEMPTS = 5;
+
+/** 改名，遇到 Windows 的短暂占用就重试。 */
+export async function renameWithRetry(from: string, to: string): Promise<void> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await rename(from, to);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (attempt >= RENAME_ATTEMPTS || code === undefined || !RENAME_RETRY_CODES.has(code)) {
+        throw error;
+      }
+      await new Promise((done) => setTimeout(done, 50 * attempt));
+    }
+  }
+}
+
+/** 先写临时文件再改名。失败时删掉临时文件，不留 `.xxx.tmp`。 */
+export async function writeAtomic(target: string, data: Buffer | string): Promise<void> {
   const dir = dirname(target);
   await mkdir(dir, { recursive: true });
   const temp = join(dir, `.${basename(target)}.${randomUUID()}.tmp`);
-  const handle = await open(temp, "w");
   try {
-    await handle.writeFile(data);
-    await handle.sync();
-  } finally {
-    await handle.close();
+    const handle = await open(temp, "w");
+    try {
+      await handle.writeFile(data);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await renameWithRetry(temp, target);
+  } catch (error) {
+    await unlink(temp).catch(() => undefined);
+    throw error;
   }
-  await rename(temp, target);
+}
+
+const STALE_TEMP = /^\..+\.[0-9a-f-]{36}\.tmp$/i;
+export const CANVAS_STALE_TEMP_MS = 10 * 60_000;
+
+/** 清掉以前没写成留下的临时文件（超过 10 分钟的；更新的可能还在写）。 */
+async function sweepStaleTemps(projectRoot: string): Promise<void> {
+  const root = canvasDirLexical(projectRoot);
+  for (const dir of [root, join(root, CANVAS_REVISIONS_DIR)]) {
+    let names: string[];
+    try {
+      names = await readdir(dir);
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      if (!STALE_TEMP.test(name)) {
+        continue;
+      }
+      const path = join(dir, name);
+      try {
+        if (Date.now() - (await stat(path)).mtimeMs > CANVAS_STALE_TEMP_MS) {
+          await unlink(path);
+        }
+      } catch {
+        // 别的程序占着或已经没了，下次再清
+      }
+    }
+  }
 }
 
 async function sweepRevisionDir(dir: string, keep: ReadonlySet<string>): Promise<void> {
@@ -189,12 +279,27 @@ async function writeBoardFile(projectRoot: string, board: CanvasBoard): Promise<
   await syncCanvasRevisions(projectRoot, board);
 }
 
+/** 界面打开画板时读：顺带清掉以前留下的临时文件。 */
 export async function loadCanvasBoard(projectRoot: string): Promise<CanvasBoard> {
-  return readBoardFile(projectRoot);
+  return withCanvasLock(projectRoot, async () => {
+    await sweepStaleTemps(projectRoot);
+    return readBoardFile(projectRoot);
+  });
 }
 
-export async function saveCanvasBoard(projectRoot: string, board: CanvasBoard): Promise<void> {
-  await writeBoardFile(projectRoot, board);
+/** 在锁里读画板、按 change 改、写回。change 返回原对象就不写。 */
+export async function editCanvasBoard(
+  projectRoot: string,
+  change: (board: CanvasBoard) => CanvasBoard,
+): Promise<CanvasBoard> {
+  return withCanvasLock(projectRoot, async () => {
+    const board = await readBoardFile(projectRoot);
+    const next = change(board);
+    if (next !== board) {
+      await writeBoardFile(projectRoot, next);
+    }
+    return next;
+  });
 }
 
 export async function placeImageOnBoard(
@@ -209,21 +314,23 @@ export async function placeImageOnBoard(
   if (!resolved.ok) {
     return resolved;
   }
-  let board = await readBoardFile(projectRoot);
-  const addedAt = new Date().toISOString();
-  const rowId = options.rowId?.trim();
-  if (rowId !== undefined && rowId !== "" && options.asNewVersion) {
-    const before = activePage(board).rows.find((row) => row.id === rowId);
-    board = before
-      ? appendVersionToRow(board, rowId, resolved.relative, addedAt)
-      : addImageAsNewRow(board, resolved.relative, rowId, addedAt);
-  } else if (rowId !== undefined && rowId !== "") {
-    board = addImageAsNewRow(board, resolved.relative, rowId, addedAt);
-  } else {
-    board = addImageAsNewRow(board, resolved.relative, `row-${randomUUID()}`, addedAt);
-  }
-  await writeBoardFile(projectRoot, board);
-  return { ok: true, board, relativePath: resolved.relative };
+  return withCanvasLock(projectRoot, async () => {
+    let board = await readBoardFile(projectRoot);
+    const addedAt = new Date().toISOString();
+    const rowId = options.rowId?.trim();
+    if (rowId !== undefined && rowId !== "" && options.asNewVersion) {
+      const before = activePage(board).rows.find((row) => row.id === rowId);
+      board = before
+        ? appendVersionToRow(board, rowId, resolved.relative, addedAt)
+        : addImageAsNewRow(board, resolved.relative, rowId, addedAt);
+    } else if (rowId !== undefined && rowId !== "") {
+      board = addImageAsNewRow(board, resolved.relative, rowId, addedAt);
+    } else {
+      board = addImageAsNewRow(board, resolved.relative, `row-${randomUUID()}`, addedAt);
+    }
+    await writeBoardFile(projectRoot, board);
+    return { ok: true as const, board, relativePath: resolved.relative };
+  });
 }
 
 export async function removeFromCanvasBoard(
@@ -237,9 +344,9 @@ export async function removeFromCanvasBoard(
   if (!lexical.ok) {
     return lexical;
   }
-  let board = await readBoardFile(projectRoot);
-  board = removePathFromBoard(board, lexical.relative);
-  await writeBoardFile(projectRoot, board);
+  const board = await editCanvasBoard(projectRoot, (current) =>
+    removePathFromBoard(current, lexical.relative),
+  );
   return { ok: true, board };
 }
 
@@ -255,29 +362,10 @@ export async function updateCanvasAnnotations(
   if (!resolved.ok) {
     return resolved;
   }
-  let board = await readBoardFile(projectRoot);
-  board = setAnnotationsForPath(board, resolved.relative, annotations);
-  await writeBoardFile(projectRoot, board);
+  const board = await editCanvasBoard(projectRoot, (current) =>
+    setAnnotationsForPath(current, resolved.relative, annotations),
+  );
   return { ok: true, board };
-}
-
-export async function deleteCanvasImageFile(
-  projectRoot: string,
-  imageRelativePath: string,
-): Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }> {
-  const resolved = await resolveCanvasImage(projectRoot, imageRelativePath);
-  if (!resolved.ok) {
-    return resolved;
-  }
-  try {
-    await unlink(resolved.absolute);
-  } catch {
-    return { ok: false, error: "删除文件失败。" };
-  }
-  let board = await readBoardFile(projectRoot);
-  board = removePathFromBoard(board, resolved.relative);
-  await writeBoardFile(projectRoot, board);
-  return { ok: true };
 }
 
 export async function readCanvasImageBytes(
@@ -406,18 +494,12 @@ export async function ingestCanvasDirectoryFile(
   if (!resolved.ok) {
     return;
   }
-  const board = await readBoardFile(projectRoot);
-  const exists = board.pages.some((page) =>
-    page.rows.some((row) => row.versions.some((version) => version.path === resolved.relative)),
-  );
-  if (exists) {
-    return;
-  }
-  const next = addImageAsNewRow(
-    board,
-    resolved.relative,
-    `row-${randomUUID()}`,
-    new Date().toISOString(),
-  );
-  await writeBoardFile(projectRoot, next);
+  await editCanvasBoard(projectRoot, (board) => {
+    const exists = board.pages.some((page) =>
+      page.rows.some((row) => row.versions.some((version) => version.path === resolved.relative)),
+    );
+    return exists
+      ? board
+      : addImageAsNewRow(board, resolved.relative, `row-${randomUUID()}`, new Date().toISOString());
+  });
 }

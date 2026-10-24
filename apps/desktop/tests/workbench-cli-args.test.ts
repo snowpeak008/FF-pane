@@ -8,6 +8,7 @@ import {
   assertSecretAbsent,
   buildInteractiveClaudeArgs,
   buildInteractiveCodexArgs,
+  CODEX_SESSION_MEMORY_OFF,
 } from "../src/main/workbench/cli-args";
 import { assertLaunchCliIpcSafe, WorkbenchCliLaunchError } from "../src/main/workbench/launch-cli";
 import {
@@ -152,7 +153,25 @@ describe("buildInteractiveClaudeArgs", () => {
   });
 });
 
+const MEMORY_OFF = CODEX_SESSION_MEMORY_OFF.flatMap((override) => ["-c", override]);
+
 describe("buildInteractiveCodexArgs", () => {
+  it("新开和续接都只对本次会话关掉 Codex 全局记忆，盖过同名覆盖", () => {
+    for (const resume of [false, true]) {
+      const args = buildInteractiveCodexArgs({
+        cwd: "D:\\repo",
+        resume,
+        configOverrides: { "features.memories": "true" },
+      });
+      for (const override of CODEX_SESSION_MEMORY_OFF) {
+        expect(args[args.indexOf(override) - 1]).toBe("-c");
+      }
+      expect(args.indexOf("features.memories=false")).toBeGreaterThan(
+        args.indexOf("features.memories=true"),
+      );
+    }
+  });
+
   it("新开：-C + model + overrides", () => {
     expect(
       buildInteractiveCodexArgs({
@@ -174,6 +193,12 @@ describe("buildInteractiveCodexArgs", () => {
         "model_reasoning_effort="medium"",
         "-c",
         "mcp_servers.ffpane.command="node"",
+        "-c",
+        "features.memories=false",
+        "-c",
+        "memories.use_memories=false",
+        "-c",
+        "memories.generate_memories=false",
         "hi",
       ]
     `);
@@ -208,7 +233,7 @@ describe("buildInteractiveCodexArgs", () => {
         resume: true,
         resumeSessionId: "019fd7dc-9d5d-77e2-90aa-6ba82b6ff3f2",
       }),
-    ).toEqual(["resume", "019fd7dc-9d5d-77e2-90aa-6ba82b6ff3f2", "-C", "D:\\repo"]);
+    ).toEqual(["resume", "019fd7dc-9d5d-77e2-90aa-6ba82b6ff3f2", "-C", "D:\\repo", ...MEMORY_OFF]);
   });
 
   it("续接无 id 打开选择器（不加 --last）", () => {
@@ -217,7 +242,7 @@ describe("buildInteractiveCodexArgs", () => {
         cwd: "D:\\repo",
         resume: true,
       }),
-    ).toEqual(["resume", "-C", "D:\\repo"]);
+    ).toEqual(["resume", "-C", "D:\\repo", ...MEMORY_OFF]);
   });
 
   it("权限：新开 -s/-a；续接改 -c sandbox_mode / approval_policy", () => {
@@ -226,7 +251,7 @@ describe("buildInteractiveCodexArgs", () => {
         cwd: "D:\\repo",
         permission: "edit",
       }),
-    ).toEqual(["-C", "D:\\repo", "-s", "workspace-write", "-a", "on-request"]);
+    ).toEqual(["-C", "D:\\repo", "-s", "workspace-write", "-a", "on-request", ...MEMORY_OFF]);
     expect(
       buildInteractiveCodexArgs({
         cwd: "D:\\repo",
@@ -243,6 +268,7 @@ describe("buildInteractiveCodexArgs", () => {
       'sandbox_mode="workspace-write"',
       "-c",
       'approval_policy="never"',
+      ...MEMORY_OFF,
     ]);
   });
 });

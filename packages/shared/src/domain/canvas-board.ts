@@ -37,11 +37,29 @@ export interface CanvasPage {
   readonly rows: readonly CanvasRow[];
 }
 
+/** AI 窗口申请删一张图（T11.0）：没被用户标「不要」的图不直接删，等用户同意。 */
+export interface CanvasDeleteRequest {
+  /** 申请的窗口标题。 */
+  readonly by: string;
+  readonly reason: string;
+  readonly at: string;
+}
+
+/** 画板上一张图的附注（T11.0）。 */
+export interface CanvasImageNote {
+  /** 用户标了「不要」：AI 删它会直接进回收站。 */
+  readonly rejected?: boolean;
+  readonly deleteRequest?: CanvasDeleteRequest;
+  /** 导出到项目里的哪些位置（项目内相对路径）。 */
+  readonly exportedTo?: readonly string[];
+}
+
 export interface CanvasBoard {
   readonly v: typeof CANVAS_BOARD_VERSION;
   readonly pages: readonly CanvasPage[];
   readonly annotations: Readonly<Record<string, readonly CanvasAnnotation[]>>;
   readonly activePageId?: string;
+  readonly notes?: Readonly<Record<string, CanvasImageNote>>;
 }
 
 export function defaultCanvasBoard(): CanvasBoard {
@@ -137,8 +155,9 @@ export function appendVersionToRow(
 /** 从画板移除路径（不删磁盘文件）。hidden 行仍保留结构时可整行隐藏。 */
 export function removePathFromBoard(board: CanvasBoard, imagePath: string): CanvasBoard {
   const { [imagePath]: _removed, ...rest } = board.annotations;
+  const { [imagePath]: _note, ...notes } = board.notes ?? {};
   return {
-    ...board,
+    ...withNotes(board, notes),
     pages: board.pages.map((page) => ({
       ...page,
       rows: page.rows
@@ -149,6 +168,76 @@ export function removePathFromBoard(board: CanvasBoard, imagePath: string): Canv
         .filter((row) => row.versions.length > 0),
     })),
     annotations: rest,
+  };
+}
+
+function withNotes(
+  board: CanvasBoard,
+  notes: Readonly<Record<string, CanvasImageNote>>,
+): CanvasBoard {
+  const { notes: _old, ...rest } = board;
+  return Object.keys(notes).length > 0 ? { ...rest, notes } : rest;
+}
+
+/** 改一张图的附注；改完是空的就整条去掉。 */
+export function setImageNote(
+  board: CanvasBoard,
+  imagePath: string,
+  change: (note: CanvasImageNote) => CanvasImageNote,
+): CanvasBoard {
+  const { [imagePath]: before, ...others } = board.notes ?? {};
+  const next = change(before ?? {});
+  const kept: CanvasImageNote = {
+    ...(next.rejected === true ? { rejected: true } : {}),
+    ...(next.deleteRequest !== undefined ? { deleteRequest: next.deleteRequest } : {}),
+    ...(next.exportedTo !== undefined && next.exportedTo.length > 0
+      ? { exportedTo: next.exportedTo }
+      : {}),
+  };
+  return withNotes(board, Object.keys(kept).length > 0 ? { ...others, [imagePath]: kept } : others);
+}
+
+/** 图在哪一页哪一行。 */
+export function locatePath(
+  board: CanvasBoard,
+  imagePath: string,
+): { readonly pageId: string; readonly rowId: string } | undefined {
+  for (const page of board.pages) {
+    for (const row of page.rows) {
+      if (row.versions.some((version) => version.path === imagePath)) {
+        return { pageId: page.id, rowId: row.id };
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * 把图放回原来的页和行（从回收站恢复）。行没了放到那一页末尾，页也没了放到当前页末尾。
+ * 已经在画板上就不动。
+ */
+export function placePathAt(
+  board: CanvasBoard,
+  imagePath: string,
+  at: { readonly pageId?: string; readonly rowId?: string },
+  newRowId: string,
+  addedAt: string,
+): CanvasBoard {
+  if (locatePath(board, imagePath) !== undefined) {
+    return board;
+  }
+  const page = board.pages.find((item) => item.id === at.pageId) ?? activePage(board);
+  const hasRow = at.rowId !== undefined && page.rows.some((row) => row.id === at.rowId);
+  const rows = hasRow
+    ? page.rows.map((row) =>
+        row.id === at.rowId
+          ? { ...row, versions: [...row.versions, { path: imagePath, addedAt }] }
+          : row,
+      )
+    : [...page.rows, { id: newRowId, versions: [{ path: imagePath, addedAt }] }];
+  return {
+    ...board,
+    pages: board.pages.map((item) => (item.id === page.id ? { ...item, rows } : item)),
   };
 }
 
@@ -283,10 +372,44 @@ export function parseCanvasBoard(raw: unknown): CanvasBoard | undefined {
   }
   const activePageId =
     typeof record["activePageId"] === "string" ? record["activePageId"] : pages[0]?.id;
+  const notes = parseNotes(record["notes"]);
   return {
     v: CANVAS_BOARD_VERSION,
     pages,
     annotations,
     ...(activePageId !== undefined ? { activePageId } : {}),
+    ...(notes !== undefined ? { notes } : {}),
   };
+}
+
+function parseNotes(raw: unknown): Record<string, CanvasImageNote> | undefined {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return undefined;
+  }
+  const notes: Record<string, CanvasImageNote> = {};
+  for (const [path, value] of Object.entries(raw)) {
+    if (typeof value !== "object" || value === null) {
+      continue;
+    }
+    const item = value as Record<string, unknown>;
+    const request = item["deleteRequest"] as Record<string, unknown> | undefined;
+    const exportedTo = Array.isArray(item["exportedTo"])
+      ? item["exportedTo"].filter((entry): entry is string => typeof entry === "string")
+      : [];
+    const note: CanvasImageNote = {
+      ...(item["rejected"] === true ? { rejected: true } : {}),
+      ...(typeof request === "object" &&
+      request !== null &&
+      typeof request["by"] === "string" &&
+      typeof request["reason"] === "string" &&
+      typeof request["at"] === "string"
+        ? { deleteRequest: { by: request["by"], reason: request["reason"], at: request["at"] } }
+        : {}),
+      ...(exportedTo.length > 0 ? { exportedTo } : {}),
+    };
+    if (Object.keys(note).length > 0) {
+      notes[path] = note;
+    }
+  }
+  return Object.keys(notes).length > 0 ? notes : undefined;
 }

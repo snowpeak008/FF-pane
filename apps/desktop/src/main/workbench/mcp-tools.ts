@@ -183,6 +183,7 @@ export type RemindDelivery =
   | "queued-busy"
   | "queued-manual"
   | "queued-blocked"
+  | "queued-draft"
   | "not-running"
   | "failed"
   | "silent"
@@ -196,6 +197,7 @@ const REMIND_DELIVERY_TEXT: Readonly<Record<RemindDelivery, string>> = {
   "queued-busy": "对方正忙，提醒排队，空闲后自动送达。",
   "queued-manual": "对方状态未知，提醒等用户在该窗口点立即发送。",
   "queued-blocked": "对方在等用户批准，批准后才送达提醒。",
+  "queued-draft": "用户在对方的输入框里打过字，提醒等用户发完（或确认框是空的）再自动送达。",
   "not-running": "对方终端没有运行，只写进了收件箱。",
   failed: "提醒没能写进对方终端，只写进了收件箱。",
   silent: "你挂了监管者：done 和 progress 只进上级收件箱、不叫醒它，监管者已收到抄送。",
@@ -278,10 +280,25 @@ export interface WorkbenchToolDeps {
     | { readonly ok: true; readonly relativePath: string }
     | { readonly ok: false; readonly error: string }
   >;
+  /** AI 删图：用户标了「不要」就进回收站，否则只挂申请等用户确认。 */
   readonly deleteCanvasFile: (
-    projectRoot: string,
+    caller: ToolWindowView,
     imagePath: string,
-  ) => Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }>;
+    reason: string,
+  ) => Promise<
+    | { readonly ok: true; readonly status: "trashed" | "requested" }
+    | { readonly ok: false; readonly error: string }
+  >;
+  /** 把画板上的图复制到项目里，原图留在画板。 */
+  readonly exportCanvasImage: (
+    caller: ToolWindowView,
+    imagePath: string,
+    targetPath: string,
+    overwrite: boolean,
+  ) => Promise<
+    | { readonly ok: true; readonly targetPath: string }
+    | { readonly ok: false; readonly error: string }
+  >;
   /** 只查传入的项目根。工具层不会把参数里的项目路径传进来。 */
   readonly searchProjectMemory: (
     projectRoot: string,
@@ -483,6 +500,8 @@ export async function executeWorkbenchTool(
       return generateImage(caller, args, deps);
     case "ffpane_delete_canvas_file":
       return deleteCanvasFileTool(caller, args, deps);
+    case "ffpane_export_canvas_image":
+      return exportCanvasImageTool(caller, args, deps);
     case "ffpane_memory_search":
       return searchMemory(caller, args, deps);
     case "ffpane_memory_add":
@@ -1473,6 +1492,9 @@ async function openCanvas(
   });
 }
 
+/** 正在出图的窗口。同一窗口上一张没出完就再调，直接拒绝，免得重复出图、重复扣额度。 */
+const generatingWindows = new Set<string>();
+
 async function generateImage(
   caller: ToolWindowView,
   args: Readonly<Record<string, unknown>>,
@@ -1482,6 +1504,23 @@ async function generateImage(
   if (typeof prompt !== "string" || prompt.trim() === "") {
     return fail("ffpane_generate_image 需要 prompt（要画的画面）。");
   }
+  if (generatingWindows.has(caller.id)) {
+    return fail("上一张还在生成，等它返回再出下一张。不要用 sleep 或 ls 去找图。");
+  }
+  generatingWindows.add(caller.id);
+  try {
+    return await generateImageNow(caller, prompt, args, deps);
+  } finally {
+    generatingWindows.delete(caller.id);
+  }
+}
+
+async function generateImageNow(
+  caller: ToolWindowView,
+  prompt: string,
+  args: Readonly<Record<string, unknown>>,
+  deps: WorkbenchToolDeps,
+): Promise<ToolTextResult> {
   const sourceImagePath = args["sourceImagePath"];
   const rowId = args["rowId"];
   const asNewVersion = args["asNewVersion"] === true;
@@ -1518,11 +1557,47 @@ async function deleteCanvasFileTool(
   if (typeof imagePath !== "string" || imagePath.trim() === "") {
     return fail("ffpane_delete_canvas_file 需要 imagePath。");
   }
-  const deleted = await deps.deleteCanvasFile(caller.projectRoot, imagePath.trim());
+  const reason = args["reason"];
+  if (typeof reason !== "string" || reason.trim() === "") {
+    return fail("ffpane_delete_canvas_file 需要 reason（为什么要删）。");
+  }
+  const deleted = await deps.deleteCanvasFile(caller, imagePath.trim(), reason);
   if (!deleted.ok) {
     return fail(deleted.error);
   }
-  return ok({ ok: true });
+  return ok({
+    ok: true,
+    status: deleted.status,
+    message:
+      deleted.status === "trashed"
+        ? "用户标过这张图不要，已移到画板回收站。"
+        : "已申请删除，等用户在画板上确认；在那之前图还在画板上。不要再换别的办法删。",
+  });
+}
+
+async function exportCanvasImageTool(
+  caller: ToolWindowView,
+  args: Readonly<Record<string, unknown>>,
+  deps: WorkbenchToolDeps,
+): Promise<ToolTextResult> {
+  const imagePath = args["imagePath"];
+  const targetPath = args["targetPath"];
+  if (typeof imagePath !== "string" || imagePath.trim() === "") {
+    return fail("ffpane_export_canvas_image 需要 imagePath。");
+  }
+  if (typeof targetPath !== "string" || targetPath.trim() === "") {
+    return fail("ffpane_export_canvas_image 需要 targetPath（项目里的相对路径）。");
+  }
+  const exported = await deps.exportCanvasImage(
+    caller,
+    imagePath.trim(),
+    targetPath,
+    args["overwrite"] === true,
+  );
+  if (!exported.ok) {
+    return fail(exported.error);
+  }
+  return ok({ ok: true, targetPath: exported.targetPath });
 }
 
 async function optionalBrief(

@@ -533,6 +533,18 @@ export function TerminalView({
     };
     host.addEventListener("contextmenu", onContextMenu);
 
+    // 输入法选词时终端收不到字，主进程以为没人在打字；告诉它，选词期间不投递。
+    const reportComposing = (composing: boolean) => (): void => {
+      const current = infoRef.current;
+      if (current !== null && !current.exited) {
+        void invokeQuery("terminal:composing", { id: current.id, composing });
+      }
+    };
+    const onCompositionStart = reportComposing(true);
+    const onCompositionEnd = reportComposing(false);
+    host.addEventListener("compositionstart", onCompositionStart);
+    host.addEventListener("compositionend", onCompositionEnd);
+
     const shouldAutoStart =
       cliLaunchRef.current === undefined || cliLaunchRef.current.autoStart !== false;
     if (shouldAutoStart || peekLiveTerminal(windowId) !== undefined) {
@@ -543,6 +555,8 @@ export function TerminalView({
 
     return () => {
       host.removeEventListener("contextmenu", onContextMenu);
+      host.removeEventListener("compositionstart", onCompositionStart);
+      host.removeEventListener("compositionend", onCompositionEnd);
       observer.disconnect();
       term.dispose();
       termRef.current = null;

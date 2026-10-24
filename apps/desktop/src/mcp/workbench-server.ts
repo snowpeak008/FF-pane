@@ -15,6 +15,8 @@ import { WORKBENCH_MCP_SERVER_NAME, WORKBENCH_MCP_TOOLS } from "./workbench-tool
 
 const SERVER_VERSION = "1.0.0";
 const CALL_TIMEOUT_MS = 20_000;
+/** 出图要 25 到 60 秒，订阅出图有时更久：单独放宽，免得图还在出就报「控制通道超时」（T11.0）。 */
+export const GENERATE_IMAGE_TIMEOUT_MS = 5 * 60_000;
 
 export const WINDOW_TOKEN_LITERAL = `\${${FF_PANE_WINDOW_TOKEN_ENV}}`;
 export const PIPE_LITERAL = `\${${FF_PANE_WB_PIPE_ENV}}`;
@@ -107,7 +109,9 @@ export function createWorkbenchMcpOptions(
     const timeoutMs =
       name === "ffpane_wait_events"
         ? (clampWaitSeconds(args["timeoutSec"]) + 20) * 1000
-        : CALL_TIMEOUT_MS;
+        : name === "ffpane_generate_image"
+          ? GENERATE_IMAGE_TIMEOUT_MS
+          : CALL_TIMEOUT_MS;
     return callControlTool(pipe, token, name, args, timeoutMs);
   },
 ): McpServerOptions {

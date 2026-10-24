@@ -77,7 +77,9 @@ describe("TerminalReplyGate", () => {
   it("用户按键不受影响：Esc、方向键、焦点、括号粘贴里的内容都原样写", () => {
     const g = gate();
     const keys = "\x1b\x1b[A\x1b[I\x1b[O\r";
-    expect(g.filterInput(keys)).toEqual({ data: keys, typed: keys, dropped: 0 });
+    // 焦点报告照写进 PTY，但不算用户在打字。
+    expect(g.filterInput(keys)).toEqual({ data: keys, typed: "\x1b\x1b[A\r", dropped: 0 });
+    expect(g.filterInput("\x1b[O").typed).toBe("");
     const paste = "\x1b[200~粘贴里有 \x1b[?1;2c 也不动\x1b[201~";
     expect(g.filterInput(paste).data).toBe(paste);
   });

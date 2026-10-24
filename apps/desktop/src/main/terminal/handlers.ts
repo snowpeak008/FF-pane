@@ -25,6 +25,8 @@ export interface TerminalLayerOptions {
    * data 含 `\r` 表示这次是提交（Enter）。
    */
   readonly onUserInput?: (terminalId: string, data: string) => void;
+  /** 用户开始或结束用输入法选词。 */
+  readonly onUserComposing?: (terminalId: string, composing: boolean) => void;
 }
 
 export interface TerminalLayer {
@@ -32,6 +34,7 @@ export interface TerminalLayer {
     InvokeHandlers,
     | "terminal:create"
     | "terminal:write"
+    | "terminal:composing"
     | "terminal:resize"
     | "terminal:kill"
     | "terminal:list"
@@ -117,6 +120,10 @@ export function createTerminalLayer(
     },
     "terminal:write": (request) => {
       writeFromView(manager, request.id, request.data, options.onUserInput);
+      return { ok: true as const };
+    },
+    "terminal:composing": (request) => {
+      options.onUserComposing?.(request.id, request.composing === true);
       return { ok: true as const };
     },
     "terminal:resize": (request) => {

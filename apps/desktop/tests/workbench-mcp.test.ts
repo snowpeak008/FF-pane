@@ -201,7 +201,8 @@ function harness(
     },
     openCanvas: async () => ({ ok: true as const, relativePath: ".ffpane/canvas/a.png" }),
     generateImage: async () => ({ ok: false as const, error: "测试里不生图。" }),
-    deleteCanvasFile: async () => ({ ok: true as const }),
+    deleteCanvasFile: async () => ({ ok: true as const, status: "requested" as const }),
+    exportCanvasImage: async () => ({ ok: true as const, targetPath: "art/a.png" }),
     searchProjectMemory: async () => [],
     addProjectMemory: async () => undefined,
     setModelEffort: async () => ({ ok: false as const, error: "unused" }),
@@ -436,6 +437,57 @@ describe("工具授权", () => {
     expect(missing.isError).toBe(true);
     expect(missing.text).toContain("prompt");
     expect(reminders).toEqual([]);
+  });
+
+  it("同一窗口上一张没出完再调：直接拒绝，不重复出图；出完后可以再出", async () => {
+    const { deps } = harness(tempDir());
+    let release: () => void = () => undefined;
+    let calls = 0;
+    const slow: WorkbenchToolDeps = {
+      ...deps,
+      generateImage: async () => {
+        calls += 1;
+        await new Promise<void>((done) => {
+          release = done;
+        });
+        return { ok: true, relativePath: ".ffpane/canvas/gen.png" };
+      },
+    };
+    const first = call(slow, "B", "ffpane_generate_image", { prompt: "一只猫" });
+    await Promise.resolve();
+    const second = await call(slow, "B", "ffpane_generate_image", { prompt: "一只猫" });
+    expect(second.isError).toBe(true);
+    expect(second.text).toContain("上一张还在生成");
+    release();
+    expect((await first).isError).toBe(false);
+    expect(calls).toBe(1);
+    const again = call(slow, "B", "ffpane_generate_image", { prompt: "一只狗" });
+    await Promise.resolve();
+    release();
+    expect((await again).isError).toBe(false);
+  });
+
+  it("删图要写原因；返回是申请还是进了回收站", async () => {
+    const { deps } = harness(tempDir());
+    const seen: string[] = [];
+    const watched: WorkbenchToolDeps = {
+      ...deps,
+      deleteCanvasFile: async (caller, imagePath, reason) => {
+        seen.push(`${caller.title}:${imagePath}:${reason}`);
+        return { ok: true, status: "requested" };
+      },
+    };
+    const noReason = await call(watched, "B", "ffpane_delete_canvas_file", {
+      imagePath: ".ffpane/canvas/a.png",
+    });
+    expect(noReason.isError).toBe(true);
+    expect(noReason.text).toContain("reason");
+    const asked = await call(watched, "B", "ffpane_delete_canvas_file", {
+      imagePath: ".ffpane/canvas/a.png",
+      reason: "不合格",
+    });
+    expect(asked.json).toMatchObject({ ok: true, status: "requested" });
+    expect(seen).toEqual(["子:.ffpane/canvas/a.png:不合格"]);
   });
 });
 

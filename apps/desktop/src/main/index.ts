@@ -283,6 +283,9 @@ async function bootstrap(): Promise<void> {
           queue.noteSubmit(terminalId);
         }
       },
+      onUserComposing: (terminalId, composing) => {
+        workbenchCliLayer?.idleQueue.noteComposing(terminalId, composing);
+      },
     });
     projectPtyCleanup.killProject = (projectId) => {
       terminalLayer?.manager.killWhere(

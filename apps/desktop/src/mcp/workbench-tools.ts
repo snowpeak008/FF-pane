@@ -25,6 +25,7 @@ export const WORKBENCH_MCP_TOOL_NAMES = [
   "ffpane_open_canvas",
   "ffpane_generate_image",
   "ffpane_delete_canvas_file",
+  "ffpane_export_canvas_image",
   "ffpane_memory_search",
   "ffpane_memory_add",
   "ffpane_set_model_effort",
@@ -423,16 +424,44 @@ const TOOL_DEFINITIONS: readonly McpToolDefinition[] = [
   {
     name: "ffpane_delete_canvas_file",
     description:
-      "从磁盘删除 .ffpane/canvas/ 内的一张图片，并同步从画板数据移除。只有用户在对话里明确说要清理文件时才调用；不要自动删。",
+      "申请删掉画板上的一张图。画板是项目图库：用户标过「不要」的图会移到画板回收站；没标的不会删，只在图上挂一条申请，等用户确认。图不会从磁盘直接删掉。要把图放进项目目录请用 ffpane_export_canvas_image，不要「复制再删」。",
     inputSchema: {
       type: "object",
       properties: {
         imagePath: {
           type: "string",
-          description: "要删除的图片，路径必须在 .ffpane/canvas/ 内。",
+          description: "要删的图片，路径必须在 .ffpane/canvas/ 内。",
+        },
+        reason: {
+          type: "string",
+          description: "为什么要删（用户会在画板上看到）。",
         },
       },
-      required: ["imagePath"],
+      required: ["imagePath", "reason"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "ffpane_export_canvas_image",
+    description:
+      "把画板上的一张图复制到项目里的指定位置（比如美术目录），原图留在画板，画板上会记下导出到哪里。targetPath 是项目里的相对路径，不能出项目、不能放进 .ffpane，扩展名要和原图一致。目标已有文件时要传 overwrite: true 才覆盖。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        imagePath: {
+          type: "string",
+          description: "画板上的图，路径必须在 .ffpane/canvas/ 内。",
+        },
+        targetPath: {
+          type: "string",
+          description: "项目里的相对路径，例如 art/concept/00_aerial.png。",
+        },
+        overwrite: {
+          type: "boolean",
+          description: "目标已有文件时是否覆盖。缺省 false。",
+        },
+      },
+      required: ["imagePath", "targetPath"],
       additionalProperties: false,
     },
   },

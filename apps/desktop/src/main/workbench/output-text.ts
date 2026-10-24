@@ -101,15 +101,41 @@ export function clampReadScreenLines(value: unknown): number {
   return Math.min(Math.floor(value), READ_SCREEN_MAX_LINES);
 }
 
+type HeadlessLine = NonNullable<ReturnType<xtermHeadless.Terminal["buffer"]["active"]["getLine"]>>;
+
+/**
+ * 只留正常显示的字：暗色和反色的格子换成空格。
+ * 输入框的提示文字是暗色、光标格是反色（真机核对 Claude Code 2.1.302、codex-cli 0.162.0，2026-10-24），
+ * 用户打的字是正常颜色。
+ */
+function solidText(line: HeadlessLine): string {
+  let out = "";
+  for (let x = 0; x < line.length; x += 1) {
+    const cell = line.getCell(x);
+    const width = cell?.getWidth() ?? 1;
+    if (cell === undefined || width === 0) {
+      continue;
+    }
+    const chars = cell.getChars();
+    out += chars === "" || cell.isDim() !== 0 || cell.isInverse() !== 0 ? " ".repeat(width) : chars;
+  }
+  return out.trimEnd();
+}
+
 /**
  * 把回放缓冲按终端尺寸重放进无头终端，取渲染后的屏幕和滚动区文字。
  * 光标移动、清行、重画都按终端语义落定，加载动画只留最后一帧；
  * 再去掉只剩动画字符的行，连续空行收成一行，返回最后 maxLines 行。
+ * solidOnly：只留正常显示的字（见 solidText），用来判断输入框里有没有用户打的字。
+ * keepRows：不把折行拼回去，按屏幕上的行返回。看输入框要用它：Windows ConPTY 遇到占满一整行的内容
+ * （Claude 输入框上下的横线）不换行，靠自动折行接着写下一行，下一行会被标成折行，
+ * 一拼就把横线和「❯」行拼成一行，认不出输入框（真机核对 Claude Code 2.1.302，2026-10-24）。
  */
 export async function renderTerminalText(
   raw: string,
   size: { readonly cols: number; readonly rows: number },
   maxLines: number,
+  options?: { readonly solidOnly?: boolean; readonly keepRows?: boolean },
 ): Promise<string> {
   const terminal = new xtermHeadless.Terminal({
     cols: Math.max(20, Math.floor(size.cols)),
@@ -128,8 +154,8 @@ export async function renderTerminalText(
       if (line === undefined) {
         continue;
       }
-      const text = line.translateToString(true);
-      if (line.isWrapped && lines.length > 0) {
+      const text = options?.solidOnly === true ? solidText(line) : line.translateToString(true);
+      if (line.isWrapped && lines.length > 0 && options?.keepRows !== true) {
         lines[lines.length - 1] = `${lines[lines.length - 1]}${text}`;
         continue;
       }

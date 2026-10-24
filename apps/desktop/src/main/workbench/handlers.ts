@@ -22,6 +22,7 @@ import {
   isWorkbenchRoleManualId,
   type ProjectId,
   type Provider,
+  setActivePage,
   type WorkbenchWindow,
 } from "@ff-pane/shared";
 import {
@@ -54,15 +55,25 @@ import type { PtyManager } from "../terminal/manager";
 import { API_ERROR_SAME_TURN_MS, createApiErrorTracker } from "./api-error-tracker";
 import { createWorkbenchAuthRegistry, type WorkbenchAuthRegistry } from "./auth-registry";
 import {
-  deleteCanvasImageFile,
   describeCanvasRevision,
+  editCanvasBoard,
   loadCanvasBoard,
   placeImageOnBoard,
   readCanvasImageBytes,
   removeFromCanvasBoard,
-  saveCanvasBoard,
+  updateCanvasAnnotations,
   writeCanvasMarkedPreview,
 } from "./canvas-files";
+import {
+  exportCanvasImage,
+  listCanvasTrash,
+  markCanvasRejected,
+  purgeCanvasTrash,
+  requestCanvasDelete,
+  resolveCanvasDeleteRequest,
+  restoreCanvasTrash,
+  trashCanvasImage,
+} from "./canvas-library";
 import { ensureCanvasWatcher } from "./canvas-watcher";
 import { closeDescendantWindow } from "./close-descendant";
 import { CodexSessionClaimer, isAutomatedTestEnv, resolveCodexHome } from "./codex-claim";
@@ -81,7 +92,12 @@ import {
 } from "./control-channel";
 import { grokHookSessionMatches } from "./grok-hook-config";
 import { releaseWindowHooks } from "./hook-launch";
-import { createIdleDeliverQueue, type IdleDeliverQueue, type SubmitResult } from "./idle-deliver";
+import {
+  createIdleDeliverQueue,
+  type IdleDeliverHold,
+  type IdleDeliverQueue,
+  type SubmitResult,
+} from "./idle-deliver";
 import { createInboxCursorStore, inboxCursorPath } from "./inbox-cursor";
 import {
   assertLaunchCliIpcSafe,
@@ -125,6 +141,7 @@ import {
 import { addCallerProjectMemory, searchCallerProjectMemory } from "./project-memory";
 import {
   createPromptWatch,
+  inputHasText,
   type PromptRuntime,
   inputStillHolds as readInputStillHolds,
 } from "./prompt-ready";
@@ -191,7 +208,7 @@ export interface WorkbenchCliLayer {
     | "workbench:open-ffpane"
     | "workbench:panel-activity"
     | "workbench:get-canvas"
-    | "workbench:save-canvas"
+    | "workbench:canvas-edit"
     | "workbench:save-canvas-marked"
     | "workbench:read-canvas-image"
     | "workbench:remove-canvas-image"
@@ -330,7 +347,7 @@ export async function createWorkbenchCliLayer(
   const publishDeliverPending = (notice: {
     readonly windowId: string;
     readonly count: number;
-    readonly mode: "manual" | "blocked" | "busy" | "clear";
+    readonly mode: "manual" | "blocked" | "busy" | "draft" | "clear";
   }): void => {
     const window = options.getWindow();
     if (window === null || window.isDestroyed()) {
@@ -365,6 +382,15 @@ export async function createWorkbenchCliLayer(
     });
   };
   /** 给窗口一行平台提醒：在线就交给等待调用，否则打进终端。 */
+  /** 排着队的提醒告诉发信方的说法。 */
+  const queuedDelivery = (mode: IdleDeliverHold): RemindDelivery =>
+    mode === "manual"
+      ? "queued-manual"
+      : mode === "blocked"
+        ? "queued-blocked"
+        : mode === "draft"
+          ? "queued-draft"
+          : "queued-busy";
   const deliverLine = (
     windowId: string,
     text: string,
@@ -393,11 +419,7 @@ export async function createWorkbenchCliLayer(
     if (queued.status === "delivered") {
       return "delivered";
     }
-    return queued.mode === "manual"
-      ? "queued-manual"
-      : queued.mode === "blocked"
-        ? "queued-blocked"
-        : "queued-busy";
+    return queuedDelivery(queued.mode);
   };
   /**
    * 当场打进去的提醒等核对完再返回：提交了才算送达，没提交（补按一次回车也不行）直接报失败。
@@ -884,6 +906,7 @@ export async function createWorkbenchCliLayer(
       const screen = await renderTail(terminalId);
       return screen === undefined ? undefined : readInputStillHolds(screen, runtime, text);
     },
+    readDraft: (terminalId) => readDraft(terminalId),
     now: () => Date.now(),
     schedule: (delayMs, fn) => {
       const timer = setTimeout(fn, delayMs);
@@ -1088,9 +1111,12 @@ export async function createWorkbenchCliLayer(
     }
     return kind === "codex" ? "codex" : undefined;
   };
-  /** 看屏幕只要最后一段：输入框和状态行每帧都重画，开头的横幅由 observe 缓存。 */
+  /**
+   * 看屏幕只要最后一段：输入框和状态行每帧都重画，开头的横幅由 observe 缓存。
+   * 按屏幕上的行读（keepRows），折行不拼回去，否则认不出 Claude 的输入框。
+   */
   const SCREEN_TAIL_BYTES = 256 * 1024;
-  const renderTail = async (terminalId: string): Promise<string | undefined> => {
+  const renderTail = async (terminalId: string, solidOnly = false): Promise<string | undefined> => {
     const record = options.manager.get(terminalId);
     if (record === undefined || record.exited) {
       return undefined;
@@ -1100,10 +1126,20 @@ export async function createWorkbenchCliLayer(
         takeUtf8Tail(options.manager.getReplayBuffer(terminalId), SCREEN_TAIL_BYTES),
         { cols: record.cols, rows: record.rows },
         60,
+        { solidOnly, keepRows: true },
       );
     } catch {
       return undefined;
     }
+  };
+  /** 输入框里有没有用户打的字（只看正常颜色的字，提示文字和光标格不算）。看不出返回 undefined。 */
+  const readDraft = async (terminalId: string): Promise<boolean | undefined> => {
+    const runtime = promptRuntimeOf(options.manager.get(terminalId)?.metadata);
+    if (runtime === undefined) {
+      return undefined;
+    }
+    const screen = await renderTail(terminalId, true);
+    return screen === undefined ? undefined : inputHasText(screen, runtime);
   };
   /** 重启过的窗口看到输入提示符就判为空闲；被 Esc 打断、一直显示忙的也清掉。 */
   const promptWatch = createPromptWatch({
@@ -1120,7 +1156,7 @@ export async function createWorkbenchCliLayer(
       return out;
     },
     phaseOf: (terminalId) => idleQueue.phaseOf(terminalId),
-    render: renderTail,
+    render: (terminalId) => renderTail(terminalId),
     notePromptReady: (terminalId, opts) => idleQueue.notePromptReady(terminalId, opts),
     onReady: (windowId) => {
       afterIdleHook(windowId);
@@ -2085,12 +2121,16 @@ export async function createWorkbenchCliLayer(
       }
       return { ok: true as const, permission: request.permission };
     },
-    "workbench:deliver-now": (request) => {
+    "workbench:deliver-now": async (request) => {
       const terminalId = findLiveTerminalId(request.windowId);
       if (terminalId === undefined) {
         return { ok: false as const, reason: "unknown-window" as const };
       }
-      const result = idleQueue.deliverNow(terminalId);
+      // 用户点的立即发送：看得出框里有字才拒绝，看不出就照用户的意思发。
+      const draft = idleQueue.needsDraftCheck(terminalId)
+        ? (await readDraft(terminalId)) === true
+        : false;
+      const result = idleQueue.deliverNow(terminalId, { draft });
       if (result.status === "refused") {
         return {
           ok: false as const,
@@ -2311,21 +2351,43 @@ export async function createWorkbenchCliLayer(
       const root = await projectRootOf(request.projectId);
       ensureCanvasWatcher(root);
       const board = await loadCanvasBoard(root);
-      return { board };
+      return { board, trash: await canvasTrashView(root) };
     },
-    "workbench:save-canvas": async (request) => {
+    "workbench:canvas-edit": async (request) => {
       const root = await projectRootOf(request.projectId);
-      if (request.board.v !== 1) {
-        throw new Error("不支持的画板版本。");
+      const edit = request.edit;
+      const unwrap = (result: { readonly ok: boolean; readonly error?: string }): void => {
+        if (!result.ok) {
+          throw new Error(result.error ?? "画板操作失败。");
+        }
+      };
+      switch (edit.kind) {
+        case "set-page":
+          await editCanvasBoard(root, (board) => setActivePage(board, edit.pageId));
+          break;
+        case "set-annotations":
+          unwrap(await updateCanvasAnnotations(root, edit.path, edit.annotations));
+          break;
+        case "mark-rejected":
+          unwrap(await markCanvasRejected(root, edit.path, edit.rejected));
+          break;
+        case "trash":
+          unwrap(await trashCanvasImage(root, edit.path));
+          break;
+        case "resolve-request":
+          unwrap(await resolveCanvasDeleteRequest(root, edit.path, edit.approve));
+          break;
+        case "restore":
+          unwrap(await restoreCanvasTrash(root, edit.trashId));
+          break;
+        case "purge":
+          unwrap(await purgeCanvasTrash(root, edit.trashId));
+          break;
+        default:
+          throw new Error("不认识的画板操作。");
       }
-      await saveCanvasBoard(root, request.board);
-      const browser = options.getWindow();
-      if (browser !== null && !browser.isDestroyed()) {
-        publishEvent(browser.webContents, "workbench:canvas-changed", {
-          projectId: request.projectId,
-        });
-      }
-      return { ok: true as const };
+      publishCanvasChanged(request.projectId);
+      return { board: await loadCanvasBoard(root), trash: await canvasTrashView(root) };
     },
     "workbench:save-canvas-marked": async (request) => {
       const root = await projectRootOf(request.projectId);
@@ -2349,13 +2411,8 @@ export async function createWorkbenchCliLayer(
       if (!removed.ok) {
         throw new Error(removed.error);
       }
-      const browser = options.getWindow();
-      if (browser !== null && !browser.isDestroyed()) {
-        publishEvent(browser.webContents, "workbench:canvas-changed", {
-          projectId: request.projectId,
-        });
-      }
-      return { board: removed.board };
+      publishCanvasChanged(request.projectId);
+      return { board: removed.board, trash: await canvasTrashView(root) };
     },
     "workbench:open-ffpane": async (request) => {
       const root = await projectRootOf(request.projectId);
@@ -2455,6 +2512,24 @@ export async function createWorkbenchCliLayer(
       projectId: projectId as ProjectId,
     });
   };
+
+  const publishCanvasChanged = (projectId: string): void => {
+    const browser = options.getWindow();
+    if (browser !== null && !browser.isDestroyed()) {
+      publishEvent(browser.webContents, "workbench:canvas-changed", {
+        projectId: projectId as ProjectId,
+      });
+    }
+  };
+  /** 回收站给界面看的部分（不带回收站里的文件名）。 */
+  const canvasTrashView = async (root: string) =>
+    (await listCanvasTrash(root)).map((entry) => ({
+      id: entry.id,
+      originalPath: entry.originalPath,
+      deletedBy: entry.deletedBy,
+      deletedAt: entry.deletedAt,
+      ...(entry.reason !== undefined ? { reason: entry.reason } : {}),
+    }));
 
   const projectRootOf = async (projectId: string): Promise<string> => {
     const listed = await projects.listProjects();
@@ -2783,11 +2858,7 @@ export async function createWorkbenchCliLayer(
       const senders = pendingSenders.get(terminalId) ?? new Set<string>();
       senders.add(fromWindowId);
       pendingSenders.set(terminalId, senders);
-      return queued.mode === "manual"
-        ? "queued-manual"
-        : queued.mode === "blocked"
-          ? "queued-blocked"
-          : "queued-busy";
+      return queuedDelivery(queued.mode);
     },
     clearReminder: (windowId) => {
       const terminalId = findLiveTerminalId(windowId);
@@ -3153,8 +3224,20 @@ export async function createWorkbenchCliLayer(
       );
       return outcome;
     },
-    deleteCanvasFile: async (projectRoot, imagePath) =>
-      deleteCanvasImageFile(projectRoot, imagePath),
+    deleteCanvasFile: async (caller, imagePath, reason) => {
+      const result = await requestCanvasDelete(caller.projectRoot, imagePath, caller.title, reason);
+      if (result.ok) {
+        publishCanvasChanged(caller.projectId);
+      }
+      return result;
+    },
+    exportCanvasImage: async (caller, imagePath, targetPath, overwrite) => {
+      const result = await exportCanvasImage(caller.projectRoot, imagePath, targetPath, overwrite);
+      if (result.ok) {
+        publishCanvasChanged(caller.projectId);
+      }
+      return result;
+    },
   });
 
   return {

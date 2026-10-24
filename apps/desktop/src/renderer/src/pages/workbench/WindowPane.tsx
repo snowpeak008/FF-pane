@@ -186,7 +186,7 @@ export function WindowPane({
 
   const [deliverPending, setDeliverPending] = useState<{
     count: number;
-    mode: "manual" | "blocked" | "busy" | "clear";
+    mode: "manual" | "blocked" | "busy" | "draft" | "clear";
   }>({ count: 0, mode: "clear" });
 
   const queueConversationPlan = (plan: ConversationLaunchPlan): void => {
@@ -876,7 +876,17 @@ export function WindowPane({
                     className="rounded-sm bg-primary px-1.5 py-0.5 text-primary-fg"
                     data-testid="workbench-deliver-now"
                     onClick={() => {
-                      void invokeQuery("workbench:deliver-now", { windowId: window.id });
+                      void invokeQuery("workbench:deliver-now", { windowId: window.id }).then(
+                        (result) => {
+                          if (
+                            result.status === "success" &&
+                            !result.data.ok &&
+                            result.data.reason === "draft"
+                          ) {
+                            toast.message(t("workbench.deliver.draftRefused"));
+                          }
+                        },
+                      );
                     }}
                   >
                     {t("workbench.deliver.send")}
@@ -892,7 +902,9 @@ export function WindowPane({
                   <span data-testid="workbench-deliver-blocked">
                     {deliverPending.mode === "blocked"
                       ? t("workbench.deliver.blocked")
-                      : t("workbench.deliver.busy")}
+                      : deliverPending.mode === "draft"
+                        ? t("workbench.deliver.draft")
+                        : t("workbench.deliver.busy")}
                   </span>
                   {deliverPending.mode === "blocked" ? (
                     <span data-testid="workbench-deliver-permission-hold">

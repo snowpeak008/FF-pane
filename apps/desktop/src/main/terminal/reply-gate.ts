@@ -68,6 +68,12 @@ const REPLY = new RegExp(
   "g",
 );
 
+/**
+ * 焦点报告（窗格获得或失去焦点时 xterm 写的 ESC[I / ESC[O，CLI 打开了 1004 模式才会有）。
+ * 照常写进 PTY，但不是用户在打字：不算输入，不推迟投递（T11.0）。
+ */
+const FOCUS_REPORT = new RegExp(`${ESC}\\[[IO]`, "g");
+
 const PASTE_START = `${ESC}[200~`;
 const PASTE_END = `${ESC}[201~`;
 
@@ -159,7 +165,7 @@ export class TerminalReplyGate {
       }
     }
     const tail = text.slice(last);
-    return { data: out + tail, typed: typed + tail, dropped };
+    return { data: out + tail, typed: (typed + tail).replace(FOCUS_REPORT, ""), dropped };
   }
 
   private push(key: string, expires: number): void {

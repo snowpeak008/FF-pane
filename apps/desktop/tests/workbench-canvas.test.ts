@@ -16,12 +16,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   canvasImageSha256,
   describeCanvasRevision,
+  editCanvasBoard,
   ingestCanvasDirectoryFile,
   lexicalCanvasPath,
   loadCanvasBoard,
   placeImageOnBoard,
   removeFromCanvasBoard,
-  saveCanvasBoard,
   updateCanvasAnnotations,
   writeCanvasMarkedPreview,
 } from "../src/main/workbench/canvas-files";
@@ -133,7 +133,7 @@ describe("canvas files on disk", () => {
     };
     expect(revision.image).toBe(rel);
     expect(revision.marks[0]?.text).toBe("改这里");
-    await saveCanvasBoard(root, board);
+    await editCanvasBoard(root, () => ({ ...board }));
     const afterSave = createHash("sha256")
       .update(readFileSync(join(root, ".ffpane", "canvas", "pic.png")))
       .digest("hex");

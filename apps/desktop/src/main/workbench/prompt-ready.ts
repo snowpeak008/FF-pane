@@ -158,6 +158,29 @@ export function inputStillHolds(
   runtime: PromptRuntime,
   wanted: string,
 ): boolean | undefined {
+  const body = readInputBody(text, runtime);
+  if (body === undefined) {
+    return undefined;
+  }
+  if (body === "") {
+    return false;
+  }
+  const head = wanted.trim().slice(0, 12).replace(/\s+/g, "");
+  return body.replace(/\s+/g, "").includes(head) || /\[Pasted (text|Content)/i.test(body);
+}
+
+/**
+ * 输入框里有没有用户打的字（T11.0：有字就不投递）。看不到输入框返回 undefined。
+ * screen 要用 renderTerminalText 的 solidOnly 渲染：提示文字是暗色、光标格是反色，已换成空格，
+ * 剩下的才是用户的字。
+ */
+export function inputHasText(screen: string, runtime: PromptRuntime): boolean | undefined {
+  const body = readInputBody(screen, runtime);
+  return body === undefined ? undefined : body !== "";
+}
+
+/** 屏幕最下面那个输入框里的文字（去掉提示符，折行拼起来）。看不到输入框返回 undefined。 */
+function readInputBody(text: string, runtime: PromptRuntime): string | undefined {
   const lines = text.split("\n").map((line) => line.replace(/\s+$/, ""));
   const start = Math.max(0, lines.length - PROMPT_TAIL_LINES);
   const marker = runtime === "codex" ? /^›(\s|$)/ : /^❯(\s|$)/;
@@ -169,14 +192,9 @@ export function inputStillHolds(
     if (runtime === "claude-code" && !RULE.test(lines[index - 1] ?? "")) {
       continue;
     }
-    const body = [line.slice(1), ...inputContinuation(lines, index + 1, runtime)]
+    return [line.slice(1), ...inputContinuation(lines, index + 1, runtime)]
       .map((part) => part.trim())
       .join("");
-    if (body === "") {
-      return false;
-    }
-    const head = wanted.trim().slice(0, 12).replace(/\s+/g, "");
-    return body.replace(/\s+/g, "").includes(head) || /\[Pasted (text|Content)/i.test(body);
   }
   return undefined;
 }

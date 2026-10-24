@@ -34,6 +34,9 @@
  * - 可按终端设清空输入框的按键（clearInput，Claude 与 Codex 都是 Ctrl+U）：没提交时先清掉、
  *   重新打一遍再回车；还不行就清掉再报 not-submitted。不清的话文字留在输入框里，
  *   下一条提醒接在后面，越堆越多。
+ * - 输入框里有用户的字就不投（T11.0）。上次确认框是空的之后用户按过键（或正在用输入法选词），
+ *   才去看屏幕：框里有字就等用户发完；看不出框里有没有字时，用户 60 秒内按过键也先等着。
+ *   用户没按过键时框里不可能有用户的字，照常当场投递，不用看屏幕。
  */
 
 export const DEFAULT_OUTPUT_QUIET_MS = 1500;
@@ -53,6 +56,13 @@ export const CODEX_SUBMIT_DELAY_MS = 800;
  */
 export const CLEAR_INPUT_KEYS = "\u0015\u0015\u0015\u0015";
 
+/** 输入框里有用户的字时，隔这么久再看一次屏幕。 */
+export const DRAFT_RECHECK_MS = 2000;
+/** 看不出输入框里有没有字时，用户这么久没按键才投。 */
+export const UNSEEN_DRAFT_QUIET_MS = 60_000;
+/** 输入法选词最多算这么久（结束事件丢了也不会一直卡住）。 */
+export const COMPOSING_MAX_MS = 60_000;
+
 export type DeliverPhase = "unknown" | "idle" | "busy" | "blocked";
 
 /**
@@ -71,9 +81,9 @@ export type HookSignal =
   | "post-tool-use"
   | "post-tool-use-failure";
 
-export type IdleDeliverHold = "auto" | "manual" | "blocked" | "busy";
+export type IdleDeliverHold = "auto" | "manual" | "blocked" | "busy" | "draft";
 
-export type DeliverPendingMode = "manual" | "blocked" | "busy" | "clear";
+export type DeliverPendingMode = "manual" | "blocked" | "busy" | "draft" | "clear";
 
 export interface IdleDeliverOutcome {
   readonly terminalId: string;
@@ -102,6 +112,11 @@ export interface IdleDeliverDeps {
    * 信号说没提交时先看一眼再重打，免得把其实已经提交的再发一遍。
    */
   readonly inputStillHolds?: (terminalId: string, text: string) => Promise<boolean | undefined>;
+  /**
+   * 看屏幕：输入框里有没有用户打的字。true = 有，false = 空，undefined = 看不出。
+   * 缺省时不看，只按按键静默判断（旧行为）。
+   */
+  readonly readDraft?: (terminalId: string) => Promise<boolean | undefined>;
   readonly submitVerifyMs?: number;
   /** 排队之后才发生的结果。立即完成的结果由 enqueue 返回值表达。 */
   readonly onDeferred?: (outcome: IdleDeliverOutcome) => void;
@@ -133,7 +148,10 @@ export type IdleDeliverEnqueueResult =
 
 export type ManualDeliverResult =
   | { readonly status: "delivered"; readonly count: number }
-  | { readonly status: "refused"; readonly reason: "blocked" | "busy" | "empty" | "dead" };
+  | {
+      readonly status: "refused";
+      readonly reason: "blocked" | "busy" | "empty" | "dead" | "draft";
+    };
 
 export interface IdleDeliverAttachOptions {
   /** 启动参数里带了 initialPrompt：SessionStart 不能当成“在等输入”。 */
@@ -163,6 +181,10 @@ export interface IdleDeliverQueue {
   attach(terminalId: string, options?: IdleDeliverAttachOptions): void;
   noteHook(terminalId: string, signal: HookSignal, meta?: HookNoteMeta): void;
   noteInput(terminalId: string, atMs?: number): void;
+  /** 用户开始或结束用输入法选词。选词期间不投递。 */
+  noteComposing(terminalId: string, composing: boolean): void;
+  /** 上次确认输入框是空的之后用户按过键（或正在选词）：投递前要先看输入框。 */
+  needsDraftCheck(terminalId: string): boolean;
   /** 本窗口向 PTY 提交了回车。不刷新 lastInputAt（由 noteInput 负责）。 */
   noteSubmit(terminalId: string): void;
   enqueue(input: IdleDeliverEnqueue): IdleDeliverEnqueueResult;
@@ -174,7 +196,7 @@ export interface IdleDeliverQueue {
     onSubmit?: (result: SubmitResult) => void,
   ): IdleDeliverEnqueueResult;
   /** 仅未知状态（或已经是回合结束）允许用户立即发送。阻塞 / 忙时拒绝。 */
-  deliverNow(terminalId: string): ManualDeliverResult;
+  deliverNow(terminalId: string, options?: { readonly draft?: boolean }): ManualDeliverResult;
   cancel(terminalId: string): void;
   /** 窗口退出：清空该终端队列，不再写入。 */
   drop(terminalId: string): void;
@@ -236,6 +258,16 @@ interface Session {
   /** 有可靠的「一轮开始」信号来源。 */
   turnStartSource: boolean;
   lastTurnStartAt: number;
+  /** 确认输入框里没有用户的字的时间：真正开始一轮，或看屏幕看到框是空的。 */
+  lastCleanAt: number;
+  /** 开始用输入法选词的时间，0 表示没在选。 */
+  composingSince: number;
+  /** 正在看屏幕。 */
+  draftChecking: boolean;
+  /** 上次看屏幕的时间。 */
+  draftCheckedAt: number;
+  /** 因为输入框里有用户的字（或看不出）在等。 */
+  draftHeld: boolean;
 }
 
 const TOOL_USE_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
@@ -323,6 +355,11 @@ export function createIdleDeliverQueue(deps: IdleDeliverDeps): IdleDeliverQueue 
       hadTurn: false,
       paused: false,
       bracketedPaste: false,
+      lastCleanAt: 0,
+      composingSince: 0,
+      draftChecking: false,
+      draftCheckedAt: 0,
+      draftHeld: false,
     };
     sessions.set(terminalId, created);
     return created;
@@ -336,10 +373,18 @@ export function createIdleDeliverQueue(deps: IdleDeliverDeps): IdleDeliverQueue 
     }
   };
 
+  const composing = (session: Session): boolean =>
+    session.composingSince !== 0 && deps.now() - session.composingSince < COMPOSING_MAX_MS;
+
   const notifyPending = (terminalId: string): void => {
     const session = sessions.get(terminalId);
     const count = session?.queue.length ?? 0;
-    const mode = session === undefined || count === 0 ? "clear" : pendingMode(session.phase);
+    const mode =
+      session === undefined || count === 0
+        ? "clear"
+        : (session.draftHeld || composing(session)) && session.phase === "idle"
+          ? "draft"
+          : pendingMode(session.phase);
     deps.onPending?.({
       terminalId,
       ...(session?.windowId !== undefined ? { windowId: session.windowId } : {}),
@@ -395,7 +440,51 @@ export function createIdleDeliverQueue(deps: IdleDeliverDeps): IdleDeliverQueue 
     if (session.lastInputAt !== 0 && deps.now() - session.lastInputAt < inputQuietMs) {
       return false;
     }
+    if (composing(session)) {
+      return false;
+    }
     return deps.isIdle(terminalId, item.quietMs);
+  };
+
+  /** 上次确认框里没有用户的字之后，用户又按过键。 */
+  const dirty = (session: Session): boolean =>
+    deps.readDraft !== undefined && session.lastInputAt > session.lastCleanAt;
+
+  const markClean = (session: Session): void => {
+    session.lastCleanAt = deps.now();
+    session.draftHeld = false;
+  };
+
+  /** 看一眼输入框：空了就接着投；有字（或看不出且用户刚按过键）就过一会儿再看。 */
+  const checkDraft = (terminalId: string, session: Session): void => {
+    const read = deps.readDraft;
+    if (read === undefined || session.draftChecking) {
+      return;
+    }
+    if (session.draftCheckedAt !== 0 && deps.now() - session.draftCheckedAt < DRAFT_RECHECK_MS) {
+      arm(terminalId);
+      return;
+    }
+    session.draftChecking = true;
+    const after = (draft: boolean | undefined): void => {
+      session.draftChecking = false;
+      if (sessions.get(terminalId) !== session) {
+        return;
+      }
+      session.draftCheckedAt = deps.now();
+      const clear =
+        draft === false ||
+        (draft === undefined && deps.now() - session.lastInputAt >= UNSEEN_DRAFT_QUIET_MS);
+      if (clear) {
+        markClean(session);
+        pump(terminalId, true);
+        return;
+      }
+      session.draftHeld = true;
+      notifyPending(terminalId);
+      arm(terminalId);
+    };
+    read(terminalId).then(after, () => after(undefined));
   };
 
   const settleSubmit = (session: Session, result: SubmitResult): void => {
@@ -640,8 +729,14 @@ export function createIdleDeliverQueue(deps: IdleDeliverDeps): IdleDeliverQueue 
         mode:
           session.phase === "unknown" && item.allowUnknown === true
             ? "auto"
-            : holdMode(session.phase),
+            : session.phase === "idle" && composing(session)
+              ? "draft"
+              : holdMode(session.phase),
       };
+    }
+    if (dirty(session)) {
+      checkDraft(terminalId, session);
+      return { status: "queued", mode: "draft" };
     }
     const wrote = deliverHead(terminalId, deferred);
     if (!wrote) {
@@ -695,6 +790,8 @@ export function createIdleDeliverQueue(deps: IdleDeliverDeps): IdleDeliverQueue 
         }
         session.phase = permissionOutstanding(session) > 0 ? "blocked" : "busy";
       } else if (signal === "user-prompt-submit") {
+        // 真正开始了一轮：输入框被清空了。
+        markClean(session);
         session.hadTurn = true;
         session.pendingPermissionIds.clear();
         session.pendingPermissionDigests.clear();
@@ -732,6 +829,19 @@ export function createIdleDeliverQueue(deps: IdleDeliverDeps): IdleDeliverQueue 
     noteInput(terminalId, atMs) {
       const session = ensure(terminalId);
       session.lastInputAt = atMs ?? deps.now();
+    },
+    noteComposing(terminalId, isComposing) {
+      const session = ensure(terminalId);
+      session.composingSince = isComposing ? deps.now() : 0;
+      session.lastInputAt = deps.now();
+      if (session.queue.length > 0) {
+        notifyPending(terminalId);
+        arm(terminalId);
+      }
+    },
+    needsDraftCheck(terminalId) {
+      const session = sessions.get(terminalId);
+      return session !== undefined && (dirty(session) || composing(session));
     },
     noteSubmit(terminalId) {
       const session = ensure(terminalId);
@@ -804,10 +914,14 @@ export function createIdleDeliverQueue(deps: IdleDeliverDeps): IdleDeliverQueue 
         ...(onSubmit !== undefined ? { onSubmit } : {}),
       });
     },
-    deliverNow(terminalId) {
+    deliverNow(terminalId, options) {
       const session = sessions.get(terminalId);
       if (session === undefined || session.queue.length === 0) {
         return { status: "refused", reason: "empty" };
+      }
+      // 立即发送也不接在用户没发完的字后面。
+      if (options?.draft === true || composing(session)) {
+        return { status: "refused", reason: "draft" };
       }
       if (permissionOutstanding(session) > 0 || session.phase === "blocked") {
         if (permissionOutstanding(session) > 0) {
@@ -844,6 +958,7 @@ export function createIdleDeliverQueue(deps: IdleDeliverDeps): IdleDeliverQueue 
     },
     noteTurnStarted(terminalId) {
       const session = ensure(terminalId);
+      markClean(session);
       session.lastTurnStartAt = deps.now();
       session.hadTurn = true;
       if (session.phase !== "blocked") {

@@ -255,6 +255,12 @@ export interface TerminalWriteRequest {
   readonly data: string;
 }
 
+/** 用户在这个终端里开始或结束用输入法选词（T11.0：选词期间不投递）。 */
+export interface TerminalComposingRequest {
+  readonly id: string;
+  readonly composing: boolean;
+}
+
 export interface TerminalResizeRequest {
   readonly id: string;
   readonly cols: number;
@@ -444,7 +450,7 @@ export type DeliverWorkbenchPendingResponse =
   | { readonly ok: true; readonly count: number }
   | {
       readonly ok: false;
-      readonly reason: "blocked" | "busy" | "empty" | "unknown-window";
+      readonly reason: "blocked" | "busy" | "empty" | "draft" | "unknown-window";
     };
 
 /** 管理者开出的子窗口已经在主进程启动，渲染端把它放进当前布局。 */
@@ -556,11 +562,53 @@ export interface WorkbenchCanvasBoardView {
     >
   >;
   readonly activePageId?: string;
+  /** 图的附注：用户标了「不要」、AI 的删图申请、导出位置（T11.0）。 */
+  readonly notes?: Readonly<
+    Record<
+      string,
+      {
+        readonly rejected?: boolean;
+        readonly deleteRequest?: {
+          readonly by: string;
+          readonly reason: string;
+          readonly at: string;
+        };
+        readonly exportedTo?: readonly string[];
+      }
+    >
+  >;
+}
+
+/** 画板回收站里的一张图（T11.0）。 */
+export interface WorkbenchCanvasTrashEntryView {
+  readonly id: string;
+  readonly originalPath: string;
+  readonly deletedBy: string;
+  readonly deletedAt: string;
+  readonly reason?: string;
 }
 
 export interface WorkbenchGetCanvasResponse {
   readonly board: WorkbenchCanvasBoardView;
+  readonly trash: readonly WorkbenchCanvasTrashEntryView[];
 }
+
+/**
+ * 界面对画板的一次改动（T11.0）。主进程在锁里读最新的画板、只改这一处再写回，
+ * 不整份覆盖，免得盖掉同时在出图、收图的窗口写进去的行。
+ */
+export type WorkbenchCanvasEdit =
+  | { readonly kind: "set-page"; readonly pageId: string }
+  | {
+      readonly kind: "set-annotations";
+      readonly path: string;
+      readonly annotations: WorkbenchCanvasBoardView["annotations"][string];
+    }
+  | { readonly kind: "mark-rejected"; readonly path: string; readonly rejected: boolean }
+  | { readonly kind: "trash"; readonly path: string }
+  | { readonly kind: "resolve-request"; readonly path: string; readonly approve: boolean }
+  | { readonly kind: "restore"; readonly trashId: string }
+  | { readonly kind: "purge"; readonly trashId?: string };
 
 export interface WorkbenchReadCanvasImageResponse {
   readonly mime: string;
@@ -627,7 +675,7 @@ export interface WorkbenchManagerGrantEvent {
 export interface WorkbenchDeliverPendingEvent {
   readonly windowId: string;
   readonly count: number;
-  readonly mode: "manual" | "blocked" | "busy" | "clear";
+  readonly mode: "manual" | "blocked" | "busy" | "draft" | "clear";
 }
 
 export interface ModelEffortSettledRequest {
@@ -1518,6 +1566,7 @@ export interface IpcInvokeContracts {
   /** 创建内嵌终端（T10.1）；shell 白名单 pwsh/powershell/cmd，cwd 必须是已存在目录。 */
   "terminal:create": { request: CreateTerminalRequest; response: TerminalInfo };
   "terminal:write": { request: TerminalWriteRequest; response: { readonly ok: true } };
+  "terminal:composing": { request: TerminalComposingRequest; response: { readonly ok: true } };
   "terminal:resize": { request: TerminalResizeRequest; response: { readonly ok: true } };
   "terminal:kill": { request: TerminalIdRequest; response: { readonly ok: true } };
   "terminal:list": { request: undefined; response: readonly TerminalInfo[] };
@@ -1640,10 +1689,10 @@ export interface IpcInvokeContracts {
     request: { readonly projectId: ProjectId };
     response: WorkbenchGetCanvasResponse;
   };
-  /** 保存 board.json（页签、标注、从画板移除等）。 */
-  "workbench:save-canvas": {
-    request: { readonly projectId: ProjectId; readonly board: WorkbenchCanvasBoardView };
-    response: { readonly ok: true };
+  /** 改画板的一处（切页、标注、标「不要」、删进回收站、处理删图申请、恢复、彻底删除）。 */
+  "workbench:canvas-edit": {
+    request: { readonly projectId: ProjectId; readonly edit: WorkbenchCanvasEdit };
+    response: WorkbenchGetCanvasResponse;
   };
   /** 把画了标记的预览 PNG 写进 `.ffpane/canvas/revisions/`。不改原图。 */
   "workbench:save-canvas-marked": {
@@ -1929,6 +1978,7 @@ export const INVOKE_CHANNELS = [
   "dialog:pick-directory",
   "terminal:create",
   "terminal:write",
+  "terminal:composing",
   "terminal:resize",
   "terminal:kill",
   "terminal:list",
@@ -1957,7 +2007,7 @@ export const INVOKE_CHANNELS = [
   "workbench:open-ffpane",
   "workbench:panel-activity",
   "workbench:get-canvas",
-  "workbench:save-canvas",
+  "workbench:canvas-edit",
   "workbench:save-canvas-marked",
   "workbench:read-canvas-image",
   "workbench:remove-canvas-image",

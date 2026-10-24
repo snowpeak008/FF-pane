@@ -1,14 +1,22 @@
 /**
  * 项目画板：缩略图条、整图查看。拖动空白移动画面，点一下打标签。
+ * 画板是项目图库（T11.0）：删图进回收站；可以标「不要」；AI 的删图申请在这里同意或保留；
+ * 彻底删除、清空回收站只有这里能做。
  */
 
-import type { CanvasAnnotation, CanvasBoard, ProjectId } from "@ff-pane/shared";
+import type { CanvasAnnotation, CanvasBoard, CanvasImageNote, ProjectId } from "@ff-pane/shared";
 import { type ReactElement, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { projectImageTag } from "../../../../shared/canvas-image-tag";
-import type { WorkbenchCanvasBoardView } from "../../../../shared-ipc/contracts";
+import type {
+  WorkbenchCanvasBoardView,
+  WorkbenchCanvasEdit,
+  WorkbenchCanvasTrashEntryView,
+  WorkbenchGetCanvasResponse,
+} from "../../../../shared-ipc/contracts";
 import { Button } from "../../components/ui/Button";
+import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/Tabs";
 import { invokeQuery } from "../../ipc/query";
 import { useSubscription } from "../../ipc/useSubscription";
@@ -32,19 +40,17 @@ function boardFromView(view: WorkbenchCanvasBoardView): CanvasBoard {
   return view;
 }
 
-function viewFromBoard(board: CanvasBoard): WorkbenchCanvasBoardView {
-  return board;
-}
-
 function CanvasImage({
   projectId,
   path,
   selected,
+  note,
   onSelect,
 }: {
   readonly projectId: ProjectId;
   readonly path: string;
   readonly selected: boolean;
+  readonly note?: CanvasImageNote;
   readonly onSelect: () => void;
 }): ReactElement {
   const { t } = useTranslation();
@@ -77,7 +83,17 @@ function CanvasImage({
         selected ? "border-primary ring-2 ring-primary/40" : "border-neutral-800"
       }`}
     >
-      <span className="flex min-h-0 flex-1 items-center justify-center bg-muted/40 p-1">
+      <span className="relative flex min-h-0 flex-1 items-center justify-center bg-muted/40 p-1">
+        {note?.deleteRequest !== undefined || note?.rejected === true ? (
+          <span
+            className="absolute left-1 top-1 rounded-sm bg-warning-surface px-1 text-[10px] text-warning-text"
+            data-testid="canvas-image-flag"
+          >
+            {note.deleteRequest !== undefined
+              ? t("workbench.canvas.flagRequest")
+              : t("workbench.canvas.flagRejected")}
+          </span>
+        ) : null}
         {src === null ? (
           <span className="text-xs text-fg-muted">…</span>
         ) : (
@@ -700,7 +716,28 @@ export function WorkbenchCanvasPanel({
   const closeCanvas = useWorkbenchCanvasStore((s) => s.closeCanvas);
   const setFocusPath = useWorkbenchCanvasStore((s) => s.setFocusPath);
   const [board, setBoard] = useState<CanvasBoard | null>(null);
+  const [trash, setTrash] = useState<readonly WorkbenchCanvasTrashEntryView[]>([]);
+  const [showTrash, setShowTrash] = useState(false);
+  const [purging, setPurging] = useState<{ readonly trashId?: string } | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+
+  const adopt = (data: WorkbenchGetCanvasResponse): CanvasBoard => {
+    const next = boardFromView(data.board);
+    setBoard(next);
+    setTrash(data.trash);
+    return next;
+  };
+
+  /** 改画板的一处。主进程只改这一处，不整份覆盖。 */
+  const applyEdit = async (edit: WorkbenchCanvasEdit): Promise<boolean> => {
+    const settled = await invokeQuery("workbench:canvas-edit", { projectId, edit });
+    if (settled.status === "error") {
+      toast.error(settled.error.message);
+      return false;
+    }
+    adopt(settled.data);
+    return true;
+  };
 
   const reload = useCallback(async () => {
     const settled = await invokeQuery("workbench:get-canvas", { projectId });
@@ -710,6 +747,7 @@ export function WorkbenchCanvasPanel({
     }
     const next = boardFromView(settled.data.board);
     setBoard(next);
+    setTrash(settled.data.trash);
     setSelectedPath((current) => {
       if (current !== null) {
         return current;
@@ -744,19 +782,6 @@ export function WorkbenchCanvasPanel({
 
   const commitChain = useRef(Promise.resolve());
 
-  const persistBoard = async (next: CanvasBoard): Promise<boolean> => {
-    setBoard(next);
-    const settled = await invokeQuery("workbench:save-canvas", {
-      projectId,
-      board: viewFromBoard(next),
-    });
-    if (settled.status === "error") {
-      toast.error(settled.error.message);
-      return false;
-    }
-    return true;
-  };
-
   const saveMarkedPreview = async (path: string, pngBase64: string): Promise<void> => {
     const settled = await invokeQuery("workbench:save-canvas-marked", {
       projectId,
@@ -780,9 +805,19 @@ export function WorkbenchCanvasPanel({
       toast.error(settled.error.message);
       return;
     }
-    setBoard(boardFromView(settled.data.board));
+    adopt(settled.data);
     setSelectedPath(null);
     toast.message(t("workbench.canvas.removedFromBoard"));
+  };
+
+  const trashSelected = async (): Promise<void> => {
+    if (selectedPath === null) {
+      return;
+    }
+    if (await applyEdit({ kind: "trash", path: selectedPath })) {
+      setSelectedPath(null);
+      toast.message(t("workbench.canvas.trashed"));
+    }
   };
 
   if (!open || board === null) {
@@ -790,6 +825,7 @@ export function WorkbenchCanvasPanel({
   }
 
   const annotations = selectedPath !== null ? (board.annotations[selectedPath] ?? []) : [];
+  const note = selectedPath !== null ? board.notes?.[selectedPath] : undefined;
 
   return (
     <div
@@ -797,9 +833,91 @@ export function WorkbenchCanvasPanel({
       role="dialog"
       aria-label={t("workbench.canvas.title")}
     >
-      <header className="flex items-center border-b border-border px-3 py-2 pr-14">
+      <header className="flex items-center gap-3 border-b border-border px-3 py-2 pr-14">
         <h2 className="text-sm font-medium">{t("workbench.canvas.title")}</h2>
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          data-testid="canvas-trash-toggle"
+          onClick={() => setShowTrash((value) => !value)}
+        >
+          {t("workbench.canvas.trash", { count: trash.length })}
+        </Button>
       </header>
+      {showTrash ? (
+        <div
+          className="flex max-h-72 shrink-0 flex-col gap-1 overflow-y-auto border-b border-border px-3 py-2 text-xs"
+          data-testid="canvas-trash"
+        >
+          {trash.length === 0 ? (
+            <p className="text-fg-muted">{t("workbench.canvas.trashEmpty")}</p>
+          ) : (
+            <>
+              {trash.map((entry) => (
+                <div key={entry.id} className="flex items-center gap-2">
+                  <span className="min-w-0 flex-1 truncate">
+                    {t("workbench.canvas.trashEntry", {
+                      name: projectImageTag(entry.originalPath).fileName,
+                      by: entry.deletedBy,
+                      at: new Date(entry.deletedAt).toLocaleString(),
+                    })}
+                    {entry.reason !== undefined
+                      ? t("workbench.canvas.trashReason", { reason: entry.reason })
+                      : ""}
+                  </span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => void applyEdit({ kind: "restore", trashId: entry.id })}
+                  >
+                    {t("workbench.canvas.restore")}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setPurging({ trashId: entry.id })}
+                  >
+                    {t("workbench.canvas.purge")}
+                  </Button>
+                </div>
+              ))}
+              <div className="pt-1">
+                <Button type="button" size="sm" variant="ghost" onClick={() => setPurging({})}>
+                  {t("workbench.canvas.purgeAll")}
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+      ) : null}
+      <ConfirmDialog
+        open={purging !== null}
+        onOpenChange={(value) => {
+          if (!value) {
+            setPurging(null);
+          }
+        }}
+        title={
+          purging?.trashId === undefined
+            ? t("workbench.canvas.purgeAllTitle", { count: trash.length })
+            : t("workbench.canvas.purgeTitle")
+        }
+        description={t("workbench.canvas.purgeDescription")}
+        confirmLabel={t("workbench.canvas.purge")}
+        onConfirm={() => {
+          const target = purging;
+          setPurging(null);
+          if (target !== null) {
+            void applyEdit({
+              kind: "purge",
+              ...(target.trashId !== undefined ? { trashId: target.trashId } : {}),
+            });
+          }
+        }}
+      />
       <button
         type="button"
         aria-label={t("workbench.canvas.close")}
@@ -811,7 +929,8 @@ export function WorkbenchCanvasPanel({
       <Tabs
         value={activePageId}
         onValueChange={(value) => {
-          void persistBoard({ ...board, activePageId: value });
+          setBoard({ ...board, activePageId: value });
+          void applyEdit({ kind: "set-page", pageId: value });
         }}
         className="flex shrink-0 flex-col px-3"
       >
@@ -841,6 +960,9 @@ export function WorkbenchCanvasPanel({
                           projectId={projectId}
                           path={version.path}
                           selected={selectedPath === version.path}
+                          {...(board.notes?.[version.path] !== undefined
+                            ? { note: board.notes[version.path] }
+                            : {})}
                           onSelect={() => setSelectedPath(version.path)}
                         />
                       </div>
@@ -865,8 +987,39 @@ export function WorkbenchCanvasPanel({
               <p className="truncate text-[11px] text-white/70">
                 {projectImageTag(selectedPath).path}
               </p>
+              {note?.exportedTo !== undefined ? (
+                <p className="truncate text-[11px] text-white/70" data-testid="canvas-exported-to">
+                  {t("workbench.canvas.exportedTo", { paths: note.exportedTo.join(", ") })}
+                </p>
+              ) : null}
             </div>
             <div className="flex gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                data-testid="canvas-mark-rejected"
+                onClick={() =>
+                  void applyEdit({
+                    kind: "mark-rejected",
+                    path: selectedPath,
+                    rejected: note?.rejected !== true,
+                  })
+                }
+              >
+                {note?.rejected === true
+                  ? t("workbench.canvas.unmarkRejected")
+                  : t("workbench.canvas.markRejected")}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                data-testid="canvas-trash-image"
+                onClick={() => void trashSelected()}
+              >
+                {t("workbench.canvas.moveToTrash")}
+              </Button>
               <Button
                 type="button"
                 size="sm"
@@ -877,17 +1030,52 @@ export function WorkbenchCanvasPanel({
               </Button>
             </div>
           </div>
+          {note?.deleteRequest !== undefined ? (
+            <div
+              className="mb-2 flex items-center gap-2 rounded-md bg-warning-surface px-2 py-1.5 text-xs text-warning-text"
+              data-testid="canvas-delete-request"
+            >
+              <span className="min-w-0 flex-1">
+                {t("workbench.canvas.deleteRequest", {
+                  by: note.deleteRequest.by,
+                  reason: note.deleteRequest.reason,
+                })}
+              </span>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={() =>
+                  void applyEdit({ kind: "resolve-request", path: selectedPath, approve: true })
+                }
+              >
+                {t("workbench.canvas.approveDelete")}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() =>
+                  void applyEdit({ kind: "resolve-request", path: selectedPath, approve: false })
+                }
+              >
+                {t("workbench.canvas.keepImage")}
+              </Button>
+            </div>
+          ) : null}
           <Viewer
             projectId={projectId}
             path={selectedPath}
             annotations={annotations}
             onAnnotationsCommit={(next, preview) => {
               const path = selectedPath;
+              setBoard({ ...board, annotations: { ...board.annotations, [path]: next } });
               commitChain.current = commitChain.current
                 .then(async () => {
-                  const saved = await persistBoard({
-                    ...board,
-                    annotations: { ...board.annotations, [path]: next },
+                  const saved = await applyEdit({
+                    kind: "set-annotations",
+                    path,
+                    annotations: next,
                   });
                   if (!saved || next.length === 0) {
                     return;

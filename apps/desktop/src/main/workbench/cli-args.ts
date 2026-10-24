@@ -16,6 +16,16 @@ export const CODEX_INTERACTIVE_COMMAND = "codex";
 /** Grok 默认可执行文件名。 */
 export const GROK_INTERACTIVE_COMMAND = "grok";
 
+/**
+ * FF-pane 的 Codex 窗口不读也不写 Codex 全局记忆（T11.0）。
+ * 全局记忆不分项目，会把别的项目的总结塞进系统说明；只对本次会话关掉，不改用户的 config.toml。
+ */
+export const CODEX_SESSION_MEMORY_OFF: readonly string[] = [
+  "features.memories=false",
+  "memories.use_memories=false",
+  "memories.generate_memories=false",
+];
+
 /** 交互式 Claude 启动参数。 */
 export interface BuildInteractiveClaudeArgsInput {
   readonly model?: string;
@@ -165,6 +175,10 @@ export function buildInteractiveCodexArgs(input: BuildInteractiveCodexArgsInput)
   }
   for (const [key, value] of Object.entries(input.configOverrides ?? {})) {
     args.push("-c", `${key}=${value}`);
+  }
+  // 放在 configOverrides 之后，同名覆盖也盖不过它。
+  for (const override of CODEX_SESSION_MEMORY_OFF) {
+    args.push("-c", override);
   }
   if (input.developerInstructions !== undefined && input.developerInstructions.trim() !== "") {
     args.push("-c", `developer_instructions=${JSON.stringify(input.developerInstructions)}`);
