@@ -1,8 +1,9 @@
 /**
  * T10.19：近况覆盖、四行不齐不叫醒、消息不含详细记录全文、路径必须在 briefs 内。
+ * T11.0b：四行不齐时报错，说清哪一行，附模板；监管者写近况时就检查。
  */
 
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { WorkbenchAuthNode } from "@ff-pane/core";
@@ -16,7 +17,11 @@ import {
   type WorkbenchToolDeps,
 } from "../src/main/workbench/mcp-tools";
 import { createNamedLocks } from "../src/main/workbench/named-locks";
-import { buildSupervisorWake } from "../src/main/workbench/status-handoff";
+import {
+  buildSupervisorWake,
+  parseStatusPage,
+  STATUS_TEMPLATE,
+} from "../src/main/workbench/status-handoff";
 import { readThreadIndex } from "../src/main/workbench/thread-store";
 
 const roots: string[] = [];
@@ -180,10 +185,49 @@ describe("监管者交接", () => {
     const { deps } = harness(root);
     const viaTool = await call(deps, "S", "ffpane_write_status", {
       name: "near.md",
-      content: "第三页",
+      content: FOUR,
     });
     expect(viaTool.isError).toBe(false);
-    expect(readFileSync(join(root, ".ffpane", "briefs", "near.md"), "utf8")).toBe("第三页\n");
+    expect(readFileSync(join(root, ".ffpane", "briefs", "near.md"), "utf8")).toBe(`${FOUR}\n`);
+
+    // 别的角色不套四行格式。
+    const byManager = await call(deps, "A", "ffpane_write_status", {
+      name: "plan.md",
+      content: "第三页",
+    });
+    expect(byManager.isError).toBe(false);
+    expect(readFileSync(join(root, ".ffpane", "briefs", "plan.md"), "utf8")).toBe("第三页\n");
+  });
+
+  it("T11.0b：监管者写不合格的近况，当场报错、带模板、不写文件", async () => {
+    const root = tempDir();
+    const { deps } = harness(root);
+    const rejected = await call(deps, "S", "ffpane_write_status", {
+      name: "near.md",
+      content: "各窗口状态：都在忙\n锁/资源：空闲\n问题：无\n建议：继续",
+    });
+    expect(rejected.isError).toBe(true);
+    expect(rejected.text).toContain("第 1 行要以「结论：」开头");
+    expect(rejected.text).toContain(STATUS_TEMPLATE);
+    expect(existsSync(join(root, ".ffpane", "briefs", "near.md"))).toBe(false);
+  });
+
+  it("T11.0b：不合格时说清是哪一行", () => {
+    const reasonOf = (text: string): string | undefined => {
+      const parsed = parseStatusPage(text);
+      return parsed.ok ? undefined : parsed.reason;
+    };
+    expect(reasonOf("结论：做完；已跑 lint，通过。\n改了：无")).toContain("现在是 2 行");
+    expect(reasonOf("结论：已跑 lint，通过。\n改了：无\n还没做：无\n要决定：无")).toContain(
+      "第 1 行「结论：」后面要紧跟",
+    );
+    expect(reasonOf("结论：做完；已跑 lint，通过。\n改动：无\n还没做：无\n要决定：无")).toBe(
+      "第 2 行要以「改了：」开头",
+    );
+    expect(reasonOf("结论：做完。\n改了：无\n还没做：无\n要决定：无")).toContain("要写跑没跑");
+    expect(reasonOf(FOUR)).toBeUndefined();
+    // 模板自己要能通过。
+    expect(parseStatusPage(STATUS_TEMPLATE).ok).toBe(true);
   });
 
   it("四行不齐不产生叫醒管理者的消息", async () => {
@@ -200,8 +244,11 @@ describe("监管者交接", () => {
       briefPath: ".ffpane/briefs/near.md",
       detailPath: detail.relativePath,
     });
-    expect(incomplete.isError).toBe(false);
-    expect(incomplete.json).toMatchObject({ delivered: false });
+    // T11.0b：不再悄悄拦下，报错并说清哪里不对。
+    expect(incomplete.isError).toBe(true);
+    expect(incomplete.text).toContain("没有送出");
+    expect(incomplete.text).toContain("现在是 5 行");
+    expect(incomplete.text).toContain(STATUS_TEMPLATE);
     expect(incomplete.text).not.toContain("MARKER-9f3a");
     expect(reminders).toEqual([]);
     expect(await readThreadIndex(root)).toEqual([]);
@@ -211,7 +258,8 @@ describe("监管者交接", () => {
       statusText: "结论：做完\n改了：无\n还没做：无\n要决定：无",
       detailText: DETAIL,
     });
-    expect(missingRun).toEqual({ ok: true, wake: false });
+    expect(missingRun).toMatchObject({ ok: true, wake: false });
+    expect(missingRun).toHaveProperty("reason", expect.stringContaining("要写跑没跑"));
     expect(missingRun).not.toHaveProperty("text");
   });
 

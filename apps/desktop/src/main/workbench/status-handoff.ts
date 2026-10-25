@@ -1,6 +1,6 @@
 /**
  * 监管者交接（T10.19）。
- * 近况只有四行。四行不齐不叫醒管理者。消息只带路径和这四行，不带详细记录正文。
+ * 近况只有四行。四行不齐不叫醒管理者，并说清哪一行不对（T11.0b）。消息只带路径和这四行，不带详细记录正文。
  */
 
 import type { WorkbenchRole } from "@ff-pane/shared";
@@ -8,6 +8,14 @@ import { hasControlChar } from "./remind";
 
 const STATUS_PREFIXES = ["结论：", "改了：", "还没做：", "要决定："] as const;
 const CONCLUSIONS = ["做完", "卡住", "失败"] as const;
+
+/** 四行模板。错误提示和 supervisor.md 都用这一份。 */
+export const STATUS_TEMPLATE = [
+  "结论：做完；已跑 pnpm test，通过。（「做完」「卡住」「失败」三选一开头；没跑就写「没跑」）",
+  "改了：改过的文件，没有就写无",
+  "还没做：还没做的，没有就写无",
+  "要决定：要管理者拍板的一件事，没有就写无",
+].join("\n");
 
 export type StatusConclusion = (typeof CONCLUSIONS)[number];
 
@@ -92,36 +100,35 @@ export function parseStatusPage(text: string):
       readonly lines: readonly [string, string, string, string];
       readonly conclusion: StatusConclusion;
     }
-  | { readonly ok: false } {
+  | { readonly ok: false; readonly reason: string } {
   const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
   const lines = normalized.split("\n").map((line) => line.trim());
-  if (lines.length !== STATUS_PREFIXES.length || lines.some((line) => line.length === 0)) {
-    return { ok: false };
+  if (lines.length !== STATUS_PREFIXES.length) {
+    return { ok: false, reason: `要正好 4 行，现在是 ${lines.length} 行` };
   }
   for (let i = 0; i < STATUS_PREFIXES.length; i += 1) {
     const prefix = STATUS_PREFIXES[i];
     const line = lines[i];
     if (prefix === undefined || line === undefined || !line.startsWith(prefix)) {
-      return { ok: false };
+      return { ok: false, reason: `第 ${i + 1} 行要以「${prefix ?? ""}」开头` };
     }
   }
+  const [conclusionLine, changed, pending, decision] = lines;
   const conclusionPrefix = STATUS_PREFIXES[0];
-  const conclusionLine = lines[0];
-  const changed = lines[1];
-  const pending = lines[2];
-  const decision = lines[3];
   if (
-    conclusionPrefix === undefined ||
     conclusionLine === undefined ||
     changed === undefined ||
     pending === undefined ||
     decision === undefined
   ) {
-    return { ok: false };
+    return { ok: false, reason: "要正好 4 行" };
   }
   const conclusion = matchConclusion(conclusionLine.slice(conclusionPrefix.length));
-  if (conclusion === undefined || !hasRunResult(lines.join("\n"))) {
-    return { ok: false };
+  if (conclusion === undefined) {
+    return { ok: false, reason: "第 1 行「结论：」后面要紧跟「做完」「卡住」或「失败」" };
+  }
+  if (!hasRunResult(lines.join("\n"))) {
+    return { ok: false, reason: "要写跑没跑：「已跑 …，通过」「已跑 …，失败」或「没跑」" };
   }
   return {
     ok: true,
@@ -130,8 +137,13 @@ export function parseStatusPage(text: string):
   };
 }
 
+/** 近况不合格时给监管者看的话：哪里不对，再附模板。 */
+export function statusPageProblem(reason: string): string {
+  return `近况不合格：${reason}。照这个格式重写，正好四行：\n${STATUS_TEMPLATE}`;
+}
+
 export type SupervisorWake =
-  | { readonly ok: true; readonly wake: false }
+  | { readonly ok: true; readonly wake: false; readonly reason: string }
   | {
       readonly ok: true;
       readonly wake: true;
@@ -172,7 +184,7 @@ export function buildSupervisorWake(input: {
   }
   const parsed = parseStatusPage(input.statusText);
   if (!parsed.ok) {
-    return { ok: true, wake: false };
+    return { ok: true, wake: false, reason: parsed.reason };
   }
   const lines = [`近况：${statusPath}`];
   if (detailPath !== undefined) {
@@ -182,7 +194,7 @@ export function buildSupervisorWake(input: {
   const text = lines.join("\n");
   const detail = input.detailText?.trim() ?? "";
   if (detail.length >= 20 && text.includes(detail)) {
-    return { ok: true, wake: false };
+    return { ok: true, wake: false, reason: "消息里只放四行，不要放详细记录的正文" };
   }
   return {
     ok: true,
@@ -195,7 +207,7 @@ export function buildSupervisorWake(input: {
 
 export type SupervisorGate =
   | { readonly ok: true; readonly kind: "passthrough" }
-  | { readonly ok: true; readonly kind: "silent" }
+  | { readonly ok: true; readonly kind: "silent"; readonly reason: string }
   | {
       readonly ok: true;
       readonly kind: "wake";
@@ -227,7 +239,7 @@ export function gateSupervisorToManager(input: {
     return wake;
   }
   if (!wake.wake) {
-    return { ok: true, kind: "silent" };
+    return { ok: true, kind: "silent", reason: wake.reason };
   }
   return {
     ok: true,

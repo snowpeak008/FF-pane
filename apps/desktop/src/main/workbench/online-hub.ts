@@ -41,6 +41,8 @@ export interface OnlineHub {
   offer(windowId: string, text: string): boolean;
   /** 有新消息。在线就收下并返回 true。 */
   offerInbox(windowId: string): boolean;
+  /** 不等：取走排着的事件，并让它马上离线（此后的提醒照常走终端）。正在等的那次按超时交回。 */
+  leave(windowId: string): WaitOutcome;
   /** 叫停。它在线就返回 true，并在下一次（或正在进行的）等待里告诉它。 */
   requestStop(windowId: string): boolean;
   isOnline(windowId: string): boolean;
@@ -140,6 +142,26 @@ export function createOnlineHub(deps: {
       slot.inbox = true;
       flush(slot, false);
       return true;
+    },
+    leave(windowId) {
+      const slot = slots.get(windowId);
+      if (slot === undefined) {
+        return { events: [], inbox: false, stop: false, timedOut: false };
+      }
+      if (slot.waiter !== undefined) {
+        flush(slot, true);
+      }
+      const outcome: WaitOutcome = {
+        events: slot.events,
+        inbox: slot.inbox,
+        stop: false,
+        timedOut: false,
+      };
+      slot.events = [];
+      slot.inbox = false;
+      slot.stop = false;
+      slot.onlineUntil = 0;
+      return outcome;
     },
     requestStop(windowId) {
       const slot = slots.get(windowId);

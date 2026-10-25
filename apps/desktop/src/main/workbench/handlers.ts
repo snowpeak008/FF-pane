@@ -172,6 +172,7 @@ import {
   resolveWorkbenchRoleResourcesDir,
 } from "./role-resources";
 import { setWindowRole } from "./set-role";
+import { buildSilentReportReminder, createSilentReportWatch } from "./silent-report-watch";
 import { createTeamDigest, digestRelativePath } from "./team-digest";
 import {
   appendThreadRecord,
@@ -460,6 +461,8 @@ export async function createWorkbenchCliLayer(
    * 上级也暂停（限流）或不在，就记进上级的「待处理」，不打进任何终端，等用户叫醒它。
    */
   const teamDigest = createTeamDigest({ now: () => Date.now() });
+  /** 监管者在线时没叫醒上级的汇报，久了没人读再提醒上级（T11.0b）。 */
+  const silentReports = createSilentReportWatch({ now: () => Date.now() });
   /** 能不能把事交给这个窗口：终端在跑、没因错误暂停；当监管者用时还要在线（在等事件）。 */
   const canReceive = (windowId: string, asSupervisor: boolean): boolean =>
     findLiveTerminalId(windowId) !== undefined &&
@@ -764,11 +767,35 @@ export async function createWorkbenchCliLayer(
       );
     }
   };
+  /** 没叫醒上级的汇报过了宽限期：上级还没读，就提醒它一次；读过就算了。 */
+  const checkSilentReports = async (): Promise<void> => {
+    for (const due of silentReports.takeDue()) {
+      const stored = await findStoredWindow(due.managerId);
+      if (stored === undefined) {
+        continue;
+      }
+      const unread = recordsAddressedTo(
+        await readThreadIndex(stored.projectRoot),
+        due.managerId,
+        await cursors.get(due.managerId),
+      ).filter((record) => due.recordIds.includes(record.id));
+      const first = unread[0];
+      if (first === undefined) {
+        continue;
+      }
+      void toolDeps().remind(
+        due.managerId,
+        () => buildSilentReportReminder(unread.length),
+        first.from.windowId,
+      );
+    }
+  };
   const stallTimer = setInterval(() => {
     checkStalls();
     drainOffline();
     checkSupervisors();
     checkTeams();
+    checkSilentReports().catch(() => undefined);
   }, 30_000);
   stallTimer.unref?.();
   const PERMISSION_WAIT_NOTICE_MS = 90_000;
@@ -820,6 +847,7 @@ export async function createWorkbenchCliLayer(
       }
     }
     onlineHub.forget(windowId);
+    silentReports.forget(windowId);
     stopCodexTail(windowId);
     for (const grant of locks.releaseWindow(windowId)) {
       notifyLockGranted(grant);
@@ -2671,6 +2699,14 @@ export async function createWorkbenchCliLayer(
       modelEffort.drop(windowId);
       const actual = await settleActualModel(windowId, relaunched.result);
       return { ok: true, how: resume ? "resume" : "fresh", ...actual };
+    },
+    leaveOnline: (windowId) => {
+      const outcome = onlineHub.leave(windowId);
+      publishOnline(windowId);
+      return outcome;
+    },
+    watchSilentReport: (managerId, recordId) => {
+      silentReports.note(managerId, recordId);
     },
     waitEvents: async (windowId, timeoutMs) => {
       const pending = onlineHub.wait(windowId, timeoutMs);

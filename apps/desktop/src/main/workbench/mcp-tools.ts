@@ -58,7 +58,7 @@ import {
   WORKBENCH_ROLE_LABEL,
 } from "./remind";
 import type { SetWindowRoleResult } from "./set-role";
-import { gateSupervisorToManager } from "./status-handoff";
+import { gateSupervisorToManager, parseStatusPage, statusPageProblem } from "./status-handoff";
 import {
   appendThreadRecord,
   assertProjectFiles,
@@ -308,6 +308,10 @@ export interface WorkbenchToolDeps {
   readonly addProjectMemory: (projectRoot: string, entry: MemoryEntry) => Promise<void>;
   /** 在线监管：挂着等本窗口的事件，最长 timeoutMs。 */
   readonly waitEvents: (windowId: string, timeoutMs: number) => Promise<WaitOutcome>;
+  /** 不等：取走已经排着的事件，并让它马上离线，此后的提醒走终端。 */
+  readonly leaveOnline?: (windowId: string) => WaitOutcome;
+  /** 汇报走了 quietParent（监管者在线，没叫醒上级）：记下来，久了没人读再提醒上级。 */
+  readonly watchSilentReport?: (managerId: string, recordId: string) => void;
   /** 给被打断的窗口打一句平台固定的「继续」。不带调用方的任何文字。状态未知也按回车。 */
   readonly nudge: (windowId: string) => RemindDelivery | Promise<RemindDelivery>;
   /** 窗口现在用的模型和强度。不在运行时只给记下的设置。 */
@@ -515,7 +519,7 @@ export async function executeWorkbenchTool(
     case "ffpane_lock":
       return lockTool(caller, args, deps);
     case "ffpane_wait_events":
-      return waitEvents(caller, args, deps);
+      return waitEvents(caller, args, tree, deps);
     case "ffpane_nudge":
       return nudge(caller, args, tree, deps);
     case "ffpane_request_decision":
@@ -669,6 +673,13 @@ async function writeStatus(
   if (typeof name !== "string" || typeof content !== "string") {
     return fail("ffpane_write_status 需要 name 和 content。");
   }
+  // 监管者的近况要交给管理者，写的时候就按四行检查，别等汇报时才发现（T11.0b）。
+  if (caller.role === "supervisor") {
+    const parsed = parseStatusPage(content);
+    if (!parsed.ok) {
+      return fail(`没有写入。${statusPageProblem(parsed.reason)}`);
+    }
+  }
   const written = await writeStatusFile({
     projectRoot: caller.projectRoot,
     name,
@@ -746,11 +757,44 @@ async function openWindow(
   });
 }
 
+/** 挂在这个管理者下面、现在在线的监管者。 */
+async function onlineSupervisorOf(
+  managerId: string,
+  tree: Readonly<Record<string, WorkbenchAuthNode>>,
+  deps: WorkbenchToolDeps,
+): Promise<ToolWindowView | undefined> {
+  for (const node of Object.values(tree)) {
+    if (node.role !== "supervisor" || node.parentWindowId !== managerId) {
+      continue;
+    }
+    const state = deps.windowState(node.id);
+    if (state?.online === true && state.lastApiError?.paused !== true) {
+      return deps.describe(node.id);
+    }
+  }
+  return undefined;
+}
+
 async function waitEvents(
   caller: ToolWindowView,
   args: Readonly<Record<string, unknown>>,
+  tree: Readonly<Record<string, WorkbenchAuthNode>>,
   deps: WorkbenchToolDeps,
 ): Promise<ToolTextResult> {
+  // 监管者在线时由它盯着，管理者不挂着等：交出排着的事，直接结束本轮（T11.0b）。
+  const supervisor =
+    caller.role === "manager" ? await onlineSupervisorOf(caller.id, tree, deps) : undefined;
+  if (supervisor !== undefined) {
+    const pending = deps.leaveOnline?.(caller.id);
+    const messages = pending?.inbox === true ? await takeInboxDigest(caller.id, deps) : "";
+    return ok({
+      events: pending?.events ?? [],
+      ...(messages !== "" ? { messages } : {}),
+      stop: true,
+      timedOut: false,
+      next: `监管者「${supervisor.title}」在线，由它盯着。处理完上面的事就结束本轮，不要再调用 ffpane_wait_events；执行做完或失败、要你拍板、监管者报上来的事，平台都会叫醒你。`,
+    });
+  }
   const seconds = clampWaitSeconds(args["timeoutSec"]);
   const outcome = await deps.waitEvents(caller.id, seconds * 1000);
   const messages = outcome.inbox ? await takeInboxDigest(caller.id, deps) : "";
@@ -1048,7 +1092,7 @@ async function sendMessage(
     return fail(gated.error);
   }
   if (gated.kind === "silent") {
-    return ok({ delivered: false, reason: "近况四行不齐，未叫醒管理者。" });
+    return fail(`没有送出，管理者没被叫醒。${statusPageProblem(gated.reason)}`);
   }
   const deliveredText = gated.kind === "wake" ? gated.text : text;
   const deliveredBrief = gated.kind === "wake" ? gated.statusPath : brief.path;
@@ -1155,7 +1199,7 @@ async function report(
     return fail(gated.error);
   }
   if (gated.kind === "silent") {
-    return ok({ delivered: false, reason: "近况四行不齐，未叫醒管理者。" });
+    return fail(`没有送出，管理者没被叫醒。${statusPageProblem(gated.reason)}`);
   }
   const deliveredText = gated.kind === "wake" ? gated.text : summary;
   const deliveredStatus = gated.kind === "wake" ? gated.status : status;
@@ -1186,6 +1230,11 @@ async function report(
     watcherState.lastApiError?.paused !== true &&
     targetId === node?.parentWindowId &&
     (deliveredStatus === "done" || deliveredStatus === "progress");
+  if (quietParent && deliveredStatus === "done") {
+    // 监管者在线时 done 不叫醒上级；它 10 分钟没转、上级也没读，平台再提醒上级一次（T11.0b）。
+    // progress 只是进度，不追。
+    deps.watchSilentReport?.(target.id, record.id);
+  }
   const delivery = quietParent
     ? "silent"
     : await remindTarget(target, caller, "report", deliveredStatus, record, deps, true);

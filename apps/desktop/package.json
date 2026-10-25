@@ -1,6 +1,6 @@
 {
   "name": "@ff-pane/desktop",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "productName": "FF-pane",
   "private": true,
   "type": "module",

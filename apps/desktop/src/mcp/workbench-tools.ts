@@ -89,7 +89,7 @@ const TOOL_DEFINITIONS: readonly McpToolDefinition[] = [
   {
     name: "ffpane_wait_events",
     description:
-      "在线监管：挂着等跟你有关的事件，有事件立刻返回，没有就到点返回。事件包括平台状态提醒（限流、卡住、空闲没汇报、等批准、退出）、锁轮到你、投递失败，以及新消息（正文附在 messages 里，已标记已读）。处理完就再调用一次接着等，这样你会一直在线，回合不结束。返回 stop 为 true 表示用户叫停了，处理完手头的事就结束本轮，不要再调用。",
+      "在线监管：挂着等跟你有关的事件，有事件立刻返回，没有就到点返回。事件包括平台状态提醒（限流、卡住、空闲没汇报、等批准、退出）、锁轮到你、投递失败，以及新消息（正文附在 messages 里，已标记已读）。处理完就再调用一次接着等，这样你会一直在线，回合不结束。返回 stop 为 true 表示用户叫停了，处理完手头的事就结束本轮，不要再调用。给监管者用：管理者名下有在线的监管者时，管理者调用会立刻返回 stop，由监管者盯着。",
     inputSchema: {
       type: "object",
       properties: {
@@ -197,7 +197,10 @@ const TOOL_DEFINITIONS: readonly McpToolDefinition[] = [
           type: "string",
           description: "文件名，例如 status.md。只能是 briefs 目录内的文件名。",
         },
-        content: { type: "string", description: "近况正文。监管者只写四行，每次覆盖。" },
+        content: {
+          type: "string",
+          description: "近况正文。监管者只写四行，每次覆盖；四行不合格时不写入，返回错误和模板。",
+        },
       },
       required: ["name", "content"],
       additionalProperties: false,
@@ -274,7 +277,7 @@ const TOOL_DEFINITIONS: readonly McpToolDefinition[] = [
   {
     name: "ffpane_report",
     description:
-      "向上级链汇报。windowId 缺省时汇报给直接上级。status 只能是 done、blocked、failed、progress。summary 上限 8KB，更长请改用 ffpane_write_brief。files 是项目内相对路径，不能越出项目根。监管者汇报给管理者时，summary 只能是近况四行，briefPath 是近况路径；四行不齐不会写入收件箱，也不会叫醒管理者。detailPath 只能是详细记录的路径。",
+      "向上级链汇报。windowId 缺省时汇报给直接上级。status 只能是 done、blocked、failed、progress。summary 上限 8KB，更长请改用 ffpane_write_brief。files 是项目内相对路径，不能越出项目根。监管者汇报给管理者时，summary 只能是近况四行，briefPath 是近况路径；四行不合格会返回错误，说明哪一行不对并附模板，不写入收件箱，也不叫醒管理者。detailPath 只能是详细记录的路径。",
     inputSchema: {
       type: "object",
       properties: {

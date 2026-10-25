@@ -776,6 +776,68 @@ describe("监管者观察", () => {
     expect(reminders.map((item) => item.windowId)).toEqual(["S", "A", "S"]);
   });
 
+  it("T11.0b：没叫醒上级的 done 记下来，等兜底；叫醒了的不记", async () => {
+    const root = tempDir();
+    const h = watched(root);
+    const watchedIds: { managerId: string; recordId: string }[] = [];
+    const deps: WorkbenchToolDeps = {
+      ...supervisorOnline(h.deps),
+      watchSilentReport: (managerId, recordId) => {
+        watchedIds.push({ managerId, recordId });
+      },
+    };
+    const done = await call(deps, "B", "ffpane_report", { status: "done", summary: "记录在 x" });
+    expect(done.json).toMatchObject({ delivery: "silent" });
+    const toManager = (await readThreadIndex(root)).find((record) => record.to.windowId === "A");
+    expect(watchedIds).toEqual([{ managerId: "A", recordId: toManager?.id }]);
+
+    await call(deps, "B", "ffpane_report", { status: "progress", summary: "做到一半" });
+    await call(deps, "B", "ffpane_report", { status: "failed", summary: "挂了" });
+    expect(watchedIds).toHaveLength(1);
+  });
+
+  it("T11.0b：监管者在线时，管理者等事件直接拿到 stop，排着的事一并交出", async () => {
+    const root = tempDir();
+    const h = watched(root);
+    const left: string[] = [];
+    const deps: WorkbenchToolDeps = {
+      ...supervisorOnline(h.deps),
+      leaveOnline: (id) => {
+        left.push(id);
+        return { events: ["[状态] 排着的一条"], inbox: false, stop: false, timedOut: false };
+      },
+    };
+    const result = await call(deps, "A", "ffpane_wait_events", { timeoutSec: 110 });
+    expect(h.waits).toEqual([]);
+    expect(left).toEqual(["A"]);
+    expect(result.json).toMatchObject({ events: ["[状态] 排着的一条"], stop: true });
+    expect((result.json as { next: string }).next).toContain("监管者「监管」在线");
+
+    // 监管者自己照常等。
+    await call(deps, "S", "ffpane_wait_events");
+    expect(h.waits).toEqual([{ windowId: "S", timeoutMs: 240_000 }]);
+  });
+
+  it("T11.0b：监管者掉线或暂停时，管理者照常等", async () => {
+    const root = tempDir();
+    const h = watched(root);
+    await call(h.deps, "A", "ffpane_wait_events");
+    const paused: WorkbenchToolDeps = {
+      ...h.deps,
+      windowState: (id) =>
+        id === "S"
+          ? {
+              phase: "idle",
+              pendingReminders: 0,
+              online: true,
+              lastApiError: { type: "rate_limit", label: "限流", at: 0, paused: true },
+            }
+          : undefined,
+    };
+    await call(paused, "A", "ffpane_wait_events");
+    expect(h.waits.map((item) => item.windowId)).toEqual(["A", "A"]);
+  });
+
   it("监管者掉线：done 也叫醒上级，抄送照样留给监管者", async () => {
     const root = tempDir();
     const { deps, reminders } = watched(root);

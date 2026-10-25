@@ -123,6 +123,25 @@ describe("在线监管", () => {
     expect(hub.isOnline("s")).toBe(false);
   });
 
+  it("T11.0b：leave 不等，交出排着的事件并马上离线", async () => {
+    const { hub, advance } = harness();
+    const first = hub.wait("m", 10_000);
+    advance(10_000);
+    await first;
+    expect(hub.offer("m", "[状态] 排着")).toBe(true);
+    hub.offerInbox("m");
+    expect(hub.leave("m")).toEqual({
+      events: ["[状态] 排着"],
+      inbox: true,
+      stop: false,
+      timedOut: false,
+    });
+    expect(hub.isOnline("m")).toBe(false);
+    expect(hub.offer("m", "[状态] 之后的")).toBe(false);
+    expect(hub.drainOffline()).toEqual([]);
+    expect(hub.leave("never")).toMatchObject({ events: [], inbox: false });
+  });
+
   it("等待秒数缺省 240，夹在 10 到 540", () => {
     expect(clampWaitSeconds(undefined)).toBe(240);
     expect(clampWaitSeconds(1)).toBe(10);

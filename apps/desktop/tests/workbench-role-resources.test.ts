@@ -15,6 +15,7 @@ import {
   saveRoleManualOverride,
 } from "../src/main/workbench/role-manuals";
 import { resolveWorkbenchRoleResourcesDir } from "../src/main/workbench/role-resources";
+import { STATUS_TEMPLATE } from "../src/main/workbench/status-handoff";
 
 const desktopDir = fileURLToPath(new URL("..", import.meta.url));
 const resourcesDir = join(desktopDir, "resources", "workbench-roles");
@@ -44,6 +45,15 @@ describe("workbench role manuals", () => {
       expect(bytes.includes(13), name).toBe(false);
       expect(bytes.length, name).toBeLessThanOrEqual(2048);
     }
+  });
+
+  it("T11.0b：监管者说明里的四行模板和平台检查的是同一份；管理者不再被叫去自己盯", () => {
+    const supervisor = readFileSync(join(resourcesDir, "supervisor.md"), "utf8");
+    expect(supervisor).toContain(STATUS_TEMPLATE);
+    expect(supervisor).toContain("核对完必须用 `ffpane_report` 报一次");
+    const manager = readFileSync(join(resourcesDir, "manager.md"), "utf8");
+    expect(manager).not.toContain("循环调用 `ffpane_wait_events`");
+    expect(manager).toContain("派完活就结束本轮");
   });
 
   it("electron-builder 把 workbench-roles 打进 extraResources", () => {
