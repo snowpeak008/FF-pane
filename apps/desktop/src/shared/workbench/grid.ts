@@ -273,8 +273,7 @@ export function placeUserWindow(
 ): ProjectWorkbenchLayout {
   const windows = { ...layout.windows, [window.id]: window };
   const tabId = target?.tabId ?? layout.activeTabId;
-  const tab =
-    target?.newPage === true ? undefined : layout.tabs.find((item) => item.id === tabId);
+  const tab = target?.newPage === true ? undefined : layout.tabs.find((item) => item.id === tabId);
   if (tab !== undefined) {
     const wanted =
       target?.slot !== undefined && tab.slots[target.slot] === null

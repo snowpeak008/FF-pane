@@ -23,6 +23,8 @@ import { WindowPane } from "./WindowPane";
 
 /** 每格最小占比（%）。 */
 const MIN_CELL_PERCENT = 10;
+/** 行的固定编号（最多 3 行），做 React key 和面板 id。 */
+const ROW_IDS = ["row-0", "row-1", "row-2"] as const;
 
 export interface GridLayoutProps {
   readonly tabId: string;
@@ -125,10 +127,10 @@ export function GridLayout(props: GridLayoutProps): ReactElement | null {
             }
           }}
         >
-          {Array.from({ length: rows }, (_, row) => {
+          {ROW_IDS.slice(0, rows).map((rowId, row) => {
             const colPercents = percents(sizes.cols[row] ?? []);
             return (
-              <Fragment key={`row-${row}`}>
+              <Fragment key={rowId}>
                 {row > 0 ? (
                   <PanelResizeHandle
                     className="h-1 bg-border transition-colors hover:bg-primary"
@@ -136,7 +138,7 @@ export function GridLayout(props: GridLayoutProps): ReactElement | null {
                   />
                 ) : null}
                 <Panel
-                  id={`row-${row}`}
+                  id={rowId}
                   order={row}
                   defaultSize={rowPercents[row]}
                   minSize={MIN_CELL_PERCENT}

@@ -25,7 +25,10 @@ function layoutWithWindows(
   const first = windows[0];
   return {
     projectId: projectId as ProjectId,
-    tabs: first === undefined ? [] : [{ id: "tab-1", title: "Tab 1", slots: [first.id, null, null, null, null, null] }],
+    tabs:
+      first === undefined
+        ? []
+        : [{ id: "tab-1", title: "Tab 1", slots: [first.id, null, null, null, null, null] }],
     activeTabId: first === undefined ? null : "tab-1",
     windows: windowMap,
     maximizedWindowId: null,
