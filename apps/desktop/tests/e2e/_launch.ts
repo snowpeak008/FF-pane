@@ -16,11 +16,11 @@
  * 语言相关的结论时用它，否则断言只能弱化为「是一种受支持语言」。
  */
 
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { _electron, type ElectronApplication, expect, type Page } from "@playwright/test";
+import { _electron, type ElectronApplication, expect, type Page, test } from "@playwright/test";
 
 export const desktopDir = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -33,6 +33,29 @@ const UI_LANGUAGE_KEY = "ffpane.ui-language";
  * 30 s ≈ 3 倍裕量。超时即判定挂死，走强杀兜底（见 cleanup 注释）。
  */
 const CLEANUP_CLOSE_BUDGET_MS = 30_000;
+
+/** 崩溃 dump 拷到这里（T11.0d）：e2e 的 userData 收尾就删，主进程崩在退出时以前谁也看不到。 */
+const CRASH_DUMP_DIR = join(
+  resolve(dirname(fileURLToPath(import.meta.url)), "..", ".."),
+  "test-results",
+  "e2e-crash-dumps",
+);
+
+function findDumps(dir: string): string[] {
+  const out: string[] = [];
+  if (!existsSync(dir)) {
+    return out;
+  }
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      out.push(...findDumps(path));
+    } else if (entry.name.endsWith(".dmp")) {
+      out.push(path);
+    }
+  }
+  return out;
+}
 
 export interface LaunchedApp {
   readonly app: ElectronApplication;
@@ -181,6 +204,18 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
     } else {
       // 优雅关闭后仍给内核一点时间释放目录句柄（Windows EPERM）
       await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    const dumps = findDumps(userDataDir);
+    if (dumps.length > 0) {
+      mkdirSync(CRASH_DUMP_DIR, { recursive: true });
+      const title = test
+        .info()
+        .title.replace(/[^\w一-鿿-]+/g, "_")
+        .slice(0, 60);
+      for (const dump of dumps) {
+        copyFileSync(dump, join(CRASH_DUMP_DIR, `${Date.now()}-${title}.dmp`));
+      }
+      console.warn(`[e2e] ${dumps.length} crash dump(s) after "${test.info().title}"`);
     }
     if (!retainDataRoot) {
       try {

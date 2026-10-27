@@ -35,6 +35,12 @@ export interface PtyHandle {
    * 返回 false 表示做不到同步通知，调用方自己等 pid。
    */
   onPid?(listener: (pid: number) => void): boolean;
+  /**
+   * conpty 的「进程退出」原生回调已经送到 JS 了（或者根本不会来）。T11.0d：这个回调要是在
+   * 退出时 JS 环境已经拆掉以后才到，node-addon-api 会把它变成 C++ 异常，整个主进程 abort。
+   * 退出前要等所有终端都送到。缺省视为已送到。
+   */
+  exitDelivered?(): boolean;
 }
 
 export type PtyFactory = (options: PtyFactoryOptions) => PtyHandle;

@@ -178,6 +178,8 @@ export class PtyManager {
       pendingOutput: "",
     };
     this.sessions.set(id, session);
+    this.pruneSettled();
+    this.unsettled.add(handle);
     const notified =
       handle.onPid?.((pid) => {
         this.assignSession(session, pid);
@@ -381,6 +383,40 @@ export class PtyManager {
       }
     }
     return { count, bufferedBytes };
+  }
+
+  /** 还没确认原生退出回调送到的终端（含已经关掉、从 Map 删了的）。 */
+  private readonly unsettled = new Set<PtyHandle>();
+
+  private pruneSettled(): void {
+    for (const handle of this.unsettled) {
+      if (handle.exitDelivered?.() ?? true) {
+        this.unsettled.delete(handle);
+      }
+    }
+  }
+
+  /** 退出前要不要等：还有活着的终端，或者有终端的原生退出回调还没送到。 */
+  hasUnsettledExits(): boolean {
+    this.pruneSettled();
+    return this.unsettled.size > 0 || [...this.sessions.values()].some((s) => !s.exited);
+  }
+
+  /**
+   * 退出前调用（T11.0d）：杀掉全部终端，等它们的原生退出回调都送到 JS 再返回，最多等 budgetMs。
+   * 不等的话，回调可能在 Electron 拆 JS 环境时才到，主进程直接 abort（10-20 至 10-27 的崩溃都是这个）。
+   * 返回超时时还没送到的个数。
+   */
+  async settleForQuit(budgetMs: number): Promise<number> {
+    await this.killAll();
+    const deadline = this.now() + budgetMs;
+    for (;;) {
+      this.pruneSettled();
+      if (this.unsettled.size === 0 || this.now() >= deadline) {
+        return this.unsettled.size;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
   }
 
   /** 杀掉全部 PTY 并清空 Map。 */

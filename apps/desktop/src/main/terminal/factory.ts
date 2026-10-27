@@ -48,15 +48,23 @@ export function createNodePtyFactory(): PtyFactory {
     const pidListeners: ((pid: number) => void)[] = [];
     const agent = (
       pty as unknown as {
-        readonly _agent?: { _completePtyConnection?: () => void; readonly innerPid?: number };
+        readonly _agent?: {
+          _completePtyConnection?: () => void;
+          readonly innerPid?: number;
+          /** _$onProcessExit 收到原生回调时写入；连不上时 node-pty 自己写 -1。 */
+          readonly _exitCode?: number;
+        };
       }
     )._agent;
     const original = agent?._completePtyConnection;
     const hooked = agent !== undefined && typeof original === "function";
+    /** conptyNative.connect 调成功了：之后一定会有一次「进程退出」原生回调。 */
+    let connected = false;
     if (hooked) {
       agent._completePtyConnection = () => {
         original.call(agent);
         const pid = agent.innerPid ?? 0;
+        connected = pid > 0;
         if (pid > 0) {
           for (const listener of pidListeners.splice(0)) {
             listener(pid);
@@ -87,6 +95,13 @@ export function createNodePtyFactory(): PtyFactory {
       },
       kill(): void {
         pty.kill();
+      },
+      exitDelivered(): boolean {
+        // 认不出内部结构就当已送到，不卡退出。
+        if (!hooked || !connected) {
+          return true;
+        }
+        return agent?._exitCode !== undefined;
       },
       onData(listener): void {
         pty.onData(listener);

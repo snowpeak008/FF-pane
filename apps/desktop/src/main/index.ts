@@ -38,6 +38,9 @@ const devWindowIcon = app.isPackaged
   ? undefined
   : join(app.getAppPath(), "resources", "icon", "icon.ico");
 
+/** 退出时等终端原生退出回调送到的上限。加上布局 flush（0.8 秒）仍在退出看门狗（5 秒）之内。 */
+const TERMINAL_SETTLE_BUDGET_MS = 3_000;
+
 /** 当前主窗口引用（目录选择器等原生弹窗挂靠父窗口时惰性取用）。 */
 let mainWindow: BrowserWindow | null = null;
 /** 终端层（T10.1）；退出时杀掉全部 PTY。 */
@@ -241,8 +244,16 @@ async function bootstrap(): Promise<void> {
   const quitDeps: QuitCoordinatorDeps = {
     hasInflight: () => false,
     prepare: async () => undefined,
-    hasRuntimeResources: () => false,
-    closeRuntimes: async () => undefined,
+    // T11.0d：退出前先杀终端、等它们的原生退出回调都送到，再让 Electron 拆 JS 环境。
+    // 回调晚到会被 node-addon-api 变成 C++ 异常，主进程 abort（10-20 至 10-27 的崩溃）。
+    hasRuntimeResources: () => terminalLayer?.manager.hasUnsettledExits() ?? false,
+    closeRuntimes: async () => {
+      const left = await terminalLayer?.manager.settleForQuit(TERMINAL_SETTLE_BUDGET_MS);
+      if (left !== undefined && left > 0) {
+        console.error(`[main] ${left} terminal exit callback(s) still pending at quit`);
+      }
+    },
+    runtimeCloseBudgetMs: TERMINAL_SETTLE_BUDGET_MS + 500,
     flushLayouts: () => layoutFlush.requestFlush(),
     quit: () => app.quit(),
     log: (message: string) => console.log(`[main] ${message}`),
