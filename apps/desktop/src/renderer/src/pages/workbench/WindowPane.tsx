@@ -180,6 +180,9 @@ export function WindowPane({
       }
       if (result.delivery === "dropped") {
         toast.message(t("workbench.role.dropped"));
+      } else if (result.delivery === "restarting" || result.delivery === "restart-queued") {
+        // T11.1：能不能开子 agent 变了，要重启才生效。
+        toast.message(t("workbench.role.restartForSubagents"));
       }
     });
   };

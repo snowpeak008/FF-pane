@@ -399,13 +399,17 @@ describe("配置草案未确认不落盘", () => {
         "utf8",
       );
     }
-    const wait = Date.now() + 3_000;
-    while (Date.now() < wait && presented < MAX_PENDING_CONFIG_DRAFTS) {
+    // 负载高时超限那份的回执可能比前几份晚写出来：两样都等到（以前只等确认框，偶发拿不到回执）。
+    const listResponses = async () =>
+      (await readdir(mailbox.responsesDir)).filter((name) => name.endsWith(".json"));
+    const wait = Date.now() + 10_000;
+    while (
+      Date.now() < wait &&
+      (presented < MAX_PENDING_CONFIG_DRAFTS || (await listResponses()).length < 1)
+    ) {
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
-    const responseNames = (await readdir(mailbox.responsesDir)).filter((name) =>
-      name.endsWith(".json"),
-    );
+    const responseNames = await listResponses();
     expect(responseNames).toHaveLength(1);
     const overflow = await readFile(join(mailbox.responsesDir, responseNames[0] ?? ""), "utf8");
     expect(presented).toBe(MAX_PENDING_CONFIG_DRAFTS);

@@ -132,6 +132,8 @@ test("管理者开窗口，执行者汇报，越权被拒，记录落盘", async
       timeout: 10_000,
     });
     await expect(page.getByTestId("workbench-new-confirm")).toBeEnabled({ timeout: 15_000 });
+    // 一开始就是管理者：AI 自己从普通改成管理者会在空闲时重启（T11.1），这里不测那个。
+    await page.getByTestId("workbench-new-role-manager").click();
     await page.getByTestId("workbench-new-confirm").click();
 
     const manager = page.getByTestId("workbench-window").first();
@@ -252,6 +254,8 @@ test("管理者读取并关闭子窗口，再打开任务页", async () => {
       timeout: 10_000,
     });
     await expect(page.getByTestId("workbench-new-confirm")).toBeEnabled({ timeout: 15_000 });
+    // 一开始就是管理者：AI 自己从普通改成管理者会在空闲时重启（T11.1），这里不测那个。
+    await page.getByTestId("workbench-new-role-manager").click();
     await page.getByTestId("workbench-new-confirm").click();
 
     const manager = page.getByTestId("workbench-window").first();
@@ -296,6 +300,8 @@ test("窗口请用户拍板：界面上点选项，决定作为消息发回给�
     await expect(page.getByTestId("workbench-new-window-dialog")).toBeVisible();
     await page.getByTestId("workbench-new-kind-claude").click();
     await expect(page.getByTestId("workbench-new-confirm")).toBeEnabled({ timeout: 15_000 });
+    // 一开始就是管理者：AI 自己从普通改成管理者会在空闲时重启（T11.1），这里不测那个。
+    await page.getByTestId("workbench-new-role-manager").click();
     await page.getByTestId("workbench-new-confirm").click();
 
     const asker = page.getByTestId("workbench-window").first();
@@ -339,6 +345,8 @@ test("在线监管：一直挂着等事件，拍板结果从等待里拿到，�
     await expect(page.getByTestId("workbench-new-window-dialog")).toBeVisible();
     await page.getByTestId("workbench-new-kind-claude").click();
     await expect(page.getByTestId("workbench-new-confirm")).toBeEnabled({ timeout: 15_000 });
+    // 一开始就是管理者：AI 自己从普通改成管理者会在空闲时重启（T11.1），这里不测那个。
+    await page.getByTestId("workbench-new-role-manager").click();
     await page.getByTestId("workbench-new-confirm").click();
 
     const pane = page.getByTestId("workbench-window").first();
@@ -393,6 +401,7 @@ test("重启后子窗口仍被封顶，续接管理者可以再开窗口", async
       timeout: 10_000,
     });
     await expect(page.getByTestId("workbench-new-confirm")).toBeEnabled({ timeout: 15_000 });
+    // 这里要从普通窗口开始：脚本按「已经是管理者」认出是重启后的第二次启动。
     await page.getByTestId("workbench-new-confirm").click();
 
     const manager = page.getByTestId("workbench-window").filter({ hasText: "Opened by you" });
@@ -474,6 +483,8 @@ test("隐藏面板：看板、计划预览、记录筛选，侧栏不再有旧�
       timeout: 10_000,
     });
     await expect(page.getByTestId("workbench-new-confirm")).toBeEnabled({ timeout: 15_000 });
+    // 一开始就是管理者：AI 自己从普通改成管理者会在空闲时重启（T11.1），这里不测那个。
+    await page.getByTestId("workbench-new-role-manager").click();
     await page.getByTestId("workbench-new-confirm").click();
 
     const manager = page.getByTestId("workbench-window").first();
@@ -559,6 +570,8 @@ test("从项目页收到打开任务面板后，切到工作台并打开抽屉",
       timeout: 10_000,
     });
     await expect(page.getByTestId("workbench-new-confirm")).toBeEnabled({ timeout: 15_000 });
+    // 一开始就是管理者：AI 自己从普通改成管理者会在空闲时重启（T11.1），这里不测那个。
+    await page.getByTestId("workbench-new-role-manager").click();
     await page.getByTestId("workbench-new-confirm").click();
 
     const manager = page.getByTestId("workbench-window").first();
@@ -610,6 +623,8 @@ test("管理者写入记忆，子窗口能查到但不能写，记忆页可删�
       timeout: 10_000,
     });
     await expect(page.getByTestId("workbench-new-confirm")).toBeEnabled({ timeout: 15_000 });
+    // 一开始就是管理者：AI 自己从普通改成管理者会在空闲时重启（T11.1），这里不测那个。
+    await page.getByTestId("workbench-new-role-manager").click();
     await page.getByTestId("workbench-new-confirm").click();
 
     const manager = page.getByTestId("workbench-window").first();

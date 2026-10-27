@@ -33,6 +33,7 @@ import {
 import { placeOpenedWindow } from "../../../shared/workbench/place-child";
 import { planTerminalReconcile } from "../../../shared/workbench/reconcile-terminals";
 import type {
+  SetWorkbenchRoleResponse,
   WorkbenchChildWindowEvent,
   WorkbenchInboxNoticeEvent,
 } from "../../../shared-ipc/contracts";
@@ -152,7 +153,7 @@ export interface WorkbenchStoreActions {
   ) => Promise<
     | {
         readonly ok: true;
-        readonly delivery: "skipped" | "queued" | "manual" | "held" | "delivered" | "dropped";
+        readonly delivery: SetWorkbenchRoleResponse["delivery"];
       }
     | { readonly ok: false; readonly message: string }
   >;

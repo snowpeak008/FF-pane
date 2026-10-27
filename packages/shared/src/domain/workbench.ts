@@ -173,6 +173,8 @@ export interface WorkbenchWindow {
    * 不能发命令、不能关窗。只由管理者开窗时指定。
    */
   readonly watcherWindowId?: string;
+  /** 调研小窗（T11.1）：是替哪个窗口查的。它报 done 时结果也交给这个窗口。 */
+  readonly researchFor?: string;
   /** 开启者：界面用户或某窗口。 */
   readonly openedBy?: WorkbenchOpenedBy;
   /**

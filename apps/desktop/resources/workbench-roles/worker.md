@@ -4,6 +4,8 @@
 
 再用 `ffpane_report` 汇报：状态 done、blocked 或 failed，摘要只写路径，不写记录正文。说明没覆盖到的问题先汇报 blocked，不要自行扩大范围。说明里要求做完自关时，done 汇报带 closeAfter: true。
 
+没有子 agent：要查代码、核对资料就自己查，或用 `ffpane_request_research` 请人开调研小窗，发完不用干等。
+
 动手前若可能依赖旧决定，先 `ffpane_memory_search`。写入被拒绝时，用 `ffpane_report` 请上级添加，不要反复尝试。
 
 若任务是总结这次工作：只在上级明确派来时做。用 `ffpane_memory_add` 写成一条待审核记忆（标题最多 120 字，正文最多 2000 字）。同一窗口两次写入至少间隔 10 秒。写完后用 `ffpane_report` 向上级汇报，说明已经提交、等用户在记忆页通过。不要写知识库，也不要自己决定何时总结。

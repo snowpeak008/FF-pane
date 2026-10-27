@@ -380,13 +380,15 @@
         "worker": "执行",
         "reviewer": "检查",
         "supervisor": "监管者",
+        "researcher": "调研",
         "none": "普通"
       },
       "badgeHint": "点击或右键，把这个窗口设为某个角色",
       "notAi": "当前焦点不是 AI 窗口",
       "rejected": "不能把这个窗口设成该角色",
       "dropped": "窗口已退出，角色说明没写进去。下次启动会自动注入",
-      "grantPending": "管理权待恢复"
+      "grantPending": "管理权待恢复",
+      "restartForSubagents": "换了角色，能不能开子 agent 也变了（只有普通窗口能开），窗口会续接重启后生效；在忙就等它空闲。"
     },
     "resumeConfirm": {
       "title": "确认启动这个窗口？",
@@ -880,7 +882,8 @@
         "planner": "规划",
         "worker": "执行",
         "reviewer": "检查",
-        "supervisor": "监管者"
+        "supervisor": "监管者",
+        "researcher": "调研"
       },
       "source": {
         "default": "正在使用内置原文",

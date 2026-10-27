@@ -380,13 +380,15 @@
         "worker": "Worker",
         "reviewer": "Reviewer",
         "supervisor": "Supervisor",
+        "researcher": "Researcher",
         "none": "Plain"
       },
       "badgeHint": "Click or right-click to set this window's role",
       "notAi": "The focused window is not an AI window",
       "rejected": "This window cannot be given that role",
       "dropped": "The window had exited, so the role note was not written. The next launch injects it",
-      "grantPending": "Manager authority not restored"
+      "grantPending": "Manager authority not restored",
+      "restartForSubagents": "The new role changes whether this window can open sub-agents (only plain windows can). It will restart with its conversation to apply this; if busy it waits until idle."
     },
     "resumeConfirm": {
       "title": "Start this window?",
@@ -880,7 +882,8 @@
         "planner": "Planner",
         "worker": "Worker",
         "reviewer": "Reviewer",
-        "supervisor": "Supervisor"
+        "supervisor": "Supervisor",
+        "researcher": "Researcher"
       },
       "source": {
         "default": "Using the built-in text",

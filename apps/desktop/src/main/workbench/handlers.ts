@@ -1265,6 +1265,21 @@ export async function createWorkbenchCliLayer(
     idleQueue,
     manualPath: (role: import("@ff-pane/shared").WorkbenchRole) =>
       resolveRoleSwitchManualPath(resourcesDir, overridesDir, role),
+    // T11.1：子 agent 限制变了，走改模型的重启路线让新启动参数生效。
+    // 改角色本身就是决定，不再弹确认框（AI 改角色时弹框会打断用户）；等空闲再续接重启。
+    restartForPolicy: async (windowId: string) => {
+      policyRestartPending.add(windowId);
+      const facts = await modelEffortFacts(windowId);
+      const decision = modelEffort.request(windowId, facts);
+      if (decision.launch) {
+        return "restarting" as const;
+      }
+      if (decision.outcome === "deferred") {
+        policyRestartPending.delete(windowId);
+        return "deferred" as const;
+      }
+      return decision.outcome === "confirm" ? ("confirm" as const) : ("queued" as const);
+    },
   });
   const publishManagerGrant = (projectId: string, windowId: string, pending: boolean): void => {
     const browser = options.getWindow();
@@ -1595,19 +1610,23 @@ export async function createWorkbenchCliLayer(
     // Codex 的编号由 notify 报来，界面不在当前标签页时布局里可能还没记上，以主进程记的为准。
     const codexSession = kind === "codex" ? codexSessionOf.get(windowId) : undefined;
     const resumeId = codexSession ?? sessionId;
+    const phase = terminalId !== undefined ? idleQueue.phaseOf(terminalId) : ("unknown" as const);
+    // T11.1 改角色要重启：不用确认；不在空闲就当聊过，等空闲续接，不在一轮中间冷重启。
+    const policy = policyRestartPending.has(windowId);
     const hadConversation =
       terminalId !== undefined &&
       (record?.metadata?.["resumed"] === true ||
         record?.metadata?.["initialPrompt"] === true ||
-        idleQueue.hadTurn(terminalId));
+        idleQueue.hadTurn(terminalId) ||
+        (policy && phase !== "idle"));
     return {
       running: terminalId !== undefined,
-      phase: terminalId !== undefined ? idleQueue.phaseOf(terminalId) : ("unknown" as const),
+      phase,
       canResume: terminalId !== undefined && resumeId !== undefined && resumeId.trim() !== "",
-      needsConfirm: role === "manager" || permission === "yolo",
+      needsConfirm: !policy && (role === "manager" || permission === "yolo"),
       hadConversation,
-      // 改权限只能靠重启；/model 只换模型和强度。
-      canSwitchInWindow: kind === "codex" && !permissionChangePending.has(windowId),
+      // 改权限、改角色只能靠重启；/model 只换模型和强度。
+      canSwitchInWindow: kind === "codex" && !permissionChangePending.has(windowId) && !policy,
       ...(resumeId !== undefined && resumeId.trim() !== "" ? { sessionId: resumeId } : {}),
       kind: typeof kind === "string" ? kind : undefined,
       permission,
@@ -1618,6 +1637,8 @@ export async function createWorkbenchCliLayer(
 
   /** 改了权限、还没重启生效的窗口：不能用 /model 代替重启。 */
   const permissionChangePending = new Set<string>();
+  /** 改了角色、子 agent 限制变了、还没重启生效的窗口（T11.1）。 */
+  const policyRestartPending = new Set<string>();
   type ModelEffortRunOutcome =
     | {
         readonly ok: true;
@@ -1951,6 +1972,7 @@ export async function createWorkbenchCliLayer(
         return relaunched;
       }
       permissionChangePending.delete(windowId);
+      policyRestartPending.delete(windowId);
       const actual = await settleActualModel(windowId, relaunched.result);
       return { ok: true, how: mode, ...actual };
     })().catch(
@@ -2725,6 +2747,7 @@ export async function createWorkbenchCliLayer(
         return relaunched;
       }
       permissionChangePending.delete(windowId);
+      policyRestartPending.delete(windowId);
       modelEffort.drop(windowId);
       const actual = await settleActualModel(windowId, relaunched.result);
       return { ok: true, how: resume ? "resume" : "fresh", ...actual };
@@ -2813,6 +2836,7 @@ export async function createWorkbenchCliLayer(
         running: findLiveTerminalId(windowId) !== undefined,
         ...(found.kind !== undefined ? { kind: found.kind } : {}),
         ...(found.watcherWindowId !== undefined ? { watcherWindowId: found.watcherWindowId } : {}),
+        ...(found.researchFor !== undefined ? { researchFor: found.researchFor } : {}),
         ...(parentId !== undefined && parentId.trim() !== "" ? { parentWindowId: parentId } : {}),
         ...(parentTitle !== undefined ? { parentTitle } : {}),
       };
@@ -2995,6 +3019,7 @@ export async function createWorkbenchCliLayer(
       },
       releaseRuntime: (windowId) => {
         modelEffort.drop(windowId);
+        policyRestartPending.delete(windowId);
         void mcpRegistry.release(windowId);
         codexClaimer.cancel(windowId);
         releaseWindowHooks(windowId);

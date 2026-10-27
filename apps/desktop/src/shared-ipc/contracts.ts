@@ -411,7 +411,17 @@ export interface SetWorkbenchPermissionResponse {
 export interface SetWorkbenchRoleResponse {
   readonly ok: true;
   readonly role: WorkbenchRole;
-  readonly delivery: "skipped" | "queued" | "manual" | "held" | "delivered" | "dropped";
+  /** restarting / restart-queued / restart-confirm：子 agent 限制变了，窗口重启生效（T11.1）。 */
+  readonly delivery:
+    | "skipped"
+    | "queued"
+    | "manual"
+    | "held"
+    | "delivered"
+    | "dropped"
+    | "restarting"
+    | "restart-queued"
+    | "restart-confirm";
 }
 
 export interface WorkbenchRoleManualView {

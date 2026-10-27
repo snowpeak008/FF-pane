@@ -3,13 +3,15 @@
  * 与旧会话 Role / CustomRole 无关：只描述多窗口工作台里的预定义角色。
  */
 
-/** 工作台角色（none = 普通，默认）。supervisor = 监管者。 */
+/** 工作台角色（none = 普通，默认）。supervisor = 监管者，researcher = 调研。 */
 export const WORKBENCH_ROLES = [
   "manager",
   "planner",
   "worker",
   "reviewer",
   "supervisor",
+  /** 调研（T11.1）：只读，只回答一个问题，结论写进 brief、附证据，交回后自关。取代子 agent 干的小调研。 */
+  "researcher",
   "none",
 ] as const;
 
@@ -39,6 +41,7 @@ export const WORKBENCH_ROLE_MANUAL_IDS = [
   "worker",
   "reviewer",
   "supervisor",
+  "researcher",
 ] as const;
 
 /** 角色说明书 id。base 是所有 AI 窗口共用的说明。 */

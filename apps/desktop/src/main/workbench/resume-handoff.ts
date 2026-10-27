@@ -163,6 +163,7 @@ export interface ResumeHandoffInput {
 const ROLE_TEXT: Readonly<Record<WorkbenchRole, string>> = {
   manager: "管理者",
   supervisor: "监管者",
+  researcher: "调研",
   worker: "执行",
   reviewer: "检查",
   planner: "规划",

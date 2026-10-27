@@ -358,6 +358,8 @@ test("Claude 窗口启动参数正确，退出后可续接，重启不自动开"
     expect(argv).toContain("--effort");
     expect(argv).toContain("medium");
     expect(argv).toContain(multilinePrompt);
+    // T11.1：普通窗口（用户自己开的）不限子 agent。
+    expect(argv).not.toContain("Agent,Task");
     expect(text).toMatch(/FAKE_CLAUDE_ENV_ANTHROPIC_API_KEY=absent/);
 
     await expect(page.getByTestId("terminal-cli-stopped")).toBeVisible({ timeout: 15_000 });
@@ -460,6 +462,7 @@ test("Codex 窗口至少能启动并打印 argv", async () => {
     expect(argv).toContain("-C");
     expect(argv).toContain("-m");
     expect(argv).toContain("gpt-5");
+    expect(argv.join(" ")).not.toContain("features.multi_agent");
     expect(text).toMatch(/FAKE_CODEX_ENV_OPENAI_API_KEY=absent/);
   } finally {
     await launched.cleanup();
@@ -780,6 +783,8 @@ test("T10.6：worker 说明书注入，运行中改管理者，设置覆盖进�
       .poll(async () => readReplayForWindow(page, windowId), { timeout: 20_000 })
       .toContain("FAKE_CLAUDE_ARGV_JSON=");
     const argv = parseArgvJson(await readReplayForWindow(page, windowId), "FAKE_CLAUDE");
+    // T11.1：执行不能开子 agent，靠启动参数拦。
+    expect(argv.slice(0, 2)).toEqual(["--disallowedTools", "Agent,Task"]);
     const promptFlag = argv.indexOf("--append-system-prompt-file");
     expect(promptFlag).toBeGreaterThanOrEqual(0);
     const promptPath = argv[promptFlag + 1];

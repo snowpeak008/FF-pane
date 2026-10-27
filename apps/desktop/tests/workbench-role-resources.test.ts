@@ -30,12 +30,13 @@ afterEach(async () => {
 });
 
 describe("workbench role manuals", () => {
-  it("六份说明书存在、LF、且不超过约 2KB", () => {
+  it("七份说明书存在、LF、且不超过约 2KB（T11.1 加了调研）", () => {
     const names = readdirSync(resourcesDir).sort();
     expect(names).toEqual([
       "base.md",
       "manager.md",
       "planner.md",
+      "researcher.md",
       "reviewer.md",
       "supervisor.md",
       "worker.md",
@@ -99,5 +100,18 @@ describe("workbench role manuals", () => {
     expect(composed).toContain("ffpane_read_inbox");
     expect(composed).toContain(marker);
     expect(WORKBENCH_ROLE_MANUAL_IDS).toContain("worker");
+  });
+
+  it("T11.1：说明书讲清没有子 agent、怎么要调研", () => {
+    const read = (name: string) => readFileSync(join(resourcesDir, name), "utf8");
+    expect(read("base.md")).toContain("没有子 agent");
+    expect(read("base.md")).toContain("ffpane_request_research");
+    expect(read("worker.md")).toContain("ffpane_request_research");
+    expect(read("manager.md")).toContain("researcher");
+    expect(read("supervisor.md")).toContain("调研请求");
+    const researcher = read("researcher.md");
+    expect(researcher).toContain("只读");
+    expect(researcher).toContain("closeAfter: true");
+    expect(researcher).toContain("没有子 agent");
   });
 });

@@ -156,6 +156,42 @@ test("改管理者自己时先确认，点确认后才续接", async () => {
   }
 });
 
+test("T11.1：普通窗口自己改成管理者，空闲后带着子 agent 限制续接，不弹确认框", async () => {
+  test.setTimeout(120_000);
+  const fakeBinDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-role-self-bin-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-role-self-proj-"));
+  seedFakeClaude(fakeBinDir);
+  const launched = await launchApp({
+    pathPrepend: fakeBinDir,
+    extraEnv: { FFPANE_WB_SCRIPT: "role-self" },
+  });
+  try {
+    const { app, page } = launched;
+    await createProject(app, page, projectDir, "E2E Role");
+    await page.getByRole("button", { name: /^E2E Role/ }).click();
+    await gotoRoute(page, "/workbench");
+    await page.getByTestId("workbench-new-tab").click();
+    await expect(page.getByTestId("workbench-new-window-dialog")).toBeVisible();
+    await page.getByTestId("workbench-new-kind-claude").click();
+    await expect(page.getByTestId("workbench-new-confirm")).toBeEnabled({ timeout: 15_000 });
+    await page.getByTestId("workbench-new-confirm").click();
+    const window = page.getByTestId("workbench-window").first();
+    const windowId = (await window.getAttribute("data-window-id")) ?? "";
+    expect(windowId).not.toBe("");
+    // 第一次启动是普通窗口，参数里没有限制；改完角色、这一轮结束后才续接。
+    await expect
+      .poll(async () => readReplayForWindow(page, windowId), { timeout: 90_000 })
+      .toContain("FFPANE_RESUMED=1");
+    const after = await readReplayForWindow(page, windowId);
+    expect(after).toContain("--disallowedTools");
+    expect(after).toContain("Agent,Task");
+    expect(after).toContain("--resume");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+  } finally {
+    await launched.cleanup();
+  }
+});
+
 /** 按窗口 id 从终端列表找当前活着的终端读回放，不依赖窗口在不在当前标签页。 */
 async function readLiveReplay(page: LaunchedApp["page"], windowId: string): Promise<string> {
   return page.evaluate(async (wid) => {

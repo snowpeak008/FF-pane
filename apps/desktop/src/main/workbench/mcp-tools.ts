@@ -103,6 +103,8 @@ export interface ToolWindowView {
   readonly kind?: "claude" | "codex" | "grok" | "deepseek" | "shell";
   /** 观察本窗口的监管者。 */
   readonly watcherWindowId?: string;
+  /** 调研小窗：替哪个窗口查的（T11.1）。 */
+  readonly researchFor?: string;
 }
 
 /** 窗口现在用的模型和思考强度，以及排着还没生效的设置。 */
@@ -501,6 +503,8 @@ export async function executeWorkbenchTool(
       return sendMessage(caller, args, tree, deps);
     case "ffpane_report":
       return report(caller, args, tree, deps);
+    case "ffpane_request_research":
+      return requestResearch(caller, args, tree, deps);
     case "ffpane_read_inbox":
       return readInbox(caller, args, deps);
     case "ffpane_read_output":
@@ -649,7 +653,20 @@ async function setRole(
   if (!result.ok) {
     return fail(result.reason === "forbidden" ? "不能设定这个窗口的角色。" : "设定角色失败。");
   }
-  return ok({ ok: true, windowId, role: result.role });
+  const restartNote =
+    result.delivery === "restarting"
+      ? "能不能开子 agent 变了，窗口已带新参数重启（能续接就续接）。"
+      : result.delivery === "restart-queued"
+        ? "能不能开子 agent 变了，窗口在忙，空闲后自动重启生效。"
+        : result.delivery === "restart-confirm"
+          ? "能不能开子 agent 变了，要重启生效，等用户在界面上确认。"
+          : undefined;
+  return ok({
+    ok: true,
+    windowId,
+    role: result.role,
+    ...(restartNote !== undefined ? { note: restartNote } : {}),
+  });
 }
 
 async function writeBrief(
@@ -752,6 +769,7 @@ async function openWindow(
     ...(typeof args["supervisorWindowId"] === "string"
       ? { supervisorWindowId: args["supervisorWindowId"] }
       : {}),
+    ...(typeof args["researchFor"] === "string" ? { researchFor: args["researchFor"] } : {}),
   });
   if (!opened.ok) {
     return fail(opened.error);
@@ -1271,6 +1289,34 @@ async function report(
     void remindTarget(watcher, caller, "report", deliveredStatus, cc, deps, false);
     await publishUnread(watcher, deps);
   }
+  // 调研小窗（T11.1）：结果也交给提问的那个窗口，只传路径。
+  let researchCc: string | undefined;
+  if (
+    caller.role === "researcher" &&
+    caller.researchFor !== undefined &&
+    caller.researchFor !== target.id &&
+    caller.researchFor !== watcher?.id
+  ) {
+    const asker = await deps.describe(caller.researchFor);
+    if (asker !== undefined) {
+      const forwarded = await persist(
+        caller,
+        asker,
+        {
+          kind: "report",
+          text: deliveredText,
+          status: deliveredStatus,
+          ...(files !== undefined ? { files } : {}),
+          ...(deliveredBrief !== undefined ? { briefPath: deliveredBrief } : {}),
+        },
+        tree,
+        deps,
+      );
+      researchCc = asker.id;
+      void remindTarget(asker, caller, "report", deliveredStatus, forwarded, deps, false);
+      await publishUnread(asker, deps);
+    }
+  }
   deps.publishInbox({ windowId: caller.id, lastReportStatus: deliveredStatus });
   if (closeAfter) {
     deps.closeSelfLater(caller.id);
@@ -1284,7 +1330,76 @@ async function report(
     ...(ccId !== undefined && watcher !== undefined
       ? { cc: { windowId: watcher.id, id: ccId } }
       : {}),
+    ...(researchCc !== undefined ? { researchFor: researchCc } : {}),
     ...(closeAfter ? { closing: "汇报已送出，本窗口几秒后由上级关闭。不要再开始新的工作。" } : {}),
+  });
+}
+
+/** 能发调研请求的角色（T11.1）。管理者、监管者自己开调研小窗。 */
+const RESEARCH_REQUESTERS: readonly WorkbenchRole[] = ["worker", "reviewer", "planner"];
+
+/**
+ * ffpane_request_research（T11.1）：执行、检查、规划要查资料时发调研请求，取代子 agent。
+ * 发给自己在线的监管者；没有或不在线就发给最上面的管理者。请求就是一条消息，
+ * 里面写明怎么开调研小窗；收件的人开窗，结果由调研小窗交回提问的窗口。
+ */
+async function requestResearch(
+  caller: ToolWindowView,
+  args: Readonly<Record<string, unknown>>,
+  tree: Readonly<Record<string, WorkbenchAuthNode>>,
+  deps: WorkbenchToolDeps,
+): Promise<ToolTextResult> {
+  if (!RESEARCH_REQUESTERS.includes(caller.role)) {
+    return fail(
+      "只有执行、检查、规划发调研请求。管理者和监管者直接用 ffpane_open_window 开 role researcher 的调研小窗。",
+    );
+  }
+  const question = args["question"];
+  if (typeof question !== "string" || question.trim() === "") {
+    return fail("ffpane_request_research 需要 question（要查清的一个问题）。");
+  }
+  const scope = typeof args["scope"] === "string" ? args["scope"].trim() : "";
+  const answer = typeof args["answer"] === "string" ? args["answer"].trim() : "";
+  let targetId: string | undefined;
+  if (caller.watcherWindowId !== undefined) {
+    const state = deps.windowState(caller.watcherWindowId);
+    if (state?.online === true && state.lastApiError?.paused !== true) {
+      targetId = caller.watcherWindowId;
+    }
+  }
+  if (targetId === undefined) {
+    const walk = walkAncestors(caller.id, tree);
+    const ancestors = walk.cycle ? [] : walk.ids;
+    targetId =
+      [...ancestors].reverse().find((id) => tree[id]?.role === "manager") ??
+      tree[caller.id]?.parentWindowId;
+  }
+  if (targetId === undefined || targetId.trim() === "") {
+    return fail("没有监管者或管理者可以接这个请求。");
+  }
+  const target = await deps.describe(targetId);
+  if (target === undefined) {
+    return fail("找不到接请求的窗口。");
+  }
+  const lines = [
+    `调研请求（来自「${caller.title}」${caller.id}）`,
+    `问题：${question.trim()}`,
+    ...(scope !== "" ? [`范围：${scope}`] : []),
+    ...(answer !== "" ? [`想要：${answer}`] : []),
+    `处理：用 ffpane_open_window 开 role researcher、permission read-only、reasoningEffort low 的调研小窗，researchFor 填 ${caller.id}，把上面的问题和范围写进 message。结论会由调研小窗交回提问的窗口，也抄送给你。`,
+  ];
+  const text = lines.join("\n");
+  if (Buffer.byteLength(text, "utf8") > MESSAGE_MAX_BYTES) {
+    return tooLong();
+  }
+  const record = await persist(caller, target, { kind: "message", text }, tree, deps);
+  const delivery = await remindTarget(target, caller, "message", undefined, record, deps, false);
+  await publishUnread(target, deps);
+  return ok({
+    id: record.id,
+    sentTo: { windowId: target.id, title: target.title, role: target.role },
+    delivery,
+    next: "请求已送出。不用干等：接着做别的，或结束这一轮，结论来了平台会叫醒你。",
   });
 }
 

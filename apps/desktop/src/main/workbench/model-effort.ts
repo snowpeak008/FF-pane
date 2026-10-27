@@ -27,6 +27,7 @@ const DESCENDANT_ROLES: readonly WorkbenchRole[] = [
   "worker",
   "reviewer",
   "supervisor",
+  "researcher",
   "none",
 ];
 

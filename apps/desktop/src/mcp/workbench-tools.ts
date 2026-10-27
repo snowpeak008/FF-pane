@@ -27,6 +27,7 @@ export const WORKBENCH_MCP_TOOL_NAMES = [
   "ffpane_delete_canvas_file",
   "ffpane_export_canvas_image",
   "ffpane_canvas_review",
+  "ffpane_request_research",
   "ffpane_memory_search",
   "ffpane_memory_add",
   "ffpane_set_model_effort",
@@ -64,6 +65,9 @@ export const WORKBENCH_READ_ONLY_TOOL_NAMES: readonly WorkbenchMcpToolName[] = [
   "ffpane_open_panel",
   "ffpane_open_canvas",
   "ffpane_canvas_review",
+  "ffpane_request_research",
+  // 监管者是只读档，也要能开调研小窗（T11.1）；谁能开、开什么由平台代码判断。
+  "ffpane_open_window",
   "ffpane_memory_search",
   "ffpane_lock",
   "ffpane_nudge",
@@ -211,7 +215,7 @@ const TOOL_DEFINITIONS: readonly McpToolDefinition[] = [
   {
     name: "ffpane_open_window",
     description:
-      "开一个子窗口并派活。仅管理者可调用，且该管理者身份必须是本进程里通过 ffpane_set_role 或界面确认过的（仅从布局里读到的管理者不够）。权限不得超过你自己的有效权限，超出会被封顶并在结果里说明。子窗口工作目录是项目根。briefPath 必须位于该项目 .ffpane/briefs/ 内。",
+      "开一个子窗口并派活。管理者可调用，且该管理者身份必须是本进程里通过 ffpane_set_role 或界面确认过的（仅从布局里读到的管理者不够）。监管者只能开调研小窗：role researcher、permission read-only，同时最多 2 个。权限不得超过你自己的有效权限，超出会被封顶并在结果里说明。子窗口工作目录是项目根。briefPath 必须位于该项目 .ffpane/briefs/ 内。",
     inputSchema: {
       type: "object",
       properties: {
@@ -240,6 +244,11 @@ const TOOL_DEFINITIONS: readonly McpToolDefinition[] = [
           type: "string",
           description:
             "可选。挂上观察这个窗口的监管者（你开的、角色为监管者）。监管者能读它的终端、收它汇报的抄送，不能下命令。挂了以后，它 done 和 progress 的汇报不叫醒你，blocked 和 failed 照常叫醒。",
+        },
+        researchFor: {
+          type: "string",
+          description:
+            "可选，只配 role researcher。这个调研是替哪个窗口查的（调研请求里写着）。调研小窗报 done 时，结论也交给这个窗口。",
         },
         model: {
           type: "string",
@@ -423,6 +432,21 @@ const TOOL_DEFINITIONS: readonly McpToolDefinition[] = [
         },
       },
       required: ["prompt"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "ffpane_request_research",
+    description:
+      "要查代码、核对资料时用（没有子 agent）。执行、检查、规划可用。请求发给你在线的监管者，没有就发给管理者；他们会开一个只读的调研小窗，结论写成 brief、附证据，交回给你，同时抄送他们。发完不用干等，接着做别的或结束本轮，结论来了会叫醒你。一次只问一个问题。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        question: { type: "string", description: "要查清的一个问题。" },
+        scope: { type: "string", description: "可选。要看的范围：目录、文件或命令。" },
+        answer: { type: "string", description: "可选。想要的答案形式，比如「列出调用处」。" },
+      },
+      required: ["question"],
       additionalProperties: false,
     },
   },

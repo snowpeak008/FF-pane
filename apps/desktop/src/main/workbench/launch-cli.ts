@@ -79,6 +79,7 @@ import {
   writeWorkbenchClaudeMcpFile,
 } from "./mcp-temp";
 import type { LaunchCliRoute } from "./resolve-config";
+import { subagentPolicyFor } from "./role-tool-policy";
 
 /** initialPrompt IPC 上限（字节按 UTF-16 码元计；更长内容走 T10.7 briefs）。 */
 export const MAX_INITIAL_PROMPT_CHARS = 32 * 1024;
@@ -398,6 +399,11 @@ async function launchCliWindowBody(
   const registered = deps.authRegistry?.get(input.windowId);
   const role: WorkbenchRole =
     registered?.role ?? (isWorkbenchRole(input.role) ? input.role : DEFAULT_WORKBENCH_ROLE);
+  // T11.1：除普通窗口外一律不能开子 agent，靠启动参数拦。
+  const subagents = subagentPolicyFor(role);
+  if (runtime === "codex" && subagents.restricted) {
+    configOverrides = { ...configOverrides, ...subagents.codexConfigOverrides };
+  }
   const compact = resolveManagerCompact({
     role,
     kind,
@@ -496,6 +502,9 @@ async function launchCliWindowBody(
             ? { sessionId: nativeSessionId }
             : {}),
       permission,
+      ...(subagents.claudeDisallowedTools.length > 0
+        ? { disallowedTools: subagents.claudeDisallowedTools }
+        : {}),
       ...(mcpTemp !== undefined
         ? {
             mcpConfigPath: mcpTemp.path,

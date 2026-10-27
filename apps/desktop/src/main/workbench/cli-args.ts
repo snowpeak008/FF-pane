@@ -58,6 +58,11 @@ export interface BuildInteractiveClaudeArgsInput {
    */
   readonly allowedTools?: readonly string[];
   /**
+   * 禁用的工具（`--disallowedTools`，T11.1 关子 agent）。用逗号合成一个值放在最前面，
+   * 后面紧跟 `--session-id` / `--resume` 这类选项，可变参数不会把开场白当工具名吞掉。
+   */
+  readonly disallowedTools?: readonly string[];
+  /**
    * 只读档仍能跑查看类命令（监管者）：不禁命令工具，由 plan 模式只放行只读命令。
    * 不加 Bash(前缀:*) 放行规则：find -delete、git diff --output 这类前缀也能写盘，放行规则会绕过 plan 的只读判断。
    */
@@ -96,6 +101,10 @@ export interface BuildInteractiveCodexArgsInput {
  */
 export function buildInteractiveClaudeArgs(input: BuildInteractiveClaudeArgsInput): string[] {
   const args: string[] = [];
+  const disallowed = (input.disallowedTools ?? []).filter((tool) => tool.trim() !== "");
+  if (disallowed.length > 0) {
+    args.push("--disallowedTools", disallowed.join(","));
+  }
   if (input.resumeSessionId !== undefined && input.resumeSessionId.trim() !== "") {
     args.push("--resume", input.resumeSessionId.trim());
   } else if (input.resumePicker === true) {

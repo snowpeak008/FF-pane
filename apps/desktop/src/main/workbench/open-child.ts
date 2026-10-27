@@ -42,7 +42,12 @@ export interface OpenChildArgs {
   readonly model?: string;
   /** 已校验的思考强度。 */
   readonly reasoningEffort?: string;
+  /** 调研小窗（T11.1）：替哪个窗口查。只能配 role researcher。 */
+  readonly researchFor?: string;
 }
+
+/** 监管者同时最多开几个调研小窗（T11.1）。 */
+export const SUPERVISOR_MAX_RESEARCHERS = 2;
 
 export interface OpenChildSuccess {
   readonly ok: true;
@@ -144,15 +149,33 @@ export async function openChildWindow(
   if (caller === undefined) {
     return { ok: false, error: "找不到调用窗口。" };
   }
-  if (caller.role !== "manager" || !deps.authRegistry.isManagerGranted(callerId)) {
+  // T11.1：监管者也能开窗，但只能开调研小窗、只读、同时最多 2 个。派活仍是管理者的事。
+  const bySupervisor = caller.role === "supervisor";
+  if (
+    !bySupervisor &&
+    (caller.role !== "manager" || !deps.authRegistry.isManagerGranted(callerId))
+  ) {
     return {
       ok: false,
       error:
-        "只有管理者可以开窗口，而且必须是本进程里通过 ffpane_set_role 或界面确认过的管理者。从布局读到的管理者身份不能直接开窗口，请先调用 ffpane_set_role。",
+        "只有管理者可以开窗口（监管者只能开调研小窗），而且必须是本进程里通过 ffpane_set_role 或界面确认过的管理者。从布局读到的管理者身份不能直接开窗口，请先调用 ffpane_set_role。",
     };
   }
   if (!isWorkbenchRole(args.role) || !isWorkbenchPermissionLevel(args.permission)) {
     return { ok: false, error: "角色或权限无效。" };
+  }
+  if (bySupervisor && args.role !== "researcher") {
+    return {
+      ok: false,
+      error:
+        "监管者只能开调研小窗（role researcher）。要开执行、检查、规划，请在近况里写明，交给管理者。",
+    };
+  }
+  if (bySupervisor && args.permission !== "read-only") {
+    return { ok: false, error: "监管者开的调研小窗只能是 read-only。" };
+  }
+  if (args.researchFor !== undefined && args.role !== "researcher") {
+    return { ok: false, error: "researchFor 只能配 role researcher。" };
   }
   if (
     args.cli !== "claude" &&
@@ -198,6 +221,26 @@ export async function openChildWindow(
   const layout = layouts[described.projectId];
   if (layout === undefined || layout.windows[callerId] === undefined) {
     return { ok: false, error: "布局里没有这个管理者窗口。" };
+  }
+  let researchFor: string | undefined;
+  if (args.researchFor !== undefined && args.researchFor.trim() !== "") {
+    researchFor = args.researchFor.trim();
+    if (layout.windows[researchFor] === undefined) {
+      return { ok: false, error: "researchFor 指的窗口不在这个项目里。" };
+    }
+  }
+  if (bySupervisor) {
+    const running = Object.values(layout.windows).filter(
+      (window) =>
+        window.parentWindowId === callerId &&
+        (deps.authRegistry.get(window.id)?.role ?? window.role) === "researcher",
+    ).length;
+    if (running >= SUPERVISOR_MAX_RESEARCHERS) {
+      return {
+        ok: false,
+        error: `你已经开着 ${running} 个调研小窗（最多 ${SUPERVISOR_MAX_RESEARCHERS} 个）。等它们交回结果自关后再开。`,
+      };
+    }
   }
   let watcherWindowId: string | undefined;
   if (args.supervisorWindowId !== undefined && args.supervisorWindowId.trim() !== "") {
@@ -293,6 +336,7 @@ export async function openChildWindow(
     createdAt: deps.now?.() ?? Date.now(),
     terminalId: launched.terminal.id,
     role: args.role,
+    ...(researchFor !== undefined ? { researchFor } : {}),
     routeMode: launched.connectionMode,
     ...(launched.providerName !== undefined ? { routeProviderName: launched.providerName } : {}),
     ...(launched.model !== undefined ? { routeModel: launched.model } : {}),

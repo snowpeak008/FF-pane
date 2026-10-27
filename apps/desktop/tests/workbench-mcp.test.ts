@@ -667,6 +667,78 @@ describe("在线监管", () => {
   });
 });
 
+describe("调研请求（T11.1）", () => {
+  function withSupervisor(online: boolean) {
+    const root = tempDir();
+    const h = harness(root);
+    h.views["S"] = view(root, "S", "监管", "supervisor", "A");
+    h.tree["S"] = node("S", "supervisor", "A");
+    const worker = h.views["D"];
+    if (worker === undefined) {
+      throw new Error("missing D");
+    }
+    h.views["D"] = { ...worker, watcherWindowId: "S" };
+    const deps: WorkbenchToolDeps = {
+      ...h.deps,
+      windowState: (id) =>
+        id === "S" && online
+          ? { phase: "idle", lastOutputAt: 0, pendingReminders: 0, online: true }
+          : h.deps.windowState(id),
+    };
+    return { ...h, deps, root };
+  }
+
+  it("执行发请求：监管者在线就发给监管者，消息里写清怎么开调研小窗", async () => {
+    const h = withSupervisor(true);
+    const sent = await call(h.deps, "D", "ffpane_request_research", {
+      question: "哪些地方调用了 saveLayout？",
+      scope: "apps/desktop/src",
+    });
+    expect(sent.json).toMatchObject({ sentTo: { windowId: "S", role: "supervisor" } });
+    const index = await readThreadIndex(h.root);
+    const last = index.at(-1);
+    expect(last?.to.windowId).toBe("S");
+    expect(last?.text).toContain("问题：哪些地方调用了 saveLayout？");
+    expect(last?.text).toContain("researchFor 填 D");
+  });
+
+  it("监管者不在线：发给管理者；管理者和监管者自己不能发请求", async () => {
+    const h = withSupervisor(false);
+    const sent = await call(h.deps, "D", "ffpane_request_research", { question: "查一下" });
+    expect(sent.json).toMatchObject({ sentTo: { windowId: "A", role: "manager" } });
+    expect((await call(h.deps, "A", "ffpane_request_research", { question: "x" })).isError).toBe(
+      true,
+    );
+    expect((await call(h.deps, "S", "ffpane_request_research", { question: "x" })).isError).toBe(
+      true,
+    );
+    expect((await call(h.deps, "D", "ffpane_request_research", {})).isError).toBe(true);
+  });
+
+  it("调研小窗报 done：结论交给开它的窗口，也交给提问的窗口", async () => {
+    const root = tempDir();
+    const h = harness(root);
+    h.views["S"] = view(root, "S", "监管", "supervisor", "A");
+    h.tree["S"] = node("S", "supervisor", "A");
+    h.views["R"] = { ...view(root, "R", "调研1", "researcher", "S"), researchFor: "D" };
+    h.tree["R"] = node("R", "researcher", "S");
+    await call(h.deps, "R", "ffpane_write_brief", { name: "调研-调用处.md", content: "# 结论" });
+    const reported = await call(h.deps, "R", "ffpane_report", {
+      status: "done",
+      summary: ".ffpane/briefs/调研-调用处.md",
+      briefPath: ".ffpane/briefs/调研-调用处.md",
+      closeAfter: true,
+    });
+    expect(reported.json).toMatchObject({ researchFor: "D" });
+    const index = await readThreadIndex(root);
+    const targets = index
+      .filter((record) => record.from.windowId === "R")
+      .map((r) => r.to.windowId);
+    expect(targets.sort()).toEqual(["D", "S"]);
+    expect(h.selfClosed).toEqual(["R"]);
+  });
+});
+
 describe("叫醒与拍板", () => {
   it("nudge：能叫醒后代和挂在自己名下的窗口，叫不醒别人", async () => {
     const root = tempDir();
@@ -1456,6 +1528,132 @@ describe("open_window", () => {
       { ...deps, checkResources: async () => "可用内存只剩 1.0 GB" },
     );
     expect(short).toEqual({ ok: false, error: "可用内存只剩 1.0 GB" });
+  });
+
+  it("监管者只能开只读的调研小窗，同时最多 2 个；researchFor 记在窗口上（T11.1）", async () => {
+    const root = tempDir();
+    const registry = createWorkbenchAuthRegistry();
+    registry.pin(
+      { id: "A", permission: "edit", role: "manager", openedBy: "user" },
+      "proj-1" as never,
+    );
+    registry.grantManager("A");
+    registry.pin(
+      {
+        id: "S",
+        permission: "read-only",
+        role: "supervisor",
+        openedBy: { windowId: "A" },
+        parentWindowId: "A",
+      },
+      "proj-1" as never,
+    );
+    const base = layout(root);
+    let current: ProjectWorkbenchLayout = {
+      ...base,
+      windows: {
+        ...base.windows,
+        S: {
+          id: "S",
+          projectId: "proj-1" as never,
+          title: "监管",
+          kind: "claude",
+          cwd: root,
+          createdAt: 2,
+          permission: "read-only",
+          role: "supervisor",
+          openedBy: { windowId: "A" },
+          parentWindowId: "A",
+        },
+        D: {
+          id: "D",
+          projectId: "proj-1" as never,
+          title: "执行",
+          kind: "claude",
+          cwd: root,
+          createdAt: 3,
+          permission: "edit",
+          role: "worker",
+          openedBy: { windowId: "A" },
+          parentWindowId: "A",
+        },
+      },
+    };
+    let ids = 0;
+    const deps = {
+      authRegistry: registry,
+      readLayouts: async () => ({ "proj-1": current }),
+      saveLayout: async (next: ProjectWorkbenchLayout) => {
+        current = next;
+      },
+      launch: async () =>
+        ({
+          terminal: { id: "term" },
+          kind: "claude",
+          effectivePermission: "read-only",
+          permissionCapped: false,
+        }) as unknown as LaunchCliWindowResult,
+      resolveRoute: async () => ({
+        ok: true as const,
+        route: {
+          connectionMode: "local_cli" as const,
+          configId: "cfg" as never,
+          configName: "默认配置",
+        },
+      }),
+      describeCaller: async () => ({
+        title: "监管",
+        projectId: "proj-1",
+        projectRoot: root,
+        permission: "read-only" as const,
+      }),
+      aliveCount: () => 3,
+      maxWindows: async () => 12,
+      publish: () => undefined,
+      newId: () => {
+        ids += 1;
+        return `r-${ids}`;
+      },
+    };
+    const worker = await openChildWindow(
+      "S",
+      { cli: "claude", role: "worker", permission: "read-only", title: "执行" },
+      deps,
+    );
+    expect(worker).toMatchObject({ ok: false, error: expect.stringContaining("只能开调研小窗") });
+    const writable = await openChildWindow(
+      "S",
+      { cli: "claude", role: "researcher", permission: "edit", title: "调研" },
+      deps,
+    );
+    expect(writable).toMatchObject({ ok: false, error: expect.stringContaining("read-only") });
+    const wrongPair = await openChildWindow(
+      "A",
+      { cli: "claude", role: "worker", permission: "edit", title: "执行", researchFor: "D" },
+      deps,
+    );
+    expect(wrongPair).toMatchObject({ ok: false });
+    for (const index of [1, 2]) {
+      const opened = await openChildWindow(
+        "S",
+        {
+          cli: "claude",
+          role: "researcher",
+          permission: "read-only",
+          title: `调研${index}`,
+          researchFor: "D",
+        },
+        deps,
+      );
+      expect(opened.ok).toBe(true);
+    }
+    expect(current.windows["r-1"]).toMatchObject({ role: "researcher", researchFor: "D" });
+    const third = await openChildWindow(
+      "S",
+      { cli: "claude", role: "researcher", permission: "read-only", title: "调研3" },
+      deps,
+    );
+    expect(third).toMatchObject({ ok: false, error: expect.stringContaining("最多 2 个") });
   });
 
   it("先登记父级再启动，超权封顶，非管理者与未授予者被拒，到上限不开", async () => {

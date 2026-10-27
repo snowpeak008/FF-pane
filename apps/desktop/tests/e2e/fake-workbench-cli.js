@@ -126,7 +126,7 @@ function keepAlive() {
 async function main() {
   const script = process.env.FFPANE_WB_SCRIPT ?? "";
   const argv = process.argv.slice(2);
-  if (script === "effort-worker" || script === "effort-self") {
+  if (script === "effort-worker" || script === "effort-self" || script === "role-self") {
     process.stdout.write(`FAKE_ARGV_JSON=${JSON.stringify(argv)}\n`);
     if (argv.includes("--resume")) {
       process.stdout.write("FFPANE_RESUMED=1\n");
@@ -215,6 +215,15 @@ async function main() {
     process.stdout.write(`FFPANE_DECISION_REMINDER=${stdin.includes("[新消息]") ? "yes" : "no"}\n`);
     process.stdout.write(`FFPANE_DECISION_INBOX=${inbox.text}\n`);
     process.stdout.write("FFPANE_DECISION_DONE=1\n");
+    keepAlive();
+    return;
+  }
+  if (script === "role-self") {
+    // T11.1：普通窗口自己改成管理者，这一轮结束后平台带着限制续接重启，不弹确认框。
+    const role = await tool("ffpane_set_role", { windowId: me.windowId, role: "manager" });
+    process.stdout.write(`FFPANE_MCP_ROLE=${role.text}
+`);
+    fireStop(spec);
     keepAlive();
     return;
   }
