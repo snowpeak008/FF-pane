@@ -18,6 +18,9 @@ import { createRelaunchGuard } from "./relaunch-guard";
 import { ackTerminalOutput } from "./terminal-output-ack";
 import "@xterm/xterm/css/xterm.css";
 
+/** 尺寸停止变化多久后才调伪终端（毫秒）。ConPTY 每调一次都整屏重画（1.0.8 查过）。 */
+const PTY_RESIZE_SETTLE_MS = 150;
+
 export interface TerminalViewProps {
   /** 工作台窗口 id（槽位键；与 PTY id 分离）。 */
   readonly windowId: string;
@@ -512,24 +515,34 @@ export function TerminalView({
       return true;
     });
 
-    // 容器每动一下都会回调；行列没变不发，免得伪终端整屏重画
+    // 容器每动一下都会回调；行列没变不发，免得伪终端整屏重画。
+    // 拖分隔线、拖窗口时尺寸连着变（T11.2c）：画面跟着变，伪终端等停下来再按最终尺寸调一次。
     let sentSize = "";
+    let resizeTimer: ReturnType<typeof setTimeout> | undefined;
+    const sendSize = (): void => {
+      resizeTimer = undefined;
+      const current = infoRef.current;
+      const size = current === null ? "" : `${current.id}:${term.cols}x${term.rows}`;
+      if (current !== null && !current.exited && size !== sentSize) {
+        sentSize = size;
+        void invokeQuery("terminal:resize", {
+          id: current.id,
+          cols: term.cols,
+          rows: term.rows,
+        });
+      }
+    };
     const observer = new ResizeObserver(() => {
       try {
         fit.fit();
-        const current = infoRef.current;
-        const size = current === null ? "" : `${current.id}:${term.cols}x${term.rows}`;
-        if (current !== null && !current.exited && size !== sentSize) {
-          sentSize = size;
-          void invokeQuery("terminal:resize", {
-            id: current.id,
-            cols: term.cols,
-            rows: term.rows,
-          });
-        }
       } catch {
         // ignore fit races during teardown
+        return;
       }
+      if (resizeTimer !== undefined) {
+        clearTimeout(resizeTimer);
+      }
+      resizeTimer = setTimeout(sendSize, PTY_RESIZE_SETTLE_MS);
     });
     observer.observe(host);
 
@@ -564,6 +577,9 @@ export function TerminalView({
       host.removeEventListener("compositionstart", onCompositionStart);
       host.removeEventListener("compositionend", onCompositionEnd);
       observer.disconnect();
+      if (resizeTimer !== undefined) {
+        clearTimeout(resizeTimer);
+      }
       term.dispose();
       termRef.current = null;
       fitRef.current = null;

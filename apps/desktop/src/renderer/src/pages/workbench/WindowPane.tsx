@@ -16,7 +16,13 @@ import {
   WORKBENCH_ROLES,
 } from "@ff-pane/shared";
 import { Bot, Columns2, Maximize2, Minimize2, Radio, Rows2, SquareTerminal, X } from "lucide-react";
-import { type ReactElement, useMemo, useRef, useState } from "react";
+import {
+  type ReactElement,
+  type PointerEvent as ReactPointerEvent,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Button } from "../../components/ui/Button";
@@ -45,6 +51,10 @@ export interface WindowPaneProps {
   readonly onRename: (title: string) => void;
   readonly onTerminalIdChange: (terminalId: string | undefined) => void;
   readonly onCwdFallback: () => void;
+  /** 按住标题栏拖窗口换位置（T11.2c）。 */
+  readonly onDragStart?: (event: ReactPointerEvent<HTMLElement>) => void;
+  /** 正被拖着。 */
+  readonly dragging?: boolean;
 }
 
 export function WindowPane({
@@ -60,6 +70,8 @@ export function WindowPane({
   onRename,
   onTerminalIdChange,
   onCwdFallback,
+  onDragStart,
+  dragging = false,
 }: WindowPaneProps): ReactElement {
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
@@ -303,6 +315,7 @@ export function WindowPane({
       className={cn(
         "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border bg-surface",
         focused ? "border-primary" : "border-border",
+        dragging && "opacity-50",
       )}
       data-testid="workbench-window"
       data-window-id={window.id}
@@ -316,6 +329,19 @@ export function WindowPane({
           isCli && role === "manager" ? "bg-primary-surface" : "bg-surface-sunken",
         )}
         data-manager={isCli && role === "manager" ? "true" : "false"}
+        data-testid="workbench-window-header"
+        onPointerDown={(event) => {
+          // 标题和空白处能拖；其他按钮、改名输入框照常点。
+          const target = event.target as HTMLElement;
+          if (
+            onDragStart === undefined ||
+            editing ||
+            target.closest("input, button:not([data-drag-handle])") !== null
+          ) {
+            return;
+          }
+          onDragStart(event);
+        }}
       >
         <span className="flex shrink-0 items-center gap-1 px-1 text-fg-muted" title={kindLabel}>
           {isCli ? <Bot aria-hidden size={12} /> : <SquareTerminal aria-hidden size={12} />}
@@ -347,7 +373,8 @@ export function WindowPane({
         ) : (
           <button
             type="button"
-            className="min-w-0 flex-1 truncate px-1 text-left text-xs font-medium text-fg"
+            className="min-w-0 flex-1 cursor-grab truncate px-1 text-left text-xs font-medium text-fg"
+            data-drag-handle
             onDoubleClick={() => {
               setDraft(window.title);
               setEditing(true);

@@ -3,11 +3,19 @@
  * 横向 3 列 × 2 行、竖向 2 列 × 3 行，按工作台区域的宽高自动换（0.9–1.1 之间不换，免得来回跳）。
  * 每一行是独立的一组：拖行里的竖线只改左右两格；拖行之间的横线只改这两行。双击分隔线恢复均分。
  * 空格子显示「＋ 新建窗口」。放哪、比例怎么算都在 shared/workbench/grid.ts。
+ * 按住标题栏拖窗口（T11.2c）：每格都是落点，拖动时目标格高亮。
  */
 
 import type { ProjectId, WorkbenchGridSizes, WorkbenchWindow } from "@ff-pane/shared";
 import { Plus } from "lucide-react";
-import { Fragment, type ReactElement, useEffect, useRef, useState } from "react";
+import {
+  Fragment,
+  type ReactElement,
+  type PointerEvent as ReactPointerEvent,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import {
@@ -20,6 +28,7 @@ import {
 } from "../../../../shared/workbench/grid";
 import { cn } from "../../lib/cn";
 import { WindowPane } from "./WindowPane";
+import type { WindowDragState } from "./window-drag";
 
 /** 每格最小占比（%）。 */
 const MIN_CELL_PERCENT = 10;
@@ -48,6 +57,8 @@ export interface GridLayoutProps {
   readonly onRowSizes: (orientation: GridOrientation, rows: readonly number[]) => void;
   readonly onColSizes: (orientation: GridOrientation, row: number, cols: readonly number[]) => void;
   readonly onResetSizes: (orientation: GridOrientation) => void;
+  readonly drag: WindowDragState | null;
+  readonly onDragStart: (windowId: string, event: ReactPointerEvent<HTMLElement>) => void;
 }
 
 function percents(fractions: readonly number[]): number[] {
@@ -96,6 +107,8 @@ export function GridLayout(props: GridLayoutProps): ReactElement | null {
       onRename={(title) => props.onRename(window.id, title)}
       onTerminalIdChange={(id) => props.onTerminalIdChange(window.id, id)}
       onCwdFallback={() => props.onCwdFallback(window.id)}
+      onDragStart={(event) => props.onDragStart(window.id, event)}
+      dragging={props.drag?.windowId === window.id}
     />
   );
 
@@ -162,6 +175,12 @@ export function GridLayout(props: GridLayoutProps): ReactElement | null {
                       const slot = slotAt(row, col, orientation);
                       const windowId = props.slots[slot] ?? null;
                       const window = windowId !== null ? props.windows[windowId] : undefined;
+                      const target = props.drag?.target;
+                      const dropHere =
+                        target?.kind === "slot" &&
+                        target.tabId === props.tabId &&
+                        target.slot === slot &&
+                        windowId !== props.drag?.windowId;
                       return (
                         <Fragment key={`cell-${slot}`}>
                           {col > 0 ? (
@@ -178,9 +197,12 @@ export function GridLayout(props: GridLayoutProps): ReactElement | null {
                             className="min-h-0 min-w-0"
                           >
                             <div
-                              className="flex h-full min-h-0 flex-col p-0.5"
+                              className="relative flex h-full min-h-0 flex-col p-0.5"
                               data-testid="workbench-grid-cell"
+                              data-drop="slot"
+                              data-tab-id={props.tabId}
                               data-slot={slot}
+                              data-drop-active={dropHere ? "true" : undefined}
                             >
                               {window !== undefined ? (
                                 pane(window, false)
@@ -199,6 +221,9 @@ export function GridLayout(props: GridLayoutProps): ReactElement | null {
                                   {t("workbench.grid.newWindowHere")}
                                 </button>
                               )}
+                              {dropHere ? (
+                                <div className="pointer-events-none absolute inset-0.5 z-20 rounded-md border-2 border-primary bg-primary-surface/40" />
+                              ) : null}
                             </div>
                           </Panel>
                         </Fragment>

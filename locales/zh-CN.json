@@ -622,7 +622,8 @@
       "stopped": "已通知它下线"
     },
     "grid": {
-      "newWindowHere": "新建窗口"
+      "newWindowHere": "新建窗口",
+      "tabFull": "这一页满了"
     }
   },
   "projects": {

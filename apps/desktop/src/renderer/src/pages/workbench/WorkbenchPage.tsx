@@ -32,6 +32,7 @@ import { WorkbenchCanvasPanel } from "./WorkbenchCanvasPanel";
 import { WorkbenchDecisions } from "./WorkbenchDecisions";
 import { WorkbenchDrawer } from "./WorkbenchDrawer";
 import { WorkbenchRuntimeBar } from "./WorkbenchRuntimeBar";
+import { useWindowDrag } from "./window-drag";
 
 export function WorkbenchPage(): ReactElement {
   const { t } = useTranslation();
@@ -60,6 +61,7 @@ export function WorkbenchPage(): ReactElement {
   const getProjectLayout = useWorkbenchStore((s) => s.getProjectLayout);
 
   const countRunningWindows = useWorkbenchStore((s) => s.countRunningWindows);
+  const moveWindow = useWorkbenchStore((s) => s.moveWindow);
   const canvasPending = useWorkbenchCanvasStore((s) =>
     entry === null ? 0 : (s.pending[entry.id] ?? 0),
   );
@@ -122,6 +124,13 @@ export function WorkbenchPage(): ReactElement {
       useWorkbenchStore.getState().clearCwdFallback(windowId);
     }
   }, [cwdFallbackWindowIds, t]);
+
+  // 拖窗口换位置（T11.2c）：只改格子，窗口不重启。
+  const windowDrag = useWindowDrag((windowId, target) => {
+    if (entry !== null && moveWindow(entry.id, windowId, target) === "full") {
+      toast.error(t("workbench.grid.tabFull"));
+    }
+  });
 
   const ensureCapacity = useCallback(async (): Promise<boolean> => {
     const settled = await invokeQuery("config:get");
@@ -331,6 +340,7 @@ export function WorkbenchPage(): ReactElement {
           onClose={requestCloseTab}
           onRename={(tabId, title) => renameTab(entry.id, tabId, title)}
           onNewTab={handleNewTab}
+          dropTarget={windowDrag.drag?.target ?? null}
         />
         <WorkbenchRuntimeBar projectId={entry.id} />
         <WorkbenchDecisions projectId={entry.id} />
@@ -411,6 +421,8 @@ export function WorkbenchPage(): ReactElement {
               onResetSizes={(orientation) =>
                 setGridSizes(entry.id, activeTab.id, (sizes) => resetGridSizes(sizes, orientation))
               }
+              drag={windowDrag.drag}
+              onDragStart={windowDrag.start}
             />
           </div>
         )}

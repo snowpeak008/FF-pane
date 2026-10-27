@@ -422,3 +422,104 @@ export function detachWindowFromLayout(
     maximizedWindowId: layout.maximizedWindowId === windowId ? null : layout.maximizedWindowId,
   };
 }
+
+// ---------- 拖窗口换位置（T11.2c） ----------
+
+/** 窗口拖到哪：某一格、某个标签、标签栏的「＋」。 */
+export type WindowDropTarget =
+  | { readonly kind: "slot"; readonly tabId: string; readonly slot: number }
+  | { readonly kind: "tab"; readonly tabId: string }
+  | { readonly kind: "new-tab" };
+
+/** 从落点元素的 data-drop / data-tab-id / data-slot 读出落点。 */
+export function dropTargetOf(
+  data: Readonly<Record<string, string | undefined>>,
+): WindowDropTarget | null {
+  const tabId = data["tabId"];
+  switch (data["drop"]) {
+    case "slot": {
+      const slot = Number(data["slot"]);
+      return tabId !== undefined && data["slot"] !== undefined && Number.isInteger(slot)
+        ? { kind: "slot", tabId, slot }
+        : null;
+    }
+    case "tab":
+      return tabId !== undefined ? { kind: "tab", tabId } : null;
+    case "new-tab":
+      return { kind: "new-tab" };
+    default:
+      return null;
+  }
+}
+
+export type MoveWindowResult =
+  | { readonly ok: true; readonly layout: ProjectWorkbenchLayout }
+  | { readonly ok: false; readonly reason: "full" | "unchanged" };
+
+/**
+ * 拖窗口：落到另一个窗口上两个对调；落到空格移过去、原来那格变空；
+ * 落到别的标签放那页编号最小的空格，满了不让放；落到「＋」开新页放第 1 格。
+ * 只改格子，窗口本身不动。原来那页空了就去掉；停在当前页，除非当前页被去掉了。
+ */
+export function moveWindowInLayout(
+  layout: ProjectWorkbenchLayout,
+  windowId: string,
+  target: WindowDropTarget,
+  newTabId: string,
+): MoveWindowResult {
+  const from = findTabOfWindow(layout, windowId);
+  if (from === undefined) {
+    return { ok: false, reason: "unchanged" };
+  }
+  const fromSlot = slotIndexOf(from.slots, windowId);
+  if (target.kind === "slot" && target.tabId === from.id) {
+    if (target.slot === fromSlot || target.slot < 0 || target.slot >= GRID_SLOTS) {
+      return { ok: false, reason: "unchanged" };
+    }
+    const other = from.slots[target.slot] ?? null;
+    const slots = withSlot(withSlot(from.slots, target.slot, windowId), fromSlot, other);
+    return { ok: true, layout: replaceTab(layout, { ...from, slots }) };
+  }
+  const alone = windowIdsInSlots(from.slots).length === 1;
+  if (target.kind === "new-tab" ? alone : target.tabId === from.id) {
+    return { ok: false, reason: "unchanged" };
+  }
+  let tabs: WorkbenchTab[];
+  if (target.kind === "new-tab") {
+    tabs = [...layout.tabs, newTab(newTabId, nextTabTitle(layout), windowId)];
+  } else {
+    const to = layout.tabs.find((tab) => tab.id === target.tabId);
+    if (to === undefined) {
+      return { ok: false, reason: "unchanged" };
+    }
+    const slot =
+      target.kind === "slot" && to.slots[target.slot] === null
+        ? target.slot
+        : firstEmptySlot(to.slots);
+    if (slot < 0) {
+      return { ok: false, reason: "full" };
+    }
+    tabs = layout.tabs.map((tab) =>
+      tab.id === to.id ? { ...tab, slots: withSlot(tab.slots, slot, windowId) } : tab,
+    );
+  }
+  const emptied = withSlot(from.slots, fromSlot, null);
+  tabs = tabs.flatMap((tab) => {
+    if (tab.id !== from.id) {
+      return [tab];
+    }
+    return windowIdsInSlots(emptied).length > 0 ? [{ ...tab, slots: emptied }] : [];
+  });
+  const activeTabId = tabs.some((tab) => tab.id === layout.activeTabId)
+    ? layout.activeTabId
+    : (findTabOfWindow({ ...layout, tabs }, windowId)?.id ?? null);
+  return {
+    ok: true,
+    layout: {
+      ...layout,
+      tabs,
+      activeTabId,
+      maximizedWindowId: layout.maximizedWindowId === windowId ? null : layout.maximizedWindowId,
+    },
+  };
+}

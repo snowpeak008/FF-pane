@@ -1,12 +1,14 @@
 /**
  * 工作台标签栏（T10.2）：新建 / 切换 / 关闭 / 双击重命名。
  * 48px 高、标签固定 160px 宽（T11.2a）；选中的标签和下面的工作区连成一片，切换时滚到看得见。
+ * 拖窗口时（T11.2c）标签和「＋」都是落点：放到那一页的空格，或开新页。
  */
 
 import type { WorkbenchTab } from "@ff-pane/shared";
 import { Plus, X } from "lucide-react";
 import { type ReactElement, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { WindowDropTarget } from "../../../../shared/workbench/grid";
 import { Button } from "../../components/ui/Button";
 import { cn } from "../../lib/cn";
 
@@ -17,6 +19,8 @@ export interface TabBarProps {
   readonly onClose: (tabId: string) => void;
   readonly onRename: (tabId: string, title: string) => void;
   readonly onNewTab: () => void;
+  /** 正在拖窗口时指针下的落点。 */
+  readonly dropTarget?: WindowDropTarget | null;
 }
 
 export function TabBar({
@@ -26,6 +30,7 @@ export function TabBar({
   onClose,
   onRename,
   onNewTab,
+  dropTarget = null,
 }: TabBarProps): ReactElement {
   const { t } = useTranslation();
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -76,11 +81,16 @@ export function TabBar({
               key={tab.id}
               ref={active ? activeRef : undefined}
               title={tab.title}
+              data-drop="tab"
+              data-tab-id={tab.id}
               className={cn(
                 "group flex w-40 shrink-0 items-center gap-1 rounded-t-md border-x border-t-2 px-3",
                 active
                   ? "border-x-border border-t-primary bg-canvas text-fg"
                   : "border-x-border border-t-border bg-surface-sunken text-fg-muted hover:bg-surface-hover",
+                dropTarget?.kind === "tab" &&
+                  dropTarget.tabId === tab.id &&
+                  "bg-primary-surface ring-2 ring-primary ring-inset",
               )}
             >
               <button
@@ -112,12 +122,16 @@ export function TabBar({
         })}
       </div>
       <Button
-        className="self-center"
         variant="ghost"
         size="md"
         iconOnly
         aria-label={t("workbench.tab.new")}
         data-testid="workbench-new-tab"
+        data-drop="new-tab"
+        className={cn(
+          "self-center",
+          dropTarget?.kind === "new-tab" && "bg-primary-surface ring-2 ring-primary",
+        )}
         onClick={onNewTab}
       >
         <Plus aria-hidden size={18} />

@@ -622,7 +622,8 @@
       "stopped": "Told it to go offline"
     },
     "grid": {
-      "newWindowHere": "New window"
+      "newWindowHere": "New window",
+      "tabFull": "That page is full"
     }
   },
   "projects": {

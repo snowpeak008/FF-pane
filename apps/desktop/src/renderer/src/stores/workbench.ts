@@ -26,9 +26,11 @@ import { detachWindowFromLayout } from "../../../shared/workbench/detach-window"
 import {
   findTabOfWindow,
   type GridOrientation,
+  moveWindowInLayout,
   placeSplitWindow,
   placeUserWindow,
   tabWindowIds,
+  type WindowDropTarget,
 } from "../../../shared/workbench/grid";
 import { placeOpenedWindow } from "../../../shared/workbench/place-child";
 import { planTerminalReconcile } from "../../../shared/workbench/reconcile-terminals";
@@ -169,6 +171,12 @@ export interface WorkbenchStoreActions {
   readonly setActiveTab: (projectId: ProjectId, tabId: string) => void;
   readonly focusWindow: (projectId: ProjectId, windowId: string) => void;
   readonly toggleMaximize: (projectId: ProjectId, windowId: string) => void;
+  /** 拖窗口换位置（T11.2c）：只改格子，窗口不重启。full 是目标页满了。 */
+  readonly moveWindow: (
+    projectId: ProjectId,
+    windowId: string,
+    target: WindowDropTarget,
+  ) => "moved" | "full" | "unchanged";
   /** 当前工作台格子的方向（不存档，GridLayout 量出来的），分屏时用。 */
   readonly gridOrientation: GridOrientation;
   readonly setGridOrientation: (orientation: GridOrientation) => void;
@@ -905,6 +913,20 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
         maximizedWindowId: layout.maximizedWindowId === windowId ? windowId : null,
       };
     });
+  },
+
+  moveWindow(projectId, windowId, target) {
+    const result = moveWindowInLayout(
+      get().getProjectLayout(projectId),
+      windowId,
+      target,
+      newId("tab"),
+    );
+    if (!result.ok) {
+      return result.reason;
+    }
+    patchProject(set, get, projectId, () => result.layout);
+    return "moved";
   },
 
   toggleMaximize(projectId, windowId) {
