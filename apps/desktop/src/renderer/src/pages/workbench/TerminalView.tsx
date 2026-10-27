@@ -15,6 +15,7 @@ import { cn } from "../../lib/cn";
 import { useTheme } from "../../theme";
 import { forgetLiveTerminal, peekLiveTerminal, rememberLiveTerminal } from "./live-terminals";
 import { createRelaunchGuard } from "./relaunch-guard";
+import { ackTerminalOutput } from "./terminal-output-ack";
 import "@xterm/xterm/css/xterm.css";
 
 export interface TerminalViewProps {
@@ -173,6 +174,28 @@ export function TerminalView({
     void invokeQuery("terminal:write", { id: current.id, data });
   }, []);
 
+  /** 当前挂着输出的终端（T11.0d：主进程只推挂着的）。 */
+  const attachedIdRef = useRef<string | null>(null);
+  /**
+   * 先挂上再取回放：挂上之后的输出要么在回放里、要么在回放之后到，回放前到的会被 reset 清掉，不会丢也不会重。
+   */
+  const loadReplay = useCallback(async (term: Terminal, id: string): Promise<void> => {
+    const previous = attachedIdRef.current;
+    if (previous !== id) {
+      attachedIdRef.current = id;
+      if (previous !== null) {
+        void invokeQuery("terminal:attach", { id: previous, attached: false });
+      }
+      await invokeQuery("terminal:attach", { id, attached: true });
+    }
+    const replay = await invokeQuery("terminal:get-replay", { id });
+    if (replay.status === "success" && replay.data.data.length > 0) {
+      // 等回放期间已经写进来的实时输出也在回放里：先清掉，免得写两遍。
+      term.reset();
+      term.write(replay.data.data);
+    }
+  }, []);
+
   const attachExisting = useCallback(
     async (existingId: string, cols: number, rows: number): Promise<boolean> => {
       const term = termRef.current;
@@ -192,14 +215,10 @@ export function TerminalView({
       setInfo(found);
       onTerminalIdChangeRef.current?.(found.id);
       void invokeQuery("terminal:resize", { id: found.id, cols, rows });
-      const replay = await invokeQuery("terminal:get-replay", { id: found.id });
-      if (replay.status === "success" && replay.data.data.length > 0) {
-        term.reset();
-        term.write(replay.data.data);
-      }
+      await loadReplay(term, found.id);
       return true;
     },
-    [windowId],
+    [loadReplay, windowId],
   );
 
   const createWithCwd = useCallback(
@@ -299,12 +318,7 @@ export function TerminalView({
           : {}),
       });
       setResumePickerHint(settled.data.resumePicker === true);
-      const replay = await invokeQuery("terminal:get-replay", { id: settled.data.terminal.id });
-      if (replay.status === "success" && replay.data.data.length > 0) {
-        // 等回放期间已经写进来的实时输出也在回放里：先清掉，免得写两遍。
-        term.reset();
-        term.write(replay.data.data);
-      }
+      await loadReplay(term, settled.data.terminal.id);
       return;
     }
 
@@ -324,12 +338,8 @@ export function TerminalView({
     infoRef.current = settled.data;
     setInfo(settled.data);
     onTerminalIdChangeRef.current?.(settled.data.id);
-    const replay = await invokeQuery("terminal:get-replay", { id: settled.data.id });
-    if (replay.status === "success" && replay.data.data.length > 0) {
-      term.reset();
-      term.write(replay.data.data);
-    }
-  }, [attachExisting, createWithCwd, cwd, fallbackCwd, launchCli, windowId]);
+    await loadReplay(term, settled.data.id);
+  }, [attachExisting, createWithCwd, cwd, fallbackCwd, launchCli, loadReplay, windowId]);
 
   const restart = useCallback(async () => {
     const previous = infoRef.current;
@@ -413,18 +423,14 @@ export function TerminalView({
             : {}),
         });
         setResumePickerHint(settled.data.resumePicker === true);
-        const replay = await invokeQuery("terminal:get-replay", { id: settled.data.terminal.id });
-        if (replay.status === "success" && replay.data.data.length > 0) {
-          term.reset();
-          term.write(replay.data.data);
-        }
+        await loadReplay(term, settled.data.terminal.id);
       } finally {
         relaunchGuardRef.current.leave();
         relaunchBusyRef.current = false;
         setLaunching(false);
       }
     },
-    [launchCli, windowId],
+    [launchCli, loadReplay, windowId],
   );
 
   // 外部 nonce：父级驱动的再拉起（若仍使用）
@@ -594,11 +600,30 @@ export function TerminalView({
 
   useSubscription("terminal:output", (payload) => {
     const current = infoRef.current;
-    if (current === null || payload.id !== current.id) {
+    const term = termRef.current;
+    if (current === null || payload.id !== current.id || term === null) {
+      // 不是这个视图的也回执，主进程那边不会因此卡住。
+      ackTerminalOutput(payload.id, payload.data.length);
       return;
     }
-    termRef.current?.write(payload.data);
+    if (payload.reset === true) {
+      term.reset();
+    }
+    term.write(payload.data, () => {
+      ackTerminalOutput(payload.id, payload.data.length);
+    });
   });
+
+  useEffect(
+    () => () => {
+      const id = attachedIdRef.current;
+      attachedIdRef.current = null;
+      if (id !== null) {
+        void invokeQuery("terminal:attach", { id, attached: false });
+      }
+    },
+    [],
+  );
 
   useSubscription("terminal:exit", (payload) => {
     const current = infoRef.current;

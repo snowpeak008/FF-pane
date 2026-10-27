@@ -686,6 +686,20 @@ export interface WorkbenchModelEffortEvent {
 export interface TerminalOutputEvent {
   readonly id: string;
   readonly data: string;
+  /** 界面太久没回执、攒的输出被扔掉了：先清屏，data 是整份回放（T11.0d）。 */
+  readonly reset?: true;
+}
+
+/** 界面开始或停止显示这个终端（T11.0d）：只给挂着的终端推输出。 */
+export interface TerminalAttachRequest {
+  readonly id: string;
+  readonly attached: boolean;
+}
+
+/** 界面已经写进 xterm 的输出长度（按字符串长度），用于流控。 */
+export interface TerminalAckRequest {
+  readonly id: string;
+  readonly length: number;
 }
 
 export interface TerminalExitEvent {
@@ -1559,6 +1573,8 @@ export interface IpcInvokeContracts {
   "terminal:kill": { request: TerminalIdRequest; response: { readonly ok: true } };
   "terminal:list": { request: undefined; response: readonly TerminalInfo[] };
   "terminal:get-replay": { request: TerminalIdRequest; response: TerminalReplayResponse };
+  "terminal:attach": { request: TerminalAttachRequest; response: { readonly ok: true } };
+  "terminal:ack": { request: TerminalAckRequest; response: { readonly ok: true } };
   /** 读取全部项目工作台布局（T10.2；损坏条目已跳过）。 */
   "workbench:get-layouts": {
     request: undefined;
@@ -1972,6 +1988,8 @@ export const INVOKE_CHANNELS = [
   "terminal:kill",
   "terminal:list",
   "terminal:get-replay",
+  "terminal:attach",
+  "terminal:ack",
   "workbench:get-layouts",
   "workbench:save-layout",
   "workbench:flush-ack",

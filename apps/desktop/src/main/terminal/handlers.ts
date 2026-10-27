@@ -9,6 +9,7 @@ import type { InvokeHandlers } from "../../shared-ipc/server";
 import { publishEvent } from "../../shared-ipc/server";
 import { createNodePtyFactory } from "./factory";
 import { PtyManager } from "./manager";
+import { OUTPUT_FLOW_DEFAULTS, OutputFlow } from "./output-flow";
 import { assertTerminalCreateIpcSafe, defaultTerminalCwd } from "./shell";
 
 export interface TerminalLayerOptions {
@@ -39,6 +40,8 @@ export interface TerminalLayer {
     | "terminal:kill"
     | "terminal:list"
     | "terminal:get-replay"
+    | "terminal:attach"
+    | "terminal:ack"
   >;
   readonly manager: PtyManager;
   readonly dispose: () => Promise<void>;
@@ -75,17 +78,30 @@ export function createTerminalLayer(
   options: TerminalLayerOptions = {},
 ): TerminalLayer {
   const getMax = options.getMaxWorkbenchWindows ?? (() => DEFAULT_MAX_WORKBENCH_WINDOWS);
-  const manager = new PtyManager({
+  // 只推界面挂着的终端；界面没回执的太多就先攒着（T11.0d）。
+  const flow: OutputFlow = new OutputFlow({
+    ...OUTPUT_FLOW_DEFAULTS,
+    send: (id, data, reset) => {
+      const window = getWindow();
+      if (window === null || window.isDestroyed()) {
+        return;
+      }
+      publishEvent(window.webContents, "terminal:output", {
+        id,
+        data,
+        ...(reset ? { reset: true as const } : {}),
+      });
+    },
+    replay: (id) => manager.getReplayBuffer(id),
+  });
+  const manager: PtyManager = new PtyManager({
     factory: createNodePtyFactory(),
     listeners: {
       onOutputBatch: (batch) => {
-        const window = getWindow();
-        if (window === null || window.isDestroyed()) {
-          return;
-        }
-        publishEvent(window.webContents, "terminal:output", batch);
+        flow.push(batch.id, batch.data);
       },
       onExit: (notice) => {
+        flow.remove(notice.id);
         options.onTerminalExit?.(notice.metadata, notice.id, {
           exitCode: notice.exitCode,
           killed: notice.killed === true,
@@ -135,6 +151,18 @@ export function createTerminalLayer(
       return { ok: true as const };
     },
     "terminal:list": () => manager.list(),
+    "terminal:attach": (request) => {
+      if (request.attached) {
+        flow.attach(request.id);
+      } else {
+        flow.detach(request.id);
+      }
+      return { ok: true as const };
+    },
+    "terminal:ack": (request) => {
+      flow.ack(request.id, request.length);
+      return { ok: true as const };
+    },
     "terminal:get-replay": (request) => ({
       id: request.id,
       data: manager.getReplayBuffer(request.id),
