@@ -8,10 +8,10 @@ import type {
   PaneSplitDirection,
   ProjectId,
   ProjectWorkbenchLayout,
+  WorkbenchGridSizes,
   WorkbenchOpenedBy,
   WorkbenchPermissionLevel,
   WorkbenchRole,
-  WorkbenchTab,
   WorkbenchWindow,
 } from "@ff-pane/shared";
 import {
@@ -24,11 +24,12 @@ import {
 import { create } from "zustand";
 import { detachWindowFromLayout } from "../../../shared/workbench/detach-window";
 import {
-  collectWindowIds,
-  leafPane,
-  splitLeaf,
-  updateSplitSizesByKey,
-} from "../../../shared/workbench/pane-tree";
+  findTabOfWindow,
+  type GridOrientation,
+  placeSplitWindow,
+  placeUserWindow,
+  tabWindowIds,
+} from "../../../shared/workbench/grid";
 import { placeOpenedWindow } from "../../../shared/workbench/place-child";
 import { planTerminalReconcile } from "../../../shared/workbench/reconcile-terminals";
 import type {
@@ -86,6 +87,10 @@ export interface WorkbenchStoreActions {
     readonly role?: WorkbenchRole;
     readonly parentWindowId?: string;
     readonly openedBy?: WorkbenchOpenedBy;
+    /** 点了空格子的「＋」：放进这一格（T11.2b）。 */
+    readonly slot?: number;
+    /** 标签栏的「＋」（新建标签）：开新页放第 1 格。缺省放当前页的空格。 */
+    readonly newPage?: boolean;
   }) => { readonly ok: true; readonly windowId: string; readonly autoLaunch: boolean };
   readonly splitWindow: (input: {
     readonly projectId: ProjectId;
@@ -163,11 +168,13 @@ export interface WorkbenchStoreActions {
   readonly setActiveTab: (projectId: ProjectId, tabId: string) => void;
   readonly focusWindow: (projectId: ProjectId, windowId: string) => void;
   readonly toggleMaximize: (projectId: ProjectId, windowId: string) => void;
-  readonly updateSplitSizes: (
+  /** 当前工作台格子的方向（不存档，GridLayout 量出来的），分屏时用。 */
+  readonly gridOrientation: GridOrientation;
+  readonly setGridOrientation: (orientation: GridOrientation) => void;
+  readonly setGridSizes: (
     projectId: ProjectId,
     tabId: string,
-    splitKey: string,
-    percents: readonly [number, number],
+    change: (sizes: WorkbenchGridSizes | undefined) => WorkbenchGridSizes | undefined,
   ) => void;
   readonly bindTerminalId: (
     projectId: ProjectId,
@@ -271,10 +278,6 @@ function nextCliTitle(
     return `Grok ${n}`;
   }
   return `DeepSeek ${n}`;
-}
-
-function nextTabTitle(layout: ProjectWorkbenchLayout): string {
-  return `Tab ${layout.tabs.length + 1}`;
 }
 
 /** 本渲染会话内新建的窗口 id（不持久化）。 */
@@ -398,6 +401,8 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
     role,
     parentWindowId,
     openedBy,
+    slot,
+    newPage,
   }) {
     const windowId = newId("win");
     const tabId = newId("tab");
@@ -426,19 +431,11 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
           : {}),
         ...(parentWindowId !== undefined ? { parentWindowId } : {}),
       };
-      const tab: WorkbenchTab = {
-        id: tabId,
-        title: nextTabTitle(layout),
-        root: leafPane(windowId),
-      };
-      return {
-        ...layout,
-        tabs: [...layout.tabs, tab],
-        activeTabId: tabId,
-        windows: { ...layout.windows, [windowId]: window },
-        focusedWindowId: windowId,
-        maximizedWindowId: null,
-      };
+      // T11.2b：当前页编号最小的空格（点了空格子就放那格），满了才开新页。
+      return placeUserWindow(layout, window, tabId, {
+        ...(slot !== undefined ? { slot } : {}),
+        ...(newPage === true ? { newPage: true } : {}),
+      });
     });
     return { ok: true, windowId, autoLaunch: true };
   },
@@ -456,8 +453,7 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
     openedBy,
   }) {
     const layout = get().getProjectLayout(projectId);
-    const activeTab = layout.tabs.find((tab) => tab.id === layout.activeTabId);
-    if (activeTab === undefined || !collectWindowIds(activeTab.root).includes(targetWindowId)) {
+    if (findTabOfWindow(layout, targetWindowId) === undefined) {
       return { ok: false, reason: "missing" };
     }
     const windowId = newId("win");
@@ -466,10 +462,6 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
       pendingInitialPrompts.set(windowId, initialPrompt.trim());
     }
     patchProject(set, get, projectId, (current) => {
-      const tab = current.tabs.find((item) => item.id === current.activeTabId);
-      if (tab === undefined) {
-        return current;
-      }
       const isAi = isAiWorkbenchKind(kind);
       const window: WorkbenchWindow = {
         id: windowId,
@@ -487,14 +479,17 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
           : {}),
         ...(parentWindowId !== undefined ? { parentWindowId } : {}),
       };
-      const nextRoot = splitLeaf(tab.root, targetWindowId, windowId, direction);
-      return {
-        ...current,
-        windows: { ...current.windows, [windowId]: window },
-        focusedWindowId: windowId,
-        maximizedWindowId: null,
-        tabs: current.tabs.map((item) => (item.id === tab.id ? { ...item, root: nextRoot } : item)),
-      };
+      // T11.2b：向右 = 同一行右边最近的空格，向下 = 同一列下面最近的空格，没有就开新页。
+      return (
+        placeSplitWindow(
+          current,
+          targetWindowId,
+          window,
+          direction === "horizontal" ? "right" : "down",
+          get().gridOrientation,
+          newId("tab"),
+        ) ?? current
+      );
     });
     return { ok: true, windowId, autoLaunch: true };
   },
@@ -832,7 +827,7 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
     if (tab === undefined) {
       return;
     }
-    const ids = collectWindowIds(tab.root);
+    const ids = tabWindowIds(tab);
     for (const windowId of ids) {
       const window = layout.windows[windowId];
       if (window?.terminalId !== undefined) {
@@ -901,7 +896,7 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
 
   focusWindow(projectId, windowId) {
     patchProject(set, get, projectId, (layout) => {
-      const tab = layout.tabs.find((item) => collectWindowIds(item.root).includes(windowId));
+      const tab = findTabOfWindow(layout, windowId);
       return {
         ...layout,
         focusedWindowId: windowId,
@@ -919,20 +914,33 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
     }));
   },
 
-  updateSplitSizes(projectId, tabId, splitKey, percents) {
-    const sizes = [percents[0] / 100, percents[1] / 100] as const;
+  gridOrientation: "landscape",
+
+  setGridOrientation(orientation) {
+    if (get().gridOrientation !== orientation) {
+      set({ gridOrientation: orientation });
+    }
+  },
+
+  setGridSizes(projectId, tabId, change) {
     const layout = get().getProjectLayout(projectId);
     const tab = layout.tabs.find((item) => item.id === tabId);
     if (tab === undefined) {
       return;
     }
-    const nextRoot = updateSplitSizesByKey(tab.root, splitKey, sizes);
-    if (nextRoot === tab.root) {
+    const nextSizes = change(tab.sizes);
+    if (JSON.stringify(nextSizes) === JSON.stringify(tab.sizes)) {
       return;
     }
     patchProject(set, get, projectId, (current) => ({
       ...current,
-      tabs: current.tabs.map((item) => (item.id === tabId ? { ...item, root: nextRoot } : item)),
+      tabs: current.tabs.map((item) => {
+        if (item.id !== tabId) {
+          return item;
+        }
+        const { sizes: _old, ...rest } = item;
+        return nextSizes === undefined ? rest : { ...rest, sizes: nextSizes };
+      }),
     }));
   },
 

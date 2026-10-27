@@ -1362,7 +1362,7 @@ describe("open_window", () => {
     };
     return {
       projectId: "proj-1" as never,
-      tabs: [{ id: "tab-1", title: "Tab", root: { type: "leaf", windowId: "A" } }],
+      tabs: [{ id: "tab-1", title: "Tab", slots: ["A", null, null, null, null, null] }],
       activeTabId: "tab-1",
       windows: { A: manager },
       maximizedWindowId: null,
@@ -1864,7 +1864,7 @@ describe("模型、思考强度与就地修复", () => {
         readLayouts: async () => ({
           "proj-1": {
             projectId: "proj-1" as never,
-            tabs: [{ id: "tab-1", title: "Tab", root: { type: "leaf", windowId: "A" } }],
+            tabs: [{ id: "tab-1", title: "Tab", slots: ["A", null, null, null, null, null] }],
             activeTabId: "tab-1",
             windows: { A: manager },
             maximizedWindowId: null,

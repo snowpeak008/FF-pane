@@ -72,7 +72,7 @@ function localRoute(): LaunchCliRoute {
 function layout(windowId: string, role: string): ProjectWorkbenchLayout {
   return {
     projectId: "proj-role" as never,
-    tabs: [{ id: "tab-1", title: "Tab", root: { type: "leaf", windowId } }],
+    tabs: [{ id: "tab-1", title: "Tab", slots: [windowId, null, null, null, null, null] }],
     activeTabId: "tab-1",
     windows: {
       [windowId]: {

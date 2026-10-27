@@ -618,6 +618,9 @@
       "stopHint": "Take it offline: it stops after finishing the current item",
       "started": "Sent. It goes online once idle",
       "stopped": "Told it to go offline"
+    },
+    "grid": {
+      "newWindowHere": "New window"
     }
   },
   "projects": {

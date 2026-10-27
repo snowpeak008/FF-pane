@@ -71,7 +71,7 @@ describe("shouldAttachConfigTool", () => {
     const registry = createWorkbenchAuthRegistry();
     const layout = {
       projectId: "proj-1" as never,
-      tabs: [{ id: "tab-1", title: "Tab", root: { type: "leaf" as const, windowId: "locked" } }],
+      tabs: [{ id: "tab-1", title: "Tab", slots: ["locked", null, null, null, null, null] }],
       activeTabId: "tab-1",
       maximizedWindowId: null,
       focusedWindowId: "locked",

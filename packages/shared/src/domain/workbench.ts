@@ -256,11 +256,30 @@ export interface PaneSplit {
 
 export type PaneNode = PaneLeaf | PaneSplit;
 
-/** 单个标签页：标题 + 一棵分屏树。 */
+/** 固定格子里拖过的比例（T11.2b）：按方向分别存，没调过的方向均分。 */
+export interface WorkbenchGridSizes {
+  readonly landscape?: {
+    readonly rows: readonly number[];
+    readonly cols: readonly (readonly number[])[];
+  };
+  readonly portrait?: {
+    readonly rows: readonly number[];
+    readonly cols: readonly (readonly number[])[];
+  };
+}
+
+/**
+ * 单个标签页（T11.2b 起是固定 6 格）：slots 是 6 个格子，每格一个窗口 id 或空。
+ * 横向 3 列 × 2 行、竖向 2 列 × 3 行，换方向时编号不变。
+ * 旧的分屏树（PaneNode，v4 及以前）只在读旧档时用一次。
+ */
 export interface WorkbenchTab {
   readonly id: string;
   readonly title: string;
-  readonly root: PaneNode;
+  readonly slots: readonly (string | null)[];
+  readonly sizes?: WorkbenchGridSizes;
+  /** 管理者开子窗口时新开的团队页：记下是哪个管理者的，之后它的子窗口先填这里的空格。 */
+  readonly teamOf?: string;
 }
 
 /** 单个项目的工作台布局（不含终端输出）。 */

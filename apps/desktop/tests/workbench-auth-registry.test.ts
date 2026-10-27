@@ -25,7 +25,7 @@ function layoutWith(windows: ProjectWorkbenchLayout["windows"]): ProjectWorkbenc
       {
         id: "tab-1",
         title: "Tab",
-        root: { type: "leaf", windowId: ids[0] ?? "x" },
+        slots: [ids[0] ?? "x", null, null, null, null, null],
       },
     ],
     activeTabId: "tab-1",

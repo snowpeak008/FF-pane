@@ -4,7 +4,6 @@
 
 import type { ProjectId, ProjectWorkbenchLayout } from "@ff-pane/shared";
 import { describe, expect, it } from "vitest";
-import { leafPane } from "../src/shared/workbench/pane-tree";
 import { planTerminalReconcile } from "../src/shared/workbench/reconcile-terminals";
 
 function layoutWithWindows(
@@ -26,7 +25,7 @@ function layoutWithWindows(
   const first = windows[0];
   return {
     projectId: projectId as ProjectId,
-    tabs: first === undefined ? [] : [{ id: "tab-1", title: "Tab 1", root: leafPane(first.id) }],
+    tabs: first === undefined ? [] : [{ id: "tab-1", title: "Tab 1", slots: [first.id, null, null, null, null, null] }],
     activeTabId: first === undefined ? null : "tab-1",
     windows: windowMap,
     maximizedWindowId: null,

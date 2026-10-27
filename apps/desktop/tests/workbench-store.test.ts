@@ -80,15 +80,15 @@ describe("workbench store", () => {
 
     const layout = useWorkbenchStore.getState().getProjectLayout(PROJECT);
     expect(layout.tabs).toHaveLength(1);
-    expect(layout.tabs[0]?.root.type).toBe("split");
+    // T11.2b：向右分屏落到同一行右边的空格。
+    const splitId = split.ok ? split.windowId : "";
+    expect(layout.tabs[0]?.slots).toEqual([created.windowId, splitId, null, null, null, null]);
 
+    // 关掉第 1 格，第 1 格变空，第 2 格的窗口不挪。
     await useWorkbenchStore.getState().closeWindow(PROJECT, created.windowId);
     expect(useWorkbenchStore.getState().countRunningWindows()).toBe(1);
     const after = useWorkbenchStore.getState().getProjectLayout(PROJECT);
-    expect(after.tabs[0]?.root).toEqual({
-      type: "leaf",
-      windowId: split.ok ? split.windowId : "",
-    });
+    expect(after.tabs[0]?.slots).toEqual([null, splitId, null, null, null, null]);
   });
 
   it("防抖 persist；flushWorkbenchLayouts 立刻落盘", async () => {

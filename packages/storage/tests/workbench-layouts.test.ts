@@ -2,7 +2,7 @@
  * 工作台布局持久化单测（T10.2）。
  */
 
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -30,7 +30,7 @@ function sampleLayout(projectId: string): ProjectWorkbenchLayout {
       {
         id: "tab-1",
         title: "Tab 1",
-        root: { type: "leaf", windowId: "win-1" },
+        slots: ["win-1", null, null, null, null, null],
       },
     ],
     activeTabId: "tab-1",
@@ -116,7 +116,7 @@ describe("workbench layout store", () => {
 
     await store.saveProject({
       projectId: "proj-a" as ProjectWorkbenchLayout["projectId"],
-      tabs: [{ id: "tab-1", title: "Tab 1", root: { type: "leaf", windowId: "win-2" } }],
+      tabs: [{ id: "tab-1", title: "Tab 1", slots: ["win-2", null, null, null, null, null] }],
       activeTabId: "tab-1",
       windows: {
         "win-2": {
@@ -260,5 +260,94 @@ describe("workbench layout store", () => {
     await store.saveProject(sampleLayout("proj-a"));
     await store.removeProject("proj-a" as ProjectWorkbenchLayout["projectId"]);
     expect(await store.readAll()).toEqual({});
+  });
+
+  it("读 v4 分屏树：按顺序排进 6 格，多出来的放进新页；旧团队页记成那个管理者的（T11.2b）", async () => {
+    tempRoot = await mkdtemp(join(tmpdir(), "ffpane-wb-layout-"));
+    const file = join(tempRoot, "workbench-layouts.json");
+    const win = (id: string, parentWindowId?: string) => ({
+      id,
+      projectId: "proj-a",
+      title: id,
+      kind: "shell",
+      cwd: "C:proj",
+      createdAt: 1,
+      ...(parentWindowId !== undefined ? { parentWindowId } : {}),
+    });
+    const leaf = (windowId: string) => ({ type: "leaf", windowId });
+    const split = (direction: string, a: unknown, b: unknown) => ({
+      type: "split",
+      direction,
+      sizes: [0.5, 0.5],
+      children: [a, b],
+    });
+    const ids = ["w1", "w2", "w3", "w4", "w5", "w6", "w7", "w8"];
+    let tree: unknown = leaf("w1");
+    for (const id of ids.slice(1)) {
+      tree = split("horizontal", tree, leaf(id));
+    }
+    writeFileSync(
+      file,
+      JSON.stringify({
+        version: 4,
+        layouts: {
+          "proj-a": {
+            tabs: [
+              { id: "tab-1", title: "Tab 1", root: tree },
+              {
+                id: "tab-team",
+                title: "团队：经理",
+                root: split("horizontal", leaf("c1"), leaf("c2")),
+              },
+            ],
+            activeTabId: "tab-1",
+            windows: Object.fromEntries(
+              [...ids.map((id) => win(id)), win("c1", "w1"), win("c2", "w1")].map((w) => [w.id, w]),
+            ),
+            maximizedWindowId: null,
+            focusedWindowId: "w1",
+          },
+        },
+      }),
+    );
+    const store = createWorkbenchLayoutStore(file);
+    const layout = (await store.readAll())["proj-a"];
+    expect(layout?.tabs.map((tab) => [tab.id, tab.title, tab.slots])).toEqual([
+      ["tab-1", "Tab 1", ["w1", "w2", "w3", "w4", "w5", "w6"]],
+      ["tab-1-2", "Tab 1 (2)", ["w7", "w8", null, null, null, null]],
+      ["tab-team", "团队：经理", ["c1", "c2", null, null, null, null]],
+    ]);
+    expect(layout?.tabs[2]?.teamOf).toBe("w1");
+    expect(layout?.tabs[0]?.teamOf).toBeUndefined();
+
+    // 存回去是 v5，格子、比例、团队页都在。
+    if (layout === undefined) {
+      throw new Error("layout missing");
+    }
+    await store.saveProject({
+      ...layout,
+      tabs: layout.tabs.map((tab, index) =>
+        index === 0
+          ? {
+              ...tab,
+              sizes: {
+                landscape: {
+                  rows: [0.7, 0.3],
+                  cols: [
+                    [0.5, 0.25, 0.25],
+                    [1, 1, 1],
+                  ],
+                },
+              },
+            }
+          : tab,
+      ),
+    });
+    const raw = JSON.parse(readFileSync(file, "utf8")) as { version: number };
+    expect(raw.version).toBe(5);
+    const again = (await store.readAll())["proj-a"];
+    expect(again?.tabs[0]?.sizes?.landscape?.rows).toEqual([0.7, 0.3]);
+    expect(again?.tabs[2]?.teamOf).toBe("w1");
+    expect(again?.tabs[1]?.slots).toEqual(["w7", "w8", null, null, null, null]);
   });
 });

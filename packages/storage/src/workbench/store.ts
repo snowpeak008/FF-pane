@@ -1,7 +1,11 @@
 /**
  * 工作台布局持久化（T10.2 / T10.5）：~/.aiworkbench/workbench-layouts.json。
- * 只存标签页 / 分屏树 / 窗口元数据（剥离 terminalId）；损坏时回退空布局。
+ * 只存标签页 / 格子 / 窗口元数据（剥离 terminalId）；损坏时回退空布局。
  * 令牌永不写入。
+ *
+ * v5（T11.2b）：标签页从分屏树改成固定 6 格（slots）。读 v4 及以前的旧档时，
+ * 按树里从左到右、从上到下的顺序排进 1–6 格，超过 6 个的放进新页，标题加「(2)」。
+ * 第一次保存时按 v5 写出，不另做备份。
  */
 
 import type {
@@ -9,6 +13,7 @@ import type {
   ProjectId,
   ProjectWorkbenchLayout,
   WorkbenchConversationRecord,
+  WorkbenchGridSizes,
   WorkbenchTab,
   WorkbenchWindow,
   WorkbenchWindowKind,
@@ -27,8 +32,14 @@ import {
 import { readJson, writeJsonAtomic } from "../fs/index.js";
 import { WorkbenchLayoutsFileInvalidError } from "./errors.js";
 
-/** 当前布局文件 schema 版本（T10.6：窗口 role）。 */
-export const WORKBENCH_LAYOUTS_FILE_VERSION = 4;
+/** 当前布局文件 schema 版本（T11.2b：标签页是固定 6 格）。 */
+export const WORKBENCH_LAYOUTS_FILE_VERSION = 5;
+
+/** T10.6 窗口 role 版：标签页还是分屏树，读入时转成格子。 */
+export const WORKBENCH_LAYOUTS_FILE_VERSION_V4 = 4;
+
+/** 每页格子数（和界面的 grid.ts 一致）。 */
+export const WORKBENCH_GRID_SLOTS = 6;
 
 /** 可读取的旧版（读入后按当前版本写出）。 */
 export const WORKBENCH_LAYOUTS_FILE_VERSION_LEGACY = 1;
@@ -194,21 +205,108 @@ function parseWindow(value: unknown, projectId: ProjectId): WorkbenchWindow | nu
   return window;
 }
 
-function parseTab(value: unknown): WorkbenchTab | null {
+/** 旧分屏树的窗口顺序：先左后右、先上后下。 */
+function paneLeafOrder(node: PaneNode): string[] {
+  if (node.type === "leaf") {
+    return [node.windowId];
+  }
+  return [...paneLeafOrder(node.children[0]), ...paneLeafOrder(node.children[1])];
+}
+
+function slotsOf(ids: readonly (string | null)[]): (string | null)[] {
+  return Array.from({ length: WORKBENCH_GRID_SLOTS }, (_, index) => ids[index] ?? null);
+}
+
+function parseFractions(value: unknown): number[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) {
+    return undefined;
+  }
+  const out: number[] = [];
+  for (const item of value) {
+    if (typeof item !== "number" || !Number.isFinite(item) || item < 0) {
+      return undefined;
+    }
+    out.push(item);
+  }
+  return out;
+}
+
+function parseGridSizes(value: unknown): WorkbenchGridSizes | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const raw = value as Record<string, unknown>;
+  const out: Record<string, { rows: number[]; cols: number[][] }> = {};
+  for (const key of ["landscape", "portrait"] as const) {
+    const side = raw[key];
+    if (typeof side !== "object" || side === null) {
+      continue;
+    }
+    const rows = parseFractions((side as Record<string, unknown>)["rows"]);
+    const colsRaw = (side as Record<string, unknown>)["cols"];
+    const cols = Array.isArray(colsRaw) ? colsRaw.map(parseFractions) : undefined;
+    if (rows === undefined || cols === undefined || cols.some((item) => item === undefined)) {
+      continue;
+    }
+    out[key] = { rows, cols: cols as number[][] };
+  }
+  return Object.keys(out).length > 0 ? (out as WorkbenchGridSizes) : undefined;
+}
+
+/** 一个标签页；旧档的分屏树可能拆成好几页（超过 6 个窗口时）。 */
+function parseTab(
+  value: unknown,
+  windows: Readonly<Record<string, WorkbenchWindow>>,
+): WorkbenchTab[] | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return null;
   }
   const raw = value as Record<string, unknown>;
-  if (typeof raw["id"] !== "string" || raw["id"].trim() === "") {
+  const id = raw["id"];
+  const title = raw["title"];
+  if (typeof id !== "string" || id.trim() === "" || typeof title !== "string") {
     return null;
   }
-  if (typeof raw["title"] !== "string") {
-    return null;
+  const teamOfRaw = raw["teamOf"];
+  if (Array.isArray(raw["slots"])) {
+    const slots = slotsOf(
+      (raw["slots"] as unknown[]).map((item) =>
+        typeof item === "string" && item.trim() !== "" ? item : null,
+      ),
+    );
+    const sizes = parseGridSizes(raw["sizes"]);
+    return [
+      {
+        id,
+        title,
+        slots,
+        ...(sizes !== undefined ? { sizes } : {}),
+        ...(typeof teamOfRaw === "string" && teamOfRaw.trim() !== "" ? { teamOf: teamOfRaw } : {}),
+      },
+    ];
   }
   if (!isPaneNode(raw["root"])) {
     return null;
   }
-  return { id: raw["id"], title: raw["title"], root: raw["root"] };
+  const order = paneLeafOrder(raw["root"]);
+  // 旧的「团队：管理者名」页：页里窗口都挂在同一个上级下，就记成这个管理者的团队页。
+  const parents = new Set(order.map((windowId) => windows[windowId]?.parentWindowId));
+  const [onlyParent] = [...parents];
+  const teamOf =
+    title.startsWith("团队：") && parents.size === 1 && typeof onlyParent === "string"
+      ? onlyParent
+      : undefined;
+  const tabs: WorkbenchTab[] = [];
+  for (let start = 0; start < Math.max(1, order.length); start += WORKBENCH_GRID_SLOTS) {
+    const part = Math.floor(start / WORKBENCH_GRID_SLOTS);
+    tabs.push({
+      id: part === 0 ? id : `${id}-${part + 1}`,
+      title: part === 0 ? title : `${title} (${part + 1})`,
+      slots: slotsOf(order.slice(start, start + WORKBENCH_GRID_SLOTS)),
+      ...(teamOf !== undefined ? { teamOf } : {}),
+    });
+  }
+  return tabs;
 }
 
 function parseLayout(projectId: string, value: unknown): ProjectWorkbenchLayout | null {
@@ -218,14 +316,6 @@ function parseLayout(projectId: string, value: unknown): ProjectWorkbenchLayout 
   const raw = value as Record<string, unknown>;
   if (!Array.isArray(raw["tabs"])) {
     return null;
-  }
-  const tabs: WorkbenchTab[] = [];
-  for (const tab of raw["tabs"]) {
-    const parsed = parseTab(tab);
-    if (parsed === null) {
-      return null;
-    }
-    tabs.push(parsed);
   }
   if (
     typeof raw["windows"] !== "object" ||
@@ -241,6 +331,14 @@ function parseLayout(projectId: string, value: unknown): ProjectWorkbenchLayout 
       return null;
     }
     windows[id] = parsed;
+  }
+  const tabs: WorkbenchTab[] = [];
+  for (const tab of raw["tabs"]) {
+    const parsed = parseTab(tab, windows);
+    if (parsed === null) {
+      return null;
+    }
+    tabs.push(...parsed);
   }
   const activeTabId =
     raw["activeTabId"] === null
@@ -302,6 +400,7 @@ async function loadFile(
   const file = raw as { readonly version?: unknown; readonly layouts?: unknown };
   if (
     file.version !== WORKBENCH_LAYOUTS_FILE_VERSION &&
+    file.version !== WORKBENCH_LAYOUTS_FILE_VERSION_V4 &&
     file.version !== WORKBENCH_LAYOUTS_FILE_VERSION_V3 &&
     file.version !== WORKBENCH_LAYOUTS_FILE_VERSION_V2 &&
     file.version !== WORKBENCH_LAYOUTS_FILE_VERSION_LEGACY
@@ -383,6 +482,7 @@ export function parseWorkbenchLayoutsFileStrict(
   const file = raw as { readonly version?: unknown; readonly layouts?: unknown };
   if (
     file.version !== WORKBENCH_LAYOUTS_FILE_VERSION &&
+    file.version !== WORKBENCH_LAYOUTS_FILE_VERSION_V4 &&
     file.version !== WORKBENCH_LAYOUTS_FILE_VERSION_V3 &&
     file.version !== WORKBENCH_LAYOUTS_FILE_VERSION_V2 &&
     file.version !== WORKBENCH_LAYOUTS_FILE_VERSION_LEGACY

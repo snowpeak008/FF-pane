@@ -8,7 +8,12 @@ import { type ReactElement, useCallback, useEffect, useMemo, useState } from "re
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { collectWindowIds } from "../../../../shared/workbench/pane-tree";
+import {
+  resetGridSizes,
+  tabWindowIds,
+  withColSizes,
+  withRowSizes,
+} from "../../../../shared/workbench/grid";
 import { useCommandHandler, useShortcutScope } from "../../command";
 import { EmptyState } from "../../components/states/EmptyState";
 import { LoadingState } from "../../components/states/LoadingState";
@@ -20,8 +25,8 @@ import { useInvokeQuery } from "../../ipc/useInvokeQuery";
 import { PageHeader } from "../../layout/PageHeader";
 import { useWorkbenchStore } from "../../stores/workbench";
 import { useWorkbenchCanvasStore } from "../../stores/workbench-canvas";
+import { GridLayout } from "./GridLayout";
 import { NewWindowDialog, type NewWindowDialogResult } from "./NewWindowDialog";
-import { SplitLayout } from "./SplitLayout";
 import { TabBar } from "./TabBar";
 import { WorkbenchCanvasPanel } from "./WorkbenchCanvasPanel";
 import { WorkbenchDecisions } from "./WorkbenchDecisions";
@@ -47,7 +52,8 @@ export function WorkbenchPage(): ReactElement {
   const focusWindow = useWorkbenchStore((s) => s.focusWindow);
   const toggleMaximize = useWorkbenchStore((s) => s.toggleMaximize);
   const applyWindowRole = useWorkbenchStore((s) => s.applyWindowRole);
-  const updateSplitSizes = useWorkbenchStore((s) => s.updateSplitSizes);
+  const setGridSizes = useWorkbenchStore((s) => s.setGridSizes);
+  const setGridOrientation = useWorkbenchStore((s) => s.setGridOrientation);
   const bindTerminalId = useWorkbenchStore((s) => s.bindTerminalId);
   const markCwdFallback = useWorkbenchStore((s) => s.markCwdFallback);
   const cwdFallbackWindowIds = useWorkbenchStore((s) => s.cwdFallbackWindowIds);
@@ -81,6 +87,7 @@ export function WorkbenchPage(): ReactElement {
   const [newWindowOpen, setNewWindowOpen] = useState(false);
   const [pendingCreate, setPendingCreate] = useState<
     | { readonly mode: "tab" }
+    | { readonly mode: "slot"; readonly slot: number }
     | {
         readonly mode: "split";
         readonly direction: "horizontal" | "vertical";
@@ -146,11 +153,12 @@ export function WorkbenchPage(): ReactElement {
       }
       const pending = pendingCreate;
       setPendingCreate(null);
-      if (pending === null || pending.mode === "tab") {
+      if (pending === null || pending.mode === "tab" || pending.mode === "slot") {
         createTabWithWindow({
           projectId: entry.id,
           projectRoot: entry.rootPath,
           kind: result.kind,
+          ...(pending?.mode === "slot" ? { slot: pending.slot } : { newPage: true }),
           ...(result.initialPrompt !== undefined ? { initialPrompt: result.initialPrompt } : {}),
           ...(result.permission !== undefined ? { permission: result.permission } : {}),
           ...(result.role !== undefined ? { role: result.role } : {}),
@@ -182,7 +190,7 @@ export function WorkbenchPage(): ReactElement {
         }
         const target =
           projectLayout.focusedWindowId ??
-          (activeTab !== null ? collectWindowIds(activeTab.root)[0] : undefined);
+          (activeTab !== null ? tabWindowIds(activeTab)[0] : undefined);
         if (target === undefined) {
           setPendingCreate({ mode: "tab" });
           setNewWindowOpen(true);
@@ -204,7 +212,7 @@ export function WorkbenchPage(): ReactElement {
       if (tab === undefined) {
         return;
       }
-      const ids = collectWindowIds(tab.root);
+      const ids = tabWindowIds(tab);
       const hasRunning = ids.some((id) => projectLayout.windows[id]?.terminalId !== undefined);
       if (hasRunning) {
         setConfirmCloseTabId(tabId);
@@ -334,8 +342,10 @@ export function WorkbenchPage(): ReactElement {
           />
         ) : (
           <div className="flex min-h-0 flex-1 flex-col p-1">
-            <SplitLayout
-              root={activeTab.root}
+            <GridLayout
+              tabId={activeTab.id}
+              slots={activeTab.slots}
+              sizes={activeTab.sizes}
               projectId={entry.id}
               projectRoot={entry.rootPath}
               windows={projectLayout.windows}
@@ -375,8 +385,28 @@ export function WorkbenchPage(): ReactElement {
                 bindTerminalId(entry.id, windowId, terminalId)
               }
               onCwdFallback={(windowId) => markCwdFallback(windowId)}
-              onSizesChange={(splitKey, percents) =>
-                updateSplitSizes(entry.id, activeTab.id, splitKey, percents)
+              onCreateInSlot={(slot) => {
+                void (async () => {
+                  if (!(await ensureCapacity())) {
+                    return;
+                  }
+                  setPendingCreate({ mode: "slot", slot });
+                  setNewWindowOpen(true);
+                })();
+              }}
+              onOrientationChange={setGridOrientation}
+              onRowSizes={(orientation, rows) =>
+                setGridSizes(entry.id, activeTab.id, (sizes) =>
+                  withRowSizes(sizes, orientation, rows),
+                )
+              }
+              onColSizes={(orientation, row, cols) =>
+                setGridSizes(entry.id, activeTab.id, (sizes) =>
+                  withColSizes(sizes, orientation, row, cols),
+                )
+              }
+              onResetSizes={(orientation) =>
+                setGridSizes(entry.id, activeTab.id, (sizes) => resetGridSizes(sizes, orientation))
               }
             />
           </div>

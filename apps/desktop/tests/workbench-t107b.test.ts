@@ -146,7 +146,7 @@ describe("closeDescendantWindow", () => {
     const layouts = new Map<string, ProjectWorkbenchLayout>();
     layouts.set("proj-1", {
       projectId: "proj-1" as never,
-      tabs: [{ id: "tab", title: "Tab", root: { type: "leaf", windowId: "A" } }],
+      tabs: [{ id: "tab", title: "Tab", slots: ["A", null, null, null, null, null] }],
       activeTabId: "tab",
       focusedWindowId: "A",
       maximizedWindowId: null,

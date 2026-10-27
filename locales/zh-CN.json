@@ -618,6 +618,9 @@
       "stopHint": "让它退出在线监管：处理完手头的事就停下",
       "started": "已发出上线提示，它空闲时就会进入在线监管",
       "stopped": "已通知它下线"
+    },
+    "grid": {
+      "newWindowHere": "新建窗口"
     }
   },
   "projects": {
