@@ -201,6 +201,7 @@ function harness(
     },
     openCanvas: async () => ({ ok: true as const, relativePath: ".ffpane/canvas/a.png" }),
     generateImage: async () => ({ ok: false as const, error: "测试里不生图。" }),
+    reviewCanvasImage: async () => ({ ok: true as const, path: ".ffpane/canvas/a.png" }),
     deleteCanvasFile: async () => ({ ok: true as const, status: "requested" as const }),
     exportCanvasImage: async () => ({ ok: true as const, targetPath: "art/a.png" }),
     searchProjectMemory: async () => [],
@@ -465,6 +466,48 @@ describe("工具授权", () => {
     await Promise.resolve();
     release();
     expect((await again).isError).toBe(false);
+  });
+
+  it("检查画板上的图：要写 pass 和理由，交给平台判断谁能查（T11.0c）", async () => {
+    const { deps } = harness(tempDir());
+    const seen: string[] = [];
+    const watched: WorkbenchToolDeps = {
+      ...deps,
+      reviewCanvasImage: async (caller, imagePath, pass, reason) => {
+        seen.push(`${caller.title}:${imagePath}:${pass}:${reason}`);
+        return pass
+          ? { ok: true, path: imagePath }
+          : { ok: false, error: "这张图是你自己放进画板的，不能自己检查。" };
+      },
+    };
+    const noPass = await call(watched, "B", "ffpane_canvas_review", {
+      imagePath: ".ffpane/canvas/a.png",
+      reason: "看过了",
+    });
+    expect(noPass.isError).toBe(true);
+    expect(noPass.text).toContain("pass");
+    const noReason = await call(watched, "B", "ffpane_canvas_review", {
+      imagePath: ".ffpane/canvas/a.png",
+      pass: true,
+    });
+    expect(noReason.isError).toBe(true);
+    const passed = await call(watched, "B", "ffpane_canvas_review", {
+      imagePath: ".ffpane/canvas/a.png",
+      pass: true,
+      reason: "构图对",
+    });
+    expect(passed.json).toMatchObject({ ok: true, path: ".ffpane/canvas/a.png" });
+    const refused = await call(watched, "B", "ffpane_canvas_review", {
+      imagePath: ".ffpane/canvas/a.png",
+      pass: false,
+      reason: "颜色不对",
+    });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toContain("不能自己检查");
+    expect(seen).toEqual([
+      "子:.ffpane/canvas/a.png:true:构图对",
+      "子:.ffpane/canvas/a.png:false:颜色不对",
+    ]);
   });
 
   it("删图要写原因；返回是申请还是进了回收站", async () => {

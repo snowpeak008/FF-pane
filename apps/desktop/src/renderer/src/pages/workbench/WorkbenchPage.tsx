@@ -54,9 +54,25 @@ export function WorkbenchPage(): ReactElement {
   const getProjectLayout = useWorkbenchStore((s) => s.getProjectLayout);
 
   const countRunningWindows = useWorkbenchStore((s) => s.countRunningWindows);
-  const canvasUnseen = useWorkbenchCanvasStore((s) =>
-    entry === null ? 0 : (s.unseen[entry.id] ?? 0),
+  const canvasPending = useWorkbenchCanvasStore((s) =>
+    entry === null ? 0 : (s.pending[entry.id] ?? 0),
   );
+  const entryId = entry?.id;
+  // 画板按钮一出来就取一次待检查数，之后跟着主进程推的变。
+  useEffect(() => {
+    if (entryId === undefined) {
+      return;
+    }
+    let cancelled = false;
+    void invokeQuery("workbench:get-canvas-pending", { projectId: entryId }).then((settled) => {
+      if (!cancelled && settled.status === "success") {
+        useWorkbenchCanvasStore.getState().setPending(entryId, settled.data.pending);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [entryId]);
 
   const { state: configState } = useInvokeQuery("config:get");
   const maxWindows = queryData(configState)?.maxWorkbenchWindows ?? 12;
@@ -290,8 +306,8 @@ export function WorkbenchPage(): ReactElement {
             data-testid="open-canvas"
             onClick={() => useWorkbenchCanvasStore.getState().openCanvas(null)}
           >
-            {canvasUnseen > 0
-              ? t("workbench.canvas.openWithNew", { count: canvasUnseen })
+            {canvasPending > 0
+              ? t("workbench.canvas.openWithPending", { count: canvasPending })
               : t("workbench.canvas.open")}
           </Button>
         }

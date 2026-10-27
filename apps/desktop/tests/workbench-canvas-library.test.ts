@@ -129,7 +129,7 @@ describe("AI 删图", () => {
     expect((await loadCanvasBoard(root)).notes?.[path]?.deleteRequest?.by).toBe("执行 1");
 
     await resolveCanvasDeleteRequest(root, path, false);
-    expect((await loadCanvasBoard(root)).notes?.[path]).toBeUndefined();
+    expect((await loadCanvasBoard(root)).notes?.[path]?.deleteRequest).toBeUndefined();
     expect(existsSync(canvasFile(root, "a.png"))).toBe(true);
 
     await requestCanvasDelete(root, path, "执行 1", "不合格");

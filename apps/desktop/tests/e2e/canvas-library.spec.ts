@@ -2,7 +2,15 @@
  * T11.0：画板是项目图库。界面上标「不要」、删进回收站、恢复、处理 AI 的删图申请、彻底删除。
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
@@ -202,7 +210,8 @@ test("画板图片走 ffpane-canvas://：缩略图、大图、带标记预览；
     expect(readdirSync(join(launched.dataRoot, "cache", "canvas-thumbs")).length).toBe(1);
 
     // 大图：原图尺寸。
-    await page.locator('button[title*="big.png"]').click();
+    // 单击选中，双击看大图（T11.0c 无限画布）。
+    await page.locator('button[title*="big.png"]').dblclick();
     const full = page.locator('img[src*="size=full"]');
     await expect.poll(() => full.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(600);
 
@@ -219,14 +228,52 @@ test("画板图片走 ffpane-canvas://：缩略图、大图、带标记预览；
       .poll(() => existsSync(join(canvasDir, "revisions", "big.png.marked.png")))
       .toBe(true);
 
-    // 关掉画板后 AI 往目录里存一张图：不弹画板，按钮上记一张新图。
+    // Esc 先关大图，再按一次关画板。
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("canvas-viewer")).toHaveCount(0);
+    await expect(page.getByRole("dialog")).toHaveCount(1);
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog")).toHaveCount(0);
+
+    // 无限画布上拖一行：位置存进 board.json；「回到自动排」清掉（T11.0c）。
+    await page.getByTestId("open-canvas").click();
+    const card = page.locator('button[title*="big.png"]');
+    const cardBox = await card.boundingBox();
+    if (cardBox === null) {
+      throw new Error("card has no box");
+    }
+    await page.mouse.move(cardBox.x + 40, cardBox.y + 40);
+    await page.mouse.down();
+    await page.mouse.move(cardBox.x + 240, cardBox.y + 140, { steps: 8 });
+    await page.mouse.up();
+    const readPlacements = () =>
+      (
+        JSON.parse(readFileSync(join(canvasDir, "board.json"), "utf8")) as {
+          placements?: Record<string, { x: number; y: number }>;
+        }
+      ).placements;
+    await expect.poll(() => readPlacements()?.["row-big"]?.x ?? null).not.toBeNull();
+    await card.click();
+    await page.getByRole("button", { name: "Back to auto layout" }).click();
+    await expect.poll(() => readPlacements()).toBeUndefined();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+
+    // 关掉画板后 AI 往目录里存一张图：不弹画板，按钮上记一张待检查（T11.0c）。
     writeFileSync(join(canvasDir, "shot.png"), makePng(40, 20));
-    await expect(page.getByTestId("open-canvas")).toHaveText("Open canvas (1 new)");
+    await expect(page.getByTestId("open-canvas")).toHaveText("Canvas · 1 to review");
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await page.getByTestId("open-canvas").click();
-    await expect(page.locator('button[title*="shot.png"]')).toBeVisible();
+    const shot = page.locator('button[title*="shot.png"]');
+    await expect(shot).toBeVisible();
+    await expect(shot.getByTestId("canvas-pending-dot")).toBeVisible();
+    // 打开画板不算看过；点「已看」才算。
+    await expect(page.getByTestId("canvas-next-pending")).toHaveText("Next to review (1)");
+    await shot.click();
+    await expect(page.getByTestId("canvas-review-state")).toHaveText("To review");
+    await page.getByTestId("canvas-mark-seen").click();
+    await expect(page.getByTestId("canvas-review-state")).toHaveText("Seen");
+    await expect(shot.getByTestId("canvas-pending-dot")).toHaveCount(0);
     await page.keyboard.press("Escape");
     await expect(page.getByTestId("open-canvas")).toHaveText("Open canvas");
   } finally {

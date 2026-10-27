@@ -2,7 +2,7 @@
  * 画板缩略图和 `ffpane-canvas://` 协议（T11.0d）。
  *
  * - 缩略图用 Electron 的 nativeImage.createThumbnailFromPath（系统缩略图，不在主线程上解码），
- *   长边 256，存 PNG（游戏素材常带透明，JPEG 会把透明处变黑）；
+ *   长边 256（画布上）和 1024（放大时，T11.0c），存 PNG（游戏素材常带透明，JPEG 会把透明处变黑）；
  * - 缓存放在 FF-pane 数据根的 `cache/canvas-thumbs/` 下，不写进用户项目；
  *   文件名带原图路径、大小、修改时间，原图变了自动重做；
  * - 一次最多做 4 张，其余排队；
@@ -15,8 +15,8 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { nativeImage, net } from "electron";
 import {
-  CANVAS_THUMB_EDGE,
   type CanvasImageSize,
+  canvasImageEdge,
   parseCanvasImageUrl,
 } from "../../shared/canvas-image-url";
 import { resolveCanvasImage, writeAtomic } from "./canvas-files";
@@ -54,20 +54,20 @@ export function canvasThumbCacheName(
   return `${createHash("sha1").update(key).digest("hex")}.png`;
 }
 
-async function makeThumb(source: string, target: string): Promise<string> {
+async function makeThumb(source: string, target: string, edge: number): Promise<string> {
   let image = await nativeImage
-    .createThumbnailFromPath(source, { width: CANVAS_THUMB_EDGE, height: CANVAS_THUMB_EDGE })
+    .createThumbnailFromPath(source, { width: edge, height: edge })
     .catch(() => nativeImage.createFromPath(source));
   if (image.isEmpty()) {
     return source;
   }
   const size = image.getSize();
   const longest = Math.max(size.width, size.height);
-  if (longest > CANVAS_THUMB_EDGE) {
+  if (longest > edge) {
     image =
       size.width >= size.height
-        ? image.resize({ width: CANVAS_THUMB_EDGE, quality: "good" })
-        : image.resize({ height: CANVAS_THUMB_EDGE, quality: "good" });
+        ? image.resize({ width: edge, quality: "good" })
+        : image.resize({ height: edge, quality: "good" });
   }
   await writeAtomic(target, image.toPNG());
   return target;
@@ -90,9 +90,10 @@ export async function canvasImageFile(
     return { ok: true, path: resolved.absolute };
   }
   const info = await stat(resolved.absolute);
+  const edge = canvasImageEdge(size);
   const target = join(
     cacheDir,
-    canvasThumbCacheName(projectRoot, resolved.relative, CANVAS_THUMB_EDGE, info.mtimeMs),
+    canvasThumbCacheName(projectRoot, resolved.relative, edge, info.mtimeMs),
   );
   const cached = await stat(target).then(
     (found) => found.isFile(),
@@ -103,7 +104,7 @@ export async function canvasImageFile(
   }
   let pending = inflight.get(target);
   if (pending === undefined) {
-    pending = limited(() => makeThumb(resolved.absolute, target)).finally(() => {
+    pending = limited(() => makeThumb(resolved.absolute, target, edge)).finally(() => {
       inflight.delete(target);
     });
     inflight.set(target, pending);

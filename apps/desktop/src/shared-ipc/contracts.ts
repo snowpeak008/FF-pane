@@ -534,7 +534,11 @@ export interface WorkbenchCanvasBoardView {
     readonly title: string;
     readonly rows: readonly {
       readonly id: string;
-      readonly versions: readonly { readonly path: string; readonly addedAt: string }[];
+      readonly versions: readonly {
+        readonly path: string;
+        readonly addedAt: string;
+        readonly by?: { readonly windowId: string; readonly title: string } | "dir";
+      }[];
       readonly hidden?: boolean;
     }[];
   }[];
@@ -567,9 +571,16 @@ export interface WorkbenchCanvasBoardView {
           readonly at: string;
         };
         readonly exportedTo?: readonly string[];
+        readonly review?: {
+          readonly state: "pending" | "ai-pass" | "ai-fail" | "seen";
+          readonly by?: string;
+          readonly reason?: string;
+          readonly at: string;
+        };
       }
     >
   >;
+  readonly placements?: Readonly<Record<string, { readonly x: number; readonly y: number }>>;
 }
 
 /** 画板回收站里的一张图（T11.0）。 */
@@ -601,7 +612,15 @@ export type WorkbenchCanvasEdit =
   | { readonly kind: "trash"; readonly path: string }
   | { readonly kind: "resolve-request"; readonly path: string; readonly approve: boolean }
   | { readonly kind: "restore"; readonly trashId: string }
-  | { readonly kind: "purge"; readonly trashId?: string };
+  | { readonly kind: "purge"; readonly trashId?: string }
+  /** Tony 点「已看」/打开大图看过（seen），或「我再看看」（pending）。T11.0c。 */
+  | { readonly kind: "review"; readonly path: string; readonly state: "seen" | "pending" }
+  /** 无限画布上拖了一行；placement 为 null 回到自动排。T11.0c。 */
+  | {
+      readonly kind: "place-row";
+      readonly rowId: string;
+      readonly placement: { readonly x: number; readonly y: number } | null;
+    };
 
 export interface WorkbenchBriefListItem {
   readonly name: string;
@@ -1693,6 +1712,11 @@ export interface IpcInvokeContracts {
     request: { readonly projectId: ProjectId };
     response: WorkbenchGetCanvasResponse;
   };
+  /** 画板待检查数（T11.0c）。画板按钮一出来就取一次，之后跟着 workbench:canvas-pending 变。 */
+  "workbench:get-canvas-pending": {
+    request: { readonly projectId: ProjectId };
+    response: { readonly pending: number };
+  };
   /** 改画板的一处（切页、标注、标「不要」、删进回收站、处理删图申请、恢复、彻底删除）。 */
   "workbench:canvas-edit": {
     request: { readonly projectId: ProjectId; readonly edit: WorkbenchCanvasEdit };
@@ -1943,9 +1967,10 @@ export interface IpcEventContracts {
   "workbench:team-paused": { payload: WorkbenchTeamPausedEvent };
   "workbench:inbox-notice": { payload: WorkbenchInboxNoticeEvent };
   "workbench:open-panel": { payload: WorkbenchOpenPanelEvent };
-  /** 画板有改动。unseen：画板关着时 AI 放进来的新图数（T11.0d，不再自动打开画板）。 */
-  "workbench:canvas-changed": {
-    payload: { readonly projectId: ProjectId; readonly unseen?: number };
+  "workbench:canvas-changed": { payload: { readonly projectId: ProjectId } };
+  /** 画板待检查数（T11.0c）：画板一改就重算推过来。 */
+  "workbench:canvas-pending": {
+    payload: { readonly projectId: ProjectId; readonly pending: number };
   };
   "workbench:window-closed": { payload: WorkbenchWindowClosedEvent };
   "workbench:decision-requested": { payload: WorkbenchDecision };
@@ -2014,6 +2039,7 @@ export const INVOKE_CHANNELS = [
   "workbench:open-ffpane",
   "workbench:panel-activity",
   "workbench:get-canvas",
+  "workbench:get-canvas-pending",
   "workbench:canvas-edit",
   "workbench:save-canvas-marked",
   "workbench:remove-canvas-image",
@@ -2102,6 +2128,7 @@ export const EVENT_CHANNELS = [
   "workbench:inbox-notice",
   "workbench:open-panel",
   "workbench:canvas-changed",
+  "workbench:canvas-pending",
   "workbench:window-closed",
   "workbench:decision-requested",
   "workbench:online-changed",

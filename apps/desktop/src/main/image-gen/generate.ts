@@ -30,7 +30,7 @@ import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { buildAgentEnv, resolveDirectCliTarget } from "@ff-pane/adapters";
 import { redactSecret } from "@ff-pane/core";
-import { imageGenModeOf } from "@ff-pane/shared";
+import { type CanvasPlacedBy, imageGenModeOf } from "@ff-pane/shared";
 import {
   describeCanvasRevision,
   lexicalCanvasPath,
@@ -75,6 +75,8 @@ export interface GenerateProjectImageInput {
   readonly sourceImagePath?: string;
   readonly rowId?: string;
   readonly asNewVersion?: boolean;
+  /** 出图的窗口（T11.0c：记在画板上，它不能检查自己的图）。 */
+  readonly placedBy?: CanvasPlacedBy;
 }
 
 export interface GenerateProjectImageDeps {
@@ -102,6 +104,7 @@ interface CleanInput {
   readonly sourceImagePath?: string;
   readonly rowId?: string;
   readonly asNewVersion: boolean;
+  readonly placedBy?: CanvasPlacedBy;
 }
 
 function failure(error: string, secret = ""): GenerateProjectImageResult {
@@ -338,7 +341,10 @@ async function placeNewImage(
   secret: string,
 ): Promise<GenerateProjectImageResult> {
   try {
-    const placed = await placeImageOnBoard(projectRoot, relativePath, versionOptions(input));
+    const placed = await placeImageOnBoard(projectRoot, relativePath, {
+      ...versionOptions(input),
+      ...(input.placedBy !== undefined ? { by: input.placedBy } : {}),
+    });
     if (!placed.ok) {
       return failure(placed.error, secret);
     }
@@ -664,6 +670,7 @@ export async function generateProjectImage(
     ...(sourceImagePath !== undefined && sourceImagePath !== "" ? { sourceImagePath } : {}),
     ...(input.rowId !== undefined ? { rowId: input.rowId } : {}),
     asNewVersion: input.asNewVersion === true,
+    ...(input.placedBy !== undefined ? { placedBy: input.placedBy } : {}),
   };
   const settings = await deps.stores.readConfig();
   const mode = imageGenModeOf(settings.imageGen);

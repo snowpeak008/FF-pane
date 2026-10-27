@@ -20,9 +20,13 @@ export interface CanvasAnnotation {
   readonly label?: string;
 }
 
+/** 谁把这一版放进画板的（T11.0c）。"dir"：AI 直接存进目录、由目录监听收进来的。 */
+export type CanvasPlacedBy = { readonly windowId: string; readonly title: string } | "dir";
+
 export interface CanvasVersion {
   readonly path: string;
   readonly addedAt: string;
+  readonly by?: CanvasPlacedBy;
 }
 
 export interface CanvasRow {
@@ -45,6 +49,20 @@ export interface CanvasDeleteRequest {
   readonly at: string;
 }
 
+/**
+ * 一张图的检查状态（T11.0c）。没有这一项的图是以前就有的，算已看。
+ * pending 待检查；ai-fail AI 检查不通过（仍要 Tony 看）；ai-pass AI 通过（算看过）；seen Tony 看过。
+ */
+export type CanvasReviewState = "pending" | "ai-pass" | "ai-fail" | "seen";
+
+export interface CanvasReview {
+  readonly state: CanvasReviewState;
+  /** 检查的窗口标题（AI 检查时）。 */
+  readonly by?: string;
+  readonly reason?: string;
+  readonly at: string;
+}
+
 /** 画板上一张图的附注（T11.0）。 */
 export interface CanvasImageNote {
   /** 用户标了「不要」：AI 删它会直接进回收站。 */
@@ -52,6 +70,13 @@ export interface CanvasImageNote {
   readonly deleteRequest?: CanvasDeleteRequest;
   /** 导出到项目里的哪些位置（项目内相对路径）。 */
   readonly exportedTo?: readonly string[];
+  readonly review?: CanvasReview;
+}
+
+/** 无限画布上被拖过的行的位置（画布像素，T11.0c）。没拖过的行自动排。 */
+export interface CanvasPlacement {
+  readonly x: number;
+  readonly y: number;
 }
 
 export interface CanvasBoard {
@@ -60,6 +85,7 @@ export interface CanvasBoard {
   readonly annotations: Readonly<Record<string, readonly CanvasAnnotation[]>>;
   readonly activePageId?: string;
   readonly notes?: Readonly<Record<string, CanvasImageNote>>;
+  readonly placements?: Readonly<Record<string, CanvasPlacement>>;
 }
 
 export function defaultCanvasBoard(): CanvasBoard {
@@ -193,6 +219,7 @@ export function setImageNote(
     ...(next.exportedTo !== undefined && next.exportedTo.length > 0
       ? { exportedTo: next.exportedTo }
       : {}),
+    ...(next.review !== undefined ? { review: next.review } : {}),
   };
   return withNotes(board, Object.keys(kept).length > 0 ? { ...others, [imagePath]: kept } : others);
 }
@@ -358,7 +385,8 @@ export function parseCanvasBoard(raw: unknown): CanvasBoard | undefined {
         const path = version["path"];
         const addedAt = version["addedAt"];
         if (typeof path === "string" && typeof addedAt === "string") {
-          versions.push({ path, addedAt });
+          const by = parsePlacedBy(version["by"]);
+          versions.push({ path, addedAt, ...(by !== undefined ? { by } : {}) });
         }
       }
       if (versions.length > 0) {
@@ -424,13 +452,84 @@ export function parseCanvasBoard(raw: unknown): CanvasBoard | undefined {
   const activePageId =
     typeof record["activePageId"] === "string" ? record["activePageId"] : pages[0]?.id;
   const notes = parseNotes(record["notes"]);
+  const placements = parsePlacements(record["placements"]);
   return {
     v: CANVAS_BOARD_VERSION,
     pages,
     annotations,
     ...(activePageId !== undefined ? { activePageId } : {}),
     ...(notes !== undefined ? { notes } : {}),
+    ...(placements !== undefined ? { placements } : {}),
   };
+}
+
+function parsePlacedBy(raw: unknown): CanvasPlacedBy | undefined {
+  if (raw === "dir") {
+    return "dir";
+  }
+  if (typeof raw !== "object" || raw === null) {
+    return undefined;
+  }
+  const item = raw as Record<string, unknown>;
+  return typeof item["windowId"] === "string" && typeof item["title"] === "string"
+    ? { windowId: item["windowId"], title: item["title"] }
+    : undefined;
+}
+
+function parseReview(raw: unknown): CanvasReview | undefined {
+  if (typeof raw !== "object" || raw === null) {
+    return undefined;
+  }
+  const item = raw as Record<string, unknown>;
+  const state = item["state"];
+  if (
+    (state !== "pending" && state !== "ai-pass" && state !== "ai-fail" && state !== "seen") ||
+    typeof item["at"] !== "string"
+  ) {
+    return undefined;
+  }
+  return {
+    state,
+    at: item["at"],
+    ...(typeof item["by"] === "string" ? { by: item["by"] } : {}),
+    ...(typeof item["reason"] === "string" ? { reason: item["reason"] } : {}),
+  };
+}
+
+function parsePlacements(raw: unknown): Record<string, CanvasPlacement> | undefined {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return undefined;
+  }
+  const out: Record<string, CanvasPlacement> = {};
+  for (const [rowId, value] of Object.entries(raw)) {
+    if (typeof value !== "object" || value === null) {
+      continue;
+    }
+    const item = value as Record<string, unknown>;
+    const x = item["x"];
+    const y = item["y"];
+    if (
+      typeof x === "number" &&
+      typeof y === "number" &&
+      Number.isFinite(x) &&
+      Number.isFinite(y)
+    ) {
+      out[rowId] = { x, y };
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** 记下或清掉一行在无限画布上的位置。 */
+export function setRowPlacement(
+  board: CanvasBoard,
+  rowId: string,
+  placement: CanvasPlacement | undefined,
+): CanvasBoard {
+  const { [rowId]: _old, ...others } = board.placements ?? {};
+  const next = placement === undefined ? others : { ...others, [rowId]: placement };
+  const { placements: _drop, ...rest } = board;
+  return Object.keys(next).length > 0 ? { ...rest, placements: next } : rest;
 }
 
 function parseNotes(raw: unknown): Record<string, CanvasImageNote> | undefined {
@@ -458,6 +557,10 @@ function parseNotes(raw: unknown): Record<string, CanvasImageNote> | undefined {
         : {}),
       ...(exportedTo.length > 0 ? { exportedTo } : {}),
     };
+    const review = parseReview(item["review"]);
+    if (review !== undefined) {
+      Object.assign(note, { review });
+    }
     if (Object.keys(note).length > 0) {
       notes[path] = note;
     }

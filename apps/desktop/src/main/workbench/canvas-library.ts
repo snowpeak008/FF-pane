@@ -21,7 +21,16 @@ import {
   removePathFromBoard,
   setAnnotationsForPath,
   setImageNote,
+  setRowPlacement,
+  type WorkbenchRole,
 } from "@ff-pane/shared";
+import {
+  aiReviewed,
+  checkAiReview,
+  placedByOf,
+  reopenReview,
+  seenByTony,
+} from "../../shared/workbench/canvas-review";
 import {
   CANVAS_SUBDIR,
   canvasDirectory,
@@ -401,5 +410,89 @@ export async function exportCanvasImage(
     }));
     await writeCanvasBoardFile(projectRoot, next);
     return { ok: true as const, targetPath: target.relative };
+  });
+}
+
+/** Tony 在画板上点「已看」（或打开大图看过）、「我再看看」（T11.0c）。 */
+export async function setCanvasReview(
+  projectRoot: string,
+  imagePath: string,
+  state: "seen" | "pending",
+): Promise<Result<{ readonly board: CanvasBoard }>> {
+  const resolved = await resolveCanvasImage(projectRoot, imagePath);
+  if (!resolved.ok) {
+    return resolved;
+  }
+  return withCanvasLock(projectRoot, async () => {
+    const board = await readCanvasBoardFile(projectRoot);
+    const at = new Date().toISOString();
+    const next = setImageNote(board, resolved.relative, (note) => ({
+      ...note,
+      review: state === "seen" ? seenByTony(at) : reopenReview(at),
+    }));
+    await writeCanvasBoardFile(projectRoot, next);
+    return { ok: true as const, board: next };
+  });
+}
+
+/**
+ * AI 窗口检查一张图（ffpane_canvas_review）。谁能查、能查哪张由 checkAiReview 决定，
+ * 读和改在同一把锁里，两个检查窗口同时查同一张也只有一个算数。
+ */
+export async function aiReviewCanvasImage(
+  projectRoot: string,
+  imagePath: string,
+  caller: { readonly id: string; readonly title: string; readonly role: WorkbenchRole },
+  pass: boolean,
+  reason: string,
+): Promise<Result<{ readonly path: string }>> {
+  const resolved = await resolveCanvasImage(projectRoot, imagePath);
+  if (!resolved.ok) {
+    return resolved;
+  }
+  return withCanvasLock(projectRoot, async () => {
+    const board = await readCanvasBoardFile(projectRoot);
+    const check = checkAiReview(
+      caller,
+      placedByOf(board, resolved.relative),
+      board.notes?.[resolved.relative],
+    );
+    if (!check.ok) {
+      return check;
+    }
+    const by = stripControls(caller.title).slice(0, 80);
+    const next = setImageNote(board, resolved.relative, (note) => ({
+      ...note,
+      review: aiReviewed(pass, by, stripControls(reason).slice(0, 400), new Date().toISOString()),
+    }));
+    await writeCanvasBoardFile(projectRoot, next);
+    return { ok: true as const, path: resolved.relative };
+  });
+}
+
+/** 无限画布上拖了一行（T11.0c）。placement 为空就回到自动排。 */
+export async function placeCanvasRow(
+  projectRoot: string,
+  rowId: string,
+  placement: { readonly x: number; readonly y: number } | undefined,
+): Promise<Result<{ readonly board: CanvasBoard }>> {
+  if (placement !== undefined && (!Number.isFinite(placement.x) || !Number.isFinite(placement.y))) {
+    return { ok: false, error: "位置不对。" };
+  }
+  return withCanvasLock(projectRoot, async () => {
+    const board = await readCanvasBoardFile(projectRoot);
+    const exists = board.pages.some((page) => page.rows.some((row) => row.id === rowId));
+    if (!exists) {
+      return { ok: false as const, error: "画板上没有这一行。" };
+    }
+    const next = setRowPlacement(
+      board,
+      rowId,
+      placement === undefined
+        ? undefined
+        : { x: Math.round(placement.x), y: Math.round(placement.y) },
+    );
+    await writeCanvasBoardFile(projectRoot, next);
+    return { ok: true as const, board: next };
   });
 }

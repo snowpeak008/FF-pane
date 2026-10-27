@@ -128,6 +128,7 @@ function harness(root: string): {
     openPanel: () => undefined,
     openCanvas: async () => ({ ok: true as const, relativePath: ".ffpane/canvas/a.png" }),
     generateImage: async () => ({ ok: false as const, error: "测试里不生图。" }),
+    reviewCanvasImage: async () => ({ ok: true as const, path: ".ffpane/canvas/a.png" }),
     deleteCanvasFile: async () => ({ ok: true as const, status: "requested" as const }),
     exportCanvasImage: async () => ({ ok: true as const, targetPath: "art/a.png" }),
     searchProjectMemory: async () => [],

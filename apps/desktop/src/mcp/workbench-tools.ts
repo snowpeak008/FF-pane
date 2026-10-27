@@ -26,6 +26,7 @@ export const WORKBENCH_MCP_TOOL_NAMES = [
   "ffpane_generate_image",
   "ffpane_delete_canvas_file",
   "ffpane_export_canvas_image",
+  "ffpane_canvas_review",
   "ffpane_memory_search",
   "ffpane_memory_add",
   "ffpane_set_model_effort",
@@ -62,6 +63,7 @@ export const WORKBENCH_READ_ONLY_TOOL_NAMES: readonly WorkbenchMcpToolName[] = [
   "ffpane_read_output",
   "ffpane_open_panel",
   "ffpane_open_canvas",
+  "ffpane_canvas_review",
   "ffpane_memory_search",
   "ffpane_lock",
   "ffpane_nudge",
@@ -421,6 +423,27 @@ const TOOL_DEFINITIONS: readonly McpToolDefinition[] = [
         },
       },
       required: ["prompt"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "ffpane_canvas_review",
+    description:
+      "检查画板上一张待检查的图，记下通过或不通过和理由。只有检查、监管者、管理者能用；放这张图进画板的窗口不能检查自己的图；只能检查还没人查过的图。通过的不再算用户的待检查；不通过的理由会显示在画板上，仍等用户看。先打开图看清楚（读图片文件），再按要求判断，理由写看到了什么。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        imagePath: {
+          type: "string",
+          description: "画板上的图，路径必须在 .ffpane/canvas/ 内。",
+        },
+        pass: { type: "boolean", description: "true 通过，false 不通过。" },
+        reason: {
+          type: "string",
+          description: "看到了什么、为什么这样判（用户会在画板上看到）。",
+        },
+      },
+      required: ["imagePath", "pass", "reason"],
       additionalProperties: false,
     },
   },

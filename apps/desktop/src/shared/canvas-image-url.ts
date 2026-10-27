@@ -5,10 +5,16 @@
 
 export const CANVAS_IMAGE_SCHEME = "ffpane-canvas";
 
-/** thumb：长边不超过 CANVAS_THUMB_EDGE 的缩略图；full：原图。 */
-export type CanvasImageSize = "thumb" | "full";
+/** thumb：长边 256 的缩略图；large：长边 1024（无限画布放大时用，T11.0c）；full：原图。 */
+export type CanvasImageSize = "thumb" | "large" | "full";
 
 export const CANVAS_THUMB_EDGE = 256;
+export const CANVAS_LARGE_EDGE = 1024;
+
+/** 每档缩略图的长边。 */
+export function canvasImageEdge(size: Exclude<CanvasImageSize, "full">): number {
+  return size === "large" ? CANVAS_LARGE_EDGE : CANVAS_THUMB_EDGE;
+}
 
 export interface CanvasImageRequest {
   readonly projectId: string;
@@ -43,7 +49,11 @@ export function parseCanvasImageUrl(url: string): CanvasImageRequest | undefined
   const projectId = parsed.searchParams.get("project") ?? "";
   const relativePath = parsed.searchParams.get("path") ?? "";
   const size = parsed.searchParams.get("size");
-  if (projectId === "" || relativePath === "" || (size !== "thumb" && size !== "full")) {
+  if (
+    projectId === "" ||
+    relativePath === "" ||
+    (size !== "thumb" && size !== "large" && size !== "full")
+  ) {
     return undefined;
   }
   return { projectId, relativePath, size };

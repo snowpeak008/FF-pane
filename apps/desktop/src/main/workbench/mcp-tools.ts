@@ -256,6 +256,7 @@ export interface WorkbenchToolDeps {
   readonly openCanvas: (input: {
     readonly projectId: string;
     readonly projectRoot: string;
+    readonly openerId: string;
     readonly openerTitle: string;
     readonly imagePath: string;
     readonly rowId?: string;
@@ -271,6 +272,7 @@ export interface WorkbenchToolDeps {
   readonly generateImage: (input: {
     readonly projectId: string;
     readonly projectRoot: string;
+    readonly openerId: string;
     readonly openerTitle: string;
     readonly prompt: string;
     readonly sourceImagePath?: string;
@@ -279,6 +281,15 @@ export interface WorkbenchToolDeps {
   }) => Promise<
     | { readonly ok: true; readonly relativePath: string }
     | { readonly ok: false; readonly error: string }
+  >;
+  /** AI 检查画板上的一张图（T11.0c）。谁能查由 checkAiReview 定。 */
+  readonly reviewCanvasImage: (
+    caller: ToolWindowView,
+    imagePath: string,
+    pass: boolean,
+    reason: string,
+  ) => Promise<
+    { readonly ok: true; readonly path: string } | { readonly ok: false; readonly error: string }
   >;
   /** AI 删图：用户标了「不要」就进回收站，否则只挂申请等用户确认。 */
   readonly deleteCanvasFile: (
@@ -504,6 +515,8 @@ export async function executeWorkbenchTool(
       return generateImage(caller, args, deps);
     case "ffpane_delete_canvas_file":
       return deleteCanvasFileTool(caller, args, deps);
+    case "ffpane_canvas_review":
+      return reviewCanvasTool(caller, args, deps);
     case "ffpane_export_canvas_image":
       return exportCanvasImageTool(caller, args, deps);
     case "ffpane_memory_search":
@@ -1526,6 +1539,7 @@ async function openCanvas(
   const result = await deps.openCanvas({
     projectId: caller.projectId,
     projectRoot: caller.projectRoot,
+    openerId: caller.id,
     openerTitle: caller.title,
     imagePath: imagePath.trim(),
     ...(typeof rowId === "string" && rowId.trim() !== "" ? { rowId: rowId.trim() } : {}),
@@ -1580,6 +1594,7 @@ async function generateImageNow(
     result = await deps.generateImage({
       projectId: caller.projectId,
       projectRoot: caller.projectRoot,
+      openerId: caller.id,
       openerTitle: caller.title,
       prompt: prompt.trim(),
       ...(typeof sourceImagePath === "string" && sourceImagePath.trim() !== ""
@@ -1595,6 +1610,36 @@ async function generateImageNow(
     return fail(result.error);
   }
   return ok({ ok: true, path: result.relativePath });
+}
+
+async function reviewCanvasTool(
+  caller: ToolWindowView,
+  args: Readonly<Record<string, unknown>>,
+  deps: WorkbenchToolDeps,
+): Promise<ToolTextResult> {
+  const imagePath = args["imagePath"];
+  if (typeof imagePath !== "string" || imagePath.trim() === "") {
+    return fail("ffpane_canvas_review 需要 imagePath（画板上的图，.ffpane/canvas/ 下）。");
+  }
+  const pass = args["pass"];
+  if (typeof pass !== "boolean") {
+    return fail("ffpane_canvas_review 需要 pass（true 通过，false 不通过）。");
+  }
+  const reason = args["reason"];
+  if (typeof reason !== "string" || reason.trim() === "") {
+    return fail("ffpane_canvas_review 需要 reason（看了什么、为什么这样判）。");
+  }
+  const reviewed = await deps.reviewCanvasImage(caller, imagePath.trim(), pass, reason);
+  if (!reviewed.ok) {
+    return fail(reviewed.error);
+  }
+  return ok({
+    ok: true,
+    path: reviewed.path,
+    message: pass
+      ? "已记为 AI 检查通过，这张图不再算待检查。"
+      : "已记为 AI 检查不通过，理由会显示在画板上，等用户看。",
+  });
 }
 
 async function deleteCanvasFileTool(

@@ -1,16 +1,17 @@
 /**
- * 项目画板：缩略图条、整图查看。拖动空白移动画面，点一下打标签。
- * 图片走 `ffpane-canvas://`（T11.0d）：缩略图懒加载、主进程缓存，原图只在大图里取，不再转 base64。
+ * 项目画板（T11.0c 起是无限画布）：所有图摆在一张画布上，按天分块；新图待检查，Tony 或 AI 检查。
  * 画板是项目图库（T11.0）：删图进回收站；可以标「不要」；AI 的删图申请在这里同意或保留；
  * 彻底删除、清空回收站只有这里能做。
+ * 图片走 `ffpane-canvas://`（T11.0d）：缩略图懒加载、主进程缓存，原图只在大图里取。
  */
 
-import type { CanvasAnnotation, CanvasBoard, CanvasImageNote, ProjectId } from "@ff-pane/shared";
-import { type ReactElement, useCallback, useEffect, useRef, useState } from "react";
+import type { CanvasBoard, ProjectId } from "@ff-pane/shared";
+import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { projectImageTag } from "../../../../shared/canvas-image-tag";
-import { canvasImageUrl } from "../../../../shared/canvas-image-url";
+import { needsTonyReview } from "../../../../shared/workbench/canvas-review";
+import { layoutWorld, nextInOrder } from "../../../../shared/workbench/canvas-world";
 import type {
   WorkbenchCanvasBoardView,
   WorkbenchCanvasEdit,
@@ -19,24 +20,12 @@ import type {
 } from "../../../../shared-ipc/contracts";
 import { Button } from "../../components/ui/Button";
 import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/Tabs";
 import { invokeQuery } from "../../ipc/query";
 import { useSubscription } from "../../ipc/useSubscription";
+import { cn } from "../../lib/cn";
 import { useWorkbenchCanvasStore } from "../../stores/workbench-canvas";
-import { renderCanvasMarkedPng } from "./canvas-marked-preview";
-import {
-  clampImagePoint,
-  draggedImagePoint,
-  fitImageView,
-  imagePointFromScreen,
-  isInsideImage,
-  screenPointFromImage,
-  type ViewTransform,
-  wheelScaleFactor,
-  zoomAtPoint,
-} from "./canvas-view";
-
-const ANNOTATION_COLORS = ["#ef4444", "#22c55e", "#3b82f6", "#eab308", "#a855f7"] as const;
+import { CanvasViewer } from "./CanvasViewer";
+import { CanvasWorld } from "./CanvasWorld";
 
 function boardFromView(view: WorkbenchCanvasBoardView): CanvasBoard {
   return view;
@@ -55,643 +44,6 @@ function versionsByPath(board: CanvasBoard): ReadonlyMap<string, string> {
   return out;
 }
 
-function CanvasImage({
-  projectId,
-  path,
-  version,
-  selected,
-  note,
-  onSelect,
-}: {
-  readonly projectId: ProjectId;
-  readonly path: string;
-  readonly version?: string;
-  readonly selected: boolean;
-  readonly note?: CanvasImageNote;
-  readonly onSelect: () => void;
-}): ReactElement {
-  const { t } = useTranslation();
-  const [failed, setFailed] = useState(false);
-  const src = canvasImageUrl(projectId, path, "thumb", version);
-  const tag = projectImageTag(path);
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      title={tag.label}
-      className={`flex h-28 w-36 shrink-0 flex-col overflow-hidden rounded-md border-2 bg-bg text-left shadow-sm ${
-        selected ? "border-primary ring-2 ring-primary/40" : "border-neutral-800"
-      }`}
-    >
-      <span className="relative flex min-h-0 flex-1 items-center justify-center bg-muted/40 p-1">
-        {note?.deleteRequest !== undefined || note?.rejected === true ? (
-          <span
-            className="absolute left-1 top-1 rounded-sm bg-warning-surface px-1 text-[10px] text-warning-text"
-            data-testid="canvas-image-flag"
-          >
-            {note.deleteRequest !== undefined
-              ? t("workbench.canvas.flagRequest")
-              : t("workbench.canvas.flagRejected")}
-          </span>
-        ) : null}
-        {failed ? (
-          <span className="text-xs text-fg-muted">…</span>
-        ) : (
-          <img
-            src={src}
-            alt=""
-            loading="lazy"
-            decoding="async"
-            className="max-h-full max-w-full object-contain"
-            draggable={false}
-            onError={() => setFailed(true)}
-          />
-        )}
-      </span>
-      <span className="border-t-2 border-neutral-800 bg-neutral-900 px-1.5 py-1 text-white">
-        <span className="block truncate text-[10px] leading-tight">
-          {t("workbench.canvas.projectTag")}
-        </span>
-        <span className="block truncate text-[11px] font-medium leading-tight">{tag.fileName}</span>
-        <span className="block truncate text-[10px] leading-tight text-white/70">{tag.path}</span>
-      </span>
-    </button>
-  );
-}
-
-function Viewer({
-  projectId,
-  path,
-  version,
-  annotations,
-  onAnnotationsCommit,
-}: {
-  readonly projectId: ProjectId;
-  readonly path: string;
-  readonly version?: string;
-  readonly annotations: readonly CanvasAnnotation[];
-  readonly onAnnotationsCommit: (
-    next: readonly CanvasAnnotation[],
-    preview: Promise<string | null>,
-  ) => void;
-}): ReactElement {
-  const { t } = useTranslation();
-  const src = canvasImageUrl(projectId, path, "full", version);
-  const paintedPath = useRef<string | null>(null);
-  const [imageSize, setImageSize] = useState({ w: 0, h: 0 });
-  const imageSizeRef = useRef({ w: 0, h: 0 });
-  const [view, setView] = useState<ViewTransform>({ scale: 1, x: 0, y: 0 });
-  const viewRef = useRef(view);
-  viewRef.current = view;
-  const userMoved = useRef(false);
-  const suppressPlaceRef = useRef(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [grabbing, setGrabbing] = useState(false);
-  const [draft, setDraft] = useState<{ id: string; x: number; y: number } | null>(null);
-  const draftRef = useRef(draft);
-  draftRef.current = draft;
-  const gestureRef = useRef<
-    | {
-        readonly kind: "canvas";
-        readonly clientX: number;
-        readonly clientY: number;
-        readonly originX: number;
-        readonly originY: number;
-        readonly button: number;
-        moved: boolean;
-      }
-    | {
-        readonly kind: "move";
-        readonly id: string;
-        readonly clientX: number;
-        readonly clientY: number;
-        readonly originX: number;
-        readonly originY: number;
-        readonly scale: number;
-        moved: boolean;
-      }
-    | null
-  >(null);
-  const [color, setColor] = useState<string>(ANNOTATION_COLORS[0]);
-  const [editing, setEditing] = useState<{ id: string; value: string } | null>(null);
-  const skipBlurRef = useRef(false);
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const editRef = useRef<HTMLInputElement | null>(null);
-
-  const fitNow = useCallback((): void => {
-    const el = containerRef.current;
-    const size = imageSizeRef.current;
-    if (el === null) {
-      return;
-    }
-    const next = fitImageView(el.clientWidth, el.clientHeight, size.w, size.h);
-    if (next !== undefined) {
-      setView(next);
-    }
-  }, []);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: 换了一张图就把视口、草稿、手势都清掉
-  useEffect(() => {
-    userMoved.current = false;
-    setView({ scale: 1, x: 0, y: 0 });
-    imageSizeRef.current = { w: 0, h: 0 };
-    setImageSize({ w: 0, h: 0 });
-    setDraft(null);
-    draftRef.current = null;
-    gestureRef.current = null;
-  }, [path]);
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (el === null) {
-      return;
-    }
-    const observer = new ResizeObserver(() => {
-      if (!userMoved.current) {
-        fitNow();
-      }
-    });
-    observer.observe(el);
-    return () => {
-      observer.disconnect();
-    };
-  }, [fitNow]);
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (el === null) {
-      return;
-    }
-    const onWheel = (event: WheelEvent): void => {
-      event.preventDefault();
-      const rect = el.getBoundingClientRect();
-      userMoved.current = true;
-      setView((current) =>
-        zoomAtPoint(
-          current,
-          event.clientX - rect.left,
-          event.clientY - rect.top,
-          current.scale * wheelScaleFactor(event.deltaY),
-        ),
-      );
-    };
-    el.addEventListener("wheel", onWheel, { passive: false });
-    return () => {
-      el.removeEventListener("wheel", onWheel);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (editing === null) {
-      return;
-    }
-    editRef.current?.focus();
-  }, [editing]);
-
-  const publish = useCallback(
-    (next: readonly CanvasAnnotation[]): void => {
-      const preview =
-        next.length === 0 ? Promise.resolve(null) : renderCanvasMarkedPng(src, next, path);
-      onAnnotationsCommit(next, preview);
-    },
-    [onAnnotationsCommit, path, src],
-  );
-
-  useEffect(() => {
-    if (annotations.length === 0 || paintedPath.current === path) {
-      return;
-    }
-    paintedPath.current = path;
-    publish(annotations);
-  }, [annotations, path, publish]);
-
-  const commitEditing = (): void => {
-    if (editing === null || skipBlurRef.current) {
-      return;
-    }
-    const value = editing.value.trim();
-    publish(
-      value === ""
-        ? annotations.filter((item) => item.id !== editing.id)
-        : annotations.map((item) => (item.id === editing.id ? { ...item, text: value } : item)),
-    );
-    setEditing(null);
-  };
-
-  const applyColor = (next: string): void => {
-    setColor(next);
-    if (selectedId === null) {
-      return;
-    }
-    publish(annotations.map((item) => (item.id === selectedId ? { ...item, color: next } : item)));
-  };
-
-  const deleteBubble = useCallback(
-    (id: string): void => {
-      skipBlurRef.current = true;
-      publish(annotations.filter((item) => item.id !== id));
-      setSelectedId((current) => (current === id ? null : current));
-      setEditing((current) => (current?.id === id ? null : current));
-    },
-    [annotations, publish],
-  );
-
-  const deleteSelected = useCallback((): void => {
-    if (selectedId === null) {
-      return;
-    }
-    deleteBubble(selectedId);
-  }, [deleteBubble, selectedId]);
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent): void => {
-      if (editing !== null || selectedId === null) {
-        return;
-      }
-      const target = event.target;
-      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
-        return;
-      }
-      if (event.key !== "Delete" && event.key !== "Backspace") {
-        return;
-      }
-      event.preventDefault();
-      deleteSelected();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [deleteSelected, editing, selectedId]);
-
-  const beginEdit = (id: string, value: string): void => {
-    skipBlurRef.current = true;
-    setEditing({ id, value });
-    window.setTimeout(() => {
-      skipBlurRef.current = false;
-      editRef.current?.focus();
-    }, 0);
-  };
-
-  const shownAnnotations = annotations.map((item) =>
-    draft !== null && draft.id === item.id ? { ...item, x: draft.x, y: draft.y } : item,
-  );
-
-  const placeBubble = (x: number, y: number): void => {
-    const point = clampImagePoint(x, y, imageSize.w, imageSize.h);
-    const item: CanvasAnnotation = {
-      id: crypto.randomUUID(),
-      kind: "label",
-      x: point.x,
-      y: point.y,
-      w: 0,
-      h: 0,
-      color,
-      label: String(annotations.filter((entry) => entry.kind === "label").length + 1),
-    };
-    publish([...annotations, item]);
-    setSelectedId(item.id);
-    beginEdit(item.id, "");
-  };
-
-  const localPoint = (clientX: number, clientY: number): { x: number; y: number } | null => {
-    const el = containerRef.current;
-    if (el === null) {
-      return null;
-    }
-    const rect = el.getBoundingClientRect();
-    return { x: clientX - rect.left, y: clientY - rect.top };
-  };
-
-  const finishGesture = (clientX: number, clientY: number, editText = false): void => {
-    const gesture = gestureRef.current;
-    gestureRef.current = null;
-    setGrabbing(false);
-    if (gesture === null) {
-      return;
-    }
-    if (gesture.kind === "canvas") {
-      const place = !gesture.moved && gesture.button === 0 && !suppressPlaceRef.current;
-      suppressPlaceRef.current = false;
-      if (!place) {
-        return;
-      }
-      const local = localPoint(clientX, clientY);
-      if (local === null) {
-        return;
-      }
-      const point = imagePointFromScreen(viewRef.current, local.x, local.y);
-      const size = imageSizeRef.current;
-      if (!isInsideImage(point.x, point.y, size.w, size.h)) {
-        setSelectedId(null);
-        return;
-      }
-      placeBubble(point.x, point.y);
-      return;
-    }
-    if (gesture.moved) {
-      const point = draggedImagePoint(
-        gesture.originX,
-        gesture.originY,
-        gesture.clientX,
-        gesture.clientY,
-        clientX,
-        clientY,
-        gesture.scale,
-        imageSize.w,
-        imageSize.h,
-      );
-      const next = { id: gesture.id, x: point.x, y: point.y };
-      draftRef.current = next;
-      setDraft(next);
-      publish(
-        annotations.map((item) =>
-          item.id === gesture.id ? { ...item, x: point.x, y: point.y } : item,
-        ),
-      );
-      return;
-    }
-    draftRef.current = null;
-    setDraft(null);
-    if (editText) {
-      const current = annotations.find((item) => item.id === gesture.id);
-      beginEdit(gesture.id, current?.text ?? "");
-    }
-  };
-
-  const moveGesture = (clientX: number, clientY: number): void => {
-    const gesture = gestureRef.current;
-    if (gesture === null) {
-      return;
-    }
-    const dx = clientX - gesture.clientX;
-    const dy = clientY - gesture.clientY;
-    if (!gesture.moved && dx * dx + dy * dy < 16) {
-      return;
-    }
-    gesture.moved = true;
-    if (gesture.kind === "canvas") {
-      userMoved.current = true;
-      setGrabbing(true);
-      setView((current) => ({
-        ...current,
-        x: gesture.originX + (clientX - gesture.clientX),
-        y: gesture.originY + (clientY - gesture.clientY),
-      }));
-      return;
-    }
-    const point = draggedImagePoint(
-      gesture.originX,
-      gesture.originY,
-      gesture.clientX,
-      gesture.clientY,
-      clientX,
-      clientY,
-      gesture.scale,
-      imageSize.w,
-      imageSize.h,
-    );
-    const next = { id: gesture.id, x: point.x, y: point.y };
-    draftRef.current = next;
-    setDraft(next);
-  };
-
-  useEffect(() => {
-    const current = draftRef.current;
-    if (current === null) {
-      return;
-    }
-    const item = annotations.find((entry) => entry.id === current.id);
-    const synced =
-      item !== undefined &&
-      Math.abs(item.x - current.x) < 0.5 &&
-      Math.abs(item.y - current.y) < 0.5;
-    if (item === undefined || synced) {
-      draftRef.current = null;
-      setDraft(null);
-    }
-  }, [annotations]);
-
-  const editingItem = shownAnnotations.find((item) => item.id === editing?.id);
-  const editingScreen =
-    editingItem === undefined ? null : screenPointFromImage(view, editingItem.x, editingItem.y);
-
-  return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-2 text-xs">
-        {ANNOTATION_COLORS.map((value) => (
-          <button
-            key={value}
-            type="button"
-            aria-label={value}
-            className={`h-5 w-5 rounded-full border ${color === value ? "ring-2 ring-primary" : ""}`}
-            style={{ backgroundColor: value }}
-            onClick={() => applyColor(value)}
-          />
-        ))}
-        <Button
-          type="button"
-          size="sm"
-          variant="secondary"
-          onClick={() => {
-            userMoved.current = false;
-            fitNow();
-          }}
-        >
-          {t("workbench.canvas.fit")}
-        </Button>
-        <span className="text-fg-muted">{t("workbench.canvas.dragHint")}</span>
-      </div>
-      <div
-        ref={containerRef}
-        className={`relative min-h-0 flex-1 touch-none overflow-hidden rounded border border-border bg-muted/40 ${
-          grabbing ? "cursor-grabbing" : "cursor-grab"
-        }`}
-        onPointerDown={(event) => {
-          if (event.button !== 0 && event.button !== 1) {
-            return;
-          }
-          if (editing !== null) {
-            suppressPlaceRef.current = true;
-          }
-          const current = viewRef.current;
-          gestureRef.current = {
-            kind: "canvas",
-            clientX: event.clientX,
-            clientY: event.clientY,
-            originX: current.x,
-            originY: current.y,
-            button: event.button,
-            moved: false,
-          };
-          event.currentTarget.setPointerCapture(event.pointerId);
-        }}
-        onPointerMove={(event) => {
-          moveGesture(event.clientX, event.clientY);
-        }}
-        onPointerUp={(event) => {
-          finishGesture(event.clientX, event.clientY);
-        }}
-        onPointerCancel={() => {
-          gestureRef.current = null;
-          suppressPlaceRef.current = false;
-          setGrabbing(false);
-          draftRef.current = null;
-          setDraft(null);
-        }}
-      >
-        <div
-          className="absolute left-0 top-0"
-          style={{
-            transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`,
-            transformOrigin: "0 0",
-          }}
-        >
-          <img
-            key={src}
-            src={src}
-            alt=""
-            className="max-w-none select-none shadow-sm"
-            draggable={false}
-            onError={() => {
-              toast.error(
-                t("workbench.canvas.loadFailed", { name: projectImageTag(path).fileName }),
-              );
-            }}
-            onLoad={(event) => {
-              const size = {
-                w: event.currentTarget.naturalWidth,
-                h: event.currentTarget.naturalHeight,
-              };
-              imageSizeRef.current = size;
-              setImageSize(size);
-              if (!userMoved.current) {
-                fitNow();
-              }
-            }}
-          />
-        </div>
-        {shownAnnotations.map((item) => {
-          if (item.kind !== "label") {
-            return null;
-          }
-          const number =
-            shownAnnotations
-              .filter((entry) => entry.kind === "label")
-              .findIndex((entry) => entry.id === item.id) + 1;
-          const screen = screenPointFromImage(view, item.x, item.y);
-          const text = item.text?.trim() ?? "";
-          const selected = selectedId === item.id;
-          return (
-            <div
-              key={item.id}
-              className="absolute z-10 cursor-grab"
-              style={{ left: screen.x, top: screen.y }}
-              onPointerDown={(event) => {
-                if (event.button !== 0) {
-                  return;
-                }
-                event.stopPropagation();
-                event.currentTarget.setPointerCapture(event.pointerId);
-                gestureRef.current = {
-                  kind: "move",
-                  id: item.id,
-                  clientX: event.clientX,
-                  clientY: event.clientY,
-                  originX: item.x,
-                  originY: item.y,
-                  scale: viewRef.current.scale,
-                  moved: false,
-                };
-                setSelectedId(item.id);
-              }}
-              onPointerMove={(event) => {
-                moveGesture(event.clientX, event.clientY);
-              }}
-              onPointerUp={(event) => {
-                const target = event.target;
-                const editText =
-                  target instanceof Element && target.closest("[data-bubble-text]") !== null;
-                finishGesture(event.clientX, event.clientY, editText);
-              }}
-            >
-              <div
-                className={`absolute flex h-7 w-7 items-center justify-center rounded-full border-2 border-white text-xs font-semibold text-white shadow ${
-                  selected ? "ring-2 ring-neutral-900" : ""
-                }`}
-                style={{
-                  transform: "translate(-50%, -50%)",
-                  backgroundColor: item.color,
-                }}
-              >
-                {number}
-              </div>
-              {text !== "" && editing?.id !== item.id ? (
-                <div
-                  data-bubble-text=""
-                  className="absolute left-4 max-w-56 -translate-y-1/2 cursor-text rounded-full bg-white/95 px-2 py-0.5 text-sm leading-tight shadow"
-                  style={{ color: item.color }}
-                >
-                  {text}
-                </div>
-              ) : null}
-              {selected ? (
-                <button
-                  type="button"
-                  aria-label={t("workbench.canvas.deleteTag")}
-                  className="absolute left-2 top-[-18px] z-20 flex h-4 w-4 items-center justify-center rounded-full bg-neutral-900 text-[10px] leading-none text-white"
-                  onPointerDown={(event) => {
-                    event.stopPropagation();
-                  }}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    deleteBubble(item.id);
-                  }}
-                >
-                  ×
-                </button>
-              ) : null}
-            </div>
-          );
-        })}
-        {editing !== null && editingScreen !== null ? (
-          <input
-            ref={editRef}
-            className="absolute z-20 min-w-28 rounded-full border bg-white px-2 py-0.5 text-sm shadow"
-            style={{
-              left: editingScreen.x + 18,
-              top: editingScreen.y,
-              transform: "translateY(-50%)",
-              color: editingItem?.color ?? color,
-              borderColor: editingItem?.color ?? color,
-            }}
-            placeholder={t("workbench.canvas.textPlaceholder")}
-            value={editing.value}
-            onChange={(event) => {
-              setEditing({ ...editing, value: event.target.value });
-            }}
-            onBlur={commitEditing}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                commitEditing();
-              }
-              if (event.key === "Escape") {
-                const current = annotations.find((item) => item.id === editing.id);
-                if ((current?.text ?? "") === "" && editing.value.trim() === "") {
-                  publish(annotations.filter((item) => item.id !== editing.id));
-                }
-                setEditing(null);
-              }
-            }}
-            onPointerDown={(event) => event.stopPropagation()}
-          />
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
 export function WorkbenchCanvasPanel({
   projectId,
 }: {
@@ -702,12 +54,19 @@ export function WorkbenchCanvasPanel({
   const focusPath = useWorkbenchCanvasStore((s) => s.focusPath);
   const closeCanvas = useWorkbenchCanvasStore((s) => s.closeCanvas);
   const setFocusPath = useWorkbenchCanvasStore((s) => s.setFocusPath);
-  const setUnseen = useWorkbenchCanvasStore((s) => s.setUnseen);
+  const setViewerOpen = useWorkbenchCanvasStore((s) => s.setViewerOpen);
   const [board, setBoard] = useState<CanvasBoard | null>(null);
   const [trash, setTrash] = useState<readonly WorkbenchCanvasTrashEntryView[]>([]);
   const [showTrash, setShowTrash] = useState(false);
   const [purging, setPurging] = useState<{ readonly trashId?: string } | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [viewerPath, setViewerPath] = useState<string | null>(null);
+  /** 大图里「上一张 / 下一张」只在待检查的图里走（从待检查的图打开时）。 */
+  const [viewerPendingOnly, setViewerPendingOnly] = useState(false);
+  const [pendingOnly, setPendingOnly] = useState(false);
+  const [focus, setFocus] = useState<{ path: string; nonce: number } | null>(null);
+  const [fitNonce, setFitNonce] = useState(0);
+  const [search, setSearch] = useState("");
 
   const adopt = (data: WorkbenchGetCanvasResponse): CanvasBoard => {
     const next = boardFromView(data.board);
@@ -733,26 +92,21 @@ export function WorkbenchCanvasPanel({
       toast.error(settled.error.message);
       return;
     }
-    const next = boardFromView(settled.data.board);
-    setBoard(next);
+    setBoard(boardFromView(settled.data.board));
     setTrash(settled.data.trash);
-    // 主进程取画板时已把新图数清零。
-    setUnseen(projectId, 0);
-    setSelectedPath((current) => {
-      if (current !== null) {
-        return current;
-      }
-      const page = next.pages.find((item) => item.id === next.activePageId) ?? next.pages[0];
-      return page?.rows[0]?.versions[0]?.path ?? null;
-    });
-  }, [projectId, setUnseen]);
+  }, [projectId]);
 
   useEffect(() => {
     if (!open) {
+      setViewerPath(null);
       return;
     }
     void reload();
   }, [open, reload]);
+
+  useEffect(() => {
+    setViewerOpen(viewerPath !== null);
+  }, [setViewerOpen, viewerPath]);
 
   useSubscription("workbench:canvas-changed", (payload) => {
     if (payload.projectId !== projectId || !open) {
@@ -761,14 +115,33 @@ export function WorkbenchCanvasPanel({
     void reload();
   });
 
+  const jumpTo = (path: string): void => {
+    setSelectedPath(path);
+    setFocus((current) => ({ path, nonce: (current?.nonce ?? 0) + 1 }));
+  };
+
   useEffect(() => {
     if (focusPath !== null) {
       setSelectedPath(focusPath);
+      setFocus((current) => ({ path: focusPath, nonce: (current?.nonce ?? 0) + 1 }));
       setFocusPath(null);
     }
   }, [focusPath, setFocusPath]);
 
   const activePageId = board?.activePageId ?? board?.pages[0]?.id ?? "page-1";
+  const activePage = board?.pages.find((page) => page.id === activePageId) ?? board?.pages[0];
+  const placements = board?.placements;
+  const layout = useMemo(
+    () => layoutWorld(activePage?.rows ?? [], placements ?? {}),
+    [activePage, placements],
+  );
+  const versions = useMemo(
+    () => (board === null ? new Map<string, string>() : versionsByPath(board)),
+    [board],
+  );
+  const notes = board?.notes ?? {};
+  const isPending = (path: string): boolean => needsTonyReview(notes[path]);
+  const pendingCount = layout.order.filter(isPending).length;
 
   const commitChain = useRef(Promise.resolve());
 
@@ -783,13 +156,10 @@ export function WorkbenchCanvasPanel({
     }
   };
 
-  const removeFromBoard = async (): Promise<void> => {
-    if (selectedPath === null) {
-      return;
-    }
+  const removeFromBoard = async (path: string): Promise<void> => {
     const settled = await invokeQuery("workbench:remove-canvas-image", {
       projectId,
-      relativePath: selectedPath,
+      relativePath: path,
     });
     if (settled.status === "error") {
       toast.error(settled.error.message);
@@ -800,33 +170,228 @@ export function WorkbenchCanvasPanel({
     toast.message(t("workbench.canvas.removedFromBoard"));
   };
 
-  const trashSelected = async (): Promise<void> => {
-    if (selectedPath === null) {
-      return;
-    }
-    if (await applyEdit({ kind: "trash", path: selectedPath })) {
+  const trashImage = async (path: string): Promise<void> => {
+    if (await applyEdit({ kind: "trash", path })) {
       setSelectedPath(null);
       toast.message(t("workbench.canvas.trashed"));
     }
   };
 
+  /** 打开大图：待检查的图看过就算已看。 */
+  const openViewer = (path: string, pendingQueue: boolean): void => {
+    setSelectedPath(path);
+    setViewerPath(path);
+    setViewerPendingOnly(pendingQueue);
+    if (needsTonyReview(notes[path])) {
+      void applyEdit({ kind: "review", path, state: "seen" });
+    }
+  };
+
+  const stepViewer = (direction: 1 | -1): void => {
+    if (viewerPath === null) {
+      return;
+    }
+    const next = nextInOrder(
+      layout.order,
+      viewerPath,
+      viewerPendingOnly ? isPending : () => true,
+      direction,
+    );
+    if (next === undefined) {
+      toast.message(t("workbench.canvas.noMorePending"));
+      return;
+    }
+    openViewer(next, viewerPendingOnly);
+    jumpTo(next);
+  };
+
+  const nextPending = (): void => {
+    const next = nextInOrder(layout.order, selectedPath, isPending);
+    if (next === undefined) {
+      toast.message(t("workbench.canvas.noMorePending"));
+      return;
+    }
+    jumpTo(next);
+  };
+
+  const runSearch = (): void => {
+    const text = search.trim().toLowerCase();
+    if (text === "") {
+      return;
+    }
+    const found = nextInOrder(layout.order, selectedPath, (path) =>
+      path.toLowerCase().includes(text),
+    );
+    if (found === undefined) {
+      toast.message(t("workbench.canvas.searchNone", { text: search.trim() }));
+      return;
+    }
+    jumpTo(found);
+  };
+
+  // 大图开着时：Esc 关大图（不关画板），← / → 上一张 / 下一张。
+  useEffect(() => {
+    if (viewerPath === null) {
+      return;
+    }
+    const onKey = (event: KeyboardEvent): void => {
+      const target = event.target;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setViewerPath(null);
+      } else if (event.key === "ArrowRight") {
+        stepViewer(1);
+      } else if (event.key === "ArrowLeft") {
+        stepViewer(-1);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
   if (!open || board === null) {
     return null;
   }
 
-  const versions = versionsByPath(board);
-  const selectedVersion = selectedPath !== null ? versions.get(selectedPath) : undefined;
-  const annotations = selectedPath !== null ? (board.annotations[selectedPath] ?? []) : [];
-  const note = selectedPath !== null ? board.notes?.[selectedPath] : undefined;
+  const selectedNote = selectedPath !== null ? notes[selectedPath] : undefined;
+  const selectedRow =
+    selectedPath === null
+      ? undefined
+      : layout.rows.find((row) => row.cards.some((card) => card.path === selectedPath));
+  const viewerVersion = viewerPath !== null ? versions.get(viewerPath) : undefined;
+
+  const reviewLabel = (path: string): string => {
+    const review = notes[path]?.review;
+    switch (review?.state) {
+      case "pending":
+        return t("workbench.canvas.reviewPending");
+      case "ai-pass":
+        return t("workbench.canvas.reviewAiPass", {
+          by: review.by ?? "",
+          reason: review.reason ?? "",
+        });
+      case "ai-fail":
+        return t("workbench.canvas.reviewAiFail", {
+          by: review.by ?? "",
+          reason: review.reason ?? "",
+        });
+      default:
+        return t("workbench.canvas.reviewSeen");
+    }
+  };
+
+  const reviewButton = (path: string): ReactElement =>
+    needsTonyReview(notes[path]) ? (
+      <Button
+        type="button"
+        size="sm"
+        variant="secondary"
+        data-testid="canvas-mark-seen"
+        onClick={() => void applyEdit({ kind: "review", path, state: "seen" })}
+      >
+        {t("workbench.canvas.markSeen")}
+      </Button>
+    ) : (
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        data-testid="canvas-reopen"
+        onClick={() => void applyEdit({ kind: "review", path, state: "pending" })}
+      >
+        {notes[path]?.review?.state === "ai-pass"
+          ? t("workbench.canvas.reopenAiPass")
+          : t("workbench.canvas.reopen")}
+      </Button>
+    );
+
+  const rejectButton = (path: string): ReactElement => (
+    <Button
+      type="button"
+      size="sm"
+      variant="secondary"
+      data-testid="canvas-mark-rejected"
+      onClick={() =>
+        void applyEdit({ kind: "mark-rejected", path, rejected: notes[path]?.rejected !== true })
+      }
+    >
+      {notes[path]?.rejected === true
+        ? t("workbench.canvas.unmarkRejected")
+        : t("workbench.canvas.markRejected")}
+    </Button>
+  );
 
   return (
     <div
-      className="absolute inset-0 z-40 flex flex-col bg-bg/95 backdrop-blur-sm"
+      className="absolute inset-0 z-40 flex flex-col bg-surface-sunken"
       role="dialog"
       aria-label={t("workbench.canvas.title")}
     >
-      <header className="flex items-center gap-3 border-b border-border px-3 py-2 pr-14">
+      <header className="flex flex-wrap items-center gap-2 border-b border-border bg-surface px-3 py-2 pr-14">
         <h2 className="text-sm font-medium">{t("workbench.canvas.title")}</h2>
+        {board.pages.length > 1
+          ? board.pages.map((page) => (
+              <Button
+                key={page.id}
+                type="button"
+                size="sm"
+                variant={page.id === activePageId ? "secondary" : "ghost"}
+                onClick={() => {
+                  setBoard({ ...board, activePageId: page.id });
+                  void applyEdit({ kind: "set-page", pageId: page.id });
+                }}
+              >
+                {page.title}
+              </Button>
+            ))
+          : null}
+        <span className="mx-1 h-5 w-px bg-border" aria-hidden="true" />
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          data-testid="canvas-fit"
+          onClick={() => setFitNonce((value) => value + 1)}
+        >
+          {t("workbench.canvas.fitAll")}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          data-testid="canvas-next-pending"
+          disabled={pendingCount === 0}
+          onClick={nextPending}
+        >
+          {t("workbench.canvas.nextPending", { count: pendingCount })}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant={pendingOnly ? "primary" : "ghost"}
+          data-testid="canvas-pending-only"
+          aria-pressed={pendingOnly}
+          onClick={() => setPendingOnly((value) => !value)}
+        >
+          {t("workbench.canvas.pendingOnly")}
+        </Button>
+        <input
+          className="h-8 w-48 rounded-md border border-border bg-surface px-2 text-sm"
+          placeholder={t("workbench.canvas.searchPlaceholder")}
+          data-testid="canvas-search"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              runSearch();
+            }
+          }}
+        />
+        <span className="flex-1" />
         <Button
           type="button"
           size="sm"
@@ -839,7 +404,7 @@ export function WorkbenchCanvasPanel({
       </header>
       {showTrash ? (
         <div
-          className="flex max-h-72 shrink-0 flex-col gap-1 overflow-y-auto border-b border-border px-3 py-2 text-xs"
+          className="flex max-h-72 shrink-0 flex-col gap-1 overflow-y-auto border-b border-border bg-surface px-3 py-2 text-xs"
           data-testid="canvas-trash"
         >
           {trash.length === 0 ? (
@@ -913,182 +478,215 @@ export function WorkbenchCanvasPanel({
       <button
         type="button"
         aria-label={t("workbench.canvas.close")}
-        className="absolute right-3 top-3 z-50 flex h-8 w-8 items-center justify-center rounded-full border border-border bg-bg text-lg leading-none shadow-sm"
+        className="absolute right-3 top-2 z-50 flex h-8 w-8 items-center justify-center rounded-full border border-border bg-surface text-lg leading-none shadow-sm"
         onClick={closeCanvas}
       >
         ×
       </button>
-      <Tabs
-        value={activePageId}
-        onValueChange={(value) => {
-          setBoard({ ...board, activePageId: value });
-          void applyEdit({ kind: "set-page", pageId: value });
-        }}
-        className="flex shrink-0 flex-col px-3"
-      >
-        <TabsList>
-          {board.pages.map((page) => (
-            <TabsTrigger key={page.id} value={page.id}>
-              {page.title}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-        {board.pages.map((page) => (
-          <TabsContent key={page.id} value={page.id} className="flex-none max-h-64 overflow-y-auto">
-            {page.rows.length === 0 ? (
-              <p className="py-2 text-xs text-fg-muted">{t("workbench.canvas.empty")}</p>
-            ) : (
-              <div className="flex flex-col gap-3 py-2">
-                {page.rows.map((row) => (
-                  <div key={row.id} className="flex items-center overflow-x-auto pb-2">
-                    {row.versions.map((version, index) => (
-                      <div key={version.path} className="flex shrink-0 items-center">
-                        {index > 0 ? (
-                          <div className="flex h-28 w-8 items-center" aria-hidden="true">
-                            <div className="h-0.5 w-full bg-primary" />
-                          </div>
-                        ) : null}
-                        <CanvasImage
-                          projectId={projectId}
-                          path={version.path}
-                          version={version.addedAt}
-                          selected={selectedPath === version.path}
-                          {...(board.notes?.[version.path] !== undefined
-                            ? { note: board.notes[version.path] }
-                            : {})}
-                          onSelect={() => setSelectedPath(version.path)}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            )}
-          </TabsContent>
-        ))}
-      </Tabs>
-      {selectedPath !== null ? (
-        <div className="flex min-h-0 flex-1 flex-col border-t border-border px-3 pb-3 pt-2">
-          <div className="mb-2 flex items-center justify-between gap-3 rounded-md border-2 border-neutral-800 bg-neutral-900 px-2 py-1.5 text-white">
-            <div className="min-w-0">
-              <p className="text-[10px] leading-tight text-white/70">
-                {t("workbench.canvas.projectTag")}
-              </p>
-              <p className="truncate text-xs font-medium">
+      {/* 选中条一直占着位置（没选时是提示），选中一张图时画布不会被挤得跳一下。 */}
+      {viewerPath === null ? (
+        selectedPath === null ? (
+          <div
+            className="flex h-24 shrink-0 items-center border-b-2 border-border-strong bg-surface-raised px-3 text-sm text-fg-muted"
+            data-testid="canvas-selection-empty"
+          >
+            {t("workbench.canvas.selectHint")}
+          </div>
+        ) : (
+          <div
+            className="flex h-24 shrink-0 items-center gap-3 overflow-hidden border-b-2 border-border-strong bg-surface-raised px-3 text-fg"
+            data-testid="canvas-selection"
+          >
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium">
                 {projectImageTag(selectedPath).fileName}
               </p>
-              <p className="truncate text-[11px] text-white/70">
-                {projectImageTag(selectedPath).path}
+              <p className="truncate text-[11px] text-fg-muted">{selectedPath}</p>
+              <p
+                className={cn(
+                  "truncate text-xs",
+                  needsTonyReview(selectedNote) ? "text-warning" : "text-fg-muted",
+                )}
+                data-testid="canvas-review-state"
+              >
+                {reviewLabel(selectedPath)}
               </p>
-              {note?.exportedTo !== undefined ? (
-                <p className="truncate text-[11px] text-white/70" data-testid="canvas-exported-to">
-                  {t("workbench.canvas.exportedTo", { paths: note.exportedTo.join(", ") })}
+              {selectedNote?.exportedTo !== undefined ? (
+                <p className="truncate text-[11px] text-fg-muted" data-testid="canvas-exported-to">
+                  {t("workbench.canvas.exportedTo", { paths: selectedNote.exportedTo.join(", ") })}
                 </p>
               ) : null}
             </div>
-            <div className="flex gap-2">
+            <div className="flex max-h-full min-w-0 flex-wrap content-center items-center justify-end gap-2">
+              {selectedNote?.deleteRequest !== undefined ? (
+                <div
+                  className="flex items-center gap-2 rounded-md bg-warning-surface px-2 py-1.5 text-xs text-warning-text"
+                  data-testid="canvas-delete-request"
+                >
+                  <span className="max-w-80">
+                    {t("workbench.canvas.deleteRequest", {
+                      by: selectedNote.deleteRequest.by,
+                      reason: selectedNote.deleteRequest.reason,
+                    })}
+                  </span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    onClick={() =>
+                      void applyEdit({ kind: "resolve-request", path: selectedPath, approve: true })
+                    }
+                  >
+                    {t("workbench.canvas.approveDelete")}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() =>
+                      void applyEdit({
+                        kind: "resolve-request",
+                        path: selectedPath,
+                        approve: false,
+                      })
+                    }
+                  >
+                    {t("workbench.canvas.keepImage")}
+                  </Button>
+                </div>
+              ) : null}
               <Button
                 type="button"
                 size="sm"
-                variant="secondary"
-                data-testid="canvas-mark-rejected"
-                onClick={() =>
-                  void applyEdit({
-                    kind: "mark-rejected",
-                    path: selectedPath,
-                    rejected: note?.rejected !== true,
-                  })
-                }
+                variant="primary"
+                data-testid="canvas-open-viewer"
+                onClick={() => openViewer(selectedPath, needsTonyReview(selectedNote))}
               >
-                {note?.rejected === true
-                  ? t("workbench.canvas.unmarkRejected")
-                  : t("workbench.canvas.markRejected")}
+                {t("workbench.canvas.openLarge")}
               </Button>
+              {reviewButton(selectedPath)}
+              {rejectButton(selectedPath)}
               <Button
                 type="button"
                 size="sm"
                 variant="secondary"
                 data-testid="canvas-trash-image"
-                onClick={() => void trashSelected()}
+                onClick={() => void trashImage(selectedPath)}
               >
                 {t("workbench.canvas.moveToTrash")}
               </Button>
               <Button
                 type="button"
                 size="sm"
-                variant="secondary"
-                onClick={() => void removeFromBoard()}
+                variant="ghost"
+                onClick={() => void removeFromBoard(selectedPath)}
               >
                 {t("workbench.canvas.removeFromBoard")}
               </Button>
+              {selectedRow?.placed === true ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    const { [selectedRow.id]: _drop, ...rest } = board.placements ?? {};
+                    setBoard({ ...board, placements: rest });
+                    void applyEdit({ kind: "place-row", rowId: selectedRow.id, placement: null });
+                  }}
+                >
+                  {t("workbench.canvas.unplaceRow")}
+                </Button>
+              ) : null}
             </div>
           </div>
-          {note?.deleteRequest !== undefined ? (
-            <div
-              className="mb-2 flex items-center gap-2 rounded-md bg-warning-surface px-2 py-1.5 text-xs text-warning-text"
-              data-testid="canvas-delete-request"
-            >
-              <span className="min-w-0 flex-1">
-                {t("workbench.canvas.deleteRequest", {
-                  by: note.deleteRequest.by,
-                  reason: note.deleteRequest.reason,
-                })}
-              </span>
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                onClick={() =>
-                  void applyEdit({ kind: "resolve-request", path: selectedPath, approve: true })
-                }
-              >
-                {t("workbench.canvas.approveDelete")}
+        )
+      ) : null}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        {layout.rows.length === 0 ? (
+          <p className="px-3 py-4 text-sm text-fg-muted">{t("workbench.canvas.empty")}</p>
+        ) : (
+          <CanvasWorld
+            key={activePageId}
+            projectId={projectId}
+            layout={layout}
+            notes={notes}
+            versions={versions}
+            selectedPath={selectedPath}
+            pendingOnly={pendingOnly}
+            isPending={isPending}
+            focus={focus}
+            fitNonce={fitNonce}
+            onSelect={setSelectedPath}
+            onOpen={(path) => openViewer(path, needsTonyReview(notes[path]))}
+            onPlaceRow={(rowId, x, y) => {
+              setBoard({
+                ...board,
+                placements: { ...(board.placements ?? {}), [rowId]: { x, y } },
+              });
+              void applyEdit({ kind: "place-row", rowId, placement: { x, y } });
+            }}
+          />
+        )}
+        {viewerPath !== null ? (
+          <div
+            className="absolute inset-0 z-30 flex flex-col bg-surface-sunken px-3 pb-3 pt-2"
+            data-testid="canvas-viewer"
+          >
+            <div className="mb-2 flex flex-wrap items-center gap-2 rounded-md border-2 border-border-strong bg-surface-raised px-3 py-1.5 text-fg">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium">
+                  {projectImageTag(viewerPath).fileName}
+                </p>
+                <p className="truncate text-xs text-fg-muted">{reviewLabel(viewerPath)}</p>
+              </div>
+              <Button type="button" size="sm" variant="secondary" onClick={() => stepViewer(-1)}>
+                {t("workbench.canvas.prevImage")}
               </Button>
+              <Button type="button" size="sm" variant="secondary" onClick={() => stepViewer(1)}>
+                {t("workbench.canvas.nextImage")}
+              </Button>
+              {reviewButton(viewerPath)}
+              {rejectButton(viewerPath)}
               <Button
                 type="button"
                 size="sm"
                 variant="ghost"
-                onClick={() =>
-                  void applyEdit({ kind: "resolve-request", path: selectedPath, approve: false })
-                }
+                data-testid="canvas-viewer-close"
+                onClick={() => setViewerPath(null)}
               >
-                {t("workbench.canvas.keepImage")}
+                {t("workbench.canvas.closeLarge")}
               </Button>
             </div>
-          ) : null}
-          <Viewer
-            projectId={projectId}
-            path={selectedPath}
-            {...(selectedVersion !== undefined ? { version: selectedVersion } : {})}
-            annotations={annotations}
-            onAnnotationsCommit={(next, preview) => {
-              const path = selectedPath;
-              setBoard({ ...board, annotations: { ...board.annotations, [path]: next } });
-              commitChain.current = commitChain.current
-                .then(async () => {
-                  const saved = await applyEdit({
-                    kind: "set-annotations",
-                    path,
-                    annotations: next,
-                  });
-                  if (!saved || next.length === 0) {
-                    return;
-                  }
-                  const png = await preview;
-                  if (png === null) {
-                    return;
-                  }
-                  await saveMarkedPreview(path, png);
-                })
-                .catch(() => undefined);
-            }}
-          />
-        </div>
-      ) : (
-        <p className="border-t border-border px-3 py-2 text-xs text-fg-muted">
-          {t("workbench.canvas.pickImage")}
-        </p>
-      )}
+            <CanvasViewer
+              projectId={projectId}
+              path={viewerPath}
+              {...(viewerVersion !== undefined ? { version: viewerVersion } : {})}
+              annotations={board.annotations[viewerPath] ?? []}
+              onAnnotationsCommit={(next, preview) => {
+                const path = viewerPath;
+                setBoard({ ...board, annotations: { ...board.annotations, [path]: next } });
+                commitChain.current = commitChain.current
+                  .then(async () => {
+                    const saved = await applyEdit({
+                      kind: "set-annotations",
+                      path,
+                      annotations: next,
+                    });
+                    if (!saved || next.length === 0) {
+                      return;
+                    }
+                    const png = await preview;
+                    if (png === null) {
+                      return;
+                    }
+                    await saveMarkedPreview(path, png);
+                  })
+                  .catch(() => undefined);
+              }}
+            />
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

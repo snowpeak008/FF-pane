@@ -24,6 +24,7 @@ import {
   appendVersionToRow,
   type CanvasAnnotation,
   type CanvasBoard,
+  type CanvasPlacedBy,
   dedupeCanvasBoard,
   defaultCanvasBoard,
   detachVersion,
@@ -32,7 +33,9 @@ import {
   parseCanvasBoard,
   removePathFromBoard,
   setAnnotationsForPath,
+  setImageNote,
 } from "@ff-pane/shared";
+import { newImageReview } from "../../shared/workbench/canvas-review";
 import {
   buildCanvasRevisionFile,
   CANVAS_REVISIONS_DIR,
@@ -353,10 +356,41 @@ export async function editCanvasBoard(
   });
 }
 
+/** 新放进画板的图：记下是谁放的，状态是待检查（T11.0c）。 */
+function markNewImage(
+  board: CanvasBoard,
+  imagePath: string,
+  at: string,
+  by: CanvasPlacedBy,
+): CanvasBoard {
+  const pages = board.pages.map((page) => ({
+    ...page,
+    rows: page.rows.map((row) =>
+      row.versions.some((version) => version.path === imagePath)
+        ? {
+            ...row,
+            versions: row.versions.map((version) =>
+              version.path === imagePath ? { ...version, by } : version,
+            ),
+          }
+        : row,
+    ),
+  }));
+  return setImageNote({ ...board, pages }, imagePath, (note) => ({
+    ...note,
+    review: newImageReview(at),
+  }));
+}
+
 export async function placeImageOnBoard(
   projectRoot: string,
   imageRelativePath: string,
-  options: { readonly rowId?: string; readonly asNewVersion?: boolean },
+  options: {
+    readonly rowId?: string;
+    readonly asNewVersion?: boolean;
+    /** 放图的窗口；缺省按目录收进来的算。 */
+    readonly by?: CanvasPlacedBy;
+  },
 ): Promise<
   | {
       readonly ok: true;
@@ -396,6 +430,9 @@ export async function placeImageOnBoard(
       board = addImageAsNewRow(board, resolved.relative, rowId, addedAt);
     } else {
       board = addImageAsNewRow(board, resolved.relative, `row-${randomUUID()}`, addedAt);
+    }
+    if (existing === undefined) {
+      board = markNewImage(board, resolved.relative, addedAt, options.by ?? "dir");
     }
     await writeBoardFile(projectRoot, board);
     return {
@@ -552,11 +589,12 @@ export async function ingestCanvasDirectoryFile(
       return board;
     }
     added = true;
-    return addImageAsNewRow(
-      board,
+    const at = new Date().toISOString();
+    return markNewImage(
+      addImageAsNewRow(board, resolved.relative, `row-${randomUUID()}`, at),
       resolved.relative,
-      `row-${randomUUID()}`,
-      new Date().toISOString(),
+      at,
+      "dir",
     );
   });
   return added;
