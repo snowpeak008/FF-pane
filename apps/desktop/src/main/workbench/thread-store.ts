@@ -4,7 +4,7 @@
  * 主进程按项目串行追加。最后一行半写时读取会跳过。
  */
 
-import { appendFile, mkdir, open, readFile } from "node:fs/promises";
+import { appendFile, mkdir, open } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import type { WorkbenchAuthNode } from "@ff-pane/core";
 import { walkAncestors } from "@ff-pane/core";
@@ -206,12 +206,72 @@ export function readThreadIndexText(text: string): readonly ThreadRecord[] {
   return out;
 }
 
+/**
+ * 读过的索引按文件缓存（T11.0d）：没变就直接用；只往后追加时只读新加的部分。
+ * 以前查收件箱、等事件、30 秒巡检每次都整份读、整份解析（《海上生存日记》已经 1.8MB）。
+ * 文件变短或开头变了（被换掉）就整份重读。
+ */
+interface ThreadIndexCache {
+  readonly size: number;
+  readonly mtimeMs: number;
+  /** 已解析到的字节位置（总是落在换行之后）。 */
+  readonly consumed: number;
+  readonly head: string;
+  readonly records: readonly ThreadRecord[];
+}
+
+const THREAD_INDEX_HEAD_BYTES = 64;
+const threadIndexCache = new Map<string, ThreadIndexCache>();
+
+async function readRange(
+  handle: Awaited<ReturnType<typeof open>>,
+  start: number,
+  length: number,
+): Promise<Buffer> {
+  const buf = Buffer.alloc(length);
+  const { bytesRead } = await handle.read(buf, 0, length, start);
+  return buf.subarray(0, bytesRead);
+}
+
 export async function readThreadIndex(projectRoot: string): Promise<readonly ThreadRecord[]> {
+  const path = join(threadsDir(projectRoot), "index.jsonl");
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
-    const text = await readFile(join(threadsDir(projectRoot), "index.jsonl"), "utf8");
-    return readThreadIndexText(text);
+    handle = await open(path, "r");
+    const stat = await handle.stat();
+    const cached = threadIndexCache.get(path);
+    if (cached !== undefined && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs) {
+      return cached.records;
+    }
+    const head = (await readRange(handle, 0, THREAD_INDEX_HEAD_BYTES)).toString("latin1");
+    const appendOnly =
+      cached !== undefined &&
+      stat.size >= cached.size &&
+      head.startsWith(cached.head.slice(0, Math.min(cached.head.length, head.length)));
+    const start = appendOnly ? cached.consumed : 0;
+    const tail = await readRange(handle, start, stat.size - start);
+    const lastNewline = tail.lastIndexOf(0x0a);
+    const complete = lastNewline >= 0 ? tail.subarray(0, lastNewline + 1) : Buffer.alloc(0);
+    const added = readThreadIndexText(complete.toString("utf8"));
+    const records = appendOnly && cached !== undefined ? [...cached.records, ...added] : added;
+    threadIndexCache.set(path, {
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+      consumed: start + complete.byteLength,
+      head,
+      records,
+    });
+    // 最后一行没有换行（可能写到一半）：缓存里不算，这次照样试着解析，和整份解析一样。
+    const partial = tail.subarray(complete.byteLength);
+    if (partial.byteLength === 0) {
+      return records;
+    }
+    const last = readThreadIndexText(partial.toString("utf8"));
+    return last.length === 0 ? records : [...records, ...last];
   } catch {
     return [];
+  } finally {
+    await handle?.close();
   }
 }
 

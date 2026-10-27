@@ -59,7 +59,6 @@ import {
   editCanvasBoard,
   loadCanvasBoard,
   placeImageOnBoard,
-  readCanvasImageBytes,
   removeFromCanvasBoard,
   updateCanvasAnnotations,
   writeCanvasMarkedPreview,
@@ -74,6 +73,7 @@ import {
   restoreCanvasTrash,
   trashCanvasImage,
 } from "./canvas-library";
+import { createCanvasImageHandler } from "./canvas-thumbs";
 import { ensureCanvasWatcher } from "./canvas-watcher";
 import { closeDescendantWindow } from "./close-descendant";
 import { CodexSessionClaimer, isAutomatedTestEnv, resolveCodexHome } from "./codex-claim";
@@ -128,7 +128,7 @@ import {
 import { createNamedLocks, type LockGrant } from "./named-locks";
 import { createOnlineHub } from "./online-hub";
 import { openChildWindow } from "./open-child";
-import { clampReadOutputBytes, renderTerminalText, takeUtf8Tail } from "./output-text";
+import { clampReadOutputBytes, renderTerminalText } from "./output-text";
 import {
   assertOpenableMarkdown,
   listBriefFiles,
@@ -211,7 +211,6 @@ export interface WorkbenchCliLayer {
     | "workbench:get-canvas"
     | "workbench:canvas-edit"
     | "workbench:save-canvas-marked"
-    | "workbench:read-canvas-image"
     | "workbench:remove-canvas-image"
     | "workbench:respond-config-draft"
   >;
@@ -223,6 +222,8 @@ export interface WorkbenchCliLayer {
   readonly modelEffort: ModelEffortController;
   readonly rolePromptTemps: RolePromptTempRegistry;
   readonly releaseConfigHub: (windowId: string) => Promise<void>;
+  /** `ffpane-canvas://` 协议：画板的原图和缩略图直接回文件（T11.0d）。 */
+  readonly handleCanvasImage: (request: Request) => Promise<Response>;
   /** 终端退出（自然退出或被关闭）：放锁；自然退出时告诉监管者或上级。 */
   readonly noteWindowExit: (
     windowId: string,
@@ -1151,7 +1152,7 @@ export async function createWorkbenchCliLayer(
     }
     try {
       return await renderTerminalText(
-        takeUtf8Tail(options.manager.getReplayBuffer(terminalId), SCREEN_TAIL_BYTES),
+        options.manager.getReplayTail(terminalId, SCREEN_TAIL_BYTES),
         { cols: record.cols, rows: record.rows },
         60,
         { solidOnly, keepRows: true },
@@ -2377,7 +2378,9 @@ export async function createWorkbenchCliLayer(
     },
     "workbench:get-canvas": async (request) => {
       const root = await projectRootOf(request.projectId);
-      ensureCanvasWatcher(root);
+      // 只有画板开着时界面才来取：新图都看到了。
+      canvasUnseen.delete(request.projectId);
+      watchCanvas(request.projectId, root);
       const board = await loadCanvasBoard(root);
       return { board, trash: await canvasTrashView(root) };
     },
@@ -2424,14 +2427,6 @@ export async function createWorkbenchCliLayer(
         throw new Error(written.error);
       }
       return { ok: true as const, markedPath: written.relativePath };
-    },
-    "workbench:read-canvas-image": async (request) => {
-      const root = await projectRootOf(request.projectId);
-      const read = await readCanvasImageBytes(root, request.relativePath);
-      if (!read.ok) {
-        throw new Error(read.error);
-      }
-      return { mime: read.mime, dataUrl: `data:${read.mime};base64,${read.base64}` };
     },
     "workbench:remove-canvas-image": async (request) => {
       const root = await projectRootOf(request.projectId);
@@ -2520,25 +2515,31 @@ export async function createWorkbenchCliLayer(
     },
   };
 
-  const publishCanvasOpened = (
-    projectId: string,
-    openerTitle: string,
-    focusPath: string,
-    projectRoot: string,
-  ): void => {
-    ensureCanvasWatcher(projectRoot);
-    const browser = options.getWindow();
-    if (browser === null || browser.isDestroyed()) {
-      return;
+  /** 画板关着时 AI 放进来的新图数（按项目）。界面打开画板来取数据时清零。 */
+  const canvasUnseen = new Map<string, number>();
+
+  /**
+   * AI 出图或交图后：只放进画板、记一张新图，不弹画板、不切页面（T11.0d，Tony 2026-10-27）。
+   * 以前每次都发 open-canvas 整屏盖上画板，三天 1336 次，打断 Tony 和窗口的对话。
+   */
+  const noteCanvasAdded = (projectId: string): void => {
+    canvasUnseen.set(projectId, (canvasUnseen.get(projectId) ?? 0) + 1);
+    publishCanvasChanged(projectId);
+  };
+  /** 监听项目的 canvas 目录；AI 直接存进目录的图收进画板时也记一张新图。 */
+  const watchCanvas = (projectId: string, projectRoot: string): void => {
+    ensureCanvasWatcher(projectRoot, () => {
+      noteCanvasAdded(projectId);
+    });
+  };
+  /** 出图、交图之后。目录监听先收进来的那次已经记过，这里只记真新加的。 */
+  const publishCanvasPlaced = (projectId: string, projectRoot: string, added: boolean): void => {
+    watchCanvas(projectId, projectRoot);
+    if (added) {
+      noteCanvasAdded(projectId);
+    } else {
+      publishCanvasChanged(projectId);
     }
-    publishEvent(browser.webContents, "workbench:open-canvas", {
-      projectId: projectId as ProjectId,
-      openerTitle,
-      focusPath,
-    });
-    publishEvent(browser.webContents, "workbench:canvas-changed", {
-      projectId: projectId as ProjectId,
-    });
   };
 
   const publishCanvasChanged = (projectId: string): void => {
@@ -2546,6 +2547,7 @@ export async function createWorkbenchCliLayer(
     if (browser !== null && !browser.isDestroyed()) {
       publishEvent(browser.webContents, "workbench:canvas-changed", {
         projectId: projectId as ProjectId,
+        unseen: canvasUnseen.get(projectId) ?? 0,
       });
     }
   };
@@ -2937,7 +2939,7 @@ export async function createWorkbenchCliLayer(
       return {
         running: true as const,
         status: "运行中",
-        text: takeUtf8Tail(options.manager.getReplayBuffer(liveId), bytes),
+        text: options.manager.getReplayTail(liveId, bytes),
       };
     },
     readScreen: async (windowId, lines) => {
@@ -3214,12 +3216,7 @@ export async function createWorkbenchCliLayer(
         return placed;
       }
       const revision = await describeCanvasRevision(input.projectRoot, placed.relativePath);
-      publishCanvasOpened(
-        input.projectId,
-        input.openerTitle,
-        placed.relativePath,
-        input.projectRoot,
-      );
+      publishCanvasPlaced(input.projectId, input.projectRoot, placed.added);
       return {
         ok: true as const,
         relativePath: placed.relativePath,
@@ -3252,13 +3249,8 @@ export async function createWorkbenchCliLayer(
       if (!outcome.ok) {
         return outcome;
       }
-      publishCanvasOpened(
-        input.projectId,
-        input.openerTitle,
-        outcome.relativePath,
-        input.projectRoot,
-      );
-      return outcome;
+      publishCanvasPlaced(input.projectId, input.projectRoot, outcome.added === true);
+      return { ok: true as const, relativePath: outcome.relativePath };
     },
     deleteCanvasFile: async (caller, imagePath, reason) => {
       const result = await requestCanvasDelete(caller.projectRoot, imagePath, caller.title, reason);
@@ -3286,6 +3278,10 @@ export async function createWorkbenchCliLayer(
     modelEffort,
     rolePromptTemps,
     releaseConfigHub: disposeConfigHub,
+    handleCanvasImage: createCanvasImageHandler({
+      projectRootOf,
+      cacheDir: join(layout.rootDir, "cache", "canvas-thumbs"),
+    }),
     noteWindowExit,
     dispose: async () => {
       clearInterval(stallTimer);

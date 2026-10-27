@@ -22,7 +22,7 @@ import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { _electron, type ElectronApplication, expect, type Page } from "@playwright/test";
 
-const desktopDir = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+export const desktopDir = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 /** i18n 语言持久化键（与 renderer/src/i18n/index.ts 的 STORAGE_KEY 保持一致）。 */
 const UI_LANGUAGE_KEY = "ffpane.ui-language";
@@ -39,6 +39,10 @@ export interface LaunchedApp {
   readonly page: Page;
   /** 全局数据根临时目录（= FF_PANE_DATA_ROOT）。 */
   readonly dataRoot: string;
+  /** Electron userData 临时目录（--user-data-dir）；单实例锁按它算。 */
+  readonly userDataDir: string;
+  /** 启动用的环境变量（再起一份同样的实例时用）。 */
+  readonly env: Readonly<Record<string, string>>;
   /** Codex 会话根临时目录（= CODEX_HOME）；可预置假 sessions。 */
   readonly codexHome: string;
   /** Claude 配置临时目录（= CLAUDE_CONFIG_DIR）。 */
@@ -209,7 +213,7 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
     }
   };
 
-  return { app, page, dataRoot, codexHome, claudeConfigDir, grokHome, cleanup };
+  return { app, page, dataRoot, userDataDir, env, codexHome, claudeConfigDir, grokHome, cleanup };
 }
 
 /** 经 HashRouter 直接导航到指定路由（如 "/projects"、"/settings"）。 */

@@ -54,6 +54,9 @@ export function WorkbenchPage(): ReactElement {
   const getProjectLayout = useWorkbenchStore((s) => s.getProjectLayout);
 
   const countRunningWindows = useWorkbenchStore((s) => s.countRunningWindows);
+  const canvasUnseen = useWorkbenchCanvasStore((s) =>
+    entry === null ? 0 : (s.unseen[entry.id] ?? 0),
+  );
 
   const { state: configState } = useInvokeQuery("config:get");
   const maxWindows = queryData(configState)?.maxWorkbenchWindows ?? 12;
@@ -287,7 +290,9 @@ export function WorkbenchPage(): ReactElement {
             data-testid="open-canvas"
             onClick={() => useWorkbenchCanvasStore.getState().openCanvas(null)}
           >
-            {t("workbench.canvas.open")}
+            {canvasUnseen > 0
+              ? t("workbench.canvas.openWithNew", { count: canvasUnseen })
+              : t("workbench.canvas.open")}
           </Button>
         }
       />

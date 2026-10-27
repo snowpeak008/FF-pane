@@ -125,6 +125,41 @@ describe("PtyManager 回放", () => {
     manager.dispose();
   });
 
+  it("getReplayTail 和整份回放取尾巴一样（T11.0d）", () => {
+    const { factory, emit } = fakeFactory();
+    const manager = new PtyManager({
+      factory,
+      outputBufferBytes: 4096,
+      outputFlushMs: 1,
+      assignJob: () => undefined,
+    });
+    const created = manager.create({ cwd, cols: 80, rows: 24 });
+    const tailOf = (text: string, max: number): string => {
+      const bytes = Buffer.from(text, "utf8");
+      let start = Math.max(0, bytes.byteLength - max);
+      while (start < bytes.byteLength && ((bytes[start] ?? 0) & 0xc0) === 0x80) {
+        start += 1;
+      }
+      return bytes.subarray(start).toString("utf8");
+    };
+    emit(CLAUDE_STARTUP);
+    emit("短输出");
+    for (const max of [10, 40, 4096, 8192]) {
+      expect(manager.getReplayTail(created.id, max)).toBe(
+        tailOf(manager.getReplayBuffer(created.id), max),
+      );
+    }
+    for (let i = 0; i < 200; i += 1) {
+      emit(`[27;3H输入第 ${i} 次[7m [27m[25;60H[K[18C`);
+    }
+    for (const max of [10, 100, 4000, 4096, 4097, 4200, 8192]) {
+      expect(manager.getReplayTail(created.id, max)).toBe(
+        tailOf(manager.getReplayBuffer(created.id), max),
+      );
+    }
+    manager.dispose();
+  });
+
   it("行列没变不再调伪终端尺寸（ConPTY 每调一次都整屏重画）", () => {
     const { factory, handle } = fakeFactory();
     const manager = new PtyManager({ factory, outputFlushMs: 1, assignJob: () => undefined });

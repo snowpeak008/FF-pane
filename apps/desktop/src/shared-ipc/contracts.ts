@@ -526,13 +526,6 @@ export interface WorkbenchOpenPanelEvent {
   readonly projectId: ProjectId;
 }
 
-/** ffpane_open_canvas：打开项目画板并可选聚焦某张图。 */
-export interface WorkbenchOpenCanvasEvent {
-  readonly projectId: ProjectId;
-  readonly openerTitle: string;
-  readonly focusPath?: string;
-}
-
 /** 画板 board.json 的渲染端视图（与 @ff-pane/shared CanvasBoard 对齐）。 */
 export interface WorkbenchCanvasBoardView {
   readonly v: 1;
@@ -609,11 +602,6 @@ export type WorkbenchCanvasEdit =
   | { readonly kind: "resolve-request"; readonly path: string; readonly approve: boolean }
   | { readonly kind: "restore"; readonly trashId: string }
   | { readonly kind: "purge"; readonly trashId?: string };
-
-export interface WorkbenchReadCanvasImageResponse {
-  readonly mime: string;
-  readonly dataUrl: string;
-}
 
 export interface WorkbenchBriefListItem {
   readonly name: string;
@@ -1703,11 +1691,6 @@ export interface IpcInvokeContracts {
     };
     response: { readonly ok: true; readonly markedPath: string };
   };
-  /** 读取 canvas 目录内的一张图片（base64 data URL）。 */
-  "workbench:read-canvas-image": {
-    request: { readonly projectId: ProjectId; readonly relativePath: string };
-    response: WorkbenchReadCanvasImageResponse;
-  };
   /** 从画板数据移除路径，不删磁盘文件。 */
   "workbench:remove-canvas-image": {
     request: { readonly projectId: ProjectId; readonly relativePath: string };
@@ -1914,6 +1897,10 @@ export type { TaskSettledStatus } from "@ff-pane/shared";
 export interface IpcEventContracts {
   /** 仅冒烟模式使用：验证订阅链路的回声事件。 */
   "smoke:event": { payload: { readonly seq: number; readonly emittedAt: number } };
+  /** 主进程或界面进程内存超过警戒线（T11.0d），界面显示「建议重启」。 */
+  "app:memory-warning": {
+    payload: { readonly kind: "main" | "renderer"; readonly mb: number };
+  };
   /** 自配置工具草案事件（config-draft / config-draft-resolved 等）。 */
   "session:event": { payload: SessionStreamEvent };
   /** 知识库导入 / 重建进度（T6.5 / §8.3.2「导入进度」）。 */
@@ -1940,8 +1927,10 @@ export interface IpcEventContracts {
   "workbench:team-paused": { payload: WorkbenchTeamPausedEvent };
   "workbench:inbox-notice": { payload: WorkbenchInboxNoticeEvent };
   "workbench:open-panel": { payload: WorkbenchOpenPanelEvent };
-  "workbench:open-canvas": { payload: WorkbenchOpenCanvasEvent };
-  "workbench:canvas-changed": { payload: { readonly projectId: ProjectId } };
+  /** 画板有改动。unseen：画板关着时 AI 放进来的新图数（T11.0d，不再自动打开画板）。 */
+  "workbench:canvas-changed": {
+    payload: { readonly projectId: ProjectId; readonly unseen?: number };
+  };
   "workbench:window-closed": { payload: WorkbenchWindowClosedEvent };
   "workbench:decision-requested": { payload: WorkbenchDecision };
   "workbench:online-changed": { payload: { readonly windowId: string; readonly online: boolean } };
@@ -2009,7 +1998,6 @@ export const INVOKE_CHANNELS = [
   "workbench:get-canvas",
   "workbench:canvas-edit",
   "workbench:save-canvas-marked",
-  "workbench:read-canvas-image",
   "workbench:remove-canvas-image",
   "workbench:respond-config-draft",
   "projects:list",
@@ -2077,6 +2065,7 @@ export const INVOKE_CHANNELS = [
 /** 事件通道运行时允许清单。 */
 export const EVENT_CHANNELS = [
   "smoke:event",
+  "app:memory-warning",
   "session:event",
   "knowledge:import-progress",
   "terminal:output",
@@ -2094,7 +2083,6 @@ export const EVENT_CHANNELS = [
   "workbench:team-paused",
   "workbench:inbox-notice",
   "workbench:open-panel",
-  "workbench:open-canvas",
   "workbench:canvas-changed",
   "workbench:window-closed",
   "workbench:decision-requested",

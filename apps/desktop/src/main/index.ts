@@ -1,12 +1,19 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createConfigStore, resolveGlobalLayout } from "@ff-pane/storage";
-import { app, BrowserWindow, dialog, ipcMain, session, shell } from "electron";
-import { registerInvokeHandlers } from "../shared-ipc/server";
+import { app, BrowserWindow, dialog, ipcMain, protocol, session, shell } from "electron";
+import { CANVAS_IMAGE_SCHEME } from "../shared/canvas-image-url";
+import { publishEvent, registerInvokeHandlers } from "../shared-ipc/server";
 import { installAppMenu, resolveAppMenuLanguage } from "./app-menu";
 import { installCsp } from "./csp";
 import { createDataHandlers } from "./data";
 import { resolveGlobalRoot } from "./data-root";
+import {
+  installDiagnostics,
+  installMainLogFile,
+  startLocalCrashReporter,
+  watchWindowResponsiveness,
+} from "./diagnostics";
 import { createKnowledgeHandlers } from "./knowledge";
 import type { MemoryIndexService } from "./memory-index";
 import { createQuitCoordinator, type QuitCoordinatorDeps } from "./session/quit";
@@ -61,6 +68,9 @@ function createMainWindow(options: {
   });
 
   mainWindow = window;
+  if (!isSmokeMode) {
+    watchWindowResponsiveness(window);
+  }
   window.on("closed", () => {
     mainWindow = null;
   });
@@ -164,6 +174,9 @@ function registerAppHandlers(): void {
 }
 
 async function bootstrap(): Promise<void> {
+  if (!isSmokeMode) {
+    installMainLogFile(join(resolveGlobalRoot(), "logs"));
+  }
   installAppMenu(resolveAppMenuLanguage(app.getLocale()));
   installCsp(session.defaultSession, devRendererUrl !== undefined);
   registerAppHandlers();
@@ -302,6 +315,8 @@ async function bootstrap(): Promise<void> {
       ...(sharedMemoryIndex !== undefined ? { memoryIndex: sharedMemoryIndex } : {}),
     });
     registerInvokeHandlers(ipcMain, workbenchCliLayer.handlers);
+    const canvasImages = workbenchCliLayer.handleCanvasImage;
+    protocol.handle(CANVAS_IMAGE_SCHEME, (request) => canvasImages(request));
 
     app.on("will-quit", () => {
       const layer = terminalLayer;
@@ -322,19 +337,63 @@ async function bootstrap(): Promise<void> {
     console.error(`[main] terminal layer init failed: ${message}`);
   }
 
+  installDiagnostics({
+    getWindow: () => mainWindow,
+    terminalStats: () => terminalLayer?.manager.bufferStats() ?? { count: 0, bufferedBytes: 0 },
+    onMemoryWarning: (warning) => {
+      if (mainWindow !== null && !mainWindow.isDestroyed()) {
+        publishEvent(mainWindow.webContents, "app:memory-warning", warning);
+      }
+    },
+  });
+
   createMainWindow({
     hidden: false,
     flushLayouts: () => layoutFlush.requestFlush(),
   });
 }
 
-app
-  .whenReady()
-  .then(bootstrap)
-  .catch((thrown: unknown) => {
-    console.error(`[main] 启动失败：${String(thrown)}`);
-    app.exit(1);
+// T11.0d：只开一份。再双击启动时把已有的窗口切到前面，新的这份直接退出。
+// 冒烟自检要能和正在用的 FF-pane 同时跑，不拿锁。
+const singleInstance = isSmokeMode || app.requestSingleInstanceLock();
+if (!singleInstance) {
+  app.quit();
+} else {
+  if (!isSmokeMode) {
+    startLocalCrashReporter();
+  }
+  // 画板图片协议（T11.0d）：要在 ready 之前登记成标准、安全、可跨源，<img> 和 canvas 导出才都能用。
+  protocol.registerSchemesAsPrivileged([
+    {
+      scheme: CANVAS_IMAGE_SCHEME,
+      privileges: {
+        standard: true,
+        secure: true,
+        supportFetchAPI: true,
+        corsEnabled: true,
+        stream: true,
+      },
+    },
+  ]);
+  app.on("second-instance", () => {
+    const window = mainWindow;
+    if (window === null || window.isDestroyed()) {
+      return;
+    }
+    if (window.isMinimized()) {
+      window.restore();
+    }
+    window.show();
+    window.focus();
   });
+  app
+    .whenReady()
+    .then(bootstrap)
+    .catch((thrown: unknown) => {
+      console.error(`[main] 启动失败：${String(thrown)}`);
+      app.exit(1);
+    });
+}
 
 app.on("window-all-closed", () => {
   // 单窗口应用：所有平台关窗即退出（macOS 常驻托盘习惯留待后续任务决策）

@@ -7,13 +7,44 @@ import { join, resolve } from "node:path";
 import { CANVAS_SUBDIR, ingestCanvasDirectoryFile } from "./canvas-files";
 
 const watchers = new Map<string, FSWatcher>();
+/** 目录监听真的收进一张新图时通知（按项目，第一次登记的为准）。 */
+const onAddedByRoot = new Map<string, () => void>();
+
+/** Windows 写一个文件会连发好几次事件，每次都整份读写 board.json；同一文件 300ms 内只收一次（T11.0d）。 */
+const INGEST_DEBOUNCE_MS = 300;
+const pendingIngest = new Map<string, ReturnType<typeof setTimeout>>();
+
+function scheduleIngest(projectRoot: string, fileName: string): void {
+  const key = `${watcherKey(projectRoot)}|${fileName}`;
+  const before = pendingIngest.get(key);
+  if (before !== undefined) {
+    clearTimeout(before);
+  }
+  const timer = setTimeout(() => {
+    pendingIngest.delete(key);
+    void ingestCanvasDirectoryFile(projectRoot, fileName)
+      .then((added) => {
+        if (added) {
+          onAddedByRoot.get(watcherKey(projectRoot))?.();
+        }
+      })
+      .catch(() => {
+        // 忽略单次写入竞争
+      });
+  }, INGEST_DEBOUNCE_MS);
+  timer.unref?.();
+  pendingIngest.set(key, timer);
+}
 
 function watcherKey(projectRoot: string): string {
   return resolve(projectRoot);
 }
 
-export function ensureCanvasWatcher(projectRoot: string): void {
+export function ensureCanvasWatcher(projectRoot: string, onAdded?: () => void): void {
   const key = watcherKey(projectRoot);
+  if (onAdded !== undefined && !onAddedByRoot.has(key)) {
+    onAddedByRoot.set(key, onAdded);
+  }
   if (watchers.has(key)) {
     return;
   }
@@ -23,9 +54,7 @@ export function ensureCanvasWatcher(projectRoot: string): void {
       if (typeof fileName !== "string" || fileName.trim() === "") {
         return;
       }
-      void ingestCanvasDirectoryFile(projectRoot, fileName).catch(() => {
-        // 忽略单次写入竞争
-      });
+      scheduleIngest(projectRoot, fileName);
     });
     watcher.on("error", () => {
       stopCanvasWatcher(projectRoot);
@@ -43,6 +72,7 @@ export function stopCanvasWatcher(projectRoot: string): void {
     watcher.close();
     watchers.delete(key);
   }
+  onAddedByRoot.delete(key);
 }
 
 export function stopAllCanvasWatchers(): void {
@@ -50,4 +80,5 @@ export function stopAllCanvasWatchers(): void {
     watcher.close();
   }
   watchers.clear();
+  onAddedByRoot.clear();
 }

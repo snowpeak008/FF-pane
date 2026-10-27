@@ -1,5 +1,6 @@
 import type { ReactElement, ReactNode } from "react";
 import { useUiStore } from "../stores/ui";
+import { MemoryWarningBanner } from "./MemoryWarningBanner";
 import { SecondaryPanel } from "./SecondaryPanel";
 import { Sidebar } from "./Sidebar";
 
@@ -32,7 +33,10 @@ export function AppLayout({ children }: AppLayoutProps): ReactElement {
       <SecondaryPanel />
       {/* main 地标：nav（A 栏）/ aside（B 栏）/ main（内容列）三分——语义化之外，
           也让测试能把「页面内容」与「B 栏同名项目条目」区分开 */}
-      <main className="flex min-w-0 flex-1 flex-col overflow-hidden">{children}</main>
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <MemoryWarningBanner />
+        {children}
+      </main>
     </div>
   );
 }

@@ -88,7 +88,12 @@ export interface GenerateProjectImageDeps {
 }
 
 export type GenerateProjectImageResult =
-  | { readonly ok: true; readonly relativePath: string }
+  | {
+      readonly ok: true;
+      readonly relativePath: string;
+      /** 是不是这次新放进画板的（目录监听先收进来了就是 false）。 */
+      readonly added?: boolean;
+    }
   | { readonly ok: false; readonly error: string };
 
 interface CleanInput {
@@ -340,7 +345,7 @@ async function placeNewImage(
     if (secret !== "" && placed.relativePath.includes(secret)) {
       return failure("出图结果异常。", secret);
     }
-    return { ok: true, relativePath: placed.relativePath };
+    return { ok: true, relativePath: placed.relativePath, added: placed.added };
   } catch (error) {
     return failure(messageOf(error), secret);
   }

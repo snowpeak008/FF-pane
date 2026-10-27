@@ -1,5 +1,6 @@
 /**
  * 项目画板：缩略图条、整图查看。拖动空白移动画面，点一下打标签。
+ * 图片走 `ffpane-canvas://`（T11.0d）：缩略图懒加载、主进程缓存，原图只在大图里取，不再转 base64。
  * 画板是项目图库（T11.0）：删图进回收站；可以标「不要」；AI 的删图申请在这里同意或保留；
  * 彻底删除、清空回收站只有这里能做。
  */
@@ -9,6 +10,7 @@ import { type ReactElement, useCallback, useEffect, useRef, useState } from "rea
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { projectImageTag } from "../../../../shared/canvas-image-tag";
+import { canvasImageUrl } from "../../../../shared/canvas-image-url";
 import type {
   WorkbenchCanvasBoardView,
   WorkbenchCanvasEdit,
@@ -40,39 +42,37 @@ function boardFromView(view: WorkbenchCanvasBoardView): CanvasBoard {
   return view;
 }
 
+/** 画板里每个路径最近一次放进来的时间，当图片地址的版本号用（同一路径换了图会重新取）。 */
+function versionsByPath(board: CanvasBoard): ReadonlyMap<string, string> {
+  const out = new Map<string, string>();
+  for (const page of board.pages) {
+    for (const row of page.rows) {
+      for (const version of row.versions) {
+        out.set(version.path, version.addedAt);
+      }
+    }
+  }
+  return out;
+}
+
 function CanvasImage({
   projectId,
   path,
+  version,
   selected,
   note,
   onSelect,
 }: {
   readonly projectId: ProjectId;
   readonly path: string;
+  readonly version?: string;
   readonly selected: boolean;
   readonly note?: CanvasImageNote;
   readonly onSelect: () => void;
 }): ReactElement {
   const { t } = useTranslation();
-  const [src, setSrc] = useState<string | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    void invokeQuery("workbench:read-canvas-image", { projectId, relativePath: path }).then(
-      (settled) => {
-        if (cancelled) {
-          return;
-        }
-        if (settled.status === "error") {
-          return;
-        }
-        setSrc(settled.data.dataUrl);
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId, path]);
-
+  const [failed, setFailed] = useState(false);
+  const src = canvasImageUrl(projectId, path, "thumb", version);
   const tag = projectImageTag(path);
   return (
     <button
@@ -94,14 +94,17 @@ function CanvasImage({
               : t("workbench.canvas.flagRejected")}
           </span>
         ) : null}
-        {src === null ? (
+        {failed ? (
           <span className="text-xs text-fg-muted">…</span>
         ) : (
           <img
             src={src}
             alt=""
+            loading="lazy"
+            decoding="async"
             className="max-h-full max-w-full object-contain"
             draggable={false}
+            onError={() => setFailed(true)}
           />
         )}
       </span>
@@ -119,11 +122,13 @@ function CanvasImage({
 function Viewer({
   projectId,
   path,
+  version,
   annotations,
   onAnnotationsCommit,
 }: {
   readonly projectId: ProjectId;
   readonly path: string;
+  readonly version?: string;
   readonly annotations: readonly CanvasAnnotation[];
   readonly onAnnotationsCommit: (
     next: readonly CanvasAnnotation[],
@@ -131,12 +136,7 @@ function Viewer({
   ) => void;
 }): ReactElement {
   const { t } = useTranslation();
-  const [src, setSrc] = useState<string | null>(null);
-  const srcPath = useRef(path);
-  if (srcPath.current !== path) {
-    srcPath.current = path;
-    setSrc(null);
-  }
+  const src = canvasImageUrl(projectId, path, "full", version);
   const paintedPath = useRef<string | null>(null);
   const [imageSize, setImageSize] = useState({ w: 0, h: 0 });
   const imageSizeRef = useRef({ w: 0, h: 0 });
@@ -190,6 +190,7 @@ function Viewer({
     }
   }, []);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 换了一张图就把视口、草稿、手势都清掉
   useEffect(() => {
     userMoved.current = false;
     setView({ scale: 1, x: 0, y: 0 });
@@ -198,23 +199,7 @@ function Viewer({
     setDraft(null);
     draftRef.current = null;
     gestureRef.current = null;
-    let cancelled = false;
-    void invokeQuery("workbench:read-canvas-image", { projectId, relativePath: path }).then(
-      (settled) => {
-        if (cancelled) {
-          return;
-        }
-        if (settled.status === "error") {
-          toast.error(settled.error.message);
-          return;
-        }
-        setSrc(settled.data.dataUrl);
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId, path]);
+  }, [path]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -266,21 +251,19 @@ function Viewer({
   const publish = useCallback(
     (next: readonly CanvasAnnotation[]): void => {
       const preview =
-        next.length === 0 || src === null
-          ? Promise.resolve(null)
-          : renderCanvasMarkedPng(src, next, path);
+        next.length === 0 ? Promise.resolve(null) : renderCanvasMarkedPng(src, next, path);
       onAnnotationsCommit(next, preview);
     },
     [onAnnotationsCommit, path, src],
   );
 
   useEffect(() => {
-    if (src === null || annotations.length === 0 || paintedPath.current === path) {
+    if (annotations.length === 0 || paintedPath.current === path) {
       return;
     }
     paintedPath.current = path;
     publish(annotations);
-  }, [annotations, path, publish, src]);
+  }, [annotations, path, publish]);
 
   const commitEditing = (): void => {
     if (editing === null || skipBlurRef.current) {
@@ -564,25 +547,29 @@ function Viewer({
             transformOrigin: "0 0",
           }}
         >
-          {src !== null ? (
-            <img
-              src={src}
-              alt=""
-              className="max-w-none select-none shadow-sm"
-              draggable={false}
-              onLoad={(event) => {
-                const size = {
-                  w: event.currentTarget.naturalWidth,
-                  h: event.currentTarget.naturalHeight,
-                };
-                imageSizeRef.current = size;
-                setImageSize(size);
-                if (!userMoved.current) {
-                  fitNow();
-                }
-              }}
-            />
-          ) : null}
+          <img
+            key={src}
+            src={src}
+            alt=""
+            className="max-w-none select-none shadow-sm"
+            draggable={false}
+            onError={() => {
+              toast.error(
+                t("workbench.canvas.loadFailed", { name: projectImageTag(path).fileName }),
+              );
+            }}
+            onLoad={(event) => {
+              const size = {
+                w: event.currentTarget.naturalWidth,
+                h: event.currentTarget.naturalHeight,
+              };
+              imageSizeRef.current = size;
+              setImageSize(size);
+              if (!userMoved.current) {
+                fitNow();
+              }
+            }}
+          />
         </div>
         {shownAnnotations.map((item) => {
           if (item.kind !== "label") {
@@ -715,6 +702,7 @@ export function WorkbenchCanvasPanel({
   const focusPath = useWorkbenchCanvasStore((s) => s.focusPath);
   const closeCanvas = useWorkbenchCanvasStore((s) => s.closeCanvas);
   const setFocusPath = useWorkbenchCanvasStore((s) => s.setFocusPath);
+  const setUnseen = useWorkbenchCanvasStore((s) => s.setUnseen);
   const [board, setBoard] = useState<CanvasBoard | null>(null);
   const [trash, setTrash] = useState<readonly WorkbenchCanvasTrashEntryView[]>([]);
   const [showTrash, setShowTrash] = useState(false);
@@ -748,6 +736,8 @@ export function WorkbenchCanvasPanel({
     const next = boardFromView(settled.data.board);
     setBoard(next);
     setTrash(settled.data.trash);
+    // 主进程取画板时已把新图数清零。
+    setUnseen(projectId, 0);
     setSelectedPath((current) => {
       if (current !== null) {
         return current;
@@ -755,7 +745,7 @@ export function WorkbenchCanvasPanel({
       const page = next.pages.find((item) => item.id === next.activePageId) ?? next.pages[0];
       return page?.rows[0]?.versions[0]?.path ?? null;
     });
-  }, [projectId]);
+  }, [projectId, setUnseen]);
 
   useEffect(() => {
     if (!open) {
@@ -824,6 +814,8 @@ export function WorkbenchCanvasPanel({
     return null;
   }
 
+  const versions = versionsByPath(board);
+  const selectedVersion = selectedPath !== null ? versions.get(selectedPath) : undefined;
   const annotations = selectedPath !== null ? (board.annotations[selectedPath] ?? []) : [];
   const note = selectedPath !== null ? board.notes?.[selectedPath] : undefined;
 
@@ -959,6 +951,7 @@ export function WorkbenchCanvasPanel({
                         <CanvasImage
                           projectId={projectId}
                           path={version.path}
+                          version={version.addedAt}
                           selected={selectedPath === version.path}
                           {...(board.notes?.[version.path] !== undefined
                             ? { note: board.notes[version.path] }
@@ -1066,6 +1059,7 @@ export function WorkbenchCanvasPanel({
           <Viewer
             projectId={projectId}
             path={selectedPath}
+            {...(selectedVersion !== undefined ? { version: selectedVersion } : {})}
             annotations={annotations}
             onAnnotationsCommit={(next, preview) => {
               const path = selectedPath;

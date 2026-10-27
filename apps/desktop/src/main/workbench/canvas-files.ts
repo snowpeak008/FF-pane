@@ -5,7 +5,18 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, open, readdir, readFile, rename, stat, unlink } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import {
+  copyFile,
+  lstat,
+  mkdir,
+  open,
+  readdir,
+  readFile,
+  rename,
+  stat,
+  unlink,
+} from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import {
   activePage,
@@ -13,8 +24,11 @@ import {
   appendVersionToRow,
   type CanvasAnnotation,
   type CanvasBoard,
+  dedupeCanvasBoard,
   defaultCanvasBoard,
+  detachVersion,
   isCanvasImageFileName,
+  locatePath,
   parseCanvasBoard,
   removePathFromBoard,
   setAnnotationsForPath,
@@ -141,13 +155,25 @@ export function canvasDirectory(projectRoot: string): string {
   return canvasDirLexical(projectRoot);
 }
 
+/** 合并重复行之前的原样备份（T11.0d）。只留第一次的，不覆盖。 */
+export const CANVAS_BOARD_DEDUPE_BACKUP = "board.before-dedupe.json";
+
 async function readBoardFile(projectRoot: string): Promise<CanvasBoard> {
   const boardPath = join(canvasDirLexical(projectRoot), CANVAS_BOARD_NAME);
   try {
     const text = await readFile(boardPath, "utf8");
     const parsed = parseCanvasBoard(JSON.parse(text) as unknown);
     if (parsed !== undefined) {
-      return parsed;
+      const deduped = dedupeCanvasBoard(parsed);
+      if (deduped.removed > 0) {
+        // 下一次写画板时按合并后的写回；合并前的原文件先留一份。
+        await copyFile(
+          boardPath,
+          join(canvasDirLexical(projectRoot), CANVAS_BOARD_DEDUPE_BACKUP),
+          fsConstants.COPYFILE_EXCL,
+        ).catch(() => undefined);
+      }
+      return deduped.board;
     }
   } catch {
     // fall through
@@ -198,8 +224,18 @@ export async function writeAtomic(target: string, data: Buffer | string): Promis
 const STALE_TEMP = /^\..+\.[0-9a-f-]{36}\.tmp$/i;
 export const CANVAS_STALE_TEMP_MS = 10 * 60_000;
 
-/** 清掉以前没写成留下的临时文件（超过 10 分钟的；更新的可能还在写）。 */
+/** 每个项目上次清临时文件的时间。目录里几千张图，每次打开画板都列一遍太费（T11.0d）。 */
+const lastSweepAt = new Map<string, number>();
+
+/** 清掉以前没写成留下的临时文件（超过 10 分钟的；更新的可能还在写）。同一项目 10 分钟内只清一次。 */
 async function sweepStaleTemps(projectRoot: string): Promise<void> {
+  const key = resolve(projectRoot).toLowerCase();
+  const now = Date.now();
+  const last = lastSweepAt.get(key);
+  if (last !== undefined && now - last < CANVAS_STALE_TEMP_MS) {
+    return;
+  }
+  lastSweepAt.set(key, now);
   const root = canvasDirLexical(projectRoot);
   for (const dir of [root, join(root, CANVAS_REVISIONS_DIR)]) {
     let names: string[];
@@ -253,12 +289,11 @@ async function syncCanvasRevisions(projectRoot: string, board: CanvasBoard): Pro
       continue;
     }
     const imageFileName = basename(resolved.absolute);
-    const bytes = await readFile(resolved.absolute);
     const brief = buildCanvasRevisionFile(
       resolved.relative,
       imageFileName,
       items,
-      readRasterSize(bytes),
+      await readImageSize(resolved.absolute),
     );
     if (brief === undefined) {
       continue;
@@ -271,6 +306,22 @@ async function syncCanvasRevisions(projectRoot: string, board: CanvasBoard): Pro
     await writeAtomic(lexical.absolute, `${JSON.stringify(brief, null, 2)}\n`);
   }
   await sweepRevisionDir(dir, keep);
+}
+
+/** 宽高只在文件头里：只读开头一段（JPEG 的尺寸段可能在 EXIF 后面，读 256KB）。T11.0d 以前每次写画板都把每张有标注的图整张读一遍。 */
+const IMAGE_HEADER_BYTES = 256 * 1024;
+
+async function readImageSize(
+  absolute: string,
+): Promise<{ readonly width: number; readonly height: number } | undefined> {
+  const handle = await open(absolute, "r");
+  try {
+    const buffer = Buffer.alloc(IMAGE_HEADER_BYTES);
+    const { bytesRead } = await handle.read(buffer, 0, IMAGE_HEADER_BYTES, 0);
+    return readRasterSize(buffer.subarray(0, bytesRead));
+  } finally {
+    await handle.close();
+  }
 }
 
 async function writeBoardFile(projectRoot: string, board: CanvasBoard): Promise<void> {
@@ -307,7 +358,13 @@ export async function placeImageOnBoard(
   imageRelativePath: string,
   options: { readonly rowId?: string; readonly asNewVersion?: boolean },
 ): Promise<
-  | { readonly ok: true; readonly board: CanvasBoard; readonly relativePath: string }
+  | {
+      readonly ok: true;
+      readonly board: CanvasBoard;
+      readonly relativePath: string;
+      /** 这次是不是新放进画板的（已经在画板上、只是挪了行或没动时为 false）。 */
+      readonly added: boolean;
+    }
   | { readonly ok: false; readonly error: string }
 > {
   const resolved = await resolveCanvasImage(projectRoot, imageRelativePath);
@@ -318,6 +375,18 @@ export async function placeImageOnBoard(
     let board = await readBoardFile(projectRoot);
     const addedAt = new Date().toISOString();
     const rowId = options.rowId?.trim();
+    // 已经在画板上（多半是目录监听先收进来了）：不再加一行。要挂到别的行当新版本时才挪过去。
+    const existing = locatePath(board, resolved.relative);
+    if (existing !== undefined) {
+      const moveTo =
+        rowId !== undefined && rowId !== "" && options.asNewVersion && existing.rowId !== rowId
+          ? rowId
+          : undefined;
+      if (moveTo === undefined) {
+        return { ok: true as const, board, relativePath: resolved.relative, added: false };
+      }
+      board = detachVersion(board, resolved.relative);
+    }
     if (rowId !== undefined && rowId !== "" && options.asNewVersion) {
       const before = activePage(board).rows.find((row) => row.id === rowId);
       board = before
@@ -329,7 +398,12 @@ export async function placeImageOnBoard(
       board = addImageAsNewRow(board, resolved.relative, `row-${randomUUID()}`, addedAt);
     }
     await writeBoardFile(projectRoot, board);
-    return { ok: true as const, board, relativePath: resolved.relative };
+    return {
+      ok: true as const,
+      board,
+      relativePath: resolved.relative,
+      added: existing === undefined,
+    };
   });
 }
 
@@ -366,29 +440,6 @@ export async function updateCanvasAnnotations(
     setAnnotationsForPath(current, resolved.relative, annotations),
   );
   return { ok: true, board };
-}
-
-export async function readCanvasImageBytes(
-  projectRoot: string,
-  imageRelativePath: string,
-): Promise<
-  | { readonly ok: true; readonly mime: string; readonly base64: string }
-  | { readonly ok: false; readonly error: string }
-> {
-  const resolved = await resolveCanvasImage(projectRoot, imageRelativePath);
-  if (!resolved.ok) {
-    return resolved;
-  }
-  const buf = await readFile(resolved.absolute);
-  const name = basename(resolved.absolute).toLowerCase();
-  const mime = name.endsWith(".png")
-    ? "image/png"
-    : name.endsWith(".webp")
-      ? "image/webp"
-      : name.endsWith(".gif")
-        ? "image/gif"
-        : "image/jpeg";
-  return { ok: true, mime, base64: buf.toString("base64") };
 }
 
 export async function canvasImageSha256(
@@ -482,24 +533,31 @@ export async function writeCanvasMarkedPreview(
   return { ok: true, relativePath };
 }
 
+/** 目录里新出现的图收进画板。返回是否真的加了一行（已经在画板上就不加）。 */
 export async function ingestCanvasDirectoryFile(
   projectRoot: string,
   fileName: string,
-): Promise<void> {
+): Promise<boolean> {
   if (!shouldIngestCanvasFileName(fileName)) {
-    return;
+    return false;
   }
   const relative = `.ffpane/${CANVAS_SUBDIR}/${fileName}`;
   const resolved = await resolveCanvasImage(projectRoot, relative);
   if (!resolved.ok) {
-    return;
+    return false;
   }
+  let added = false;
   await editCanvasBoard(projectRoot, (board) => {
-    const exists = board.pages.some((page) =>
-      page.rows.some((row) => row.versions.some((version) => version.path === resolved.relative)),
+    if (locatePath(board, resolved.relative) !== undefined) {
+      return board;
+    }
+    added = true;
+    return addImageAsNewRow(
+      board,
+      resolved.relative,
+      `row-${randomUUID()}`,
+      new Date().toISOString(),
     );
-    return exists
-      ? board
-      : addImageAsNewRow(board, resolved.relative, `row-${randomUUID()}`, new Date().toISOString());
   });
+  return added;
 }

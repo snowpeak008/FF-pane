@@ -330,6 +330,12 @@ export function createPromptWatch(deps: PromptWatchDeps): PromptWatch {
             observed.delete(id);
           }
         }
+        // observe() 读过、但从没进 checked 的终端，关掉后也要清（T11.0d）。
+        for (const id of [...observed.keys()]) {
+          if (!live.has(id)) {
+            observed.delete(id);
+          }
+        }
       } finally {
         running = false;
       }

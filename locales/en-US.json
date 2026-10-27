@@ -3,7 +3,12 @@
     "loading": "Loading application info…",
     "loadError": "Failed to load application info: {{message}}",
     "version": "Version {{version}}",
-    "runtime": "Electron {{electron}} · Chromium {{chrome}} · Node {{node}}"
+    "runtime": "Electron {{electron}} · Chromium {{chrome}} · Node {{node}}",
+    "memoryWarning": {
+      "main": "The FF-pane background process is using {{mb}} MB of memory. Restart FF-pane when convenient; windows will resume.",
+      "renderer": "The interface is using {{mb}} MB of memory. Restart FF-pane when convenient; windows will resume.",
+      "dismiss": "Dismiss"
+    }
   },
   "capability": {
     "level": {
@@ -397,8 +402,7 @@
       "open": "Open canvas",
       "close": "Close canvas",
       "projectTag": "Project image",
-      "openedBy": "Canvas opened from {{title}}",
-      "empty": "No images yet. Save files under this project’s .ffpane/canvas/, or ask a window to open the canvas tool.",
+      "empty": "No images yet. Save files under this project’s .ffpane/canvas/, or ask a window to add one with the image tools.",
       "pickImage": "Pick a thumbnail in a row above to zoom and tag.",
       "removeFromBoard": "Remove from canvas",
       "removedFromBoard": "Removed from the canvas; the file on disk is unchanged.",
@@ -429,7 +433,9 @@
       "deleteRequest": "{{by}} asks to delete this image: {{reason}}",
       "approveDelete": "Approve delete",
       "keepImage": "Keep",
-      "exportedTo": "Exported to: {{paths}}"
+      "exportedTo": "Exported to: {{paths}}",
+      "openWithNew": "Open canvas ({{count}} new)",
+      "loadFailed": "Could not load {{name}}; the file may be gone."
     },
     "drawer": {
       "noProject": "Choose a project before opening the workbench panel.",

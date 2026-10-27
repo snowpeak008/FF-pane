@@ -121,6 +121,8 @@ export async function renderCanvasMarkedPng(
   }
   try {
     const image = new Image();
+    // 原图来自 ffpane-canvas://，要按跨源取，画进 canvas 后才导得出来。
+    image.crossOrigin = "anonymous";
     image.src = src;
     await image.decode();
     if (image.naturalWidth <= 0 || image.naturalHeight <= 0) {

@@ -345,12 +345,42 @@ export class PtyManager {
     return session.evictedModes.prelude() + session.buffer.toString();
   }
 
+  /**
+   * 回放缓冲的最后至多 maxBytes 字节，结果和 takeUtf8Tail(getReplayBuffer(id), maxBytes) 一样，
+   * 但不把整份 1MB 拼成字符串（T11.0d：提示符检测每次只要最后 256KB）。
+   */
+  getReplayTail(id: string, maxBytes: number): string {
+    const session = this.requireSession(id);
+    this.flushSession(session);
+    const tail = session.buffer.tailString(maxBytes);
+    const room = maxBytes - session.buffer.byteLength();
+    if (room <= 0) {
+      return tail;
+    }
+    // 模式序列全是 ASCII，按字节截就是按字符截。
+    const prelude = session.evictedModes.prelude();
+    return prelude.slice(Math.max(0, prelude.length - room)) + tail;
+  }
+
   isIdle(id: string, quietMs: number): boolean {
     const session = this.requireSession(id);
     if (session.exited) {
       return true;
     }
     return this.now() - session.lastOutputAt >= quietMs;
+  }
+
+  /** 还在 Map 里的会话数和回放缓冲总字节（T11.0d 内存记录用）。 */
+  bufferStats(): { readonly count: number; readonly bufferedBytes: number } {
+    let bufferedBytes = 0;
+    let count = 0;
+    for (const session of this.sessions.values()) {
+      bufferedBytes += session.buffer.byteLength();
+      if (!session.exited) {
+        count += 1;
+      }
+    }
+    return { count, bufferedBytes };
   }
 
   /** 杀掉全部 PTY 并清空 Map。 */

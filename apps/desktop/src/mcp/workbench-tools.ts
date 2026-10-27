@@ -378,7 +378,7 @@ const TOOL_DEFINITIONS: readonly McpToolDefinition[] = [
   {
     name: "ffpane_open_canvas",
     description:
-      "打开本项目的画板，并把指定图片放上去。图片路径必须在 .ffpane/canvas/ 内。要看图、改图或生图前先调用；新图请先存到 .ffpane/canvas/ 再打开。可选 rowId 与 asNewVersion：为 true 时在同一行横向追加版本。用户对不满意的生图打过标签后，返回值里的 revision 就是修改要求：marks 里是编号、位置、颜色和用户写的字，markedImage 是带这些绘制的预览图。同名文件在 .ffpane/canvas/revisions/。改图时要读这些文字，也要看 markedImage；按 image 指向的原图来画，不要把气泡和字画进新图。任何窗口都可调用。过于频繁会被拒绝。",
+      "把指定图片放进本项目的画板（已在画板上的不会重复放），并取回这张图的修改要求。不会在用户界面上弹出画板，用户自己打开时会看到新图。图片路径必须在 .ffpane/canvas/ 内。要看图、改图或生图前先调用；新图请先存到 .ffpane/canvas/ 再调用。可选 rowId 与 asNewVersion：为 true 时在同一行横向追加版本。用户对不满意的生图打过标签后，返回值里的 revision 就是修改要求：marks 里是编号、位置、颜色和用户写的字，markedImage 是带这些绘制的预览图。同名文件在 .ffpane/canvas/revisions/。改图时要读这些文字，也要看 markedImage；按 image 指向的原图来画，不要把气泡和字画进新图。任何窗口都可调用。过于频繁会被拒绝。",
     inputSchema: {
       type: "object",
       properties: {
@@ -402,7 +402,7 @@ const TOOL_DEFINITIONS: readonly McpToolDefinition[] = [
   {
     name: "ffpane_generate_image",
     description:
-      "按设置里的生图方案出一张新图，或按原图改一张。任何窗口都可调用。图写入当前项目的 .ffpane/canvas/ 并打开画板。不要自己另找生图办法。sourceImagePath 可选，有则改这张已有的图，路径必须在该项目 .ffpane/canvas/ 内，且不能是 revisions 里的派生文件。有原图并且传了 rowId 与 asNewVersion 时，新图挂到那一行；否则新开一行。设置若是先不生图，会失败。失败只返回原因，不往别的窗口写正文。",
+      "按设置里的生图方案出一张新图，或按原图改一张。任何窗口都可调用。图写入当前项目的 .ffpane/canvas/ 并放进画板（不会弹出画板）。不要自己另找生图办法。sourceImagePath 可选，有则改这张已有的图，路径必须在该项目 .ffpane/canvas/ 内，且不能是 revisions 里的派生文件。有原图并且传了 rowId 与 asNewVersion 时，新图挂到那一行；否则新开一行。设置若是先不生图，会失败。失败只返回原因，不往别的窗口写正文。",
     inputSchema: {
       type: "object",
       properties: {

@@ -263,6 +263,57 @@ export function findRowForPath(board: CanvasBoard, imagePath: string): CanvasRow
   return undefined;
 }
 
+/**
+ * 同一张图在画板上只留一处：按页、行、版本的顺序留第一次出现的，后面重复的去掉，空行去掉（T11.0d）。
+ * 以前出图后目录监听和放图各加一行，《海上生存日记》6264 行里只有 3911 张不同的图。
+ * 没有重复时原样返回。
+ */
+export function dedupeCanvasBoard(board: CanvasBoard): {
+  readonly board: CanvasBoard;
+  readonly removed: number;
+} {
+  const seen = new Set<string>();
+  let removed = 0;
+  const pages = board.pages.map((page) => {
+    const rows: CanvasRow[] = [];
+    for (const row of page.rows) {
+      const versions = row.versions.filter((version) => {
+        if (seen.has(version.path)) {
+          removed += 1;
+          return false;
+        }
+        seen.add(version.path);
+        return true;
+      });
+      if (versions.length === row.versions.length) {
+        rows.push(row);
+      } else if (versions.length > 0) {
+        rows.push({ ...row, versions });
+      }
+    }
+    return rows.length === page.rows.length && rows.every((row, index) => row === page.rows[index])
+      ? page
+      : { ...page, rows };
+  });
+  return removed === 0 ? { board, removed } : { board: { ...board, pages }, removed };
+}
+
+/** 只把这张图的版本从行里拿掉（标注、附注留着），空行去掉。用于把图挪到别的行。 */
+export function detachVersion(board: CanvasBoard, imagePath: string): CanvasBoard {
+  return {
+    ...board,
+    pages: board.pages.map((page) => ({
+      ...page,
+      rows: page.rows
+        .map((row) => ({
+          ...row,
+          versions: row.versions.filter((version) => version.path !== imagePath),
+        }))
+        .filter((row) => row.versions.length > 0),
+    })),
+  };
+}
+
 export function parseCanvasBoard(raw: unknown): CanvasBoard | undefined {
   if (typeof raw !== "object" || raw === null) {
     return undefined;

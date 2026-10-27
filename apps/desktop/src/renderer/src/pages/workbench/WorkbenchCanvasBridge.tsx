@@ -1,24 +1,17 @@
 /**
- * 画板呼出：MCP ffpane_open_canvas 事件。与 WorkbenchPanelBridge 同层。
+ * 画板的全局监听，与 WorkbenchPanelBridge 同层。
+ * AI 出图、交图只更新画板按钮上的新图数，不打开画板、不切页面（T11.0d，Tony 2026-10-27）。
  */
 
 import { type ReactElement, useEffect } from "react";
-import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
-import { toast } from "sonner";
 import { useSubscription } from "../../ipc/useSubscription";
-import { useUiStore } from "../../stores/ui";
 import { useWorkbenchCanvasStore } from "../../stores/workbench-canvas";
 
 export function WorkbenchCanvasBridge(): ReactElement | null {
-  const navigate = useNavigate();
-  const { t } = useTranslation();
-
-  useSubscription("workbench:open-canvas", (payload) => {
-    useUiStore.getState().setActiveProjectId(payload.projectId);
-    navigate("/workbench");
-    useWorkbenchCanvasStore.getState().openCanvas(payload.focusPath ?? null);
-    toast.message(t("workbench.canvas.openedBy", { title: payload.openerTitle }));
+  useSubscription("workbench:canvas-changed", (payload) => {
+    if (payload.unseen !== undefined) {
+      useWorkbenchCanvasStore.getState().setUnseen(payload.projectId, payload.unseen);
+    }
   });
 
   useEffect(() => {
