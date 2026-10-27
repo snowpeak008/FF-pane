@@ -309,7 +309,7 @@ export function WindowPane({
     >
       <div
         className={cn(
-          "relative z-10 flex h-7 shrink-0 items-center gap-1 border-b border-border px-1",
+          "relative z-10 flex h-7 min-w-0 shrink-0 items-center gap-1 overflow-hidden border-b border-border px-1",
           isCli && role === "manager" ? "bg-primary-surface" : "bg-surface-sunken",
         )}
         data-manager={isCli && role === "manager" ? "true" : "false"}
@@ -611,7 +611,7 @@ export function WindowPane({
       </div>
       {isCli && role === "manager" ? (
         <div
-          className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-surface-sunken px-2 py-1"
+          className="flex shrink-0 items-center gap-x-2 overflow-hidden whitespace-nowrap border-b border-border bg-surface-sunken px-2 py-1"
           data-testid="workbench-compact-slider"
           data-compact={window.compactPercent ?? "default"}
         >
@@ -663,7 +663,10 @@ export function WindowPane({
               {t("workbench.window.compact.percent", { percent: window.compactPercent })}
             </span>
           ) : null}
-          <span className="text-2xs text-fg-muted">
+          <span
+            className="min-w-0 truncate text-2xs text-fg-muted"
+            title={`${t("workbench.window.compact.reopen")} ${t("workbench.window.compact.notLater")} ${t("workbench.window.compact.notStatus")}`}
+          >
             {t("workbench.window.compact.reopen")} {t("workbench.window.compact.notLater")}{" "}
             {t("workbench.window.compact.notStatus")}
             {window.kind === "grok" ? ` ${t("workbench.window.compact.grokCap")}` : ""}
@@ -744,7 +747,7 @@ export function WindowPane({
       ) : null}
       {isCli ? (
         <div
-          className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-2 py-1 text-2xs"
+          className="flex shrink-0 items-center gap-2 overflow-hidden whitespace-nowrap border-b border-border px-2 py-1 text-2xs"
           data-testid="workbench-session-bar"
         >
           {window.sessionUnidentified === true ? (

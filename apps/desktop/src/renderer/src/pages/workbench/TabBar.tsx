@@ -1,10 +1,11 @@
 /**
  * 工作台标签栏（T10.2）：新建 / 切换 / 关闭 / 双击重命名。
+ * 48px 高、标签固定 160px 宽（T11.2a）；选中的标签和下面的工作区连成一片，切换时滚到看得见。
  */
 
 import type { WorkbenchTab } from "@ff-pane/shared";
 import { Plus, X } from "lucide-react";
-import { type ReactElement, useState } from "react";
+import { type ReactElement, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../components/ui/Button";
 import { cn } from "../../lib/cn";
@@ -29,20 +30,26 @@ export function TabBar({
   const { t } = useTranslation();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const activeRef = useRef<HTMLDivElement | null>(null);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 切换标签、增删标签后都要把选中的那个滚进视野
+  useEffect(() => {
+    activeRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [activeTabId, tabs.length]);
 
   return (
     <div
-      className="flex h-8 shrink-0 items-center gap-1 border-b border-border bg-surface px-1"
+      className="flex h-12 shrink-0 items-stretch gap-1 border-b border-border bg-surface px-1"
       data-testid="workbench-tab-bar"
     >
-      <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
+      <div className="flex min-w-0 flex-1 items-stretch gap-0.5 overflow-x-auto overflow-y-hidden pt-1.5">
         {tabs.map((tab) => {
           const active = tab.id === activeTabId;
           if (editingId === tab.id) {
             return (
               <input
                 key={tab.id}
-                className="h-6 w-28 rounded-sm border border-border-strong bg-surface px-1 text-xs"
+                className="my-1.5 w-40 shrink-0 rounded-sm border border-border-strong bg-surface px-2 text-sm"
                 value={draft}
                 ref={(el) => {
                   el?.focus();
@@ -67,16 +74,18 @@ export function TabBar({
           return (
             <div
               key={tab.id}
+              ref={active ? activeRef : undefined}
+              title={tab.title}
               className={cn(
-                "group flex h-6 max-w-40 items-center gap-1 rounded-sm border px-1.5",
+                "group flex w-40 shrink-0 items-center gap-1 rounded-t-md border-x border-t-2 px-3",
                 active
-                  ? "border-border bg-surface-active text-fg"
-                  : "border-transparent text-fg-muted hover:bg-surface-hover",
+                  ? "border-x-border border-t-primary bg-canvas text-fg"
+                  : "border-x-border border-t-border bg-surface-sunken text-fg-muted hover:bg-surface-hover",
               )}
             >
               <button
                 type="button"
-                className="min-w-0 flex-1 truncate text-left text-xs"
+                className="h-full min-w-0 flex-1 truncate text-left text-sm"
                 data-testid="workbench-tab"
                 data-tab-id={tab.id}
                 onClick={() => onSelect(tab.id)}
@@ -89,25 +98,29 @@ export function TabBar({
               </button>
               <button
                 type="button"
-                className="rounded-sm p-0.5 opacity-0 hover:bg-surface-active group-hover:opacity-100"
+                className={cn(
+                  "rounded-sm p-1 hover:bg-surface-active",
+                  active ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+                )}
                 aria-label={t("workbench.tab.close")}
                 onClick={() => onClose(tab.id)}
               >
-                <X aria-hidden size={12} />
+                <X aria-hidden size={14} />
               </button>
             </div>
           );
         })}
       </div>
       <Button
+        className="self-center"
         variant="ghost"
-        size="sm"
+        size="md"
         iconOnly
         aria-label={t("workbench.tab.new")}
         data-testid="workbench-new-tab"
         onClick={onNewTab}
       >
-        <Plus aria-hidden size={14} />
+        <Plus aria-hidden size={18} />
       </Button>
     </div>
   );
