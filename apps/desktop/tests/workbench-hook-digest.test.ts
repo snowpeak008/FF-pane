@@ -22,6 +22,7 @@ async function runHook(
   prompt: string,
   event = "UserPromptSubmit",
   stdin: Record<string, unknown> = { hook_event_name: "UserPromptSubmit", prompt },
+  peekText?: string,
 ): Promise<{ stdout: string; requests: string[] }> {
   const pipe =
     process.platform === "win32"
@@ -49,7 +50,9 @@ async function runHook(
         `${JSON.stringify(
           req.type === "inbox-digest"
             ? { ok: true, result: { text: "正文：青蛙七号" } }
-            : { ok: true },
+            : req.type === "inbox-peek" && peekText !== undefined
+              ? { ok: true, result: { text: peekText } }
+              : { ok: true },
         )}\n`,
       );
     });
@@ -87,10 +90,21 @@ describe("新消息 hook 进程", () => {
     });
   }, 20_000);
 
-  it("普通输入只上报，不取正文，不写 stdout", async () => {
+  it("普通输入：上报后只问有没有未读，不取正文；没有未读不写 stdout", async () => {
     const result = await runHook("帮我看看 [新消息] 这个词");
-    expect(result.requests).toEqual(["hook:tok"]);
+    expect(result.requests).toEqual(["hook:tok", "inbox-peek:tok"]);
     expect(result.stdout.trim()).toBe("");
+  }, 20_000);
+
+  it("普通输入、收件箱有未读：附一句未读提示", async () => {
+    const result = await runHook("接着做", "UserPromptSubmit", undefined, "[平台] 另有 2 条未读");
+    expect(result.requests).toEqual(["hook:tok", "inbox-peek:tok"]);
+    expect(JSON.parse(result.stdout.trim())).toEqual({
+      hookSpecificOutput: {
+        hookEventName: "UserPromptSubmit",
+        additionalContext: "[平台] 另有 2 条未读",
+      },
+    });
   }, 20_000);
 
   it("API 错误（StopFailure）：只转发错误类型，不转发错误正文", async () => {

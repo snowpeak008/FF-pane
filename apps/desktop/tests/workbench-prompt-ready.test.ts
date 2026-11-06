@@ -51,6 +51,20 @@ const CLAUDE_TRUST = [
   .map((line) => line.trimStart())
   .join("\n");
 
+const CLAUDE_PERMISSION = [
+  "● Bash(git status)",
+  RULE,
+  " Bash command",
+  "   git status",
+  "   Show working tree status",
+  " Do you want to proceed?",
+  " ❯ 1. Yes",
+  "   2. Yes, and don't ask again for git status commands",
+  "   3. No, and tell Claude what to do differently (esc)",
+]
+  .map((line) => line.trimStart())
+  .join("\n");
+
 const CODEX_IDLE = [
   "  >_ OpenAI Codex (v0.162.0)",
   "  /model - choose what model and reasoning effort to use",
@@ -273,6 +287,52 @@ describe("看到输入提示符判空闲", () => {
     h.queue.noteHook("t1", "permission-request", { toolUseId: "tool-1" });
     expect(h.queue.notePromptReady("t1", { settled: true })).toBe(false);
     expect(h.queue.phaseOf("t1")).toBe("blocked");
+  });
+
+  it("批准过的确认框（按摘要记的）：屏幕回到空输入框且安静很久，放开权限闩并投递", () => {
+    const h = harness();
+    const digest = "a".repeat(64);
+    h.queue.noteHook("t1", "stop");
+    h.queue.noteHook("t1", "permission-request", { toolDigest: digest });
+    expect(h.queue.enqueue({ terminalId: "t1", text: "[新消息] 1 条" })).toEqual({
+      status: "queued",
+      mode: "blocked",
+    });
+    // 真 Claude：批准后工具跑完，PostToolUse 带的是 tool_use_id，对不上摘要；这一轮正常结束。
+    h.queue.noteHook("t1", "post-tool-use", { toolUseId: "toolu_x" });
+    h.queue.noteHook("t1", "stop");
+    expect(h.queue.phaseOf("t1")).toBe("blocked");
+    expect(h.queue.notePromptReady("t1")).toBe(false);
+    expect(h.writes).toEqual([]);
+    expect(h.queue.notePromptReady("t1", { settled: true })).toBe(true);
+    expect(h.writes).toEqual(["[新消息] 1 条", "\r"]);
+  });
+
+  it("监视器看等批准的窗口：安静够久才看屏幕，确认框不算空闲", async () => {
+    let now = 10_000;
+    let screen = CLAUDE_PERMISSION;
+    const ready: string[] = [];
+    const watch = createPromptWatch({
+      targets: () => [
+        { terminalId: "t1", windowId: "w1", runtime: "claude-code", lastOutputAt: 9000 },
+      ],
+      phaseOf: () => "blocked",
+      render: async () => screen,
+      notePromptReady: (_id, opts) => opts.settled,
+      onReady: (windowId) => {
+        ready.push(windowId);
+      },
+      now: () => now,
+    });
+    await watch.tick();
+    expect(ready).toEqual([]);
+    now = 20_000;
+    await watch.tick();
+    expect(ready).toEqual([]);
+    screen = CLAUDE_IDLE;
+    watch.forget("t1");
+    await watch.tick();
+    expect(ready).toEqual(["w1"]);
   });
 
   it("监视器只在状态未知或忙时看屏幕，同一段输出只看一次", async () => {

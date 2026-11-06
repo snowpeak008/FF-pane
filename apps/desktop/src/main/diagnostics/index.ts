@@ -236,6 +236,17 @@ function writeSnapshot(dir: string): void {
   }
 }
 
+/** 界面每 5 分钟写的内存行（JS 堆、终端图集），收进主进程日志。 */
+const RENDERER_REPORT_PREFIX = "[renderer-mem]";
+
+export function forwardRendererReports(window: BrowserWindow): void {
+  window.webContents.on("console-message", (details) => {
+    if (details.message.startsWith(RENDERER_REPORT_PREFIX)) {
+      console.log(details.message);
+    }
+  });
+}
+
 /** 界面卡住：记日志；30 秒还没缓过来就弹框，可选强制重载（走上面的「界面进程没了」）。 */
 export function watchWindowResponsiveness(window: BrowserWindow): void {
   let timer: ReturnType<typeof setTimeout> | null = null;

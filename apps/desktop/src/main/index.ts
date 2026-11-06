@@ -9,6 +9,7 @@ import { installCsp } from "./csp";
 import { createDataHandlers } from "./data";
 import { resolveGlobalRoot } from "./data-root";
 import {
+  forwardRendererReports,
   installDiagnostics,
   installMainLogFile,
   startLocalCrashReporter,
@@ -73,6 +74,7 @@ function createMainWindow(options: {
   mainWindow = window;
   if (!isSmokeMode) {
     watchWindowResponsiveness(window);
+    forwardRendererReports(window);
   }
   window.on("closed", () => {
     mainWindow = null;

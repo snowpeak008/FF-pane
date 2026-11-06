@@ -485,6 +485,8 @@ export interface WorkbenchWindowRuntimeStatus {
   readonly waitingLocks: readonly string[];
   /** 上一轮因 API 错误中断的说明，例如「账号限流（429）」。 */
   readonly lastApiError?: string;
+  /** 因 API 错误暂停、在等用户发话：平台不再往这个窗口打提醒，汇报记进它的待处理。 */
+  readonly apiPaused?: boolean;
   /** 正在在线监管（循环调用 ffpane_wait_events）。 */
   readonly online: boolean;
   /** 窗口进程组里的进程数和合计内存（工作集），含它起的后台进程。 */

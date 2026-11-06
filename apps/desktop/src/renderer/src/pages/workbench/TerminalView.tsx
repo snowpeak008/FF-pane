@@ -16,6 +16,7 @@ import { useTheme } from "../../theme";
 import { forgetLiveTerminal, peekLiveTerminal, rememberLiveTerminal } from "./live-terminals";
 import { createRelaunchGuard } from "./relaunch-guard";
 import { ackTerminalOutput } from "./terminal-output-ack";
+import { terminalWebgl } from "./terminal-webgl";
 import "@xterm/xterm/css/xterm.css";
 
 /** 尺寸停止变化多久后才调伪终端（毫秒）。ConPTY 每调一次都整屏重画（1.0.8 查过）。 */
@@ -91,23 +92,6 @@ function monoFontFamily(): string {
   const styles = getComputedStyle(document.documentElement);
   const fromToken = styles.getPropertyValue("--font-mono").trim();
   return fromToken || '"Cascadia Mono", Consolas, ui-monospace, "SFMono-Regular", Menlo, monospace';
-}
-
-async function tryLoadWebgl(terminal: Terminal): Promise<void> {
-  try {
-    const { WebglAddon } = await import("@xterm/addon-webgl");
-    const addon = new WebglAddon();
-    terminal.loadAddon(addon);
-    addon.onContextLoss(() => {
-      try {
-        addon.dispose();
-      } catch {
-        // fall back to DOM renderer
-      }
-    });
-  } catch {
-    // WebGL unavailable — keep DOM renderer
-  }
 }
 
 export function TerminalView({
@@ -486,7 +470,7 @@ export function TerminalView({
     fit.fit();
     termRef.current = term;
     fitRef.current = fit;
-    void tryLoadWebgl(term);
+    const detachWebgl = terminalWebgl.attach(term);
 
     term.onData((data) => {
       writeToPty(data);
@@ -580,6 +564,7 @@ export function TerminalView({
       if (resizeTimer !== undefined) {
         clearTimeout(resizeTimer);
       }
+      detachWebgl();
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
@@ -654,12 +639,12 @@ export function TerminalView({
     onExitCodeChangeRef.current?.(payload.exitCode);
   });
 
+  // 布局里的编号由 WorkbenchFlushBridge 记（窗口不显示时也要记）；这里只换续接用的编号。
   useSubscription("workbench:session-claimed", (payload) => {
     if (payload.windowId !== windowId) {
       return;
     }
     nativeSessionIdRef.current = payload.nativeSessionId;
-    onNativeSessionIdRef.current?.(payload.nativeSessionId);
   });
 
   // 平台正在重启这个窗口：旧终端结束到新终端接上之间不给重启按钮。

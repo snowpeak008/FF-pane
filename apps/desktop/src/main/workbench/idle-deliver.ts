@@ -14,8 +14,10 @@
  * - PermissionRequest 使未决权限计数 +1。计数 > 0 时 Stop 与“立即发送”都不写入。
  *   有合法 tool_use_id 时用它配对，对应的 PostToolUse / PostToolUseFailure 才 −1。
  *   没有 id 的摘要只加不减：同摘要的 PostToolUse 不再把多重集减到 0。
- *   摘要计数只有用户再提交一次输入（UserPromptSubmit）或窗口重启才清。
- *   因此批准权限后的自动提醒会停住，直到用户再发一句。
+ *   摘要计数由用户再提交一次输入（UserPromptSubmit）、窗口重启清掉，
+ *   或者看屏幕：输出安静很久、屏幕上是空闲的输入框（确认框不算）时清掉（notePromptReady）。
+ *   真 Claude 的 PermissionRequest 不带 tool_use_id，不这样清的话，批准过一次权限，
+ *   之后的提醒就一直停着，直到用户再发一句。
  *   伪造的 Stop 在计数 > 0 时不解锁。id 配对减到 0 后记为 busy，还要再等一次 Stop 才投递。
  * - 可按终端设回车延迟（submitDelayMs）：Codex 会把紧跟在一串字符后的回车当成粘贴里的换行，
  *   正文写完隔一会儿再写回车。
@@ -211,7 +213,7 @@ export interface IdleDeliverQueue {
   noteTurnStarted(terminalId: string): void;
   /**
    * 屏幕上是空闲的输入提示符。状态未知时判为空闲；
-   * settled（输出已经安静很久）时连忙和初始提示也一起清掉。返回状态有没有变成空闲。
+   * settled（输出已经安静很久）时连忙、初始提示和摘要记的权限闩也一起清掉。返回状态有没有变成空闲。
    */
   notePromptReady(terminalId: string, options?: { readonly settled?: boolean }): boolean;
   /** 这个终端跑过一轮（提交过回车或收到过回合信号）。 */
@@ -967,7 +969,7 @@ export function createIdleDeliverQueue(deps: IdleDeliverDeps): IdleDeliverQueue 
     },
     notePromptReady(terminalId, options) {
       const session = sessions.get(terminalId);
-      if (session === undefined || permissionOutstanding(session) > 0) {
+      if (session === undefined) {
         return false;
       }
       // 回车已写出、还在核对：等核对说了算。
@@ -975,7 +977,15 @@ export function createIdleDeliverQueue(deps: IdleDeliverDeps): IdleDeliverQueue 
         return false;
       }
       const settled = options?.settled === true;
-      if (session.phase === "unknown") {
+      if (permissionOutstanding(session) > 0 || session.phase === "blocked") {
+        // 按 tool_use_id 配对的还没结束：不清。只按摘要记的、无法配对的减不掉，批准之后会一直闩着；
+        // 屏幕上已经是空的输入框（确认框认不成输入框）且输出安静很久，说明确认框早就关了。
+        if (!settled || session.pendingPermissionIds.size > 0) {
+          return false;
+        }
+        session.pendingPermissionDigests.clear();
+        session.unpairedPermissions = 0;
+      } else if (session.phase === "unknown") {
         if (session.initialPromptPending && !settled) {
           return false;
         }

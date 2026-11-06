@@ -43,6 +43,18 @@ export function WorkbenchFlushBridge(): ReactElement | null {
     }
   });
 
+  // 对话编号变了（Codex 开了新对话，Claude 里 /resume、/clear）。窗口不在当前标签页时也要记上：
+  // 界面写回布局会把旧编号盖回去，下次续接又接回旧对话。
+  useSubscription("workbench:session-claimed", (payload) => {
+    const store = useWorkbenchStore.getState();
+    for (const layout of Object.values(store.layoutsByProject)) {
+      if (layout.windows[payload.windowId] !== undefined) {
+        store.noteWindowSession(layout.projectId, payload.windowId, payload.nativeSessionId);
+        return;
+      }
+    }
+  });
+
   useSubscription("workbench:inbox-notice", (payload) => {
     useWorkbenchStore.getState().applyInboxNotice(payload);
   });

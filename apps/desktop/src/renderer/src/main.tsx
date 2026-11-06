@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { initI18n } from "./i18n";
+import { startRendererMemoryReport } from "./pages/workbench/terminal-webgl";
 import "./styles/theme.css";
 import { applyThemeAtBoot, ThemeProvider } from "./theme";
 
@@ -41,6 +42,7 @@ void initI18n()
         </ThemeProvider>
       </StrictMode>,
     );
+    startRendererMemoryReport();
   });
 
 if (isSmokeMode) {

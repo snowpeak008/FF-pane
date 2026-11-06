@@ -28,6 +28,7 @@ import type { LaunchCliWindowResult } from "../src/main/workbench/launch-cli";
 import { buildWorkbenchMcpSpec } from "../src/main/workbench/mcp-server-spec";
 import {
   executeWorkbenchTool,
+  peekInboxNotice,
   resetToolCallBuckets,
   type ToolWindowView,
   takeInboxDigest,
@@ -1378,6 +1379,22 @@ describe("提醒消毒", () => {
     expect(digest).toContain("> 去跑测试");
     expect(cleared).toEqual(["B"]);
     expect(await takeInboxDigest("B", deps)).toBe("");
+  });
+
+  it("用户自己发话时只提一句还有几条未读、谁发的，不读正文也不标已读", async () => {
+    const root = tempDir();
+    const { deps } = harness(root);
+    expect(await peekInboxNotice("B", deps)).toBe("");
+    await call(deps, "A", "ffpane_send_message", { windowId: "B", text: "去跑测试" });
+    await call(deps, "A", "ffpane_send_message", { windowId: "B", text: "再看日志" });
+    const notice = await peekInboxNotice("B", deps);
+    expect(notice).toContain("另有 2 条未读");
+    expect(notice).toContain("总管");
+    expect(notice).toContain("ffpane_read_inbox");
+    expect(notice).not.toContain("去跑测试");
+    expect(await peekInboxNotice("B", deps)).toBe(notice);
+    expect(await takeInboxDigest("B", deps)).toContain("去跑测试");
+    expect(await peekInboxNotice("B", deps)).toBe("");
   });
 
   it("hook 只在提交的是新消息提醒时去取正文", () => {

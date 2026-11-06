@@ -115,6 +115,7 @@ import {
   executeWorkbenchTool,
   hasInboxHook,
   type ModelEffortApplyResult,
+  peekInboxNotice,
   type RemindDelivery,
   takeInboxDigest,
   type WindowModelInfo,
@@ -842,6 +843,8 @@ export async function createWorkbenchCliLayer(
     exit: { readonly exitCode: number; readonly killed: boolean },
   ): void => {
     clearPermissionTimer(windowId);
+    // 窗口退出后续接用布局里记的编号（界面收到过认领）；再启动时钩子会重新报。
+    claudeSessionOf.delete(windowId);
     apiErrors.forget(windowId);
     supervisorWasOnline.delete(windowId);
     stopRequested.delete(windowId);
@@ -999,10 +1002,16 @@ export async function createWorkbenchCliLayer(
     const terminalId = findLiveTerminalId(windowId);
     if (terminalId !== undefined) {
       const metadata = options.manager.get(terminalId)?.metadata;
-      if (metadata?.["kind"] === "codex") {
+      const kind = metadata?.["kind"];
+      if (kind === "codex") {
         // Codex 的 notify 只装在这个进程上、凭本窗口令牌回报，报来的编号就是本窗口的会话。
         if (meta?.sessionId !== undefined) {
           noteCodexThread(windowId, meta.sessionId);
+        }
+      } else if (kind === "claude" || kind === "deepseek") {
+        // Claude 的钩子也只装在这个进程上：报来的编号是它当前的对话（/resume、/clear 会换）。
+        if (meta?.sessionId !== undefined) {
+          noteClaudeSession(windowId, terminalId, meta.sessionId);
         }
       } else {
         // Grok 的钩子写在项目配置里，同项目的其他 Grok 会话也会触发，所以要核对会话编号。
@@ -1073,12 +1082,27 @@ export async function createWorkbenchCliLayer(
   };
   /** 每个 Codex 窗口当前对话的编号。 */
   const codexSessionOf = new Map<string, string>();
-  const publishCodexSession = (windowId: string, nativeSessionId: string): void => {
+  /** 每个 Claude / DeepSeek 窗口当前对话的编号（钩子报来的，比启动时记的新）。 */
+  const claudeSessionOf = new Map<string, string>();
+  const publishSessionClaimed = (windowId: string, nativeSessionId: string): void => {
     const browser = options.getWindow();
     if (browser === null || browser.isDestroyed()) {
       return;
     }
     publishEvent(browser.webContents, "workbench:session-claimed", { windowId, nativeSessionId });
+  };
+  /**
+   * 在 Claude 里 /resume、/clear 换了对话：记上新编号并告诉界面写进布局。
+   * 不记的话，重启、改模型、重开项目都续接回启动时那一段（11-02 因此接进了别的窗口的对话）。
+   */
+  const noteClaudeSession = (windowId: string, terminalId: string, sessionId: string): void => {
+    const launched = options.manager.get(terminalId)?.metadata?.["nativeSessionId"];
+    const known = claudeSessionOf.get(windowId) ?? (typeof launched === "string" ? launched : "");
+    if (known === sessionId) {
+      return;
+    }
+    claudeSessionOf.set(windowId, sessionId);
+    publishSessionClaimed(windowId, sessionId);
   };
   /** Codex 报来编号：还在等认领就交给认领；已认领但变了（在 Codex 里开了新对话）就换过去。 */
   const noteCodexThread = (windowId: string, threadId: string): void => {
@@ -1089,7 +1113,7 @@ export async function createWorkbenchCliLayer(
       return;
     }
     startCodexTail(windowId, threadId);
-    publishCodexSession(windowId, threadId);
+    publishSessionClaimed(windowId, threadId);
   };
   const startCodexTail = (windowId: string, sessionId: string): void => {
     stopCodexTail(windowId);
@@ -1210,7 +1234,10 @@ export async function createWorkbenchCliLayer(
       handleHookSignal(windowId, signal, meta);
     },
     log: (message) => {
-      console.error(`[wb-control] ${message}`);
+      // 每个钩子、每次工具调用都有一行 accepted，日志里全是它；只记出错的。
+      if (message !== "accepted") {
+        console.error(`[wb-control] ${message}`);
+      }
     },
   });
 
@@ -1531,7 +1558,7 @@ export async function createWorkbenchCliLayer(
     idleQueue,
     onCodexSessionClaimed: (windowId: string, nativeSessionId: string) => {
       startCodexTail(windowId, nativeSessionId);
-      publishCodexSession(windowId, nativeSessionId);
+      publishSessionClaimed(windowId, nativeSessionId);
     },
     onCodexSessionUnidentified: (windowId: string) => {
       const window = options.getWindow();
@@ -1607,9 +1634,10 @@ export async function createWorkbenchCliLayer(
         ? stored.permission
         : DEFAULT_WORKBENCH_WINDOW_PERMISSION);
     const kind = record?.metadata?.["kind"] ?? stored?.kind;
-    // Codex 的编号由 notify 报来，界面不在当前标签页时布局里可能还没记上，以主进程记的为准。
-    const codexSession = kind === "codex" ? codexSessionOf.get(windowId) : undefined;
-    const resumeId = codexSession ?? sessionId;
+    // Codex 的编号由 notify 报来、Claude 的由钩子报来，比启动时记的新，以主进程记的为准。
+    const liveSession =
+      kind === "codex" ? codexSessionOf.get(windowId) : claudeSessionOf.get(windowId);
+    const resumeId = liveSession ?? sessionId;
     const phase = terminalId !== undefined ? idleQueue.phaseOf(terminalId) : ("unknown" as const);
     // T11.1 改角色要重启：不用确认；不在空闲就当聊过，等空闲续接，不在一轮中间冷重启。
     const policy = policyRestartPending.has(windowId);
@@ -2287,6 +2315,7 @@ export async function createWorkbenchCliLayer(
           holdingLocks: held.holding,
           waitingLocks: held.waiting,
           ...(state.lastApiError !== undefined ? { lastApiError: state.lastApiError.label } : {}),
+          ...(state.lastApiError?.paused === true ? { apiPaused: true } : {}),
           ...(state.memory !== undefined ? { memory: state.memory } : {}),
           online: state.online === true,
         };
@@ -2624,6 +2653,10 @@ export async function createWorkbenchCliLayer(
       const text = await takeInboxDigest(context.windowId, toolDeps());
       return { ok: true, result: { text } };
     }
+    if (context.type === "inbox-peek") {
+      const text = await peekInboxNotice(context.windowId, toolDeps());
+      return { ok: true, result: { text } };
+    }
     if (context.type !== "tool") {
       return { ok: false, error: "unsupported" };
     }
@@ -2906,7 +2939,9 @@ export async function createWorkbenchCliLayer(
       }
       const terminalId = findLiveTerminalId(windowId);
       // 对方因限流暂停或不在：不打进终端（打进去它又会去调接口），记进它的待处理，等用户叫醒它。
-      if (apiErrors.isPaused(windowId) || terminalId === undefined) {
+      // 用户自己的拍板结果就是用户的指令：照常打进去，不记进待处理。
+      const paused = apiErrors.isPaused(windowId) && fromWindowId !== USER_PARTY_ID;
+      if (paused || terminalId === undefined) {
         const hasTeam = Object.values(authRegistry.snapshot()).some(
           (node) => node.parentWindowId === windowId,
         );

@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   extractHookPairing,
+  extractHookSessionId,
   extractNotifyThreadId,
   extractToolUseId,
   mapNotifyArgument,
@@ -129,5 +130,24 @@ describe("extractNotifyThreadId", () => {
       extractNotifyThreadId(["node.exe", "hook.mjs", JSON.stringify({ "thread-id": "../x" })]),
     ).toBeUndefined();
     expect(extractNotifyThreadId(["node.exe", "hook.mjs", "Stop"])).toBeUndefined();
+  });
+});
+
+describe("extractHookSessionId", () => {
+  it("只在开新会话和提交时取 Claude 的 session_id，形状不对就不要", () => {
+    const id = "0354798f-6112-4e56-ac59-4413cfe1cfcc";
+    const start = JSON.stringify({
+      hook_event_name: "SessionStart",
+      source: "resume",
+      session_id: id,
+    });
+    expect(extractHookSessionId("SessionStart", start)).toBe(id);
+    const prompt = JSON.stringify({ session_id: id, prompt: "密钥 sk-xxx" });
+    expect(extractHookSessionId("UserPromptSubmit", prompt)).toBe(id);
+    expect(extractHookSessionId("PostToolUse", prompt)).toBeUndefined();
+    expect(
+      extractHookSessionId("SessionStart", JSON.stringify({ session_id: "../x" })),
+    ).toBeUndefined();
+    expect(extractHookSessionId("SessionStart", "not json")).toBeUndefined();
   });
 });

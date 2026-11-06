@@ -1,7 +1,8 @@
 /**
  * 从渲染后的屏幕看 CLI 是不是停在空闲的输入提示符上，顺带读出屏幕上显示的模型和思考强度。
  *
- * 只用来补回合信号的空缺：重启过的窗口还没跑过一轮，收不到 Stop；上一轮被 Esc 打断也没有 Stop。
+ * 只用来补回合信号的空缺：重启过的窗口还没跑过一轮，收不到 Stop；上一轮被 Esc 打断也没有 Stop；
+ * 批准过的确认框没有能配对的结束信号，一直显示等批准。
  * 屏幕样子按真机核对（Claude Code 2.1.302、codex-cli 0.162.0，2026-10-21）：
  * - Claude：输入框是上下两条横线夹着的「❯ 」行；干活时上方有「… esc to interrupt」。
  *   信任目录、权限确认这类对话框的「❯ 1. Yes」「❯ No, exit」上面不是横线。
@@ -303,12 +304,13 @@ export function createPromptWatch(deps: PromptWatchDeps): PromptWatch {
         for (const target of deps.targets()) {
           live.add(target.terminalId);
           const phase = deps.phaseOf(target.terminalId);
-          if (phase !== "unknown" && phase !== "busy") {
+          if (phase === "idle") {
             continue;
           }
           const quiet = now - target.lastOutputAt;
           const settled = quiet >= settledMs;
-          if (quiet < quietMs || (phase === "busy" && !settled)) {
+          // 忙和等批准都要安静很久才看：批准过的确认框关了，按摘要记的权限闩靠这里放开。
+          if (quiet < quietMs || (phase !== "unknown" && !settled)) {
             continue;
           }
           const key = `${target.lastOutputAt}:${phase}:${settled ? 1 : 0}`;

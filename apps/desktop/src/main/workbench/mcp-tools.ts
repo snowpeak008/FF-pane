@@ -1457,6 +1457,37 @@ async function readInbox(
   });
 }
 
+/** 未读提示里最多列这么多个来源窗口。 */
+const INBOX_NOTICE_MAX_SENDERS = 5;
+
+/**
+ * 用户自己发话时（不是平台的新消息提醒），UserPromptSubmit hook 附一句：还有几条未读、谁发的。
+ * 不读正文、不标已读。不附的话它回完用户就结束，未读要等这一轮结束、输入框空着再提醒才看到；
+ * 用户来回说话时这个空档一直等不到。没有未读返回空串。
+ */
+export async function peekInboxNotice(callerId: string, deps: WorkbenchToolDeps): Promise<string> {
+  const caller = await deps.describe(callerId);
+  if (caller === undefined) {
+    return "";
+  }
+  const records = await readThreadIndex(caller.projectRoot);
+  const unread = inboxAfter(records, callerId, await deps.getCursor(callerId));
+  if (unread.length === 0) {
+    return "";
+  }
+  const senders = [
+    ...new Set(
+      unread.map((record) =>
+        record.from.windowId === USER_PARTY_ID ? "用户本人" : displayTitle(record.from.title),
+      ),
+    ),
+  ];
+  const from =
+    senders.slice(0, INBOX_NOTICE_MAX_SENDERS).join("、") +
+    (senders.length > INBOX_NOTICE_MAX_SENDERS ? " 等" : "");
+  return `[平台] 你的收件箱另有 ${unread.length} 条未读（来自 ${from}），不在用户这句话里。先回应用户；回应完调用 ffpane_read_inbox 看完再结束这一轮。`;
+}
+
 export const INBOX_DIGEST_MAX_CHARS = 9000;
 
 /**

@@ -1,13 +1,15 @@
 /**
  * 工作台观察型 hook（T10.6' / T10.7b）。
- * Claude：argv 里只有我们固定的事件名。stdin 上的事件 JSON 只取出 tool_use_id，
- * 以及 tool_name + 规范化 tool_input 的 SHA-256。工具正文不进入上报、不写文件、不交给 shell。
+ * Claude：argv 里只有我们固定的事件名。stdin 上的事件 JSON 只取出 tool_use_id、
+ * tool_name + 规范化 tool_input 的 SHA-256，以及 SessionStart / UserPromptSubmit 的 session_id。
+ * 工具正文不进入上报、不写文件、不交给 shell。
  * Codex notify：事件 JSON 是最后一个参数。只读取 type 和 thread-id：agent-turn-complete 映射成 Stop，
  * thread-id 作为会话编号一并上报（主进程凭窗口令牌认窗口，凭它认会话，不去扫 sessions 目录）。
  * 从环境变量读取管道名和窗口令牌，上报后立刻退出 0。
  * 不写日志、不把令牌落盘。退出码恒为 0，不返回 allow/deny。
  * 唯一的 stdout：Claude 的 UserPromptSubmit 提交的是工作台「[新消息]」提醒时，
- * 向主进程取未读正文，作为 additionalContext 交给模型（读出即标记已读）。取不到就什么也不写。
+ * 向主进程取未读正文，作为 additionalContext 交给模型（读出即标记已读）；
+ * 提交的是用户自己的话时，只取一句「还有几条未读、谁发的」（不标已读）。取不到就什么也不写。
  */
 
 import { createHash } from "node:crypto";
@@ -247,6 +249,29 @@ export function extractNotifyThreadId(argv: readonly string[]): string | undefin
   return undefined;
 }
 
+/** Claude 换了对话也会报这两种事件：开新会话、续接、/clear 走 SessionStart，每次提交走 UserPromptSubmit。 */
+const SESSION_REPORT_EVENTS = new Set(["SessionStart", "UserPromptSubmit"]);
+
+/**
+ * Claude hook stdin 里的 session_id，就是这个窗口当前的对话编号。在 Claude 里 /resume、/clear 换了对话，
+ * 平台靠它记上新编号，下次续接不再接回旧的。只取这一个字段。
+ */
+export function extractHookSessionId(event: string, raw: string): string | undefined {
+  if (!SESSION_REPORT_EVENTS.has(event)) {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith("{")) {
+    return undefined;
+  }
+  try {
+    const id = (JSON.parse(trimmed) as { session_id?: unknown })?.session_id;
+    return typeof id === "string" && THREAD_ID.test(id) ? id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** StopFailure 的 stdin 里只取错误类型（rate_limit 之类），不取错误正文。 */
 export function extractStopFailureType(raw: string): string | undefined {
   const trimmed = raw.trim();
@@ -282,11 +307,15 @@ export function promptIsInboxReminder(raw: string): boolean {
   }
 }
 
-/** 向控制通道取未读正文。超时、拒绝或断开都返回空串。 */
+/**
+ * 向控制通道取附加上下文。inbox-digest：未读正文（标为已读）；inbox-peek：只说有几条未读、谁发的。
+ * 超时、拒绝或断开都返回空串。
+ */
 export function requestInboxDigest(
   pipePath: string,
   token: string,
   timeoutMs = INBOX_DIGEST_TIMEOUT_MS,
+  type: "inbox-digest" | "inbox-peek" = "inbox-digest",
 ): Promise<string> {
   return new Promise((resolveDigest) => {
     let settled = false;
@@ -322,7 +351,7 @@ export function requestInboxDigest(
       }
     });
     socket.on("connect", () => {
-      socket.write(`${JSON.stringify({ v: 1, type: "inbox-digest", token })}\n`);
+      socket.write(`${JSON.stringify({ v: 1, type, token })}\n`);
     });
   });
 }
@@ -413,12 +442,18 @@ if (invokedDirectly()) {
           ...(pairing.toolDigest !== undefined ? { toolDigest: pairing.toolDigest } : {}),
         },
         event === "StopFailure" ? (extractStopFailureType(raw) ?? "unknown") : undefined,
-        extractNotifyThreadId(process.argv),
+        extractNotifyThreadId(process.argv) ?? extractHookSessionId(event, raw),
       );
-      if (event !== "UserPromptSubmit" || !promptIsInboxReminder(raw)) {
+      if (event !== "UserPromptSubmit") {
         return;
       }
-      const digest = await requestInboxDigest(pipePath, token);
+      // 平台的新消息提醒：附上未读正文。用户自己发的话：只提一句还有几条未读。
+      const digest = await requestInboxDigest(
+        pipePath,
+        token,
+        INBOX_DIGEST_TIMEOUT_MS,
+        promptIsInboxReminder(raw) ? "inbox-digest" : "inbox-peek",
+      );
       if (digest !== "") {
         await new Promise<void>((done) => {
           process.stdout.write(`${inboxHookOutput(digest)}\n`, () => done());

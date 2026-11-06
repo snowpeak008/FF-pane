@@ -145,7 +145,14 @@ export function RuntimeBadges({
           })}
         </span>
       ) : null}
-      {status.lastApiError !== undefined ? (
+      {status.apiPaused === true ? (
+        <span
+          className={cn(badge, "bg-warning-surface text-warning-text")}
+          data-testid="workbench-runtime-api-paused"
+        >
+          {t("workbench.runtime.apiPaused", { reason: status.lastApiError ?? "" })}
+        </span>
+      ) : status.lastApiError !== undefined ? (
         <span className={cn(badge, "bg-danger-surface text-danger-text")}>
           {t("workbench.runtime.apiError", { reason: status.lastApiError })}
         </span>
