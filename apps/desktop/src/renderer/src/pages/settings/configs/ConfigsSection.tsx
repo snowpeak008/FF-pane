@@ -28,7 +28,7 @@ const selectClass = "rounded-sm border border-border bg-surface px-2 py-1.5 text
 export function ConfigsSection(): ReactElement {
   const { t } = useTranslation();
   const { state, refetch } = useInvokeQuery("configs:list");
-  const { state: providerState } = useInvokeQuery("providers:list");
+  const { state: providerState, refetch: refetchProviders } = useInvokeQuery("providers:list");
   const { state: projectState } = useInvokeQuery("projects:list");
   const configs = queryData(state) ?? [];
   const providers = queryData(providerState) ?? [];
@@ -40,12 +40,15 @@ export function ConfigsSection(): ReactElement {
   const [replacement, setReplacement] = useState("");
   const [deleteError, setDeleteError] = useState<string | undefined>(undefined);
 
+  // 来源可能刚在同页的 Provider 区新建，打开编辑框时重拉，否则中转下拉里没有它
   const openCreate = (): void => {
+    refetchProviders();
     setEditing(null);
     setEditorOpen(true);
   };
 
   const openEdit = (config: ProjectConfig): void => {
+    refetchProviders();
     setEditing(config);
     setEditorOpen(true);
   };
