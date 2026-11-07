@@ -61,6 +61,11 @@ export interface ProjectRegistry {
    * 幂等：id 或 rootPath 已存在时不重复插入，直接返回现有条目。
    */
   restoreProject(entry: ProjectRegistryEntry): Promise<ProjectRegistryEntry>;
+  /**
+   * T11.8：设项目外可写目录（整份替换；空数组即清空）。只给界面用。
+   * id 不存在抛 ProjectNotFoundError。
+   */
+  setOutsideWriteDirs(id: ProjectId, dirs: readonly string[]): Promise<ProjectRegistryEntry>;
 }
 
 const PROJECT_ID_PREFIX = "project";
@@ -154,6 +159,26 @@ export function createProjectRegistry(
         projects.filter((project) => project.id !== id),
       );
       return removed;
+    },
+
+    async setOutsideWriteDirs(
+      id: ProjectId,
+      dirs: readonly string[],
+    ): Promise<ProjectRegistryEntry> {
+      const projects = await loadProjects(projectsFile);
+      const current = projects.find((project) => project.id === id);
+      if (current === undefined) {
+        throw new ProjectNotFoundError(id);
+      }
+      const cleaned = [...new Set(dirs.map((dir) => dir.trim()).filter((dir) => dir !== ""))];
+      const { outsideWriteDirs: _old, ...rest } = current;
+      const next: ProjectRegistryEntry =
+        cleaned.length > 0 ? { ...rest, outsideWriteDirs: cleaned } : rest;
+      await saveProjects(
+        projectsFile,
+        projects.map((project) => (project.id === id ? next : project)),
+      );
+      return next;
     },
 
     async restoreProject(entry: ProjectRegistryEntry): Promise<ProjectRegistryEntry> {

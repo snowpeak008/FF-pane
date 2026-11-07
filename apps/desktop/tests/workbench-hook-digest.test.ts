@@ -7,7 +7,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import net from "node:net";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const hookSource = join(
@@ -17,6 +17,10 @@ const hookSource = join(
   "mcp",
   "workbench-hook.ts",
 );
+/** hook 源文件导入了同目录的模块（不带扩展名），直接跑 .ts 时要补上扩展名。 */
+const tsExtRegister = pathToFileURL(
+  join(dirname(fileURLToPath(import.meta.url)), "ts-ext-register.mjs"),
+).href;
 
 async function runHook(
   prompt: string,
@@ -24,6 +28,7 @@ async function runHook(
   stdin: Record<string, unknown> = { hook_event_name: "UserPromptSubmit", prompt },
   peekText?: string,
   midTurnText?: string,
+  extraEnv: Record<string, string> = {},
 ): Promise<{ stdout: string; requests: string[] }> {
   const pipe =
     process.platform === "win32"
@@ -63,10 +68,14 @@ async function runHook(
   await new Promise<void>((resolve) => server.listen(pipe, resolve));
   try {
     const stdout = await new Promise<string>((resolve, reject) => {
-      const child = spawn(process.execPath, ["--experimental-strip-types", hookSource, event], {
-        env: { ...process.env, FF_PANE_WB_PIPE: pipe, FF_PANE_WINDOW_TOKEN: "tok" },
-        stdio: ["pipe", "pipe", "ignore"],
-      });
+      const child = spawn(
+        process.execPath,
+        ["--experimental-strip-types", "--import", tsExtRegister, hookSource, event],
+        {
+          env: { ...process.env, FF_PANE_WB_PIPE: pipe, FF_PANE_WINDOW_TOKEN: "tok", ...extraEnv },
+          stdio: ["pipe", "pipe", "ignore"],
+        },
+      );
       let out = "";
       child.stdout.on("data", (data) => {
         out += data.toString();
@@ -137,6 +146,38 @@ describe("新消息 hook 进程", () => {
     const result = await runHook("", "PostToolUse", stdin);
     expect(result.requests).toEqual(["hook:tok", "inbox-midturn:tok"]);
     expect(result.stdout.trim()).toBe("");
+  }, 20_000);
+
+  it("写到项目外（PreToolUse）：输出拒绝，不上报、不连管道（T11.8）", async () => {
+    const roots = { FF_PANE_WRITE_ROOTS: JSON.stringify(["D:\\proj", "C:\\tmp"]) };
+    const denied = await runHook(
+      "",
+      "PreToolUse",
+      { tool_name: "Bash", tool_input: { command: "mkdir -p /c/gather" }, cwd: "D:\\proj" },
+      undefined,
+      undefined,
+      roots,
+    );
+    expect(denied.requests).toEqual([]);
+    const out = JSON.parse(denied.stdout.trim());
+    expect(out.hookSpecificOutput.permissionDecision).toBe("deny");
+    expect(out.hookSpecificOutput.permissionDecisionReason).toContain("/c/gather");
+    const allowed = await runHook(
+      "",
+      "PreToolUse",
+      { tool_name: "Write", tool_input: { file_path: "D:\\proj\\a.txt" }, cwd: "D:\\proj" },
+      undefined,
+      undefined,
+      roots,
+    );
+    expect(allowed.stdout.trim()).toBe("");
+    // 没配允许目录：一律放行。
+    const unset = await runHook("", "PreToolUse", {
+      tool_name: "Write",
+      tool_input: { file_path: "C:\\x.txt" },
+      cwd: "D:\\proj",
+    });
+    expect(unset.stdout.trim()).toBe("");
   }, 20_000);
 
   it("API 错误（StopFailure）：只转发错误类型，不转发错误正文", async () => {

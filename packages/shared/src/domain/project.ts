@@ -71,4 +71,9 @@ export interface ProjectRegistryEntry {
   readonly rootPath: string;
   /** 项目登记进工作台的时间（epoch 毫秒）。 */
   readonly createdAt: EpochMillis;
+  /**
+   * T11.8 —— AI 窗口除项目目录外还能写的目录（绝对路径）。只有用户在项目卡片里能改；
+   * 存在用户目录下的 projects.json，不放进项目，AI 改不了。缺省没有。
+   */
+  readonly outsideWriteDirs?: readonly string[];
 }

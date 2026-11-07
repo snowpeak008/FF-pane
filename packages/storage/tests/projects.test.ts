@@ -94,6 +94,18 @@ describe("ProjectRegistry", () => {
     );
   });
 
+  it("项目外可写目录（T11.8）：整份替换、去空去重、空数组清掉字段、落盘可读回", async () => {
+    const a = await registry.addProject({ name: "a", rootPath: "/repos/a" });
+    const set = await registry.setOutsideWriteDirs(a.id, ["D:/x", " ", "D:/x", "E:/y"]);
+    expect(set.outsideWriteDirs).toEqual(["D:/x", "E:/y"]);
+    expect((await registry.listProjects())[0]?.outsideWriteDirs).toEqual(["D:/x", "E:/y"]);
+    const cleared = await registry.setOutsideWriteDirs(a.id, []);
+    expect(cleared).toEqual(a);
+    await expect(
+      registry.setOutsideWriteDirs("project-deadbeef0000" as ProjectId, ["D:/x"]),
+    ).rejects.toThrow(ProjectNotFoundError);
+  });
+
   it("restore：把被移除条目原样放回（保留 id 与 createdAt）", async () => {
     const a = await registry.addProject({ name: "a", rootPath: "/repos/a" });
     await registry.removeProject(a.id);

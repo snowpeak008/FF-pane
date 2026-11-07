@@ -765,6 +765,12 @@ export interface RemoveProjectRequest {
   readonly id: ProjectId;
 }
 
+/** projects:set-outside-write-dirs 请求（T11.8）：整份替换项目外可写目录，空数组即清空。 */
+export interface SetProjectOutsideWriteDirsRequest {
+  readonly id: ProjectId;
+  readonly dirs: readonly string[];
+}
+
 /** projects:restore 请求：撤销移除，把先前 projects:remove 返回的条目放回。 */
 export interface RestoreProjectRequest {
   readonly entry: ProjectRegistryEntry;
@@ -1775,6 +1781,10 @@ export interface IpcInvokeContracts {
   "projects:remove": { request: RemoveProjectRequest; response: ProjectRegistryEntry };
   /** 撤销移除：把被移除的条目原样放回注册表。 */
   "projects:restore": { request: RestoreProjectRequest; response: ProjectRegistryEntry };
+  "projects:set-outside-write-dirs": {
+    request: SetProjectOutsideWriteDirsRequest;
+    response: ProjectRegistryEntry;
+  };
   /** 读取项目级设置（project.json 中工作台负责的字段，T6.6）。 */
   "projects:get-settings": { request: ProjectScopedRequest; response: ProjectSettingsView };
   /** 更新项目级设置（非破坏性合并，保留其他工单写入的字段）。 */
@@ -2061,6 +2071,7 @@ export const INVOKE_CHANNELS = [
   "projects:create",
   "projects:remove",
   "projects:restore",
+  "projects:set-outside-write-dirs",
   "projects:get-settings",
   "projects:update-settings",
   "providers:list",

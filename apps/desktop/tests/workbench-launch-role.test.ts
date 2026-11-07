@@ -148,6 +148,9 @@ describe("launchCliWindow 角色与 hooks", () => {
       expect(first).toBeDefined();
       const token = first?.env["FF_PANE_WINDOW_TOKEN"] ?? "";
       expect(token.length).toBeGreaterThanOrEqual(64);
+      // T11.8：Claude 窗口带上能写的目录，第一个是项目目录。
+      const roots = JSON.parse(first?.env["FF_PANE_WRITE_ROOTS"] ?? "[]") as string[];
+      expect(roots[0]?.toLowerCase()).toBe(fakeBin.toLowerCase());
       expect(first?.env["FF_PANE_WB_PIPE"]).toBe("\\\\.\\pipe\\ff-pane-wb-test");
       expect(first?.env["ANTHROPIC_API_KEY"]).toBeUndefined();
       expect(first?.args.join("\n")).not.toContain(token);
@@ -168,7 +171,22 @@ describe("launchCliWindow 角色与 hooks", () => {
       expect(stopHook?.args[1]).toBe("Stop");
       expect(stopHook?.args[0]).toContain("workbench-hook.mjs");
       expect(stopHook?.command.toLowerCase()).toMatch(/node(?:\.exe)?$/);
-      expect(settingsBody).not.toMatch(/\.cmd|cmd\.exe|powershell|ELECTRON_RUN_AS_NODE/i);
+      // 只看真的会被启动的 command / args；PreToolUse 的 matcher 里有工具名 PowerShell，不是启动命令。
+      const launched = Object.values(parsed.hooks)
+        .flatMap((groups) => groups.flatMap((group) => group.hooks))
+        .flatMap((hook) => [hook.command, ...hook.args])
+        .join("\n");
+      expect(launched).not.toMatch(/\.cmd|cmd\.exe|powershell|ELECTRON_RUN_AS_NODE/i);
+      expect(settingsBody).not.toMatch(/ELECTRON_RUN_AS_NODE/);
+      // T11.8：写文件和命令工具前先做项目外写入检查，同一个 hook 脚本。
+      const guard = (
+        parsed.hooks["PreToolUse"] as unknown as
+          | { matcher: string; hooks: { command: string; args: string[] }[] }[]
+          | undefined
+      )?.[0];
+      expect(guard?.matcher).toContain("Write");
+      expect(guard?.matcher).toContain("Bash");
+      expect(guard?.hooks[0]?.args).toEqual([stopHook?.args[0], "PreToolUse"]);
 
       await launchCliWindow(
         {
@@ -231,6 +249,8 @@ describe("launchCliWindow 角色与 hooks", () => {
       const codexToken = codex?.env["FF_PANE_WINDOW_TOKEN"] ?? "";
       const joined = codex?.args.join("\n") ?? "";
       expect(joined).not.toContain("--dangerously-bypass-hook-trust");
+      expect(joined).not.toContain("--dangerously-bypass-approvals-and-sandbox");
+      expect(codex?.env["FF_PANE_WRITE_ROOTS"]).toBeUndefined();
       expect(joined).not.toContain("features.hooks");
       expect(joined).not.toContain("hooks.PermissionRequest");
       expect(joined).not.toContain("hooks.Stop");

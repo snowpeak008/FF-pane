@@ -6,6 +6,7 @@
 
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -80,6 +81,7 @@ import {
 } from "./mcp-temp";
 import type { LaunchCliRoute } from "./resolve-config";
 import { subagentPolicyFor } from "./role-tool-policy";
+import { claudeWriteRoots, codexWritableRootsOverride, WRITE_ROOTS_ENV } from "./write-roots";
 
 /** initialPrompt IPC 上限（字节按 UTF-16 码元计；更长内容走 T10.7 briefs）。 */
 export const MAX_INITIAL_PROMPT_CHARS = 32 * 1024;
@@ -173,6 +175,8 @@ export interface LaunchCliWindowDeps {
   readonly isKnowledgeToolEnabled: (projectRoot: string) => Promise<boolean>;
   /** 项目自配置开关。缺省当关。文件是否写入自配置工具只看这个开关。 */
   readonly isConfigToolEnabled?: (projectRoot: string) => Promise<boolean>;
+  /** Tony 在项目卡片里填的项目外可写目录（T11.8）。缺省没有。 */
+  readonly outsideWriteDirs?: (projectRoot: string) => Promise<readonly string[]>;
   readonly getKnowledgeToolSettings: () => Promise<
     | {
         readonly command?: string;
@@ -403,6 +407,12 @@ async function launchCliWindowBody(
   const subagents = subagentPolicyFor(role);
   if (runtime === "codex" && subagents.restricted) {
     configOverrides = { ...configOverrides, ...subagents.codexConfigOverrides };
+  }
+  // T11.8：不能写项目外。Claude 交给 PreToolUse hook；Codex 靠 workspace-write 沙盒，这里补项目外可写目录。
+  const outsideDirs =
+    deps.outsideWriteDirs !== undefined ? await deps.outsideWriteDirs(input.projectRoot) : [];
+  if (runtime === "codex") {
+    configOverrides = { ...configOverrides, ...codexWritableRootsOverride(outsideDirs) };
   }
   const compact = resolveManagerCompact({
     role,
@@ -710,6 +720,17 @@ async function launchCliWindowBody(
     }
   }
   stringEnv[FF_PANE_WINDOW_TOKEN_ENV] = windowToken;
+  if (runtime === "claude-code") {
+    stringEnv[WRITE_ROOTS_ENV] = JSON.stringify(
+      claudeWriteRoots({
+        projectRoot: input.projectRoot,
+        cwd,
+        home: homedir(),
+        tmp: tmpdir(),
+        outsideDirs,
+      }),
+    );
+  }
   for (const [key, value] of Object.entries(extraProcessEnv)) {
     stringEnv[key] = value;
   }

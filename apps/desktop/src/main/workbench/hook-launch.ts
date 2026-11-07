@@ -25,7 +25,13 @@ export const WORKBENCH_HOOK_EVENTS = [
   "SessionStart",
 ] as const;
 
-export type WorkbenchHookEvent = (typeof WORKBENCH_HOOK_EVENTS)[number];
+export type WorkbenchHookEvent = (typeof WORKBENCH_HOOK_EVENTS)[number] | "PreToolUse";
+
+/**
+ * 项目外写入检查（T11.8）挂在这些工具的 PreToolUse 上。只在主进程给了允许目录
+ * （环境变量 FF_PANE_WRITE_ROOTS）时才真的检查，hook 不上报、不连管道。
+ */
+export const WRITE_GUARD_TOOL_MATCHER = "Write|Edit|MultiEdit|NotebookEdit|Bash|PowerShell";
 
 export interface PreparedWindowHooks {
   /** 有 node 时才写。Claude `--settings` 指向它。 */
@@ -83,6 +89,12 @@ export function prepareWindowHooks(input: {
   for (const event of WORKBENCH_HOOK_EVENTS) {
     claudeHooks[event] = [{ hooks: [claudeHookExec(nodePath, input.scriptPath, event)] }];
   }
+  claudeHooks["PreToolUse"] = [
+    {
+      matcher: WRITE_GUARD_TOOL_MATCHER,
+      hooks: [claudeHookExec(nodePath, input.scriptPath, "PreToolUse")],
+    },
+  ];
   const settingsPath = join(dir, "claude-settings.json");
   writeFileSync(settingsPath, `${JSON.stringify({ hooks: claudeHooks }, null, 2)}\n`, "utf8");
   return {

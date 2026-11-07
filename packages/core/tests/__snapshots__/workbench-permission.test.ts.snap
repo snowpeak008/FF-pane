@@ -124,13 +124,23 @@ exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > codex × read-only × resume 
 
 exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > codex × yolo × fresh 1`] = `
 [
-  "--dangerously-bypass-approvals-and-sandbox",
+  "-s",
+  "workspace-write",
+  "-a",
+  "never",
+  "-c",
+  "sandbox_workspace_write.network_access=true",
 ]
 `;
 
 exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > codex × yolo × resume 1`] = `
 [
-  "--dangerously-bypass-approvals-and-sandbox",
+  "-c",
+  "sandbox_mode="workspace-write"",
+  "-c",
+  "approval_policy="never"",
+  "-c",
+  "sandbox_workspace_write.network_access=true",
 ]
 `;
 

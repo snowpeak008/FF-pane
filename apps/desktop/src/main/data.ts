@@ -91,6 +91,7 @@ type DataChannel =
   | "projects:create"
   | "projects:remove"
   | "projects:restore"
+  | "projects:set-outside-write-dirs"
   | "projects:get-settings"
   | "projects:update-settings"
   | "providers:list"
@@ -363,6 +364,16 @@ export async function createDataHandlers(
     },
 
     "projects:restore": (request) => registry.restoreProject(request.entry),
+
+    // T11.8：项目外可写目录只有界面能改，存在用户目录下的 projects.json，AI 改不了。改了要重开窗口才生效。
+    "projects:set-outside-write-dirs": (request) =>
+      registry.setOutsideWriteDirs(
+        request.id,
+        request.dirs
+          .map((dir) => dir.trim())
+          .filter((dir) => dir !== "")
+          .map((dir) => resolve(dir)),
+      ),
 
     // 项目级设置（T6.6）：只读写 project.json 中本层负责的字段，其余键原样保留
     "projects:get-settings": (request) =>

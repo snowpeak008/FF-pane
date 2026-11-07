@@ -1392,6 +1392,17 @@ export async function createWorkbenchCliLayer(
       }
     },
     getMaxWorkbenchWindows: getMax,
+    outsideWriteDirs: async (projectRoot: string) => {
+      try {
+        const listed = await projects.listProjects();
+        const entry = listed.find(
+          (item) => item.rootPath.toLowerCase() === projectRoot.toLowerCase(),
+        );
+        return entry?.outsideWriteDirs ?? [];
+      } catch {
+        return [];
+      }
+    },
     isKnowledgeToolEnabled: async (projectRoot: string) => {
       try {
         const projectLayout = resolveProjectLayout(projectRoot);

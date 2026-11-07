@@ -55,6 +55,8 @@ export function ProjectCard({
   const [configs, setConfigs] = useState<readonly ProjectConfig[]>([]);
   const [selected, setSelected] = useState("");
   const [saving, setSaving] = useState(false);
+  /** 项目外可写目录（T11.8），一行一个。 */
+  const [outsideDirs, setOutsideDirs] = useState("");
 
   const degraded = summary.unavailable.length > 0;
   const warning = !summary.workbenchPresent
@@ -70,11 +72,18 @@ export function ProjectCard({
 
   const openBind = (): void => {
     setBindOpen(true);
+    setOutsideDirs((project.outsideWriteDirs ?? []).join("\n"));
     void (async () => {
-      const [configsSettled, settingsSettled] = await Promise.all([
+      const [configsSettled, settingsSettled, projectsSettled] = await Promise.all([
         invokeQuery("configs:list"),
         invokeQuery("projects:get-settings", { projectRoot: project.rootPath }),
+        invokeQuery("projects:list"),
       ]);
+      // 卡片上的条目可能是保存前的旧值，以注册表为准。
+      if (projectsSettled.status === "success") {
+        const fresh = projectsSettled.data.find((item) => item.id === project.id);
+        setOutsideDirs((fresh?.outsideWriteDirs ?? []).join("\n"));
+      }
       const all = configsSettled.status === "success" ? configsSettled.data : [];
       const visible = all.filter((config) => isProjectConfigVisibleTo(config, project.id));
       const current =
@@ -90,7 +99,19 @@ export function ProjectCard({
       projectRoot: project.rootPath,
       patch: { configId: selected === "" ? null : selected },
     });
+    const dirs = outsideDirs
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line !== "");
+    const dirsSettled =
+      settled.status === "success"
+        ? await invokeQuery("projects:set-outside-write-dirs", { id: project.id, dirs })
+        : undefined;
     setSaving(false);
+    if (dirsSettled?.status === "error") {
+      toast.error(dirsSettled.error.message);
+      return;
+    }
     if (settled.status === "error") {
       toast.error(
         settled.error.code === "config-not-visible"
@@ -181,6 +202,17 @@ export function ProjectCard({
                 </option>
               ))}
             </select>
+            <label className="mt-4 flex flex-col gap-1 text-sm text-fg">
+              {t("projects.card.outsideDirsLabel")}
+              <textarea
+                className="min-h-20 w-full rounded-sm border border-border bg-surface px-2 py-1.5 font-mono text-xs text-fg"
+                data-testid="project-outside-dirs"
+                placeholder={t("projects.card.outsideDirsPlaceholder")}
+                value={outsideDirs}
+                onChange={(event) => setOutsideDirs(event.target.value)}
+              />
+              <span className="text-xs text-fg-muted">{t("projects.card.outsideDirsHint")}</span>
+            </label>
           </DialogBody>
           <DialogFooter>
             <Button type="button" variant="ghost" size="sm" onClick={() => setBindOpen(false)}>

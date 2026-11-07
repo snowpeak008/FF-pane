@@ -10,14 +10,17 @@
  * 唯一的 stdout：Claude 的 UserPromptSubmit 提交的是工作台「[新消息]」提醒时，
  * 向主进程取未读正文，作为 additionalContext 交给模型（读出即标记已读）；
  * 提交的是用户自己的话时，只取一句「还有几条未读、谁发的」（不标已读）。取不到就什么也不写。
+ * PreToolUse（T11.8）：只做项目外写入检查（见 write-guard.ts），不上报主进程、不连管道；该拒绝就输出拒绝。
  * 干活中途（T11.7）：Claude 每调用完一个工具（PostToolUse / PostToolUseFailure），问一次主进程
  * 有没有上级或用户本人的新消息，有就作为 additionalContext 插进去，模型下一步就能看到。不往终端打字。
  */
 
 import { createHash } from "node:crypto";
 import net from "node:net";
+import { homedir, tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { checkWrite, denyHookOutput, parseWriteRoots, WRITE_ROOTS_ENV } from "./write-guard";
 
 export const HOOK_REPORT_TIMEOUT_MS = 1500;
 export const INBOX_DIGEST_TIMEOUT_MS = 3000;
@@ -368,6 +371,43 @@ export function inboxHookOutput(
   return JSON.stringify({ hookSpecificOutput: { hookEventName, additionalContext: text } });
 }
 
+/**
+ * PreToolUse 的项目外写入检查（T11.8）。stdin 里取 tool_name、tool_input、cwd；
+ * 该拒绝返回要写到 stdout 的那一行，放行返回空串。
+ */
+export function writeGuardOutput(raw: string, rootsEnv: string | undefined): string {
+  const roots = parseWriteRoots(rootsEnv);
+  if (roots.length === 0) {
+    return "";
+  }
+  let value: { tool_name?: unknown; tool_input?: unknown; cwd?: unknown };
+  try {
+    value = JSON.parse(raw.trim()) as typeof value;
+  } catch {
+    return "";
+  }
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    typeof value.tool_name !== "string" ||
+    value.tool_input === null ||
+    typeof value.tool_input !== "object"
+  ) {
+    return "";
+  }
+  const reason = checkWrite(
+    {
+      toolName: value.tool_name,
+      toolInput: value.tool_input as Record<string, unknown>,
+      cwd: typeof value.cwd === "string" && value.cwd !== "" ? value.cwd : process.cwd(),
+    },
+    roots,
+    homedir(),
+    tmpdir(),
+  );
+  return reason === undefined ? "" : denyHookOutput(reason);
+}
+
 /** 写一行 stdout 再返回，保证进程退出前写完。 */
 function writeStdoutLine(line: string): Promise<void> {
   return new Promise<void>((done) => {
@@ -376,6 +416,7 @@ function writeStdoutLine(line: string): Promise<void> {
 }
 
 const NAMED_HOOK_EVENTS = new Set([
+  "PreToolUse",
   "PermissionRequest",
   "PostToolUse",
   "PostToolUseFailure",
@@ -438,53 +479,67 @@ if (invokedDirectly()) {
   const event = resolveReportedHookEvent(process.argv);
   const pipePath = process.env["FF_PANE_WB_PIPE"] ?? "";
   const token = process.env["FF_PANE_WINDOW_TOKEN"] ?? "";
-  if (pipePath === "" || token === "" || event === "") {
+  if (event === "PreToolUse") {
+    // 只做项目外写入检查，不上报、不需要管道。
+    void readStdinText()
+      .then(async (raw) => {
+        const out = writeGuardOutput(raw, process.env[WRITE_ROOTS_ENV]);
+        if (out !== "") {
+          await writeStdoutLine(out);
+        }
+      })
+      .catch(() => undefined)
+      .then(() => {
+        process.exit(0);
+      });
+  } else if (pipePath === "" || token === "" || event === "") {
     process.exit(0);
-  }
-  void readStdinText()
-    .then(async (raw) => {
-      const pairing = extractHookPairing(raw);
-      await sendHookReport(
-        pipePath,
-        token,
-        event,
-        pairing.toolUseId,
-        {
-          ...(pairing.toolName !== undefined ? { toolName: pairing.toolName } : {}),
-          ...(pairing.toolDigest !== undefined ? { toolDigest: pairing.toolDigest } : {}),
-        },
-        event === "StopFailure" ? (extractStopFailureType(raw) ?? "unknown") : undefined,
-        extractNotifyThreadId(process.argv) ?? extractHookSessionId(event, raw),
-      );
-      if (event === "PostToolUse" || event === "PostToolUseFailure") {
-        // 干活中途：上级或用户本人有新消息就插进去。
-        const midTurn = await requestInboxDigest(
+  } else {
+    void readStdinText()
+      .then(async (raw) => {
+        const pairing = extractHookPairing(raw);
+        await sendHookReport(
           pipePath,
           token,
-          MID_TURN_TIMEOUT_MS,
-          "inbox-midturn",
+          event,
+          pairing.toolUseId,
+          {
+            ...(pairing.toolName !== undefined ? { toolName: pairing.toolName } : {}),
+            ...(pairing.toolDigest !== undefined ? { toolDigest: pairing.toolDigest } : {}),
+          },
+          event === "StopFailure" ? (extractStopFailureType(raw) ?? "unknown") : undefined,
+          extractNotifyThreadId(process.argv) ?? extractHookSessionId(event, raw),
         );
-        if (midTurn !== "") {
-          await writeStdoutLine(inboxHookOutput(midTurn, event));
+        if (event === "PostToolUse" || event === "PostToolUseFailure") {
+          // 干活中途：上级或用户本人有新消息就插进去。
+          const midTurn = await requestInboxDigest(
+            pipePath,
+            token,
+            MID_TURN_TIMEOUT_MS,
+            "inbox-midturn",
+          );
+          if (midTurn !== "") {
+            await writeStdoutLine(inboxHookOutput(midTurn, event));
+          }
+          return;
         }
-        return;
-      }
-      if (event !== "UserPromptSubmit") {
-        return;
-      }
-      // 平台的新消息提醒：附上未读正文。用户自己发的话：只提一句还有几条未读。
-      const digest = await requestInboxDigest(
-        pipePath,
-        token,
-        INBOX_DIGEST_TIMEOUT_MS,
-        promptIsInboxReminder(raw) ? "inbox-digest" : "inbox-peek",
-      );
-      if (digest !== "") {
-        await writeStdoutLine(inboxHookOutput(digest));
-      }
-    })
-    .catch(() => undefined)
-    .then(() => {
-      process.exit(0);
-    });
+        if (event !== "UserPromptSubmit") {
+          return;
+        }
+        // 平台的新消息提醒：附上未读正文。用户自己发的话：只提一句还有几条未读。
+        const digest = await requestInboxDigest(
+          pipePath,
+          token,
+          INBOX_DIGEST_TIMEOUT_MS,
+          promptIsInboxReminder(raw) ? "inbox-digest" : "inbox-peek",
+        );
+        if (digest !== "") {
+          await writeStdoutLine(inboxHookOutput(digest));
+        }
+      })
+      .catch(() => undefined)
+      .then(() => {
+        process.exit(0);
+      });
+  }
 }

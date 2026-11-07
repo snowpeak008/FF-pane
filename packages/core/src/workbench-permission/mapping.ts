@@ -130,8 +130,26 @@ export const WORKBENCH_PERMISSION_MAPPINGS: readonly WorkbenchPermissionMapping[
   {
     level: "yolo",
     cli: "codex",
-    freshArgs: ["--dangerously-bypass-approvals-and-sandbox"],
-    resumeArgs: ["--dangerously-bypass-approvals-and-sandbox"],
+    // T11.8（Tony 2026-11-07）：全部权限也不写项目外。不审批、能联网，但用 workspace-write 沙盒；
+    // Windows 上 0.166 实测往项目外写返回「拒绝访问」。项目外可写目录由启动时另传 writable_roots。
+    freshArgs: [
+      "-s",
+      "workspace-write",
+      "-a",
+      "never",
+      "-c",
+      "sandbox_workspace_write.network_access=true",
+    ],
+    resumeArgs: [
+      "-c",
+      'sandbox_mode="workspace-write"',
+      "-c",
+      'approval_policy="never"',
+      "-c",
+      "sandbox_workspace_write.network_access=true",
+    ],
+    notes:
+      "T11.8 起不再用 --dangerously-bypass-approvals-and-sandbox：不审批、能联网，写入限在项目和 writable_roots。",
   },
   // —— Grok（交互式 grok 1.0.13；新开与续接同一组参数）——
   {
