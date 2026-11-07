@@ -1,7 +1,7 @@
 /**
  * ui store（W3.1c；T9.7 收展状态收敛）—— 全局 UI 偏好与布局状态，持久化到 localStorage。
  *
- * 收什么：侧栏折叠（A 栏）、B 栏折叠、当前页面、列表密度、当前项目选择。
+ * 收什么：侧栏折叠（A 栏）、B 栏折叠、当前页面、列表密度、当前项目选择、设置页上次打开的分组。
  * 不收什么：
  * - 主题偏好 —— 归 theme/（W3.1a 已有独立 ThemeProvider + localStorage["ffpane.ui-theme"]）；
  * - 界面语言 —— 归 i18n/（localStorage["ffpane.ui-language"]）；
@@ -30,6 +30,7 @@ import type { ProjectId } from "@ff-pane/shared";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { PageKey } from "./pages";
+import { DEFAULT_SETTINGS_GROUP, isSettingsGroup, type SettingsGroup } from "./settings-groups";
 
 /** 列表密度（设计系统 §5.6：密集 28px / 默认 32px 行高）。 */
 export type ListDensity = "compact" | "default";
@@ -45,6 +46,8 @@ export interface UiState {
   readonly listDensity: ListDensity;
   /** 当前项目选择（未选返回 null；项目本体数据经 IPC 查询，不进 store）。 */
   readonly activeProjectId: ProjectId | null;
+  /** 设置页上次打开的分组（T11.9）；旧数据没有这个字段时用第一组。 */
+  readonly settingsGroup: SettingsGroup;
 }
 
 export interface UiActions {
@@ -55,6 +58,7 @@ export interface UiActions {
   readonly toggleSecondaryPanelCollapsed: () => void;
   readonly setListDensity: (density: ListDensity) => void;
   readonly setActiveProjectId: (projectId: ProjectId | null) => void;
+  readonly setSettingsGroup: (group: SettingsGroup) => void;
   /** 项目列表已变（新建/移除/恢复）：递增刷新序号，让 B 栏等常驻消费者重取。 */
   readonly bumpProjectsRefresh: () => void;
 }
@@ -85,6 +89,7 @@ const INITIAL_UI_STATE: UiState = {
   secondaryPanelCollapsed: false,
   listDensity: "default",
   activeProjectId: null,
+  settingsGroup: DEFAULT_SETTINGS_GROUP,
 };
 
 /**
@@ -113,6 +118,9 @@ export function migrateUiState(persisted: unknown, legacySidebarValue: string | 
     listDensity: blob["listDensity"] === "compact" ? "compact" : "default",
     activeProjectId:
       typeof blob["activeProjectId"] === "string" ? (blob["activeProjectId"] as ProjectId) : null,
+    settingsGroup: isSettingsGroup(blob["settingsGroup"])
+      ? blob["settingsGroup"]
+      : INITIAL_UI_STATE.settingsGroup,
   };
 }
 
@@ -172,6 +180,9 @@ export const useUiStore = create<UiStore>()(
       setActiveProjectId: (projectId) => {
         set({ activeProjectId: projectId });
       },
+      setSettingsGroup: (group) => {
+        set({ settingsGroup: group });
+      },
       bumpProjectsRefresh: () => {
         set((state) => ({ projectsRefreshSeq: state.projectsRefreshSeq + 1 }));
       },
@@ -188,6 +199,7 @@ export const useUiStore = create<UiStore>()(
         secondaryPanelCollapsed: state.secondaryPanelCollapsed,
         listDensity: state.listDensity,
         activeProjectId: state.activeProjectId,
+        settingsGroup: state.settingsGroup,
       }),
     },
   ),

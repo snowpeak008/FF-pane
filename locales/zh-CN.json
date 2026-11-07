@@ -679,6 +679,13 @@
     }
   },
   "settings": {
+    "groups": {
+      "label": "设置分组",
+      "general": "通用",
+      "workbench": "工作台",
+      "models": "模型",
+      "tools": "工具"
+    },
     "providers": {
       "title": "模型来源（Provider）",
       "subtitle": "中转来源填独立网址和密钥。本机 CLI 在档案里选「本地 CLI」，不必在这里填网址。",

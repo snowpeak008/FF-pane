@@ -22,7 +22,7 @@ test.afterAll(async () => {
 test("填写 openai_compatible 表单 → 保存，Provider 行出现", async () => {
   const { page } = launched;
 
-  await gotoRoute(page, "/settings");
+  await gotoRoute(page, "/settings?group=models");
 
   // Provider 区空态主操作 → 选 openai-compatible 模板 → 填表
   await page.getByRole("button", { name: "New provider" }).click();

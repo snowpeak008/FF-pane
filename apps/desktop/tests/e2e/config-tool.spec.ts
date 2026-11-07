@@ -352,7 +352,7 @@ test("config MCP sidecar：拉起 → 四工具 schema 无密钥字段 → list 
 
 test("设置页开关可打开并保持选中", async () => {
   const { page } = launched;
-  await gotoRoute(page, "/settings");
+  await gotoRoute(page, "/settings?group=tools");
   const toggle = page.getByTestId("config-tool-toggle");
   await expect(toggle).toBeVisible();
   await expect(toggle).not.toBeChecked();

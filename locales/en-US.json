@@ -679,6 +679,13 @@
     }
   },
   "settings": {
+    "groups": {
+      "label": "Settings groups",
+      "general": "General",
+      "workbench": "Workbench",
+      "models": "Models",
+      "tools": "Tools"
+    },
     "providers": {
       "title": "Model providers",
       "subtitle": "Relay sources need their own URL and key. For local CLI, pick “Local CLI” on the profile — do not fill a URL here.",

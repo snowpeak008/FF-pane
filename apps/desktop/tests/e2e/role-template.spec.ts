@@ -18,7 +18,7 @@ test.afterAll(async () => {
 
 test("自定义角色入口不再出现在设置页", async () => {
   const { page } = launched;
-  await gotoRoute(page, "/settings");
+  await gotoRoute(page, "/settings?group=workbench");
   await expect(page.getByRole("button", { name: "New role" })).toHaveCount(0);
   await expect(page.locator("#role-template")).toHaveCount(0);
 });

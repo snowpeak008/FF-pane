@@ -134,7 +134,7 @@ test("收窄配置范围时，名单外仍绑定的项目会拦住保存", async
       },
       { alpha: alphaDir, beta: betaDir },
     );
-    await gotoRoute(page, "/settings");
+    await gotoRoute(page, "/settings?group=models");
     await page.getByTestId("config-new").click();
     await page.getByTestId("config-name").fill("Narrow Me");
     await page.getByTestId("config-save").click();
@@ -154,7 +154,7 @@ test("收窄配置范围时，名单外仍绑定的项目会拦住保存", async
     ).toHaveCount(1);
     await page.getByTestId("project-config-select").selectOption(configId);
     await page.getByTestId("project-config-save").click();
-    await gotoRoute(page, "/settings");
+    await gotoRoute(page, "/settings?group=models");
     await page.getByTestId(`config-edit-${configId}`).click();
     await expect(page.getByTestId(`config-scope-${created.alpha.id}`)).toBeVisible();
     await page.getByTestId(`config-scope-${created.alpha.id}`).check();

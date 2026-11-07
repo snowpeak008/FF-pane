@@ -56,7 +56,7 @@ test.afterAll(async () => {
 
 test("档案页不再出现，配置区在", async () => {
   const { page } = launched;
-  await gotoRoute(page, "/settings");
+  await gotoRoute(page, "/settings?group=models");
   await expect(page.getByRole("button", { name: "New profile" })).toHaveCount(0);
   await expect(page.locator("#profile-runtime")).toHaveCount(0);
   await expect(page.getByTestId("settings-configs")).toBeVisible();

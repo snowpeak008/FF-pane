@@ -23,7 +23,7 @@ test.afterAll(async () => {
 
 test("来源页还在，档案和自定义角色入口不再出现", async () => {
   const { page } = launched;
-  await gotoRoute(page, "/settings");
+  await gotoRoute(page, "/settings?group=models");
   await expect(page.getByRole("button", { name: "New provider" })).toBeVisible();
   await expect(page.getByRole("button", { name: "New profile" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "New role" })).toHaveCount(0);

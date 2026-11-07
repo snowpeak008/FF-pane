@@ -21,7 +21,7 @@ test.afterAll(async () => {
 
 test("设置页不再显示档案、自定义角色和默认权限预设", async () => {
   const { page } = launched;
-  await gotoRoute(page, "/settings");
+  await gotoRoute(page, "/settings?group=models");
   await expect(page.getByTestId("settings-configs")).toBeVisible();
   await expect(page.getByRole("button", { name: "New profile" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "New role" })).toHaveCount(0);

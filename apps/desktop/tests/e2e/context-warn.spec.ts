@@ -18,7 +18,7 @@ test.afterAll(async () => {
 test("设置页没有上下文阈值，config:get 仍能读出该字段", async () => {
   const { page } = launched;
 
-  await gotoRoute(page, "/settings");
+  await gotoRoute(page, "/settings?group=general");
   await expect(page.locator("#setting-context-warn-percent")).toHaveCount(0);
   await expect(page.locator("#setting-output-language")).toBeVisible();
 

@@ -49,7 +49,7 @@ test("三态切换：English → 简体中文 → 跟随系统，选择与生效
   const mainLocale = await app.evaluate(({ app: electronApp }) => electronApp.getLocale());
   expect(mainLocale).toBe(SYSTEM_LANGUAGE);
 
-  await gotoRoute(page, "/settings");
+  await gotoRoute(page, "/settings?group=general");
 
   const selector = page.locator("#setting-ui-language");
   // 起点：_launch 固定为 en-US，故选择器显示的是具体语言而非「跟随系统」
@@ -79,14 +79,14 @@ test("三态切换：English → 简体中文 → 跟随系统，选择与生效
 
 test("「跟随系统」经重启后仍是跟随系统（设置值持久化，不退化成具体语言）", async () => {
   const { page } = launched;
-  await gotoRoute(page, "/settings");
+  await gotoRoute(page, "/settings?group=general");
   await page.locator("#setting-ui-language").selectOption("system");
   expect(await savedSetting()).toBe("system");
 
   // reload 走完整初始化路径（initI18n 重新解析一次）
   await page.reload();
   await page.waitForLoadState("domcontentloaded");
-  await gotoRoute(page, "/settings");
+  await gotoRoute(page, "/settings?group=general");
 
   await expect(page.locator("#setting-ui-language")).toHaveValue("system");
   expect(await savedSetting()).toBe("system");

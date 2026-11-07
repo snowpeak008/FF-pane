@@ -837,7 +837,7 @@ test("T10.6：worker 说明书注入，运行中改管理者，设置覆盖进�
       .poll(async () => readReplayForWindow(page, windowId), { timeout: 20_000 })
       .toContain("planner.md");
 
-    await gotoRoute(page, "/settings");
+    await gotoRoute(page, "/settings?group=workbench");
     const manual = page.getByTestId("setting-workbench-role-manual");
     await manual.scrollIntoViewIfNeeded();
     await manual.selectOption("worker");

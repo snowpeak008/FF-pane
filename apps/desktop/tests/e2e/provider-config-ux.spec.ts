@@ -63,7 +63,7 @@ test.afterAll(async () => {
 
 test("校验失败呈现人话化错误：友好概括 + 字段定位 + 技术详情折叠", async () => {
   const { page } = launched;
-  await gotoRoute(page, "/settings");
+  await gotoRoute(page, "/settings?group=models");
 
   await page.getByRole("button", { name: "New provider" }).click();
   await page.getByTestId("provider-template-openai-compatible").click();
@@ -86,7 +86,7 @@ test("校验失败呈现人话化错误：友好概括 + 字段定位 + 技术�
 
 test("local-login 建档流：登录状态显示 + 本地模型枚举 + 手填入口隐藏", async () => {
   const { page } = launched;
-  await gotoRoute(page, "/settings");
+  await gotoRoute(page, "/settings?group=models");
 
   await page.getByRole("button", { name: "New provider" }).click();
   await page.getByTestId("provider-template-local-login").click();
@@ -110,7 +110,7 @@ test("local-login 建档流：登录状态显示 + 本地模型枚举 + 手填�
 
 test("anthropic-compatible：经模板新建、编辑、删除", async () => {
   const { page } = launched;
-  await gotoRoute(page, "/settings");
+  await gotoRoute(page, "/settings?group=models");
 
   await page.getByRole("button", { name: "New provider" }).click();
   await page.getByTestId("provider-template-anthropic-compatible").click();

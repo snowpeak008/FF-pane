@@ -45,7 +45,7 @@ test.afterAll(async () => {
 
 test("配置编辑器给 Claude 和 Codex 思考强度，没有其它 CLI", async () => {
   const { page } = launched;
-  await gotoRoute(page, "/settings");
+  await gotoRoute(page, "/settings?group=models");
   await page.getByTestId("config-new").click();
   await expect(page.getByTestId("config-claude-effort")).toBeVisible();
   await expect(page.getByTestId("config-codex-effort")).toBeVisible();
