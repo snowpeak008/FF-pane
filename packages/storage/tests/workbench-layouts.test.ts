@@ -350,4 +350,30 @@ describe("workbench layout store", () => {
     expect(again?.tabs[2]?.teamOf).toBe("w1");
     expect(again?.tabs[1]?.slots).toEqual(["w7", "w8", null, null, null, null]);
   });
+
+  it("v5 里中间有空格的格子读出来挤紧，顺序不变（T11.2d）", async () => {
+    tempRoot = await mkdtemp(join(tmpdir(), "ffpane-wb-layout-"));
+    const file = join(tempRoot, "workbench-layouts.json");
+    const base = sampleLayout("proj-a");
+    const second = { ...base.windows["win-1"], id: "win-2", title: "Shell 2" };
+    await writeFile(
+      file,
+      JSON.stringify({
+        version: WORKBENCH_LAYOUTS_FILE_VERSION,
+        layouts: {
+          "proj-a": {
+            ...base,
+            tabs: [
+              { id: "tab-1", title: "Tab 1", slots: [null, "win-2", null, "win-1", null, null] },
+            ],
+            windows: { ...base.windows, "win-2": second },
+          },
+        },
+      }),
+      "utf8",
+    );
+    const store = createWorkbenchLayoutStore(file);
+    const read = await store.readProject("proj-a" as ProjectWorkbenchLayout["projectId"]);
+    expect(read?.tabs[0]?.slots).toEqual(["win-2", "win-1", null, null, null, null]);
+  });
 });

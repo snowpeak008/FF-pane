@@ -258,7 +258,11 @@ export interface PaneSplit {
 
 export type PaneNode = PaneLeaf | PaneSplit;
 
-/** 固定格子里拖过的比例（T11.2b）：按方向分别存，没调过的方向均分。 */
+/**
+ * 格子里拖过的比例（T11.2b）：按方向分别存，没调过的方向均分。
+ * T11.2d 起按个数排：rows 是各条线（横向是行、竖向是列）的比例，cols 是每条线里各格的比例；
+ * 这一页的窗口个数一变就整个丢掉。
+ */
 export interface WorkbenchGridSizes {
   readonly landscape?: {
     readonly rows: readonly number[];
@@ -271,8 +275,8 @@ export interface WorkbenchGridSizes {
 }
 
 /**
- * 单个标签页（T11.2b 起是固定 6 格）：slots 是 6 个格子，每格一个窗口 id 或空。
- * 横向 3 列 × 2 行、竖向 2 列 × 3 行，换方向时编号不变。
+ * 单个标签页：slots 是 6 个位置，挤紧存放（前面是窗口 id，后面是空）。
+ * T11.2d 起按窗口个数自动排（见 apps/desktop/src/shared/workbench/grid.ts）。
  * 旧的分屏树（PaneNode，v4 及以前）只在读旧档时用一次。
  */
 export interface WorkbenchTab {
@@ -280,7 +284,7 @@ export interface WorkbenchTab {
   readonly title: string;
   readonly slots: readonly (string | null)[];
   readonly sizes?: WorkbenchGridSizes;
-  /** 管理者开子窗口时新开的团队页：记下是哪个管理者的，之后它的子窗口先填这里的空格。 */
+  /** 管理者开子窗口时新开的团队页：记下是哪个管理者的，之后它的子窗口先放这里。 */
   readonly teamOf?: string;
 }
 

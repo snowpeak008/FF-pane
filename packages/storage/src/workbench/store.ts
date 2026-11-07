@@ -6,6 +6,7 @@
  * v5（T11.2b）：标签页从分屏树改成固定 6 格（slots）。读 v4 及以前的旧档时，
  * 按树里从左到右、从上到下的顺序排进 1–6 格，超过 6 个的放进新页，标题加「(2)」。
  * 第一次保存时按 v5 写出，不另做备份。
+ * T11.2d：格子改成挤紧（前面是窗口、后面是空），读档时把中间的空格去掉，文件版本不变。
  */
 
 import type {
@@ -272,11 +273,14 @@ function parseTab(
   }
   const teamOfRaw = raw["teamOf"];
   if (Array.isArray(raw["slots"])) {
-    const slots = slotsOf(
-      (raw["slots"] as unknown[]).map((item) =>
-        typeof item === "string" && item.trim() !== "" ? item : null,
-      ),
-    );
+    // T11.2d 起格子挤紧、按个数排：1.0.19–1.0.22 存下的空格去掉，窗口按原来的顺序往前挤。
+    const ids: string[] = [];
+    for (const item of raw["slots"] as unknown[]) {
+      if (typeof item === "string" && item.trim() !== "" && !ids.includes(item)) {
+        ids.push(item);
+      }
+    }
+    const slots = slotsOf(ids);
     const sizes = parseGridSizes(raw["sizes"]);
     return [
       {

@@ -59,7 +59,7 @@ describe("workbench store", () => {
     clearLiveTerminalsForTests();
   });
 
-  it("createTabWithWindow / splitWindow / closeWindow 维护树与计数", async () => {
+  it("createTabWithWindow / addWindowAfter / closeWindow 维护格子与计数", async () => {
     const store = useWorkbenchStore.getState();
     const created = store.createTabWithWindow({
       projectId: PROJECT,
@@ -69,26 +69,25 @@ describe("workbench store", () => {
     expect(created.ok).toBe(true);
     expect(store.countRunningWindows()).toBe(1);
 
-    const split = useWorkbenchStore.getState().splitWindow({
+    const split = useWorkbenchStore.getState().addWindowAfter({
       projectId: PROJECT,
       projectRoot: "D:/tmp/p",
-      targetWindowId: created.windowId,
-      direction: "horizontal",
+      afterWindowId: created.windowId,
     });
     expect(split.ok).toBe(true);
     expect(useWorkbenchStore.getState().countRunningWindows()).toBe(2);
 
     const layout = useWorkbenchStore.getState().getProjectLayout(PROJECT);
     expect(layout.tabs).toHaveLength(1);
-    // T11.2b：向右分屏落到同一行右边的空格。
+    // T11.2d：加在那个窗口后面。
     const splitId = split.ok ? split.windowId : "";
     expect(layout.tabs[0]?.slots).toEqual([created.windowId, splitId, null, null, null, null]);
 
-    // 关掉第 1 格，第 1 格变空，第 2 格的窗口不挪。
+    // 关掉第 1 个，后面的往前挤。
     await useWorkbenchStore.getState().closeWindow(PROJECT, created.windowId);
     expect(useWorkbenchStore.getState().countRunningWindows()).toBe(1);
     const after = useWorkbenchStore.getState().getProjectLayout(PROJECT);
-    expect(after.tabs[0]?.slots).toEqual([null, splitId, null, null, null, null]);
+    expect(after.tabs[0]?.slots).toEqual([splitId, null, null, null, null, null]);
   });
 
   it("防抖 persist；flushWorkbenchLayouts 立刻落盘", async () => {

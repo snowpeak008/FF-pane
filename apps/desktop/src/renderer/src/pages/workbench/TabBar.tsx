@@ -1,11 +1,12 @@
 /**
  * 工作台标签栏（T10.2）：新建 / 切换 / 关闭 / 双击重命名。
  * 48px 高、标签固定 160px 宽（T11.2a）；选中的标签和下面的工作区连成一片，切换时滚到看得见。
- * 拖窗口时（T11.2c）标签和「＋」都是落点：放到那一页的空格，或开新页。
+ * 拖窗口时（T11.2c）标签和「＋」都是落点：加到那一页末尾，或开新页。
+ * 「在这页加窗口」（T11.2d）：加到当前页末尾，满了开新页。
  */
 
 import type { WorkbenchTab } from "@ff-pane/shared";
-import { Plus, X } from "lucide-react";
+import { Plus, SquarePlus, X } from "lucide-react";
 import { type ReactElement, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { WindowDropTarget } from "../../../../shared/workbench/grid";
@@ -19,6 +20,8 @@ export interface TabBarProps {
   readonly onClose: (tabId: string) => void;
   readonly onRename: (tabId: string, title: string) => void;
   readonly onNewTab: () => void;
+  /** 在当前页加一个窗口；没有当前页时不显示。 */
+  readonly onAddToPage?: (() => void) | undefined;
   /** 正在拖窗口时指针下的落点。 */
   readonly dropTarget?: WindowDropTarget | null;
 }
@@ -30,6 +33,7 @@ export function TabBar({
   onClose,
   onRename,
   onNewTab,
+  onAddToPage,
   dropTarget = null,
 }: TabBarProps): ReactElement {
   const { t } = useTranslation();
@@ -121,11 +125,26 @@ export function TabBar({
           );
         })}
       </div>
+      {onAddToPage !== undefined ? (
+        <Button
+          variant="ghost"
+          size="md"
+          iconOnly
+          aria-label={t("workbench.tab.addWindow")}
+          title={t("workbench.tab.addWindow")}
+          data-testid="workbench-add-window"
+          className="self-center"
+          onClick={onAddToPage}
+        >
+          <SquarePlus aria-hidden size={18} />
+        </Button>
+      ) : null}
       <Button
         variant="ghost"
         size="md"
         iconOnly
         aria-label={t("workbench.tab.new")}
+        title={t("workbench.tab.new")}
         data-testid="workbench-new-tab"
         data-drop="new-tab"
         className={cn(

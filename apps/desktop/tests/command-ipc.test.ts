@@ -69,7 +69,7 @@ afterEach(() => {
 
 const APP_INFO: AppInfo = {
   name: "FF-pane",
-  version: "1.0.22",
+  version: "1.0.23",
   runtime: { electron: "44.0.0", chrome: "140", node: "24.0.0" },
 };
 
@@ -100,8 +100,6 @@ const EXPECTED_KEY_DISPLAYS: readonly string[] = [
   "Ctrl+Shift+X",
   "Ctrl+Shift+T",
   "Ctrl+Shift+N",
-  "Ctrl+Shift+\\",
-  "Ctrl+Shift+D",
   "Ctrl+Shift+W",
   "Ctrl+Shift+F4",
   "Ctrl+Shift+M",
@@ -123,10 +121,10 @@ function keyEvent(
 describe("快捷键表预登记齐全（含工作台，不含已下线的会话和任务页）", () => {
   const registry = createShortcutRegistry(SHORTCUT_TABLE);
 
-  it("条目数正好 23（一个「命令 × 作用域」一条）", () => {
+  it("条目数正好 21（一个「命令 × 作用域」一条）", () => {
     expect(SHORTCUT_TABLE).toHaveLength(SHORTCUT_TABLE_SIZE);
-    expect(SHORTCUT_TABLE_SIZE).toBe(23);
-    expect(registry.entries()).toHaveLength(23);
+    expect(SHORTCUT_TABLE_SIZE).toBe(21);
+    expect(registry.entries()).toHaveLength(21);
   });
 
   it("命令 ID 全部合法且互不重复", () => {
@@ -144,9 +142,9 @@ describe("快捷键表预登记齐全（含工作台，不含已下线的会话�
     }
   });
 
-  it("键位覆盖注册表：26 个绑定（Ctrl+1~4 展开）", () => {
+  it("键位覆盖注册表：24 个绑定（Ctrl+1~4 展开）", () => {
     const bindings = registry.bindings();
-    expect(bindings).toHaveLength(26);
+    expect(bindings).toHaveLength(24);
     const displays = [...new Set(bindings.map((binding) => binding.display))].sort();
     expect(displays).toEqual([...EXPECTED_KEY_DISPLAYS].sort());
   });

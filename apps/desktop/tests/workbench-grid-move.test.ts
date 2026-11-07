@@ -1,5 +1,6 @@
 /**
- * T11.2c：拖窗口换位置——对调、移到空格、移到别的标签、满了拒绝、拖到「＋」开新页。
+ * T11.2c：拖窗口换位置——对调、移到别的标签、满了拒绝、拖到「＋」开新页。
+ * T11.2d 起格子挤紧：没有空格可落，移走后原来那页往前挤。
  */
 
 import type { ProjectId, ProjectWorkbenchLayout, WorkbenchTab } from "@ff-pane/shared";
@@ -54,15 +55,18 @@ describe("同一页里拖", () => {
     expect(next.windows).toBe(layout.windows);
   });
 
-  it("落到空格移过去，原来那格变空", () => {
-    const layout = layoutOf([tab("t1", ["a", "b"])]);
-    const next = moved(layout, "a", { kind: "slot", tabId: "t1", slot: 5 });
-    expect(next.tabs[0]?.slots).toEqual([null, "b", null, null, null, "a"]);
+  it("对调不改个数，拖过的比例留着", () => {
+    const layout = layoutOf([{ ...tab("t1", ["a", "b"]), sizes: {} }]);
+    expect(moved(layout, "a", { kind: "slot", tabId: "t1", slot: 1 }).tabs[0]?.sizes).toEqual({});
   });
 
-  it("落回自己那格、或落到自己这页的标签上：不变", () => {
+  it("落回自己那格、落到空位置、或落到自己这页的标签上：不变", () => {
     const layout = layoutOf([tab("t1", ["a", "b"])]);
     expect(move(layout, "a", { kind: "slot", tabId: "t1", slot: 0 })).toEqual({
+      ok: false,
+      reason: "unchanged",
+    });
+    expect(move(layout, "a", { kind: "slot", tabId: "t1", slot: 5 })).toEqual({
       ok: false,
       reason: "unchanged",
     });
@@ -74,12 +78,12 @@ describe("同一页里拖", () => {
 });
 
 describe("拖到别的标签", () => {
-  it("放到那一页编号最小的空格，原来那格变空，停在当前页", () => {
-    const layout = layoutOf([tab("t1", ["a", "b"]), tab("t2", ["x", null, "y"])]);
-    const next = moved(layout, "b", { kind: "tab", tabId: "t2" });
+  it("加到那一页末尾，原来那页往前挤，停在当前页", () => {
+    const layout = layoutOf([tab("t1", ["a", "b", "c"]), tab("t2", ["x", "y"])]);
+    const next = moved(layout, "a", { kind: "tab", tabId: "t2" });
     expect(next.tabs.map((item) => item.slots)).toEqual([
-      ["a", null, null, null, null, null],
-      ["x", "b", "y", null, null, null],
+      ["b", "c", null, null, null, null],
+      ["x", "y", "a", null, null, null],
     ]);
     expect(next.activeTabId).toBe("t1");
   });
@@ -97,22 +101,24 @@ describe("拖到别的标签", () => {
     expect(next.tabs[0]?.slots.slice(0, 2)).toEqual(["x", "a"]);
   });
 
-  it("团队页的 teamOf、比例都留着", () => {
+  it("团队页的 teamOf 留着；两页个数都变了，拖过的比例都丢掉", () => {
     const team: WorkbenchTab = { ...tab("t2", ["x"]), teamOf: "m", sizes: {} };
-    const layout = layoutOf([tab("t1", ["a", "b"]), team]);
+    const layout = layoutOf([{ ...tab("t1", ["a", "b"]), sizes: {} }, team]);
     const next = moved(layout, "a", { kind: "tab", tabId: "t2" });
-    expect(next.tabs[1]).toMatchObject({ teamOf: "m", sizes: {} });
+    expect(next.tabs[1]).toMatchObject({ teamOf: "m" });
+    expect(next.tabs[1]?.sizes).toBeUndefined();
+    expect(next.tabs[0]?.sizes).toBeUndefined();
   });
 });
 
 describe("拖到「＋」", () => {
-  it("开新页放第 1 格，原来那格变空", () => {
+  it("开新页放第 1 格，原来那页往前挤", () => {
     const layout = layoutOf([tab("t1", ["a", "b"], "Tab 1")]);
     const next = moved(layout, "b", { kind: "new-tab" });
     expect(next.tabs).toHaveLength(2);
     expect(next.tabs[1]).toMatchObject({ id: "tab-new", title: "Tab 2" });
     expect(next.tabs[1]?.slots[0]).toBe("b");
-    expect(next.tabs[0]?.slots[1]).toBeNull();
+    expect(next.tabs[0]?.slots.slice(0, 2)).toEqual(["a", null]);
     expect(next.activeTabId).toBe("t1");
   });
 

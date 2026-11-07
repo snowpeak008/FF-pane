@@ -1,11 +1,10 @@
 /**
- * 工作台布局 store（T10.2 / T10.2'）：多项目并行布局、分屏树、标签页。
+ * 工作台布局 store（T10.2 / T10.2'）：多项目并行布局、格子、标签页。
  * 布局经 IPC 落盘（防抖）；退出前 flush；PTY 生命周期与窗口 id 解耦；
  * hydrate 时与主进程存活 PTY 对账。
  */
 
 import type {
-  PaneSplitDirection,
   ProjectId,
   ProjectWorkbenchLayout,
   WorkbenchGridSizes,
@@ -25,9 +24,7 @@ import { create } from "zustand";
 import { detachWindowFromLayout } from "../../../shared/workbench/detach-window";
 import {
   findTabOfWindow,
-  type GridOrientation,
   moveWindowInLayout,
-  placeSplitWindow,
   placeUserWindow,
   tabWindowIds,
   type WindowDropTarget,
@@ -90,16 +87,14 @@ export interface WorkbenchStoreActions {
     readonly role?: WorkbenchRole;
     readonly parentWindowId?: string;
     readonly openedBy?: WorkbenchOpenedBy;
-    /** 点了空格子的「＋」：放进这一格（T11.2b）。 */
-    readonly slot?: number;
-    /** 标签栏的「＋」（新建标签）：开新页放第 1 格。缺省放当前页的空格。 */
+    /** 标签栏的「＋」（新建标签）：开新页。缺省加到当前页末尾，满了开新页。 */
     readonly newPage?: boolean;
   }) => { readonly ok: true; readonly windowId: string; readonly autoLaunch: boolean };
-  readonly splitWindow: (input: {
+  /** 窗口上的「加一个窗口」（T11.2d）：加在这个窗口后面，这页满了开新页。 */
+  readonly addWindowAfter: (input: {
     readonly projectId: ProjectId;
     readonly projectRoot: string;
-    readonly targetWindowId: string;
-    readonly direction: PaneSplitDirection;
+    readonly afterWindowId: string;
     readonly kind?: WorkbenchWindow["kind"];
     readonly initialPrompt?: string;
     readonly permission?: WorkbenchPermissionLevel;
@@ -177,9 +172,6 @@ export interface WorkbenchStoreActions {
     windowId: string,
     target: WindowDropTarget,
   ) => "moved" | "full" | "unchanged";
-  /** 当前工作台格子的方向（不存档，GridLayout 量出来的），分屏时用。 */
-  readonly gridOrientation: GridOrientation;
-  readonly setGridOrientation: (orientation: GridOrientation) => void;
   readonly setGridSizes: (
     projectId: ProjectId,
     tabId: string,
@@ -410,7 +402,6 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
     role,
     parentWindowId,
     openedBy,
-    slot,
     newPage,
   }) {
     const windowId = newId("win");
@@ -440,20 +431,21 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
           : {}),
         ...(parentWindowId !== undefined ? { parentWindowId } : {}),
       };
-      // T11.2b：当前页编号最小的空格（点了空格子就放那格），满了才开新页。
-      return placeUserWindow(layout, window, tabId, {
-        ...(slot !== undefined ? { slot } : {}),
-        ...(newPage === true ? { newPage: true } : {}),
-      });
+      // T11.2d：加到当前页末尾，满了才开新页。
+      return placeUserWindow(
+        layout,
+        window,
+        tabId,
+        newPage === true ? { newPage: true } : undefined,
+      );
     });
     return { ok: true, windowId, autoLaunch: true };
   },
 
-  splitWindow({
+  addWindowAfter({
     projectId,
     projectRoot,
-    targetWindowId,
-    direction,
+    afterWindowId,
     kind = "shell",
     initialPrompt,
     permission,
@@ -462,7 +454,7 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
     openedBy,
   }) {
     const layout = get().getProjectLayout(projectId);
-    if (findTabOfWindow(layout, targetWindowId) === undefined) {
+    if (findTabOfWindow(layout, afterWindowId) === undefined) {
       return { ok: false, reason: "missing" };
     }
     const windowId = newId("win");
@@ -488,17 +480,7 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
           : {}),
         ...(parentWindowId !== undefined ? { parentWindowId } : {}),
       };
-      // T11.2b：向右 = 同一行右边最近的空格，向下 = 同一列下面最近的空格，没有就开新页。
-      return (
-        placeSplitWindow(
-          current,
-          targetWindowId,
-          window,
-          direction === "horizontal" ? "right" : "down",
-          get().gridOrientation,
-          newId("tab"),
-        ) ?? current
-      );
+      return placeUserWindow(current, window, newId("tab"), { afterWindowId });
     });
     return { ok: true, windowId, autoLaunch: true };
   },
@@ -935,14 +917,6 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
       maximizedWindowId: layout.maximizedWindowId === windowId ? null : windowId,
       focusedWindowId: windowId,
     }));
-  },
-
-  gridOrientation: "landscape",
-
-  setGridOrientation(orientation) {
-    if (get().gridOrientation !== orientation) {
-      set({ gridOrientation: orientation });
-    }
   },
 
   setGridSizes(projectId, tabId, change) {

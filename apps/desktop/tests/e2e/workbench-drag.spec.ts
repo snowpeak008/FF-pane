@@ -103,7 +103,28 @@ async function slotOf(page: Page, windowId: string): Promise<string | null> {
     .getAttribute("data-slot");
 }
 
-test("拖窗口：对调、移到空格、开新页、移到别的标签，窗口不重启", async () => {
+/** 给窗口的终端节点打个记号；终端被重建的话是新节点，记号就没了（T11.2d）。 */
+async function markTerminal(page: Page, windowId: string): Promise<void> {
+  await pane(page, windowId)
+    .getByTestId("terminal-host")
+    .evaluate((el) => {
+      el.setAttribute("data-e2e-mark", "kept");
+    });
+}
+
+async function terminalKept(page: Page, windowId: string): Promise<boolean> {
+  return (
+    (await pane(page, windowId).getByTestId("terminal-host").getAttribute("data-e2e-mark")) ===
+    "kept"
+  );
+}
+
+async function addWindowAfter(page: Page, windowId: string): Promise<void> {
+  await pane(page, windowId).getByRole("button", { name: "Add window after this one" }).click();
+  await confirmShell(page);
+}
+
+test("按个数排、拖窗口：对调、加窗口、关窗口、开新页、移到别的标签，终端不重建", async () => {
   const { app, page } = launched;
   await createProject(app, page, projectDir, "Drag Project");
   await gotoRoute(page, "/workbench");
@@ -118,8 +139,14 @@ test("拖窗口：对调、移到空格、开新页、移到别的标签，窗�
   await typeIn(page, a, "echo DRAG_MARK_A");
   await expect.poll(() => replay(page, a), { timeout: 20_000 }).toContain("DRAG_MARK_A");
   const terminalA = await terminalId(page, a);
+  // 只有一个窗口时占满整个区域。
+  const root = await page.locator('[data-count="1"]').boundingBox();
+  const only = await cell(page, 0).boundingBox();
+  expect(root !== null && only !== null && Math.abs(root.width - only.width) < 2).toBe(true);
+  await markTerminal(page, a);
 
-  await cell(page, 1).getByTestId("workbench-grid-empty").click();
+  // 标签栏的「在这页加窗口」：加到末尾，两个左右排
+  await page.getByTestId("workbench-add-window").click();
   await confirmShell(page);
   await expect(page.getByTestId("workbench-window")).toHaveCount(2, { timeout: 15_000 });
   const b = await page.getByTestId("workbench-window").nth(1).getAttribute("data-window-id");
@@ -130,19 +157,34 @@ test("拖窗口：对调、移到空格、开新页、移到别的标签，窗�
   const terminalB = await terminalId(page, b);
   expect(await slotOf(page, a)).toBe("0");
   expect(await slotOf(page, b)).toBe("1");
+  expect(await terminalKept(page, a)).toBe(true);
+  await markTerminal(page, b);
 
-  // 1. 落到另一个窗口上：对调
+  // 1. 落到另一个窗口上：对调，终端不重建
   await drag(page, a, cell(page, 1));
   await expect.poll(() => slotOf(page, a)).toBe("1");
   expect(await slotOf(page, b)).toBe("0");
+  expect(await terminalKept(page, a)).toBe(true);
+  expect(await terminalKept(page, b)).toBe(true);
 
-  // 2. 落到空格：移过去，原来那格变空
-  // 右下角有提示条，挪到左下角那格（3），免得点终端时点到提示条上。
-  await drag(page, a, cell(page, 3));
-  await expect.poll(() => slotOf(page, a)).toBe("3");
-  await expect(cell(page, 1).getByTestId("workbench-grid-empty")).toBeVisible();
+  // 2. 窗口上的「加一个窗口」：加在它后面；再关掉，剩下的重新排，终端都不重建
+  await addWindowAfter(page, b);
+  await expect(page.getByTestId("workbench-window")).toHaveCount(3, { timeout: 15_000 });
+  await expect.poll(() => slotOf(page, a)).toBe("2");
+  const c = await cell(page, 1).getByTestId("workbench-window").getAttribute("data-window-id");
+  if (c === null) {
+    throw new Error("missing window");
+  }
+  await expect(pane(page, c).getByTestId("terminal-id")).toBeVisible({ timeout: 15_000 });
+  expect(await terminalKept(page, a)).toBe(true);
+  expect(await terminalKept(page, b)).toBe(true);
+  await pane(page, c).getByRole("button", { name: "Close window" }).click();
+  await expect(page.getByTestId("workbench-window")).toHaveCount(2, { timeout: 15_000 });
+  await expect.poll(() => slotOf(page, a)).toBe("1");
+  expect(await terminalKept(page, a)).toBe(true);
+  expect(await terminalKept(page, b)).toBe(true);
 
-  // 不重启：编号不变，之前的输出还在，还能打字
+  // 编号不变，之前的输出还在，还能打字
   await expect(pane(page, a).getByTestId("terminal-id")).toHaveText(terminalA, {
     timeout: 15_000,
   });

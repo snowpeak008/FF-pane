@@ -70,8 +70,6 @@ export const COMMAND_TABLE: readonly CommandDescriptor[] = [
   { id: "memory-reject", group: "action", requiresHandler: true },
   { id: "workbench-new-tab", group: "action", requiresHandler: true },
   { id: "workbench-new-window", group: "action", requiresHandler: true },
-  { id: "workbench-split-right", group: "action", requiresHandler: true },
-  { id: "workbench-split-down", group: "action", requiresHandler: true },
   { id: "workbench-close-window", group: "action", requiresHandler: true },
   { id: "workbench-close-tab", group: "action", requiresHandler: true },
   { id: "workbench-maximize-window", group: "action", requiresHandler: true },

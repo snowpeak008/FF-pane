@@ -417,20 +417,6 @@ export const SHORTCUT_TABLE: readonly ShortcutRegistration[] = [
     preventDefault: true,
   },
   {
-    commandId: "workbench-split-right",
-    keys: ["Ctrl+Shift+\\"],
-    scopes: ["workbench"],
-    disabledInTextInput: false,
-    preventDefault: true,
-  },
-  {
-    commandId: "workbench-split-down",
-    keys: ["Ctrl+Shift+D"],
-    scopes: ["workbench"],
-    disabledInTextInput: false,
-    preventDefault: true,
-  },
-  {
     commandId: "workbench-close-window",
     keys: ["Ctrl+Shift+W"],
     scopes: ["workbench"],
@@ -453,8 +439,8 @@ export const SHORTCUT_TABLE: readonly ShortcutRegistration[] = [
   },
 ];
 
-/** 注册表条目数。T10.11 去掉旧会话和任务页键位后为 23。 */
-export const SHORTCUT_TABLE_SIZE = 23;
+/** 注册表条目数。T10.11 去掉旧会话和任务页键位后为 23；T11.2d 去掉向右 / 向下分屏后为 21。 */
+export const SHORTCUT_TABLE_SIZE = 21;
 
 export interface ShortcutRegistry {
   /** 注册一条；键位冲突抛 ShortcutConflictError。 */

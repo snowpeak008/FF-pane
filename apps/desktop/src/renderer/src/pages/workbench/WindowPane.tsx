@@ -15,7 +15,7 @@ import {
   WORKBENCH_PERMISSION_LEVELS,
   WORKBENCH_ROLES,
 } from "@ff-pane/shared";
-import { Bot, Columns2, Maximize2, Minimize2, Radio, Rows2, SquareTerminal, X } from "lucide-react";
+import { Bot, Maximize2, Minimize2, Plus, Radio, SquareTerminal, X } from "lucide-react";
 import {
   type ReactElement,
   type PointerEvent as ReactPointerEvent,
@@ -45,8 +45,8 @@ export interface WindowPaneProps {
   readonly maximized: boolean;
   readonly onFocus: () => void;
   readonly onClose: () => void;
-  readonly onSplitRight: () => void;
-  readonly onSplitDown: () => void;
+  /** 在这一页、这个窗口后面加一个窗口；这页满了开新页（T11.2d）。 */
+  readonly onAddWindow: () => void;
   readonly onToggleMaximize: () => void;
   readonly onRename: (title: string) => void;
   readonly onTerminalIdChange: (terminalId: string | undefined) => void;
@@ -64,8 +64,7 @@ export function WindowPane({
   maximized,
   onFocus,
   onClose,
-  onSplitRight,
-  onSplitDown,
+  onAddWindow,
   onToggleMaximize,
   onRename,
   onTerminalIdChange,
@@ -592,26 +591,15 @@ export function WindowPane({
             </Button>
           </Tooltip>
         ) : null}
-        <Tooltip content={t("workbench.window.splitRight")}>
+        <Tooltip content={t("workbench.window.addWindow")}>
           <Button
             variant="ghost"
             size="sm"
             iconOnly
-            aria-label={t("workbench.window.splitRight")}
-            onClick={onSplitRight}
+            aria-label={t("workbench.window.addWindow")}
+            onClick={onAddWindow}
           >
-            <Columns2 aria-hidden size={14} />
-          </Button>
-        </Tooltip>
-        <Tooltip content={t("workbench.window.splitDown")}>
-          <Button
-            variant="ghost"
-            size="sm"
-            iconOnly
-            aria-label={t("workbench.window.splitDown")}
-            onClick={onSplitDown}
-          >
-            <Rows2 aria-hidden size={14} />
+            <Plus aria-hidden size={14} />
           </Button>
         </Tooltip>
         <Tooltip

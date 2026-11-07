@@ -40,8 +40,6 @@ export const COMMAND_IDS = [
   // 工作台布局（T10.2）
   "workbench-new-tab",
   "workbench-new-window",
-  "workbench-split-right",
-  "workbench-split-down",
   "workbench-close-window",
   "workbench-close-tab",
   "workbench-maximize-window",

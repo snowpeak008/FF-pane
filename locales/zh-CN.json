@@ -118,14 +118,6 @@
         "title": "工作台：新建窗口",
         "keywords": "workbench new window shell 工作台 窗口 终端"
       },
-      "workbench-split-right": {
-        "title": "工作台：向右分屏",
-        "keywords": "workbench split right horizontal 分屏 右"
-      },
-      "workbench-split-down": {
-        "title": "工作台：向下分屏",
-        "keywords": "workbench split down vertical 分屏 下"
-      },
       "workbench-close-window": {
         "title": "工作台：关闭窗口",
         "keywords": "workbench close window kill 关闭 窗口"
@@ -529,6 +521,7 @@
     },
     "tab": {
       "new": "新建标签页",
+      "addWindow": "在这页加一个窗口",
       "close": "关闭标签页",
       "closeConfirmTitle": "关闭标签页？",
       "closeConfirmBody": "该标签页内仍有运行中的终端，关闭将终止这些进程。"
@@ -547,8 +540,7 @@
         "starting": "启动中",
         "stopped": "已停止"
       },
-      "splitRight": "向右分屏",
-      "splitDown": "向下分屏",
+      "addWindow": "在这个窗口后面加一个窗口",
       "maximize": "最大化",
       "restore": "还原",
       "close": "关闭窗口",
@@ -623,7 +615,6 @@
       "stopped": "已通知它下线"
     },
     "grid": {
-      "newWindowHere": "新建窗口",
       "tabFull": "这一页满了"
     }
   },
@@ -1238,8 +1229,6 @@
       "memory-reject": "记忆候选：拒绝",
       "workbench-new-tab": "工作台：新建标签页",
       "workbench-new-window": "工作台：新建窗口",
-      "workbench-split-right": "工作台：向右分屏",
-      "workbench-split-down": "工作台：向下分屏",
       "workbench-close-window": "工作台：关闭窗口",
       "workbench-close-tab": "工作台：关闭标签页",
       "workbench-maximize-window": "工作台：最大化/还原窗口",

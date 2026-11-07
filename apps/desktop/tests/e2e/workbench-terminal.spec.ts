@@ -125,7 +125,7 @@ test("multi-project split panes keep output across switches", async () => {
     .poll(async () => readReplayForWindow(page, windowA1), { timeout: 20_000 })
     .toContain("MARKER_A1");
 
-  await page.getByRole("button", { name: "Split right" }).first().click();
+  await page.getByRole("button", { name: "Add window after this one" }).first().click();
   await confirmShellInNewWindowDialog(page);
   await expect(page.getByTestId("workbench-window")).toHaveCount(2, { timeout: 15_000 });
   const windowA2 = await requireWindowId(page, 1);
@@ -151,7 +151,7 @@ test("multi-project split panes keep output across switches", async () => {
     .poll(async () => readReplayForWindow(page, windowB1), { timeout: 20_000 })
     .toContain("MARKER_B1");
 
-  await page.getByRole("button", { name: "Split right" }).first().click();
+  await page.getByRole("button", { name: "Add window after this one" }).first().click();
   await confirmShellInNewWindowDialog(page);
   await expect(page.getByTestId("workbench-window")).toHaveCount(2, { timeout: 15_000 });
   const windowB2 = await requireWindowId(page, 1);

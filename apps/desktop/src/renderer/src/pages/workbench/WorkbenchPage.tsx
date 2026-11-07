@@ -1,5 +1,5 @@
 /**
- * 工作台页（T10.2）：多项目并行、标签页 + 分屏、布局持久化。
+ * 工作台页（T10.2）：多项目并行、标签页 + 格子（T11.2d 起按个数自动排）、布局持久化。
  * 非活动项目 / 非活动标签不挂载 xterm（PTY 继续跑，回放环形缓冲）。
  */
 
@@ -11,8 +11,8 @@ import { toast } from "sonner";
 import {
   resetGridSizes,
   tabWindowIds,
-  withColSizes,
-  withRowSizes,
+  withCellSizes,
+  withLineSizes,
 } from "../../../../shared/workbench/grid";
 import { useCommandHandler, useShortcutScope } from "../../command";
 import { EmptyState } from "../../components/states/EmptyState";
@@ -44,7 +44,7 @@ export function WorkbenchPage(): ReactElement {
     entry === null ? null : (s.layoutsByProject[entry.id] ?? null),
   );
   const createTabWithWindow = useWorkbenchStore((s) => s.createTabWithWindow);
-  const splitWindow = useWorkbenchStore((s) => s.splitWindow);
+  const addWindowAfter = useWorkbenchStore((s) => s.addWindowAfter);
   const closeWindow = useWorkbenchStore((s) => s.closeWindow);
   const closeTab = useWorkbenchStore((s) => s.closeTab);
   const renameTab = useWorkbenchStore((s) => s.renameTab);
@@ -54,7 +54,6 @@ export function WorkbenchPage(): ReactElement {
   const toggleMaximize = useWorkbenchStore((s) => s.toggleMaximize);
   const applyWindowRole = useWorkbenchStore((s) => s.applyWindowRole);
   const setGridSizes = useWorkbenchStore((s) => s.setGridSizes);
-  const setGridOrientation = useWorkbenchStore((s) => s.setGridOrientation);
   const bindTerminalId = useWorkbenchStore((s) => s.bindTerminalId);
   const markCwdFallback = useWorkbenchStore((s) => s.markCwdFallback);
   const cwdFallbackWindowIds = useWorkbenchStore((s) => s.cwdFallbackWindowIds);
@@ -87,14 +86,11 @@ export function WorkbenchPage(): ReactElement {
 
   const [confirmCloseTabId, setConfirmCloseTabId] = useState<string | null>(null);
   const [newWindowOpen, setNewWindowOpen] = useState(false);
+  // tab：新建页；page：加到当前页末尾；after：加在某个窗口后面。满了都开新页。
   const [pendingCreate, setPendingCreate] = useState<
     | { readonly mode: "tab" }
-    | { readonly mode: "slot"; readonly slot: number }
-    | {
-        readonly mode: "split";
-        readonly direction: "horizontal" | "vertical";
-        readonly targetWindowId: string;
-      }
+    | { readonly mode: "page" }
+    | { readonly mode: "after"; readonly afterWindowId: string }
     | null
   >(null);
 
@@ -162,55 +158,60 @@ export function WorkbenchPage(): ReactElement {
       }
       const pending = pendingCreate;
       setPendingCreate(null);
-      if (pending === null || pending.mode === "tab" || pending.mode === "slot") {
+      if (pending === null || pending.mode === "tab" || pending.mode === "page") {
         createTabWithWindow({
           projectId: entry.id,
           projectRoot: entry.rootPath,
           kind: result.kind,
-          ...(pending?.mode === "slot" ? { slot: pending.slot } : { newPage: true }),
+          ...(pending?.mode === "page" ? {} : { newPage: true }),
           ...(result.initialPrompt !== undefined ? { initialPrompt: result.initialPrompt } : {}),
           ...(result.permission !== undefined ? { permission: result.permission } : {}),
           ...(result.role !== undefined ? { role: result.role } : {}),
         });
         return;
       }
-      splitWindow({
+      addWindowAfter({
         projectId: entry.id,
         projectRoot: entry.rootPath,
-        targetWindowId: pending.targetWindowId,
-        direction: pending.direction,
+        afterWindowId: pending.afterWindowId,
         kind: result.kind,
         ...(result.initialPrompt !== undefined ? { initialPrompt: result.initialPrompt } : {}),
         ...(result.permission !== undefined ? { permission: result.permission } : {}),
         ...(result.role !== undefined ? { role: result.role } : {}),
       });
     },
-    [createTabWithWindow, entry, pendingCreate, splitWindow],
+    [addWindowAfter, createTabWithWindow, entry, pendingCreate],
   );
 
-  const handleSplit = useCallback(
-    (direction: "horizontal" | "vertical") => {
-      if (entry === null || projectLayout === null) {
+  /** 打开新建窗口对话框；先看上限。 */
+  const requestCreate = useCallback(
+    (pending: NonNullable<typeof pendingCreate>) => {
+      if (entry === null) {
         return;
       }
       void (async () => {
         if (!(await ensureCapacity())) {
           return;
         }
-        const target =
-          projectLayout.focusedWindowId ??
-          (activeTab !== null ? tabWindowIds(activeTab)[0] : undefined);
-        if (target === undefined) {
-          setPendingCreate({ mode: "tab" });
-          setNewWindowOpen(true);
-          return;
-        }
-        setPendingCreate({ mode: "split", direction, targetWindowId: target });
+        setPendingCreate(pending);
         setNewWindowOpen(true);
       })();
     },
-    [activeTab, ensureCapacity, entry, projectLayout],
+    [ensureCapacity, entry],
   );
+
+  /** 快捷键「新建窗口」：加在当前窗口后面；没有窗口就新建页。 */
+  const handleAddWindow = useCallback(() => {
+    if (projectLayout === null) {
+      return;
+    }
+    const target =
+      projectLayout.focusedWindowId ??
+      (activeTab !== null ? tabWindowIds(activeTab)[0] : undefined);
+    requestCreate(
+      target === undefined ? { mode: "tab" } : { mode: "after", afterWindowId: target },
+    );
+  }, [activeTab, projectLayout, requestCreate]);
 
   const requestCloseTab = useCallback(
     (tabId: string) => {
@@ -241,10 +242,8 @@ export function WorkbenchPage(): ReactElement {
       handleNewTab();
       return;
     }
-    handleSplit("horizontal");
+    handleAddWindow();
   });
-  useCommandHandler("workbench-split-right", () => handleSplit("horizontal"));
-  useCommandHandler("workbench-split-down", () => handleSplit("vertical"));
   useCommandHandler("workbench-close-window", () => {
     if (entry === null || projectLayout?.focusedWindowId === null || projectLayout === null) {
       return;
@@ -340,6 +339,7 @@ export function WorkbenchPage(): ReactElement {
           onClose={requestCloseTab}
           onRename={(tabId, title) => renameTab(entry.id, tabId, title)}
           onNewTab={handleNewTab}
+          onAddToPage={activeTab !== null ? () => requestCreate({ mode: "page" }) : undefined}
           dropTarget={windowDrag.drag?.target ?? null}
         />
         <WorkbenchRuntimeBar projectId={entry.id} />
@@ -366,56 +366,21 @@ export function WorkbenchPage(): ReactElement {
               maximizedWindowId={projectLayout.maximizedWindowId}
               onFocus={(windowId) => focusWindow(entry.id, windowId)}
               onClose={(windowId) => void closeWindow(entry.id, windowId)}
-              onSplitRight={(windowId) => {
-                void (async () => {
-                  if (!(await ensureCapacity())) {
-                    return;
-                  }
-                  setPendingCreate({
-                    mode: "split",
-                    direction: "horizontal",
-                    targetWindowId: windowId,
-                  });
-                  setNewWindowOpen(true);
-                })();
-              }}
-              onSplitDown={(windowId) => {
-                void (async () => {
-                  if (!(await ensureCapacity())) {
-                    return;
-                  }
-                  setPendingCreate({
-                    mode: "split",
-                    direction: "vertical",
-                    targetWindowId: windowId,
-                  });
-                  setNewWindowOpen(true);
-                })();
-              }}
+              onAddWindow={(windowId) => requestCreate({ mode: "after", afterWindowId: windowId })}
               onToggleMaximize={(windowId) => toggleMaximize(entry.id, windowId)}
               onRename={(windowId, title) => renameWindow(entry.id, windowId, title)}
               onTerminalIdChange={(windowId, terminalId) =>
                 bindTerminalId(entry.id, windowId, terminalId)
               }
               onCwdFallback={(windowId) => markCwdFallback(windowId)}
-              onCreateInSlot={(slot) => {
-                void (async () => {
-                  if (!(await ensureCapacity())) {
-                    return;
-                  }
-                  setPendingCreate({ mode: "slot", slot });
-                  setNewWindowOpen(true);
-                })();
-              }}
-              onOrientationChange={setGridOrientation}
-              onRowSizes={(orientation, rows) =>
+              onLineSizes={(orientation, count, lines) =>
                 setGridSizes(entry.id, activeTab.id, (sizes) =>
-                  withRowSizes(sizes, orientation, rows),
+                  withLineSizes(sizes, orientation, count, lines),
                 )
               }
-              onColSizes={(orientation, row, cols) =>
+              onCellSizes={(orientation, count, line, cells) =>
                 setGridSizes(entry.id, activeTab.id, (sizes) =>
-                  withColSizes(sizes, orientation, row, cols),
+                  withCellSizes(sizes, orientation, count, line, cells),
                 )
               }
               onResetSizes={(orientation) =>
