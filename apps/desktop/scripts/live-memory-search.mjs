@@ -161,9 +161,9 @@ try {
   await invoke("providers:create", {
     draft: {
       name: "Ollama(local)",
-      type: "openai_compatible",
+      templateId: "openai-compatible",
       baseUrl: BASE,
-      models: [{ id: MODEL, displayName: MODEL, kind: "embedding" }],
+      models: [{ id: MODEL, label: MODEL, kind: "embedding" }],
       embeddingModel: MODEL,
       enabled: true,
     },

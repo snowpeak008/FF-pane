@@ -148,19 +148,19 @@ try {
     throw { skip: true };
   }
 
-  // 配 Ollama 为嵌入 Provider。openai_compatible + baseUrl 带 /v1 即走 openai 方言，
+  // 配 Ollama 为嵌入 Provider。openai-compatible 模板 + baseUrl 带 /v1 即走 openai 方言，
   // Ollama 的 /v1/embeddings 与之兼容——本步骤零代码改动，纯配置
   log("2", `配置 Ollama 嵌入 Provider（${MODEL} @ ${BASE}）…`);
   const provider = await invoke("providers:create", {
     draft: {
       name: "Ollama(local)",
-      type: "openai_compatible",
+      templateId: "openai-compatible",
       baseUrl: BASE,
-      models: [{ id: MODEL, displayName: MODEL, kind: "embedding" }],
+      models: [{ id: MODEL, label: MODEL, kind: "embedding" }],
       embeddingModel: MODEL,
       enabled: true,
     },
-    // Ollama 不校验鉴权头；这里给个占位值满足 openai_compatible 的必填约束（§4.2）
+    // Ollama 不校验鉴权头；这里给个占位值满足 openai-compatible 模板的必填约束（§4.2）
     apiKey: "ollama-local-no-auth",
   });
   console.log("  provider =", provider.id, "embeddingModel =", provider.embeddingModel);

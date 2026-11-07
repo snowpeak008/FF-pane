@@ -73,15 +73,15 @@ try {
   const invoke = (channel, req) =>
     page.evaluate(([c, r]) => window.ffpane.invoke(c, r), [channel, req]);
 
-  // #2 建 Provider（openai_compatible，真实 key 经 safeStorage 落盘）
+  // #2 建 Provider（openai-compatible 模板，真实 key 经 safeStorage 落盘）
   log("2", "创建 DeepSeek Provider…");
   const provider = await invoke("providers:create", {
     draft: {
       name: "DeepSeek",
-      type: "openai_compatible",
+      templateId: "openai-compatible",
       baseUrl: "https://api.deepseek.com/v1",
-      models: [{ id: "deepseek-chat", displayName: "deepseek-chat", kind: "chat" }],
-      defaultModel: "deepseek-chat",
+      models: [{ id: "deepseek-chat", label: "deepseek-chat", kind: "chat" }],
+      defaultModelId: "deepseek-chat",
       enabled: true,
     },
     apiKey: KEY,

@@ -1,5 +1,7 @@
 /**
- * 配置面点击核验：隔离数据根，点真实设置控件，对照落盘 / 派发 / 显隐。
+ * 配置面点击核验：隔离数据根，点真实设置控件，对照落盘 / 显隐 / 过滤。
+ * 只核验设置页上点得到的控件：Profile / 角色编辑框自 T10.12a 起不再挂载，
+ * 中转来源的过滤规则改在「配置」编辑框上核验。
  * 用法：先有 out/main/index.js，再 `node apps/desktop/scripts/config-click-audit.mjs`
  */
 import { execFileSync } from "node:child_process";
@@ -24,10 +26,6 @@ function pass(id, detail) {
 function fail(id, detail) {
   results.push({ id, ok: false, detail });
   console.log(`  FAIL  ${id}  ${detail}`);
-}
-function note(id, detail) {
-  results.push({ id, ok: true, note: true, detail });
-  console.log(`  NOTE  ${id}  ${detail}`);
 }
 
 const dataRoot = mkdtempSync(join(tmpdir(), "ffpane-cfg-data-"));
@@ -122,31 +120,36 @@ try {
   await page.locator("#setting-ui-language").selectOption("en-US");
   await page.waitForTimeout(400);
 
-  // 3 阈值下拉即时落盘
-  await page.locator("#setting-context-warn-percent").selectOption("50");
+  // 3 窗口上限下拉即时落盘
+  const windowLimit = page.locator("#setting-max-workbench-windows");
+  const currentLimit = await windowLimit.inputValue();
+  const nextLimit = await windowLimit
+    .locator("option")
+    .evaluateAll(
+      (options, current) => options.map((o) => o.value).find((v) => v !== current),
+      currentLimit,
+    );
+  await windowLimit.selectOption(nextLimit);
   await page.waitForTimeout(300);
   const cfg2 = await invoke("config:get");
-  if (cfg2.contextWarnPercent === 50) pass("threshold-click", "阈值 50% 已落盘");
-  else fail("threshold-click", `contextWarnPercent=${cfg2.contextWarnPercent}`);
+  if (cfg2.maxWorkbenchWindows === Number(nextLimit))
+    pass("window-limit-click", `窗口上限 ${nextLimit} 已落盘`);
+  else fail("window-limit-click", `maxWorkbenchWindows=${cfg2.maxWorkbenchWindows}`);
 
-  // 4 空发送禁用；框旁「生成计划」不吃草稿
-  await gotoRoute("/session");
-  const sendDisabledEmpty = await page
-    .getByRole("button", { name: "Send", exact: true })
-    .isDisabled();
-  if (sendDisabledEmpty) pass("send-empty", "空输入时 Send 禁用（点击无效果）");
-  else fail("send-empty", "空输入 Send 仍可点");
-
-  // 5 openai 只填名字可点保存 → 校验拒绝（按钮亮着，效果是报错）
-  await gotoRoute("/settings");
+  // 4 openai 只填名字可点保存 → 校验拒绝（按钮亮着，效果是报错）
   await page.getByRole("button", { name: "New provider" }).click();
+  await page.getByTestId("provider-template-openai-official").click();
   await page.locator("#provider-name").fill("Bare OpenAI");
   const saveBtn = page.getByRole("button", { name: "Save", exact: true });
   const saveEnabled = await saveBtn.isEnabled();
   await saveBtn.click();
-  const errVisible = await page
-    .locator("text=/baseUrl|apiKey|必须|must|required|Invalid/i")
-    .count();
+  // 校验经 IPC 往返才回来，点完立刻数会读到空
+  const errLocator = page.locator("text=/baseUrl|apiKey|必须|must|required|Invalid/i");
+  await errLocator
+    .first()
+    .waitFor({ timeout: 8_000 })
+    .catch(() => {});
+  const errVisible = await errLocator.count();
   if (saveEnabled && errVisible > 0) {
     pass("openai-save-bare", "保存钮可点，缺 baseUrl/密钥时校验挡住（未静默成功）");
   } else {
@@ -154,40 +157,10 @@ try {
   }
   await page.getByRole("button", { name: "Cancel" }).click();
 
-  // 6 custom：无测试连接；请求模板必填才能过校验；模板运行时不消费（代码已钉，这里钉 UI）
+  // 5 local-login：CLI 下拉不落盘；重开回到默认
   await page.getByRole("button", { name: "New provider" }).click();
-  await page.locator("#provider-name").fill("Custom Dead");
-  await page.locator("#provider-type").selectOption("custom");
-  const testBtn = await page.getByRole("button", { name: "Test connection" }).count();
-  const fetchBtn = await page.getByRole("button", { name: "Fetch models" }).count();
-  const notice = await page.getByTestId("custom-type-notice").count();
-  const tmpl = await page.locator("#provider-template").count();
-  if (testBtn === 0 && fetchBtn === 0 && notice > 0 && tmpl > 0) {
-    pass("custom-ui", "自定义类型：无测连/拉模型，有警示 + 请求模板框");
-  } else {
-    fail("custom-ui", `test=${testBtn} fetch=${fetchBtn} notice=${notice} tmpl=${tmpl}`);
-  }
-  await page.locator("#provider-template").fill("unused-{{body}}");
-  await page.getByRole("button", { name: "Save", exact: true }).click();
-  try {
-    await page.getByText("Custom Dead", { exact: true }).waitFor({ timeout: 8_000 });
-    const saved = (await invoke("providers:list")).find((p) => p.name === "Custom Dead");
-    if (saved?.requestTemplate === "unused-{{body}}") {
-      note(
-        "custom-template-saved",
-        "请求模板已落盘，但运行时不消费（hint 已写明）。此字段必填却无效果。",
-      );
-    } else {
-      fail("custom-template-saved", `落盘模板=${saved?.requestTemplate}`);
-    }
-  } catch (error) {
-    fail("custom-save", error.message ?? String(error));
-  }
-
-  // 7 cli_login：CLI 下拉不落盘；重开回到默认
-  await page.getByRole("button", { name: "New provider" }).click();
+  await page.getByTestId("provider-template-local-login").click();
   await page.locator("#provider-name").fill("CLI Probe");
-  await page.locator("#provider-type").selectOption("cli_login");
   await page.locator("#provider-cli-runtime").waitFor({ timeout: 8_000 });
   await page.locator("#provider-cli-runtime").selectOption("claude-code");
   await page.getByRole("button", { name: "Save", exact: true }).click();
@@ -206,26 +179,58 @@ try {
   else fail("cli-runtime-reset", `重开值为 ${reopened}`);
   await page.getByRole("button", { name: "Cancel" }).click();
 
-  // 8 Provider 禁用仍出现在 Profile 下拉，且会话仍能受理
+  // 6 本机登录来源（含已停用）不进配置的中转下拉；空 runtime 不能落盘
   await page.getByRole("button", { name: "New provider" }).click();
+  await page.getByTestId("provider-template-local-login").click();
   await page.locator("#provider-name").fill("Disabled CLI");
-  await page.locator("#provider-type").selectOption("cli_login");
   await page.locator("label:has-text('Enabled') input[type='checkbox']").uncheck();
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await page.getByText("Disabled CLI", { exact: true }).waitFor({ timeout: 8_000 });
 
-  await page.getByRole("button", { name: "New profile" }).click();
-  await page.locator("#profile-connection").selectOption("relay");
-  const disabledInDropdown = await page
-    .locator("#profile-provider")
-    .locator("option", { hasText: "Disabled CLI" })
-    .count();
-  if (disabledInDropdown === 0) {
-    pass("disabled-still-listed", "中转下拉不列出本机 CLI 来源（含已停用）");
-  } else {
-    fail("disabled-still-listed", "中转下拉仍出现本机 CLI 来源");
+  // 对照：合法中转来源必须在下拉里，否则「不在」的判据是空转。走界面新建，同用户路径
+  await page.getByRole("button", { name: "New provider" }).click();
+  await page.getByTestId("provider-template-anthropic-compatible").click();
+  await page.locator("#provider-name").fill("Relay Control");
+  await page.locator("#provider-baseurl").fill("https://relay.example.com");
+  await page.locator("#provider-apikey").fill("sk-audit-not-real");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await page.getByText("Relay Control", { exact: true }).waitFor({ timeout: 8_000 });
+
+  /** 打开新建配置，切 Claude 中转，数下拉里的两个来源后关掉。 */
+  async function countRelayOptions() {
+    await page.getByRole("button", { name: "New config" }).click();
+    await page.getByTestId("config-claude-mode").selectOption("relay");
+    const relaySelect = page.getByTestId("config-claude-provider");
+    await relaySelect.waitFor({ timeout: 8_000 });
+    const control = await relaySelect.locator("option", { hasText: "Relay Control" }).count();
+    const disabled = await relaySelect.locator("option", { hasText: "Disabled CLI" }).count();
+    await page.getByRole("button", { name: "Cancel" }).click();
+    return { control, disabled };
   }
-  await page.getByRole("button", { name: "Cancel" }).click();
+
+  // 同页刚建的来源，不重进设置页就该出现在配置的中转下拉里
+  const fresh = await countRelayOptions();
+  if (fresh.control > 0) {
+    pass("config-provider-list-fresh", "同页新建的中转来源立刻出现在配置下拉里");
+  } else {
+    fail(
+      "config-provider-list-fresh",
+      "同页新建的中转来源不在配置下拉里：ConfigsSection 只在挂载时拉一次 providers:list，要离开设置页再回来才看得到",
+    );
+  }
+
+  // 重进设置页拿到最新来源后，再判过滤规则
+  await gotoRoute("/projects");
+  await gotoRoute("/settings");
+  await page.getByRole("button", { name: "New config" }).waitFor({ timeout: 15_000 });
+  const relisted = await countRelayOptions();
+  if (relisted.control === 0) {
+    fail("disabled-still-listed", "重进后对照来源 Relay Control 仍不在中转下拉里，判据无效");
+  } else if (relisted.disabled === 0) {
+    pass("disabled-still-listed", "配置的中转下拉不列出本机 CLI 来源（含已停用）");
+  } else {
+    fail("disabled-still-listed", "配置的中转下拉仍出现本机 CLI 来源");
+  }
 
   const disabledProv = (await invoke("providers:list")).find((p) => p.name === "Disabled CLI");
   try {
@@ -235,6 +240,7 @@ try {
         runtime: "",
         providerId: disabledProv.id,
         defaultRole: "planner",
+        connectionMode: "local_cli",
         permissionPreset: PLANNER_ENV,
       },
     });
@@ -243,151 +249,36 @@ try {
     pass("empty-runtime-saved", "空 runtime 被校验拒绝");
   }
 
-  pass("empty-runtime-start", "空 runtime 无法落盘，派发无从发起");
-
-  const disabledProfile = await invoke("profiles:create", {
+  // 7 默认权限只预填新建，不改已有
+  const existing = await invoke("profiles:create", {
     draft: {
-      name: "Uses Disabled Provider",
-      runtime: "claude-code",
-      providerId: disabledProv.id,
-      defaultRole: "planner",
-      permissionPreset: PLANNER_ENV,
+      name: "Born Worker",
+      runtime: "codex",
+      defaultRole: "worker",
+      connectionMode: "local_cli",
+      permissionPreset: WORKER_ENV,
     },
   });
-  const ackDisabled = await invoke("session:start", {
-    turnId: "audit-disabled-prov",
-    projectRoot: projectDir,
-    profileId: disabledProfile.id,
-    input: { kind: "planner-message", text: "ping" },
-  });
-  if (ackDisabled.accepted) {
-    note(
-      "disabled-provider-usable",
-      "Enabled=false 的 Provider 仍可派发（enabled 只挡嵌入，不挡会话）。点击「启用」与使用无关。",
-    );
-  } else {
-    pass("disabled-provider-usable", `禁用 Provider 派发被拒：${ackDisabled.reason}`);
-  }
-  if (ackDisabled.accepted) {
-    await page.evaluate(
-      () =>
-        new Promise((res) => {
-          const off = window.ffpane.subscribe("session:event", (e) => {
-            if (e.turnId === "audit-disabled-prov" && (e.kind === "end" || e.kind === "error")) {
-              off?.();
-              res(e);
-            }
-          });
-          setTimeout(() => {
-            off?.();
-            res({ kind: "timeout" });
-          }, 15_000);
-        }),
-    );
-  }
-
-  // 9 角色预填权限：选 Worker 填入角色默认；改 Planner 再预填规划者默认
-  await page.getByRole("button", { name: "New profile" }).click();
-  await page.locator("#profile-name").fill("Born Worker");
-  await page.locator("#profile-connection").selectOption("local_cli");
-  await page.locator("#profile-runtime").selectOption("codex");
-  await page.locator("#profile-role").selectOption("worker");
-  const bornWrite = await page.locator("#profile-perm-write").inputValue();
-  if (bornWrite.trim() === "**") {
-    pass("role-perm-decoupled", "选 Worker 后可写范围预填为角色默认 **");
-  } else {
-    fail("role-perm-decoupled", `选 Worker 后可写=${JSON.stringify(bornWrite)}`);
-  }
-  await page.locator("#profile-perm-write").fill("**");
-  await page.getByRole("button", { name: "Save", exact: true }).click();
-  await page.getByText("Born Worker", { exact: true }).waitFor({ timeout: 8_000 });
-  const discussion = (await invoke("profiles:list"))
-    .filter((p) => p.defaultRole === "planner" || String(p.defaultRole).startsWith("role-"))
-    .map((p) => p.name);
-  if (!discussion.includes("Born Worker")) {
-    pass(
-      "worker-not-in-session",
-      `Worker 不进讨论列表（现讨论：${discussion.join(", ") || "无"}）`,
-    );
-  } else {
-    fail("worker-not-in-session", `讨论列表含 Born Worker：${discussion.join(", ")}`);
-  }
-
-  await page.getByRole("button", { name: 'Edit "Born Worker"' }).click();
-  await page.locator("#profile-role").selectOption("planner");
-  await page.waitForTimeout(300);
-  const flippedWrite = await page.locator("#profile-perm-write").inputValue();
-  await page.getByRole("button", { name: "Save", exact: true }).click();
-  await page.waitForTimeout(400);
-  const born = (await invoke("profiles:list")).find((p) => p.name === "Born Worker");
-  if (flippedWrite.trim() === "" && born?.defaultRole === "planner") {
-    pass("role-flip-fills", "改成 Planner 后预填角色默认权限（可写清空）并可保存");
-  } else {
-    fail(
-      "role-flip-fills",
-      `formWrite=${JSON.stringify(flippedWrite)} defaultRole=${born?.defaultRole} write=${born?.permissionPreset.writePaths}`,
-    );
-  }
-  await page
-    .getByRole("button", { name: "Cancel" })
-    .click()
-    .catch(() => {});
-
-  // 11 角色模板点击预填
-  await page.getByRole("button", { name: "New role" }).click();
-  await page.locator("#role-template").selectOption("docs-writer");
-  const filled = await page.locator("#role-prompt").inputValue();
-  if (filled.length > 20) pass("role-template-click", `选文档写手后提示词 ${filled.length} 字`);
-  else fail("role-template-click", "模板点击后提示词仍空");
-  await page.getByRole("button", { name: "Cancel" }).click();
-
-  // 12 effort 显隐随 Runtime
-  await page.getByRole("button", { name: "New profile" }).click();
-  await page.locator("#profile-connection").selectOption("local_cli");
-  await page.locator("#profile-runtime").selectOption("claude-code");
-  try {
-    await page.locator("#profile-reasoning-effort").waitFor({ state: "visible", timeout: 8_000 });
-  } catch {
-    /* counted below */
-  }
-  const effortClaude = await page.locator("#profile-reasoning-effort").count();
-  await page.locator("#profile-runtime").selectOption("gemini-cli");
-  await page.waitForTimeout(400);
-  const effortGemini = await page.locator("#profile-reasoning-effort").count();
-  if (effortClaude > 0 && effortGemini === 0) {
-    pass("effort-visibility", "claude-code 显示推理强度，gemini-cli 隐藏");
-  } else {
-    fail("effort-visibility", `claude=${effortClaude} gemini=${effortGemini}`);
-  }
-  await page.getByRole("button", { name: "Cancel" }).click();
-
-  // 13 默认权限只预填新建，不改已有
   const before = await invoke("config:get");
   await invoke("config:update", {
     defaultPermissionPreset: { ...WORKER_ENV, writePaths: ["docs/**"] },
   });
-  const existing = (await invoke("profiles:list")).find((p) => p.name === "Born Worker");
-  if (JSON.stringify(existing.permissionPreset.writePaths) !== JSON.stringify(["docs/**"])) {
+  const reread = (await invoke("profiles:list")).find((p) => p.id === existing.id);
+  if (JSON.stringify(reread.permissionPreset.writePaths) !== JSON.stringify(["docs/**"])) {
     pass("default-perm-not-retroactive", "改默认权限不回写已有 Profile（只影响下次新建预填）");
   } else {
     fail("default-perm-not-retroactive", "已有 Profile 被默认权限改写");
   }
   await invoke("config:update", { defaultPermissionPreset: before.defaultPermissionPreset });
 
-  // 14 生成计划不消费输入框（对照源码 + UI：按钮在草稿旁但 onGeneratePlan 不读 draft）
-  note(
-    "generate-plan-ignores-draft",
-    "「Generate plan」在输入框旁边，但点击只发 planner-plan，不带输入框正文；编排器退回缺省句「请基于以上讨论产出结构化计划。」",
-  );
-
-  // 15 配对无守卫：openai_compatible Provider + claude-code Runtime 可以保存
+  // 8 配对无守卫：openai-compatible 模板的 Provider + claude-code Runtime 可以保存
   const apiProv = await invoke("providers:create", {
     draft: {
       name: "Fake API",
-      type: "openai_compatible",
+      templateId: "openai-compatible",
       baseUrl: "https://api.example.com/v1",
-      models: [{ id: "m1", displayName: "M1", kind: "chat" }],
-      defaultModel: "m1",
+      models: [{ id: "m1", label: "M1", kind: "chat" }],
+      defaultModelId: "m1",
       enabled: true,
     },
     apiKey: "sk-audit-not-real",
@@ -423,8 +314,7 @@ try {
 }
 
 const failed = results.filter((r) => !r.ok);
-const notes = results.filter((r) => r.note);
 console.log(
-  `\n点击核验：${results.filter((r) => r.ok && !r.note).length} 过 / ${failed.length} 失败 / ${notes.length} 备查 / 共 ${results.length}`,
+  `\n点击核验：${results.length - failed.length} 过 / ${failed.length} 失败 / 共 ${results.length}`,
 );
 if (failed.length > 0) process.exitCode = 1;

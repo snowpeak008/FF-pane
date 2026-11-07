@@ -91,10 +91,10 @@ try {
   const provider = await invoke("providers:create", {
     draft: {
       name: "DeepSeek",
-      type: "openai_compatible",
+      templateId: "openai-compatible",
       baseUrl: "https://api.deepseek.com/v1",
-      models: [{ id: MODEL, displayName: MODEL, kind: "chat" }],
-      defaultModel: MODEL,
+      models: [{ id: MODEL, label: MODEL, kind: "chat" }],
+      defaultModelId: MODEL,
       enabled: true,
     },
     apiKey: KEY,
