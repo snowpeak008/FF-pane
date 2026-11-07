@@ -32,6 +32,7 @@ import {
   resetToolCallBuckets,
   type ToolWindowView,
   takeInboxDigest,
+  takeMidTurnInbox,
   type WorkbenchToolDeps,
 } from "../src/main/workbench/mcp-tools";
 import { createNamedLocks, type LockGrant } from "../src/main/workbench/named-locks";
@@ -1397,12 +1398,52 @@ describe("提醒消毒", () => {
     expect(await peekInboxNotice("B", deps)).toBe("");
   });
 
+  it("干活中途：上级的消息插正文并标已读，同一批不重复（T11.7）", async () => {
+    const root = tempDir();
+    const { deps } = harness(root);
+    expect(await takeMidTurnInbox("B", deps, undefined)).toEqual({ text: "" });
+    await call(deps, "A", "ffpane_send_message", {
+      windowId: "B",
+      text: "停一下，方向改成只修存档",
+    });
+    const taken = await takeMidTurnInbox("B", deps, undefined);
+    expect(taken.text).toContain("你干活时收到上级或用户本人的新消息");
+    expect(taken.text).toContain("> 停一下，方向改成只修存档");
+    expect(taken.announceId).toBeDefined();
+    // 已标记已读：再问就没有了。
+    expect(await takeMidTurnInbox("B", deps, taken.announceId)).toEqual({ text: "" });
+    expect(await peekInboxNotice("B", deps)).toBe("");
+  });
+
+  it("干活中途：下级的消息不插；夹着下级消息时上级的只提一句、不标已读（T11.7）", async () => {
+    const root = tempDir();
+    const { deps } = harness(root);
+    const reported = await call(deps, "C", "ffpane_report", {
+      status: "progress",
+      summary: "我这边过半了",
+    });
+    expect(reported.isError).toBe(false);
+    expect(await takeMidTurnInbox("B", deps, undefined)).toEqual({ text: "" });
+    await call(deps, "A", "ffpane_send_message", { windowId: "B", text: "先别提交" });
+    const taken = await takeMidTurnInbox("B", deps, undefined);
+    expect(taken.text).toContain("总管 发来的 1 条新消息");
+    expect(taken.text).toContain("共 2 条未读");
+    expect(taken.text).toContain("ffpane_read_inbox");
+    expect(taken.text).not.toContain("先别提交");
+    // 同一批不再说；没标已读，收件箱里还在。
+    expect(await takeMidTurnInbox("B", deps, taken.announceId)).toEqual({ text: "" });
+    expect(await peekInboxNotice("B", deps)).toContain("另有 2 条未读");
+  });
+
   it("hook 只在提交的是新消息提醒时去取正文", () => {
     expect(promptIsInboxReminder(JSON.stringify({ prompt: "[新消息] 来自 A" }))).toBe(true);
     expect(promptIsInboxReminder(JSON.stringify({ prompt: "帮我看看 [新消息]" }))).toBe(false);
     expect(promptIsInboxReminder("not json")).toBe(false);
     expect(JSON.parse(inboxHookOutput("正文"))).toEqual({
       hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: "正文" },
+    });
+    expect(JSON.parse(inboxHookOutput("插进来", "PostToolUse"))).toEqual({
+      hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: "插进来" },
     });
   });
 });

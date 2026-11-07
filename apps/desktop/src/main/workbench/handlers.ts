@@ -118,6 +118,7 @@ import {
   peekInboxNotice,
   type RemindDelivery,
   takeInboxDigest,
+  takeMidTurnInbox,
   type WindowModelInfo,
   type WorkbenchToolDeps,
 } from "./mcp-tools";
@@ -2648,6 +2649,9 @@ export async function createWorkbenchCliLayer(
     return project.rootPath;
   };
 
+  /** 干活中途已经插过的最新一条（按窗口），同一批不重复说（T11.7）。只放内存。 */
+  const midTurnAnnounced = new Map<string, string>();
+
   onTool = async (context) => {
     if (context.type === "inbox-digest") {
       const text = await takeInboxDigest(context.windowId, toolDeps());
@@ -2656,6 +2660,17 @@ export async function createWorkbenchCliLayer(
     if (context.type === "inbox-peek") {
       const text = await peekInboxNotice(context.windowId, toolDeps());
       return { ok: true, result: { text } };
+    }
+    if (context.type === "inbox-midturn") {
+      const taken = await takeMidTurnInbox(
+        context.windowId,
+        toolDeps(),
+        midTurnAnnounced.get(context.windowId),
+      );
+      if (taken.announceId !== undefined) {
+        midTurnAnnounced.set(context.windowId, taken.announceId);
+      }
+      return { ok: true, result: { text: taken.text } };
     }
     if (context.type !== "tool") {
       return { ok: false, error: "unsupported" };

@@ -23,6 +23,7 @@ async function runHook(
   event = "UserPromptSubmit",
   stdin: Record<string, unknown> = { hook_event_name: "UserPromptSubmit", prompt },
   peekText?: string,
+  midTurnText?: string,
 ): Promise<{ stdout: string; requests: string[] }> {
   const pipe =
     process.platform === "win32"
@@ -52,7 +53,9 @@ async function runHook(
             ? { ok: true, result: { text: "正文：青蛙七号" } }
             : req.type === "inbox-peek" && peekText !== undefined
               ? { ok: true, result: { text: peekText } }
-              : { ok: true },
+              : req.type === "inbox-midturn"
+                ? { ok: true, result: { text: midTurnText ?? "" } }
+                : { ok: true },
         )}\n`,
       );
     });
@@ -105,6 +108,35 @@ describe("新消息 hook 进程", () => {
         additionalContext: "[平台] 另有 2 条未读",
       },
     });
+  }, 20_000);
+
+  it("干活中途（PostToolUse）：上报后问有没有该插的消息，有就作为附加上下文插进去（T11.7）", async () => {
+    const stdin = { hook_event_name: "PostToolUse", tool_name: "Bash", tool_use_id: "toolu_1" };
+    const result = await runHook("", "PostToolUse", stdin, undefined, "[平台] 上级说先别提交");
+    expect(result.requests).toEqual(["hook:tok", "inbox-midturn:tok"]);
+    expect(JSON.parse(result.stdout.trim())).toEqual({
+      hookSpecificOutput: {
+        hookEventName: "PostToolUse",
+        additionalContext: "[平台] 上级说先别提交",
+      },
+    });
+    const failed = await runHook(
+      "",
+      "PostToolUseFailure",
+      { hook_event_name: "PostToolUseFailure", tool_name: "Bash", tool_use_id: "toolu_2" },
+      undefined,
+      "[平台] 插一句",
+    );
+    expect(JSON.parse(failed.stdout.trim()).hookSpecificOutput.hookEventName).toBe(
+      "PostToolUseFailure",
+    );
+  }, 20_000);
+
+  it("干活中途没有要插的：不写 stdout", async () => {
+    const stdin = { hook_event_name: "PostToolUse", tool_name: "Read", tool_use_id: "toolu_3" };
+    const result = await runHook("", "PostToolUse", stdin);
+    expect(result.requests).toEqual(["hook:tok", "inbox-midturn:tok"]);
+    expect(result.stdout.trim()).toBe("");
   }, 20_000);
 
   it("API 错误（StopFailure）：只转发错误类型，不转发错误正文", async () => {

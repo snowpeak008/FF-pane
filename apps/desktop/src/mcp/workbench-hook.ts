@@ -10,6 +10,8 @@
  * 唯一的 stdout：Claude 的 UserPromptSubmit 提交的是工作台「[新消息]」提醒时，
  * 向主进程取未读正文，作为 additionalContext 交给模型（读出即标记已读）；
  * 提交的是用户自己的话时，只取一句「还有几条未读、谁发的」（不标已读）。取不到就什么也不写。
+ * 干活中途（T11.7）：Claude 每调用完一个工具（PostToolUse / PostToolUseFailure），问一次主进程
+ * 有没有上级或用户本人的新消息，有就作为 additionalContext 插进去，模型下一步就能看到。不往终端打字。
  */
 
 import { createHash } from "node:crypto";
@@ -19,6 +21,8 @@ import { fileURLToPath } from "node:url";
 
 export const HOOK_REPORT_TIMEOUT_MS = 1500;
 export const INBOX_DIGEST_TIMEOUT_MS = 3000;
+/** 每调用完一个工具都要问一次，CLI 等着 hook 退出，所以给得短；取不到就算了，这一轮结束还有提醒。 */
+export const MID_TURN_TIMEOUT_MS = 800;
 export const INBOX_REMINDER_PREFIX = "[新消息]";
 
 const TOOL_USE_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
@@ -308,14 +312,14 @@ export function promptIsInboxReminder(raw: string): boolean {
 }
 
 /**
- * 向控制通道取附加上下文。inbox-digest：未读正文（标为已读）；inbox-peek：只说有几条未读、谁发的。
- * 超时、拒绝或断开都返回空串。
+ * 向控制通道取附加上下文。inbox-digest：未读正文（标为已读）；inbox-peek：只说有几条未读、谁发的；
+ * inbox-midturn：干活中途该看的上级和用户本人的消息（T11.7）。超时、拒绝或断开都返回空串。
  */
 export function requestInboxDigest(
   pipePath: string,
   token: string,
   timeoutMs = INBOX_DIGEST_TIMEOUT_MS,
-  type: "inbox-digest" | "inbox-peek" = "inbox-digest",
+  type: "inbox-digest" | "inbox-peek" | "inbox-midturn" = "inbox-digest",
 ): Promise<string> {
   return new Promise((resolveDigest) => {
     let settled = false;
@@ -356,10 +360,18 @@ export function requestInboxDigest(
   });
 }
 
-/** Claude UserPromptSubmit 的附加上下文输出。 */
-export function inboxHookOutput(text: string): string {
-  return JSON.stringify({
-    hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: text },
+/** Claude hook 的附加上下文输出：UserPromptSubmit，或干活中途的 PostToolUse / PostToolUseFailure。 */
+export function inboxHookOutput(
+  text: string,
+  hookEventName: "UserPromptSubmit" | "PostToolUse" | "PostToolUseFailure" = "UserPromptSubmit",
+): string {
+  return JSON.stringify({ hookSpecificOutput: { hookEventName, additionalContext: text } });
+}
+
+/** 写一行 stdout 再返回，保证进程退出前写完。 */
+function writeStdoutLine(line: string): Promise<void> {
+  return new Promise<void>((done) => {
+    process.stdout.write(`${line}\n`, () => done());
   });
 }
 
@@ -444,6 +456,19 @@ if (invokedDirectly()) {
         event === "StopFailure" ? (extractStopFailureType(raw) ?? "unknown") : undefined,
         extractNotifyThreadId(process.argv) ?? extractHookSessionId(event, raw),
       );
+      if (event === "PostToolUse" || event === "PostToolUseFailure") {
+        // 干活中途：上级或用户本人有新消息就插进去。
+        const midTurn = await requestInboxDigest(
+          pipePath,
+          token,
+          MID_TURN_TIMEOUT_MS,
+          "inbox-midturn",
+        );
+        if (midTurn !== "") {
+          await writeStdoutLine(inboxHookOutput(midTurn, event));
+        }
+        return;
+      }
       if (event !== "UserPromptSubmit") {
         return;
       }
@@ -455,9 +480,7 @@ if (invokedDirectly()) {
         promptIsInboxReminder(raw) ? "inbox-digest" : "inbox-peek",
       );
       if (digest !== "") {
-        await new Promise<void>((done) => {
-          process.stdout.write(`${inboxHookOutput(digest)}\n`, () => done());
-        });
+        await writeStdoutLine(inboxHookOutput(digest));
       }
     })
     .catch(() => undefined)
