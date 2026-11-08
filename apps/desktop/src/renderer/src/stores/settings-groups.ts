@@ -7,7 +7,7 @@
  * 本文件零依赖，ui store 和设置页都从这里取，可直接单测。
  */
 
-export const SETTINGS_GROUPS = ["general", "workbench", "models", "tools"] as const;
+export const SETTINGS_GROUPS = ["general", "workbench", "models", "skills", "tools"] as const;
 
 export type SettingsGroup = (typeof SETTINGS_GROUPS)[number];
 

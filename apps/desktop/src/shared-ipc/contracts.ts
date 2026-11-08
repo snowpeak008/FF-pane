@@ -333,6 +333,8 @@ export interface LaunchCliWindowResponse {
   readonly permissionCapped: boolean;
   /** auto = 已装 node 直启的回合信号；manual = 没有 node.exe，投递一直要确认。 */
   readonly turnSignal: "auto" | "manual";
+  /** T11.9：这次挂了哪些技能、跳过了哪些。项目没启用技能时为空。 */
+  readonly skills?: WindowSkillsReport;
 }
 
 /** workbench:session-claimed 事件（Codex 认领到原生会话 id）。 */
@@ -359,6 +361,7 @@ export interface WorkbenchTerminalReplacedEvent {
   readonly effectivePermission: WorkbenchPermissionLevel;
   readonly permissionCapped: boolean;
   readonly turnSignal: "auto" | "manual";
+  readonly skills?: WindowSkillsReport;
   /** false = 开了新对话，界面清掉旧的当前编号。 */
   readonly resumed: boolean;
 }
@@ -769,6 +772,105 @@ export interface RemoveProjectRequest {
 export interface SetProjectOutsideWriteDirsRequest {
   readonly id: ProjectId;
   readonly dirs: readonly string[];
+}
+
+/** projects:set-skills 请求（T11.9）：整份替换这个项目启用的技能（原名），空数组即都不用。 */
+export interface SetProjectSkillsRequest {
+  readonly id: ProjectId;
+  readonly skills: readonly string[];
+}
+
+/** 技能适用于哪家（T11.9）。 */
+export type SkillAppliesToWire = "any" | "claude" | "codex";
+
+/**
+ * 技能库里一个技能的状态（技能计划 §3.4）。
+ * ok 可用；invalid SKILL.md 坏了或目录没了；python-missing / node-missing 本机找不到要用的程序。
+ */
+export type SkillStatusWire = "ok" | "invalid" | "python-missing" | "node-missing";
+
+/** 技能库里的一个技能（skills:list）。不含技能目录里任何文件的内容。 */
+export interface SkillView {
+  /** 原名（SKILL.md 里的 name），不能改，AI 看到的也是它。 */
+  readonly name: string;
+  /** 用户改的显示名；没改是空串。 */
+  readonly displayName: string;
+  readonly description: string;
+  readonly appliesTo: SkillAppliesToWire;
+  /** 从文件结构猜的作者，只当提示。 */
+  readonly author: "codex" | "claude" | "unknown";
+  readonly status: SkillStatusWire;
+  readonly needsPython: boolean;
+  readonly needsNode: boolean;
+  /** 脚本用 curl.exe / PowerShell 访问 https://，Codex 窗口里会失败。 */
+  readonly windowsHttps: boolean;
+  /** 库里这份技能的目录。 */
+  readonly dir: string;
+  /** 从哪里导入的，只是记录。 */
+  readonly source: string;
+  readonly importedAt: number;
+  /** 哪些项目启用了它（项目显示名）。 */
+  readonly usedBy: readonly string[];
+}
+
+export interface SkillsListResponse {
+  readonly skills: readonly SkillView[];
+  readonly libraryDir: string;
+}
+
+/** skills:import 请求：sourceDir 由 dialog:pick-directory 选出；replace 为 true 时替换同名技能。 */
+export interface ImportSkillRequest {
+  readonly sourceDir: string;
+  readonly replace?: boolean;
+}
+
+/**
+ * skills:import 响应。exists：库里已有同名技能，没动，界面问用户要不要替换；
+ * 失败（没有 SKILL.md、名字不合规等）走 IPC 错误，message 说清原因。
+ */
+export interface ImportSkillResponse {
+  readonly status: "imported" | "replaced" | "exists";
+  readonly name: string;
+  /** 已有同名技能时，哪些项目在用。 */
+  readonly usedBy: readonly string[];
+  /** 替换后内容和上次一样（不算配置文件）。 */
+  readonly sameAsBefore?: boolean;
+}
+
+export interface SkillNameRequest {
+  readonly name: string;
+}
+
+export interface SetSkillDisplayNameRequest {
+  readonly name: string;
+  /** 空串表示恢复用原名。 */
+  readonly displayName: string;
+}
+
+export interface SetSkillAppliesToRequest {
+  readonly name: string;
+  readonly appliesTo: SkillAppliesToWire;
+}
+
+/** skills:remove 响应：从库里删掉，并从这些项目的启用名单里拿掉。 */
+export interface RemoveSkillResponse {
+  readonly removedFromProjects: readonly string[];
+}
+
+/** 这次开窗口挂了哪些技能、跳过了哪些（技能计划 §4.2）。 */
+export interface WindowSkillsReport {
+  readonly mounted: readonly string[];
+  readonly skipped: readonly {
+    readonly name: string;
+    readonly reason:
+      | "not-in-library"
+      | "claude-only"
+      | "codex-only"
+      | "invalid"
+      | "python-missing"
+      | "node-missing"
+      | "mount-failed";
+  }[];
 }
 
 /** projects:restore 请求：撤销移除，把先前 projects:remove 返回的条目放回。 */
@@ -1785,6 +1887,16 @@ export interface IpcInvokeContracts {
     request: SetProjectOutsideWriteDirsRequest;
     response: ProjectRegistryEntry;
   };
+  /** T11.9：这个项目启用哪些技能。只有界面能改，存在 projects.json。下次开窗口生效。 */
+  "projects:set-skills": { request: SetProjectSkillsRequest; response: ProjectRegistryEntry };
+  /** T11.9 技能库。 */
+  "skills:list": { request: undefined; response: SkillsListResponse };
+  "skills:import": { request: ImportSkillRequest; response: ImportSkillResponse };
+  "skills:set-display-name": { request: SetSkillDisplayNameRequest; response: SkillView };
+  "skills:set-applies-to": { request: SetSkillAppliesToRequest; response: SkillView };
+  "skills:remove": { request: SkillNameRequest; response: RemoveSkillResponse };
+  /** 用资源管理器打开这份技能的目录，让用户自己填配置。 */
+  "skills:open-dir": { request: SkillNameRequest; response: { readonly ok: true } };
   /** 读取项目级设置（project.json 中工作台负责的字段，T6.6）。 */
   "projects:get-settings": { request: ProjectScopedRequest; response: ProjectSettingsView };
   /** 更新项目级设置（非破坏性合并，保留其他工单写入的字段）。 */
@@ -2028,6 +2140,13 @@ export const INVOKE_CHANNELS = [
   "diagnostics:check-sqlite",
   "diagnostics:check-pty",
   "dialog:pick-directory",
+  "projects:set-skills",
+  "skills:list",
+  "skills:import",
+  "skills:set-display-name",
+  "skills:set-applies-to",
+  "skills:remove",
+  "skills:open-dir",
   "terminal:create",
   "terminal:write",
   "terminal:composing",

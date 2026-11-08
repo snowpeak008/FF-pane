@@ -15,7 +15,7 @@ import {
   WORKBENCH_PERMISSION_LEVELS,
   WORKBENCH_ROLES,
 } from "@ff-pane/shared";
-import { Bot, Maximize2, Minimize2, Plus, Radio, SquareTerminal, X } from "lucide-react";
+import { Bot, Maximize2, Minimize2, Plus, Radio, Sparkles, SquareTerminal, X } from "lucide-react";
 import {
   type ReactElement,
   type PointerEvent as ReactPointerEvent,
@@ -25,6 +25,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import type { WindowSkillsReport } from "../../../../shared-ipc/contracts";
 import { Button } from "../../components/ui/Button";
 import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
 import { Tooltip } from "../../components/ui/Tooltip";
@@ -113,6 +114,8 @@ export function WindowPane({
     effort?: string;
   } | null>(null);
   const [manualTurnSignal, setManualTurnSignal] = useState(false);
+  /** T11.9：这次开窗挂了哪些技能、跳过了哪些。 */
+  const [skillsReport, setSkillsReport] = useState<WindowSkillsReport | undefined>(undefined);
   const running = exitCode === undefined && window.terminalId !== undefined;
   const autoStart = wasCreatedThisSession(window.id);
   const initialPrompt = useMemo(() => takeInitialPrompt(window.id), [takeInitialPrompt, window.id]);
@@ -541,6 +544,46 @@ export function WindowPane({
               </span>
             ) : null}
           </>
+        ) : null}
+        {skillsReport !== undefined &&
+        (skillsReport.mounted.length > 0 || skillsReport.skipped.length > 0) ? (
+          <Tooltip
+            content={
+              <span className="flex flex-col gap-0.5">
+                {skillsReport.mounted.length > 0 ? (
+                  <span>
+                    {t("workbench.skills.mounted", {
+                      names: skillsReport.mounted.join(t("settings.skills.listSeparator")),
+                    })}
+                  </span>
+                ) : null}
+                {skillsReport.skipped.map((item) => (
+                  <span key={item.name}>
+                    {t("workbench.skills.skipped", {
+                      name: item.name,
+                      reason: t(`workbench.skills.reason.${item.reason}`),
+                    })}
+                  </span>
+                ))}
+                <span className="text-fg-muted">{t("workbench.skills.restartHint")}</span>
+              </span>
+            }
+          >
+            <span
+              className={cn(
+                "flex shrink-0 items-center gap-0.5 rounded-sm px-1 text-2xs",
+                skillsReport.skipped.length > 0
+                  ? "bg-warning-surface text-warning-text"
+                  : "bg-surface-active text-fg-muted",
+              )}
+              data-testid="workbench-window-skills"
+              data-mounted={skillsReport.mounted.length}
+              data-skipped={skillsReport.skipped.length}
+            >
+              <Sparkles aria-hidden size={11} />
+              {t("workbench.skills.chip", { count: skillsReport.mounted.length })}
+            </span>
+          </Tooltip>
         ) : null}
         <span
           className={cn(
@@ -1010,6 +1053,9 @@ export function WindowPane({
                 },
                 onTurnSignal: (signal) => {
                   setManualTurnSignal(signal === "manual");
+                },
+                onSkills: (report) => {
+                  setSkillsReport(report);
                 },
                 onLaunchRoute: (route) => {
                   patchWindow(window.projectId, window.id, { routeSnapshot: route });

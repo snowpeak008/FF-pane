@@ -65,7 +65,7 @@ import {
   updateHabitStatus,
   validateHabitDraft,
 } from "@ff-pane/storage";
-import { type BrowserWindow, dialog, type OpenDialogOptions } from "electron";
+import { type BrowserWindow, dialog, type OpenDialogOptions, shell } from "electron";
 import type { InvokeHandlers } from "../shared-ipc/server";
 import { materializeProfileDraft, resetLegacyAgentConfigIfNeeded } from "./connection-mode";
 import { resolveGlobalRoot } from "./data-root";
@@ -80,6 +80,18 @@ import { createMemoryIndexService, type MemoryIndexService } from "./memory-inde
 import { type ProjectSummarySources, summarizeProjects } from "./project-summary";
 import { resolveProbeOutlet } from "./provider-proxy";
 import { createSafeStorageBackend, createSecretStore, resolveSecretsFile } from "./secrets";
+import {
+  importSkill,
+  listSkills,
+  probeSkillRuntimes,
+  readSkillIndex,
+  removeSkill,
+  resolveSkillsLayout,
+  SkillNotFoundError,
+  setSkillAppliesTo,
+  setSkillDisplayName,
+} from "./skills/skill-library";
+import { isSkillAppliesTo } from "./skills/skill-manifest";
 import { validateWorkbenchConfigDraft } from "./workbench/config-draft-validate";
 import { keepModelEffortOverrides } from "./workbench/model-effort";
 
@@ -92,6 +104,13 @@ type DataChannel =
   | "projects:remove"
   | "projects:restore"
   | "projects:set-outside-write-dirs"
+  | "projects:set-skills"
+  | "skills:list"
+  | "skills:import"
+  | "skills:set-display-name"
+  | "skills:set-applies-to"
+  | "skills:remove"
+  | "skills:open-dir"
   | "projects:get-settings"
   | "projects:update-settings"
   | "providers:list"
@@ -182,6 +201,23 @@ export async function createDataHandlers(
     secretsFile: resolveSecretsFile(layout.rootDir),
   });
   const registry = createProjectRegistry(layout.projectsFile);
+  const skillsLayout = resolveSkillsLayout(layout.rootDir);
+  /** 哪些项目启用了这个技能（项目显示名）。 */
+  const skillUsers = async (): Promise<(name: string) => readonly string[]> => {
+    const projects = await registry.listProjects();
+    return (name) =>
+      projects.filter((project) => project.skills?.includes(name) === true).map((p) => p.name);
+  };
+  const skillView = async (name: string) => {
+    const users = await skillUsers();
+    const found = (await listSkills(skillsLayout, probeSkillRuntimes(), users)).find(
+      (view) => view.name === name,
+    );
+    if (found === undefined) {
+      throw new SkillNotFoundError(name);
+    }
+    return found;
+  };
   const providers = createProviderStore(layout.providersFile);
   const profiles = createProfileStore(layout.profilesFile);
   const projectConfigs = createProjectConfigStore(layout.configsFile);
@@ -374,6 +410,71 @@ export async function createDataHandlers(
           .filter((dir) => dir !== "")
           .map((dir) => resolve(dir)),
       ),
+
+    // T11.9：项目启用哪些技能只有界面能改，存在 projects.json。只收技能库里有的原名。下次开窗口生效。
+    "projects:set-skills": async (request) => {
+      const known = new Set((await readSkillIndex(skillsLayout)).map((entry) => entry.name));
+      return registry.setSkills(
+        request.id,
+        request.skills.filter((name) => known.has(name)),
+      );
+    },
+
+    // T11.9 技能库：显示、改名、导入、删除。技能目录里的文件内容一概不回传。
+    "skills:list": async () => ({
+      skills: await listSkills(skillsLayout, probeSkillRuntimes(), await skillUsers()),
+      libraryDir: skillsLayout.libraryDir,
+    }),
+
+    "skills:import": async (request) => {
+      const outcome = await importSkill(skillsLayout, request.sourceDir, {
+        ...(request.replace === true ? { replace: true } : {}),
+      });
+      const users = await skillUsers();
+      return {
+        status: outcome.status,
+        name: outcome.name,
+        usedBy: users(outcome.name),
+        ...(outcome.sameAsBefore !== undefined ? { sameAsBefore: outcome.sameAsBefore } : {}),
+      };
+    },
+
+    "skills:set-display-name": async (request) => {
+      await setSkillDisplayName(skillsLayout, request.name, request.displayName);
+      return skillView(request.name);
+    },
+
+    "skills:set-applies-to": async (request) => {
+      if (!isSkillAppliesTo(request.appliesTo)) {
+        throw new Error(`unknown appliesTo: ${String(request.appliesTo)}`);
+      }
+      await setSkillAppliesTo(skillsLayout, request.name, request.appliesTo);
+      return skillView(request.name);
+    },
+
+    "skills:remove": async (request) => {
+      await removeSkill(skillsLayout, request.name);
+      const removedFromProjects: string[] = [];
+      for (const project of await registry.listProjects()) {
+        if (project.skills?.includes(request.name) === true) {
+          await registry.setSkills(
+            project.id,
+            project.skills.filter((name) => name !== request.name),
+          );
+          removedFromProjects.push(project.name);
+        }
+      }
+      return { removedFromProjects };
+    },
+
+    "skills:open-dir": async (request) => {
+      const view = await skillView(request.name);
+      const failure = await shell.openPath(view.dir);
+      if (failure !== "") {
+        throw new Error(failure);
+      }
+      return { ok: true } as const;
+    },
 
     // 项目级设置（T6.6）：只读写 project.json 中本层负责的字段，其余键原样保留
     "projects:get-settings": (request) =>

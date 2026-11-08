@@ -616,6 +616,21 @@
     },
     "grid": {
       "tabFull": "这一页满了"
+    },
+    "skills": {
+      "chip": "技能 {{count}}",
+      "mounted": "已挂：{{names}}",
+      "skipped": "没挂「{{name}}」：{{reason}}",
+      "restartHint": "项目里改了技能，重开窗口才生效。",
+      "reason": {
+        "not-in-library": "技能库里没有了",
+        "claude-only": "只用于 Claude",
+        "codex-only": "只用于 Codex",
+        "invalid": "SKILL.md 坏了或目录不见了",
+        "python-missing": "找不到 python",
+        "node-missing": "找不到 node",
+        "mount-failed": "挂载失败"
+      }
     }
   },
   "projects": {
@@ -654,7 +669,12 @@
         "task": "任务",
         "run": "执行记录",
         "session": "会话登记"
-      }
+      },
+      "skillsCount": "技能 {{count}} 个",
+      "skillsLabel": "技能",
+      "skillsEmpty": "技能库是空的。先到 设置 → 技能 导入。",
+      "skillsTooMany": "勾了超过 {{count}} 个，AI 容易选错，建议只留要用的。",
+      "skillsHint": "只有勾上的技能会挂给这个项目的窗口。改完要重开窗口才生效。"
     },
     "remove": {
       "toast": "已移除「{{name}}」",
@@ -684,7 +704,8 @@
       "general": "通用",
       "workbench": "工作台",
       "models": "模型",
-      "tools": "工具"
+      "tools": "工具",
+      "skills": "技能"
     },
     "providers": {
       "title": "模型来源（Provider）",
@@ -1167,6 +1188,55 @@
         "reviewer": "审查者",
         "docs-writer": "文档写手",
         "test-engineer": "测试工程师"
+      }
+    },
+    "skills": {
+      "title": "技能库",
+      "subtitle": "技能放在 FF-pane 自己的目录里，所有项目共用一份，不写 ~/.claude、~/.codex。哪个项目用哪些，在项目卡片的「配置」里勾；不勾就不生效。改了要重开窗口才生效。",
+      "import": "导入技能",
+      "importFailed": "导入失败",
+      "imported": "已导入「{{name}}」。要用的项目在项目卡片的「配置」里勾上。",
+      "replaced": "已替换「{{name}}」，你填过的配置文件保留了。",
+      "replacedSame": "「{{name}}」和上次导入的一样，配置文件保留了。",
+      "empty": "技能库是空的。下载好技能后点「导入技能」，选有 SKILL.md 的那个目录。",
+      "search": "按名字搜索",
+      "libraryDir": "技能库目录：{{dir}}",
+      "replaceTitle": "替换已有的「{{name}}」？",
+      "replaceUsedBy": "在用的项目：{{projects}}。技能目录里你填过的配置文件会保留，不会被新版本盖掉。已经开着的窗口要重开才用上新版本。",
+      "replaceUnused": "还没有项目在用。技能目录里你填过的配置文件会保留，不会被新版本盖掉。",
+      "replace": "替换",
+      "listSeparator": "、",
+      "removed": "已从技能库删掉「{{name}}」",
+      "removeTitle": "从技能库删掉「{{name}}」？",
+      "removeUsedBy": "这些项目会一起取消勾选：{{projects}}。技能目录（包括你填的配置文件）会一起删掉。已经开着的窗口不受影响，重开后就没有了。",
+      "removeUnused": "技能目录（包括你填的配置文件）会一起删掉。",
+      "remove": "删除",
+      "removeLabel": "删除「{{name}}」",
+      "openDir": "打开目录",
+      "author": {
+        "codex": "Codex 写的",
+        "claude": "Claude 写的"
+      },
+      "needsPython": "要 Python",
+      "needsNode": "要 Node",
+      "displayName": "显示名",
+      "appliesTo": "适用于",
+      "appliesToOption": {
+        "any": "通用",
+        "claude": "只用于 Claude",
+        "codex": "只用于 Codex"
+      },
+      "usedBy": "在用的项目：{{projects}}",
+      "unused": "还没有项目在用",
+      "status": {
+        "invalid": "当前无法激活：SKILL.md 坏了或目录不见了，重新导入一次。",
+        "python-missing": "当前无法激活：这台电脑上找不到 python。",
+        "node-missing": "当前无法激活：这台电脑上找不到 node。"
+      },
+      "limit": {
+        "claudeOnly": "只用于 Claude：Codex、Grok 窗口不挂。",
+        "codexOnly": "只用于 Codex：Claude、Grok 窗口不挂。",
+        "windowsHttps": "脚本用 curl 或 PowerShell 访问 https，Codex 窗口里会失败。"
       }
     }
   },

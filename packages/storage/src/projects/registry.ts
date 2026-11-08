@@ -66,6 +66,8 @@ export interface ProjectRegistry {
    * id 不存在抛 ProjectNotFoundError。
    */
   setOutsideWriteDirs(id: ProjectId, dirs: readonly string[]): Promise<ProjectRegistryEntry>;
+  /** T11.9：整份替换这个项目启用的技能，空数组即都不用。 */
+  setSkills(id: ProjectId, skills: readonly string[]): Promise<ProjectRegistryEntry>;
 }
 
 const PROJECT_ID_PREFIX = "project";
@@ -174,6 +176,22 @@ export function createProjectRegistry(
       const { outsideWriteDirs: _old, ...rest } = current;
       const next: ProjectRegistryEntry =
         cleaned.length > 0 ? { ...rest, outsideWriteDirs: cleaned } : rest;
+      await saveProjects(
+        projectsFile,
+        projects.map((project) => (project.id === id ? next : project)),
+      );
+      return next;
+    },
+
+    async setSkills(id: ProjectId, skills: readonly string[]): Promise<ProjectRegistryEntry> {
+      const projects = await loadProjects(projectsFile);
+      const current = projects.find((project) => project.id === id);
+      if (current === undefined) {
+        throw new ProjectNotFoundError(id);
+      }
+      const cleaned = [...new Set(skills.map((name) => name.trim()).filter((name) => name !== ""))];
+      const { skills: _old, ...rest } = current;
+      const next: ProjectRegistryEntry = cleaned.length > 0 ? { ...rest, skills: cleaned } : rest;
       await saveProjects(
         projectsFile,
         projects.map((project) => (project.id === id ? next : project)),

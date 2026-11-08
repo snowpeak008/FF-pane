@@ -9,7 +9,7 @@ import { migrateUiState, useUiStore } from "../src/renderer/src/stores/ui";
 
 describe("T11.9 设置页分组", () => {
   it("分组顺序固定，第一组是默认组", () => {
-    expect(SETTINGS_GROUPS).toEqual(["general", "workbench", "models", "tools"]);
+    expect(SETTINGS_GROUPS).toEqual(["general", "workbench", "models", "skills", "tools"]);
     expect(DEFAULT_SETTINGS_GROUP).toBe("general");
   });
 

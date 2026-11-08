@@ -50,6 +50,11 @@ export interface BuildInteractiveClaudeArgsInput {
    * 官方行为是与用户 settings 合并，不会关掉用户自己的 hooks。
    */
   readonly settingsFile?: string;
+  /**
+   * T11.9：本窗口挂的技能插件目录（`--plugin-dir`，每个目录一对参数，只对这次进程生效）。
+   * 不写 ~/.claude。
+   */
+  readonly pluginDirs?: readonly string[];
   /** T10.5：权限等级 → CLI 参数。 */
   readonly permission?: WorkbenchPermissionLevel;
   /**
@@ -149,6 +154,11 @@ export function buildInteractiveClaudeArgs(input: BuildInteractiveClaudeArgsInpu
   }
   if (input.settingsFile !== undefined && input.settingsFile.trim() !== "") {
     args.push("--settings", input.settingsFile.trim());
+  }
+  for (const dir of input.pluginDirs ?? []) {
+    if (dir.trim() !== "") {
+      args.push("--plugin-dir", dir.trim());
+    }
   }
   if (input.initialPrompt !== undefined && input.initialPrompt.trim() !== "") {
     args.push(input.initialPrompt);

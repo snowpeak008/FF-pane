@@ -616,6 +616,21 @@
     },
     "grid": {
       "tabFull": "That page is full"
+    },
+    "skills": {
+      "chip": "Skills {{count}}",
+      "mounted": "Mounted: {{names}}",
+      "skipped": "Not mounted “{{name}}”: {{reason}}",
+      "restartHint": "Skill changes in the project take effect after reopening the window.",
+      "reason": {
+        "not-in-library": "no longer in the library",
+        "claude-only": "Claude only",
+        "codex-only": "Codex only",
+        "invalid": "SKILL.md is broken or the folder is gone",
+        "python-missing": "python not found",
+        "node-missing": "node not found",
+        "mount-failed": "mount failed"
+      }
     }
   },
   "projects": {
@@ -654,7 +669,12 @@
         "task": "tasks",
         "run": "runs",
         "session": "session registry"
-      }
+      },
+      "skillsCount": "Skills: {{count}}",
+      "skillsLabel": "Skills",
+      "skillsEmpty": "The skill library is empty. Import skills under Settings → Skills first.",
+      "skillsTooMany": "More than {{count}} checked; the AI picks the wrong one more easily. Keep only the ones you need.",
+      "skillsHint": "Only checked skills are mounted in this project's windows. Reopen windows for changes to take effect."
     },
     "remove": {
       "toast": "Removed \"{{name}}\"",
@@ -684,7 +704,8 @@
       "general": "General",
       "workbench": "Workbench",
       "models": "Models",
-      "tools": "Tools"
+      "tools": "Tools",
+      "skills": "Skills"
     },
     "providers": {
       "title": "Model providers",
@@ -1167,6 +1188,55 @@
         "reviewer": "Reviewer",
         "docs-writer": "Docs writer",
         "test-engineer": "Test engineer"
+      }
+    },
+    "skills": {
+      "title": "Skill library",
+      "subtitle": "Skills live in FF-pane's own folder and are shared by all projects; nothing is written to ~/.claude or ~/.codex. Pick which ones a project uses under Config on its project card; unchecked skills are not used. Reopen windows for changes to take effect.",
+      "import": "Import skill",
+      "importFailed": "Import failed",
+      "imported": "Imported “{{name}}”. Check it under Config on the projects that should use it.",
+      "replaced": "Replaced “{{name}}”. Your config files were kept.",
+      "replacedSame": "“{{name}}” is the same as last time. Your config files were kept.",
+      "empty": "The skill library is empty. Download a skill, click Import skill, and pick the folder that contains SKILL.md.",
+      "search": "Search by name",
+      "libraryDir": "Library folder: {{dir}}",
+      "replaceTitle": "Replace the existing “{{name}}”?",
+      "replaceUsedBy": "Used by: {{projects}}. Config files you filled in inside the skill folder are kept and not overwritten. Open windows pick up the new version after a reopen.",
+      "replaceUnused": "No project uses it yet. Config files you filled in inside the skill folder are kept and not overwritten.",
+      "replace": "Replace",
+      "listSeparator": ", ",
+      "removed": "Removed “{{name}}” from the library",
+      "removeTitle": "Remove “{{name}}” from the library?",
+      "removeUsedBy": "It will also be unchecked in: {{projects}}. The skill folder, including your config files, is deleted. Open windows keep it until reopened.",
+      "removeUnused": "The skill folder, including your config files, is deleted.",
+      "remove": "Remove",
+      "removeLabel": "Remove “{{name}}”",
+      "openDir": "Open folder",
+      "author": {
+        "codex": "Written for Codex",
+        "claude": "Written for Claude"
+      },
+      "needsPython": "Needs Python",
+      "needsNode": "Needs Node",
+      "displayName": "Display name",
+      "appliesTo": "Applies to",
+      "appliesToOption": {
+        "any": "Any",
+        "claude": "Claude only",
+        "codex": "Codex only"
+      },
+      "usedBy": "Used by: {{projects}}",
+      "unused": "No project uses it yet",
+      "status": {
+        "invalid": "Can't be activated: SKILL.md is broken or the folder is gone. Import it again.",
+        "python-missing": "Can't be activated: python was not found on this computer.",
+        "node-missing": "Can't be activated: node was not found on this computer."
+      },
+      "limit": {
+        "claudeOnly": "Claude only: not mounted in Codex or Grok windows.",
+        "codexOnly": "Codex only: not mounted in Claude or Grok windows.",
+        "windowsHttps": "Its scripts reach https through curl or PowerShell, which fails in Codex windows."
       }
     }
   },

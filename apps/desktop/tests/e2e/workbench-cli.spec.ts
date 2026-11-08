@@ -91,6 +91,13 @@ function writePersistentFakeCli(
       `const triggerFile = ${JSON.stringify(options?.triggerFile ?? "")};`,
       "const fs = require('node:fs');",
       "const { spawn } = require('node:child_process');",
+      // T11.9：挂载目录在窗口关掉时就删，活着时把插件里的技能列出来
+      "const pluginAt = argv.indexOf('--plugin-dir');",
+      "if (pluginAt >= 0) {",
+      "  let names = 'MISSING';",
+      "  try { names = fs.readdirSync(require('node:path').join(argv[pluginAt + 1], 'skills')).join(','); } catch {}",
+      "  process.stdout.write(tag + '_PLUGIN_SKILLS=' + names + '\\n');",
+      "}",
       "if (triggerFile) {",
       "  setInterval(() => {",
       "    let text = '';",
@@ -1145,5 +1152,131 @@ test("T10.15b：同目录三个 Codex 各自认出编号，开新对话后能从
     rmSync(fakeBinDir, { recursive: true, force: true });
     rmSync(projectDir, { recursive: true, force: true });
     rmSync(codexHome, { recursive: true, force: true });
+  }
+});
+
+test("T11.9：技能库导入、改名、替换保留配置，项目勾上后 Claude 窗口挂上插件目录", async () => {
+  const fakeBinDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-skills-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-skills-proj-"));
+  const skillRepo = mkdtempSync(join(tmpdir(), "ffpane-e2e-skills-src-"));
+  writePersistentFakeCli(fakeBinDir, "claude", "ANTHROPIC_API_KEY");
+  writePersistentFakeCli(fakeBinDir, "codex", "OPENAI_API_KEY");
+  // 和 GitHub 上下载的仓库一样：技能在下一层目录里，带一份空的配置模板
+  const skillSrc = join(skillRepo, "e2e-probe-skill");
+  mkdirSync(join(skillSrc, "scripts"), { recursive: true });
+  writeFileSync(
+    join(skillSrc, "SKILL.md"),
+    "---\nname: e2e-probe-skill\ndescription: Probe skill for the FF-pane e2e test.\n---\n\n# Probe\n",
+    "utf8",
+  );
+  writeFileSync(join(skillSrc, "scripts", "run.py"), "print('probe')\n", "utf8");
+  writeFileSync(join(skillSrc, "image_api.env"), "OPENAI_API_KEY=\n", "utf8");
+
+  const launched = await launchApp({ pathPrepend: fakeBinDir });
+  try {
+    const { app, page, dataRoot } = launched;
+    await createProject(app, page, projectDir, "E2E Skills");
+    await page.getByRole("button", { name: /^E2E Skills/ }).click();
+
+    await app.evaluate(async ({ dialog }, path) => {
+      // biome-ignore lint/suspicious/noExplicitAny: E2E 打桩
+      (dialog as any).showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, skillRepo);
+    await gotoRoute(page, "/settings?group=skills");
+    await expect(page.getByTestId("skills-empty")).toBeVisible();
+    await page.getByTestId("skills-import").click();
+    const row = page.getByTestId("skill-e2e-probe-skill");
+    await expect(row).toBeVisible();
+    await expect(row).toContainText("Needs Python");
+    await expect(row).toContainText("No project uses it yet");
+
+    const nameInput = page.getByTestId("skill-display-name-e2e-probe-skill");
+    await nameInput.fill("Probe Tool");
+    await nameInput.press("Enter");
+    await expect(page.getByTestId("skill-title-e2e-probe-skill")).toHaveText("Probe Tool");
+    await expect(row).toContainText("e2e-probe-skill");
+
+    // 用户在技能库里填了配置，再导入同一个技能：要确认替换，配置文件保留
+    const libraryConfig = join(dataRoot, "skills", "e2e-probe-skill", "image_api.env");
+    writeFileSync(libraryConfig, "OPENAI_API_KEY=filled-by-user\n", "utf8");
+    await page.getByTestId("skills-import").click();
+    await page.getByRole("button", { name: "Replace", exact: true }).click();
+    await expect
+      .poll(() => readFileSync(libraryConfig, "utf8"))
+      .toBe("OPENAI_API_KEY=filled-by-user\n");
+    await expect(page.getByTestId("skill-title-e2e-probe-skill")).toHaveText("Probe Tool");
+
+    // 项目卡片「配置」里勾上
+    const projectId = await page.evaluate(async () => {
+      // biome-ignore lint/suspicious/noExplicitAny: E2E
+      const list = await (window as any).ffpane.invoke("projects:list");
+      return (list as Array<{ id: string; name: string }>).find((p) => p.name === "E2E Skills")?.id;
+    });
+    expect(projectId).toBeTruthy();
+    await gotoRoute(page, "/projects");
+    await page.getByTestId(`project-bind-config-${projectId}`).click();
+    const box = page.getByTestId("project-skill-e2e-probe-skill");
+    await expect(box).toBeVisible();
+    await expect(box).not.toBeChecked();
+    await box.check();
+    await page.getByTestId("project-config-save").click();
+    await expect(page.getByTestId(`project-skills-count-${projectId}`)).toBeVisible();
+
+    await page.evaluate(async () => {
+      const invoke = (channel: string, req?: unknown) =>
+        // biome-ignore lint/suspicious/noExplicitAny: E2E
+        (window as any).ffpane.invoke(channel, req);
+      const provider = await invoke("providers:create", {
+        draft: {
+          name: "Local Claude",
+          templateId: "local-login",
+          models: [{ id: "sonnet", label: "Sonnet", kind: "chat" }],
+          defaultModelId: "sonnet",
+          enabled: true,
+        },
+      });
+      await invoke("profiles:create", {
+        draft: {
+          name: "Claude WB",
+          runtime: "claude-code",
+          providerId: provider.id,
+          defaultRole: "worker",
+          permissionPreset: {
+            readPaths: ["**"],
+            writePaths: ["**"],
+            shell: "allowed",
+            network: false,
+            dangerousOpsRequireApproval: true,
+          },
+          connectionMode: "local_cli",
+          model: "sonnet",
+        },
+      });
+    });
+
+    await gotoRoute(page, "/workbench");
+    await page.getByTestId("workbench-new-tab").click();
+    await confirmAiWindow(page, "claude", undefined, undefined, "worker");
+    const windowId = await requireWindowId(page, 0);
+    await expect
+      .poll(async () => readReplayForWindow(page, windowId), { timeout: 20_000 })
+      .toContain("FAKE_CLAUDE_PLUGIN_SKILLS=");
+    const replay = await readReplayForWindow(page, windowId);
+    expect(replay).toContain("FAKE_CLAUDE_PLUGIN_SKILLS=e2e-probe-skill");
+    const argv = parseArgvJson(replay, "FAKE_CLAUDE");
+    const pluginDir = argv[argv.indexOf("--plugin-dir") + 1] ?? "";
+    expect(pluginDir.startsWith(join(dataRoot, "skill-mounts"))).toBe(true);
+    const chip = page
+      .locator(`[data-window-id="${windowId}"]`)
+      .getByTestId("workbench-window-skills");
+    await expect(chip).toHaveAttribute("data-mounted", "1");
+    await expect(chip).toHaveAttribute("data-skipped", "0");
+    // 技能库里那一份没被动过
+    expect(readFileSync(libraryConfig, "utf8")).toBe("OPENAI_API_KEY=filled-by-user\n");
+  } finally {
+    await launched.cleanup();
+    rmSync(fakeBinDir, { recursive: true, force: true });
+    rmSync(projectDir, { recursive: true, force: true });
+    rmSync(skillRepo, { recursive: true, force: true });
   }
 });

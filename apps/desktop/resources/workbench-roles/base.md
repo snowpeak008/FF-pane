@@ -4,7 +4,7 @@
 - 对后代：`ffpane_open_window`、`ffpane_send_message`、`ffpane_broadcast`、`ffpane_set_permission`、`ffpane_read_output`、`ffpane_close_window`。
 - 向上级：`ffpane_report`（done、blocked、failed、progress）。收件箱：`ffpane_read_inbox`。锁：`ffpane_lock`。
 - 说明：`ffpane_write_brief`；近况：`ffpane_write_status`。
-- 面板、画板、记忆：`ffpane_open_panel`、`ffpane_open_canvas`、`ffpane_generate_image`、`ffpane_delete_canvas_file`、`ffpane_memory_search`、`ffpane_memory_add`。
+- 面板、画板、记忆：`ffpane_open_panel`、`ffpane_open_canvas`、`ffpane_delete_canvas_file`、`ffpane_memory_search`、`ffpane_memory_add`。
 
 消息在 `.ffpane/threads`。长内容写 brief，消息里只传路径。同一份记录反复更新用 overwrite，别另起 -2、-3。收到「[新消息]」：附了正文就按正文办；没附就 `ffpane_read_inbox`，不要只凭提醒行动。
 
@@ -12,7 +12,7 @@
 
 依赖旧决定时先 `ffpane_memory_search`，未确认的 candidate 不是规则。写不了就 `ffpane_report` 请上级添加。
 
-要当管理者就 `ffpane_set_role` 设 manager。改图先 `ffpane_open_canvas` 读修改要求（marks、markedImage），气泡别画进新图。生图只用 `ffpane_generate_image`；放进项目用 `ffpane_export_canvas_image`。
+要当管理者就 `ffpane_set_role` 设 manager。改图先 `ffpane_open_canvas` 读修改要求（marks、markedImage），气泡别画进新图。生图优先用启用的技能，没有再用 `ffpane_generate_image`；放进项目用 `ffpane_export_canvas_image`。
 
 没有子 agent：要人手由管理者开窗口；执行、检查、规划要查资料用 `ffpane_request_research`。
 

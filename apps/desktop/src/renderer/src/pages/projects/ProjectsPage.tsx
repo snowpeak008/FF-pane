@@ -148,6 +148,7 @@ export function ProjectsPage(): ReactElement {
                 removing={removingIds.has(view.entry.id)}
                 onOpen={handleOpen}
                 onRemove={(entry) => void handleRemove(entry)}
+                onSaved={refetch}
               />
             ))}
           </div>

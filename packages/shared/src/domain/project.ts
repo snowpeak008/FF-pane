@@ -76,4 +76,9 @@ export interface ProjectRegistryEntry {
    * 存在用户目录下的 projects.json，不放进项目，AI 改不了。缺省没有。
    */
   readonly outsideWriteDirs?: readonly string[];
+  /**
+   * T11.9 —— 这个项目启用的技能（技能库里的原名）。只有用户在项目卡片里能改，
+   * 存在 projects.json，不放进项目。缺省一个都不启用。
+   */
+  readonly skills?: readonly string[];
 }

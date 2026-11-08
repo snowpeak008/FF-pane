@@ -36,6 +36,7 @@ import {
   workbenchKindToRuntime,
 } from "@ff-pane/shared";
 import { ENV_CONFIG_CALLER_ROLE } from "../../mcp/config-tool";
+import type { WindowSkillsReport } from "../../shared-ipc/contracts";
 import {
   CONFIG_MCP_SCRIPT,
   ENV_CONFIG_AUDIT,
@@ -153,6 +154,8 @@ export interface LaunchCliWindowResult {
   readonly permissionCapped: boolean;
   /** 装上了 node 直启的回合信号时为 auto；否则投递一直要手动确认。 */
   readonly turnSignal: "auto" | "manual";
+  /** T11.9：这次挂了哪些技能、跳过了哪些。没有接技能时缺省。 */
+  readonly skills?: WindowSkillsReport;
 }
 
 export interface LaunchCliWindowDeps {
@@ -177,6 +180,21 @@ export interface LaunchCliWindowDeps {
   readonly isConfigToolEnabled?: (projectRoot: string) => Promise<boolean>;
   /** Tony 在项目卡片里填的项目外可写目录（T11.8）。缺省没有。 */
   readonly outsideWriteDirs?: (projectRoot: string) => Promise<readonly string[]>;
+  /**
+   * T11.9：按项目启用的技能给这个窗口准备挂载。Claude 返回插件目录，Codex / Grok 返回要追加到说明里的技能清单。
+   * 缺省不挂技能。出错时由实现自己兜住，不让开窗失败。
+   */
+  readonly resolveSkillMounts?: (input: {
+    readonly windowId: string;
+    readonly projectRoot: string;
+    readonly runtime: "claude-code" | "codex" | "grok";
+  }) => Promise<{
+    readonly claudePluginDir?: string;
+    readonly instructions?: string;
+    readonly report: WindowSkillsReport;
+  }>;
+  /** 开窗失败时拆掉刚准备的技能挂载。 */
+  readonly releaseSkillMounts?: (windowId: string) => Promise<void>;
   readonly getKnowledgeToolSettings: () => Promise<
     | {
         readonly command?: string;
@@ -441,6 +459,21 @@ async function launchCliWindowBody(
     deps.loadRoleInjection !== undefined
       ? await deps.loadRoleInjection({ windowId: input.windowId, role, runtime })
       : {};
+  // T11.9：项目启用的技能。Claude 走插件目录；Codex / Grok 把技能清单接在角色说明后面。
+  const skillMount =
+    deps.resolveSkillMounts !== undefined
+      ? await deps.resolveSkillMounts({
+          windowId: input.windowId,
+          projectRoot: input.projectRoot,
+          runtime,
+        })
+      : undefined;
+  const withSkills = (text: string | undefined): string | undefined =>
+    skillMount?.instructions === undefined
+      ? text
+      : text === undefined || text.trim() === ""
+        ? skillMount.instructions
+        : `${text.trimEnd()}\n\n${skillMount.instructions}`;
   const mcpServers: Record<string, McpStdioServerSpec> = {
     ...(await resolveKnowledgeServers(deps, input.projectRoot)),
     ...(deps.resolveConfigTool !== undefined
@@ -470,6 +503,7 @@ async function launchCliWindowBody(
   const releaseFailedLaunch = async (): Promise<void> => {
     releaseWindowHooks(input.windowId);
     deps.tokenRegistry.revoke(input.windowId);
+    await deps.releaseSkillMounts?.(input.windowId);
     if (mcpTemp !== undefined) {
       await deps.mcpRegistry.release(input.windowId);
     }
@@ -527,6 +561,9 @@ async function launchCliWindowBody(
         ? { appendSystemPromptFile: roleInjection.claudePromptFile }
         : {}),
       ...(hooks.settingsPath !== undefined ? { settingsFile: hooks.settingsPath } : {}),
+      ...(skillMount?.claudePluginDir !== undefined
+        ? { pluginDirs: [skillMount.claudePluginDir] }
+        : {}),
       ...(input.initialPrompt !== undefined ? { initialPrompt: input.initialPrompt } : {}),
     });
   } else if (runtime === "codex") {
@@ -544,7 +581,7 @@ async function launchCliWindowBody(
     if (resuming && nativeSessionId === undefined) {
       resumePicker = true;
     }
-    const developerInstructions = roleInjection.developerInstructions;
+    const developerInstructions = withSkills(roleInjection.developerInstructions);
     args = buildInteractiveCodexArgs({
       cwd,
       ...(model !== undefined ? { model } : {}),
@@ -646,6 +683,7 @@ async function launchCliWindowBody(
         throw error;
       }
     }
+    const grokRules = withSkills(roleInjection.grokRules);
     args = buildInteractiveGrokArgs({
       ...(model !== undefined ? { model } : {}),
       ...(effort !== undefined ? { effort } : {}),
@@ -655,7 +693,7 @@ async function launchCliWindowBody(
           ? { sessionId: nativeSessionId }
           : {}),
       permission,
-      ...(roleInjection.grokRules !== undefined ? { rules: roleInjection.grokRules } : {}),
+      ...(grokRules !== undefined ? { rules: grokRules } : {}),
       ...(input.initialPrompt !== undefined ? { initialPrompt: input.initialPrompt } : {}),
     });
   } else {
@@ -668,6 +706,7 @@ async function launchCliWindowBody(
       roleInjection.developerInstructions ?? "",
       roleInjection.claudePromptFile ?? "",
       roleInjection.grokRules ?? "",
+      skillMount?.instructions ?? "",
     ]);
     assertTokenAbsent(windowToken, args);
     if (mcpTemp !== undefined) {
@@ -856,6 +895,7 @@ async function launchCliWindowBody(
         : nodePath === undefined
           ? "manual"
           : "auto",
+    ...(skillMount !== undefined ? { skills: skillMount.report } : {}),
   };
 }
 

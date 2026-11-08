@@ -51,6 +51,14 @@ import {
   createConfigMailbox,
   resolveConfigMcpServer,
 } from "../session/config-tool";
+import {
+  listSkills,
+  probeSkillRuntimes,
+  resolveSkillsLayout,
+  toMountCandidates,
+} from "../skills/skill-library";
+import { planSkillMounts } from "../skills/skill-manifest";
+import { SkillMountRegistry } from "../skills/skill-mounts";
 import { WORKBENCH_WINDOW_LIMIT_ERROR_PREFIX } from "../terminal/handlers";
 import type { PtyManager } from "../terminal/manager";
 import { API_ERROR_SAME_TURN_MS, createApiErrorTracker } from "./api-error-tracker";
@@ -274,6 +282,10 @@ export async function createWorkbenchCliLayer(
   });
   const mcpRegistry = new WorkbenchMcpTempRegistry();
   const rolePromptTemps = new RolePromptTempRegistry();
+  // T11.9：按窗口挂技能。启动时先清掉上次崩溃、强退留下的挂载目录。
+  const skillsLayout = resolveSkillsLayout(layout.rootDir);
+  const skillMounts = new SkillMountRegistry(skillsLayout.mountsDir);
+  void skillMounts.cleanStale().catch(() => undefined);
   const configHubs = new Map<string, ConfigDraftHub>();
   const projects = createProjectRegistry(layout.projectsFile);
 
@@ -1403,6 +1415,40 @@ export async function createWorkbenchCliLayer(
         return [];
       }
     },
+    resolveSkillMounts: async ({
+      windowId,
+      projectRoot,
+      runtime,
+    }: {
+      readonly windowId: string;
+      readonly projectRoot: string;
+      readonly runtime: "claude-code" | "codex" | "grok";
+    }) => {
+      let enabled: readonly string[] = [];
+      try {
+        const listed = await projects.listProjects();
+        enabled =
+          listed.find((item) => item.rootPath.toLowerCase() === projectRoot.toLowerCase())
+            ?.skills ?? [];
+        if (enabled.length === 0) {
+          await skillMounts.release(windowId);
+          return { report: { mounted: [], skipped: [] } };
+        }
+        const views = await listSkills(skillsLayout, probeSkillRuntimes());
+        const plan = planSkillMounts(enabled, toMountCandidates(views), runtime);
+        return await skillMounts.prepare(windowId, runtime, plan);
+      } catch {
+        // 技能出问题不让开窗失败：这次都不挂，窗口上照实写跳过
+        await skillMounts.release(windowId).catch(() => undefined);
+        return {
+          report: {
+            mounted: [],
+            skipped: enabled.map((name) => ({ name, reason: "mount-failed" as const })),
+          },
+        };
+      }
+    },
+    releaseSkillMounts: (windowId: string) => skillMounts.release(windowId),
     isKnowledgeToolEnabled: async (projectRoot: string) => {
       try {
         const projectLayout = resolveProjectLayout(projectRoot);
@@ -1937,6 +1983,7 @@ export async function createWorkbenchCliLayer(
         effectivePermission: result.effectivePermission,
         permissionCapped: result.permissionCapped,
         turnSignal: result.turnSignal,
+        ...(result.skills !== undefined ? { skills: result.skills } : {}),
         resumed: plan.resume,
       });
     }
@@ -2156,6 +2203,8 @@ export async function createWorkbenchCliLayer(
         },
         launchDeps(),
       );
+      // T11.9：技能脚本直接把图存进 .ffpane/canvas/，开着窗口就盯着这个目录，图才会进画板、记待检查。
+      watchCanvas(request.projectId, request.projectRoot);
       if (
         result.kind === "codex" &&
         result.claimingSession !== true &&
@@ -2190,6 +2239,7 @@ export async function createWorkbenchCliLayer(
         effectivePermission: result.effectivePermission,
         permissionCapped: result.permissionCapped,
         turnSignal: result.turnSignal,
+        ...(result.skills !== undefined ? { skills: result.skills } : {}),
       };
     },
     "workbench:set-role": async (request) => {
@@ -3085,6 +3135,7 @@ export async function createWorkbenchCliLayer(
         codexClaimer.cancel(windowId);
         releaseWindowHooks(windowId);
         void rolePromptTemps.release(windowId);
+        void skillMounts.release(windowId).catch(() => undefined);
         void disposeConfigHub(windowId);
       },
       closeRegistered: (windowId) => {
@@ -3406,6 +3457,8 @@ export async function createWorkbenchCliLayer(
     }),
     noteWindowExit,
     dispose: async () => {
+      // 退出时 will-quit 不等异步收尾：技能挂载目录先同步删掉
+      skillMounts.releaseAllSync();
       clearInterval(stallTimer);
       clearInterval(promptTimer);
       apiErrors.dispose();

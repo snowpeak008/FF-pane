@@ -18,6 +18,7 @@ import { ImageGenSection } from "./ImageGenSection";
 import { KnowledgeToolSection } from "./KnowledgeToolSection";
 import { LanguageSection } from "./LanguageSection";
 import { ProvidersSection } from "./providers/ProvidersSection";
+import { SkillsSection } from "./skills/SkillsSection";
 import { WorkbenchDefaultPermissionSection } from "./WorkbenchDefaultPermissionSection";
 import { WorkbenchLimitSection } from "./WorkbenchLimitSection";
 import { WorkbenchRoleManualsSection } from "./WorkbenchRoleManualsSection";
@@ -32,6 +33,7 @@ const GROUP_SECTIONS: Record<SettingsGroup, readonly (() => ReactNode)[]> = {
   ],
   // 生图在 T11.9 第 6 步改走技能后去掉（技能计划 §5.1）
   models: [() => <ProvidersSection />, () => <ImageGenSection />, () => <ConfigsSection />],
+  skills: [() => <SkillsSection />],
   tools: [() => <KnowledgeToolSection />, () => <ConfigToolSection />],
 };
 

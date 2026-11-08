@@ -58,6 +58,10 @@ export interface TerminalViewProps {
   ) => void;
   /** 没有 node.exe 时回合信号装不上，投递一直要手动确认。 */
   readonly onTurnSignal?: (signal: "auto" | "manual") => void;
+  /** T11.9：这次挂了哪些技能、跳过了哪些。 */
+  readonly onSkills?: (
+    report: import("../../../../shared-ipc/contracts").WindowSkillsReport | undefined,
+  ) => void;
   readonly onLaunchRoute?: (route: {
     readonly connectionMode: "local_cli" | "relay";
     readonly providerName?: string;
@@ -110,6 +114,7 @@ export function TerminalView({
   onNativeSessionId,
   onPermissionCapped,
   onTurnSignal,
+  onSkills,
   onLaunchRoute,
   launchNonce = 0,
   beforeUserRelaunch,
@@ -148,6 +153,8 @@ export function TerminalView({
   onPermissionCappedRef.current = onPermissionCapped;
   const onTurnSignalRef = useRef(onTurnSignal);
   onTurnSignalRef.current = onTurnSignal;
+  const onSkillsRef = useRef(onSkills);
+  onSkillsRef.current = onSkills;
   const onLaunchRouteRef = useRef(onLaunchRoute);
   onLaunchRouteRef.current = onLaunchRoute;
   const onRelaunchSettledRef = useRef(onRelaunchSettled);
@@ -294,6 +301,7 @@ export function TerminalView({
         onPermissionCappedRef.current?.(settled.data.effectivePermission);
       }
       onTurnSignalRef.current?.(settled.data.turnSignal);
+      onSkillsRef.current?.(settled.data.skills);
       onLaunchRouteRef.current?.({
         connectionMode: settled.data.connectionMode,
         ...(settled.data.providerName !== undefined
@@ -399,6 +407,7 @@ export function TerminalView({
           onPermissionCappedRef.current?.(settled.data.effectivePermission);
         }
         onTurnSignalRef.current?.(settled.data.turnSignal);
+        onSkillsRef.current?.(settled.data.skills);
         onLaunchRouteRef.current?.({
           connectionMode: settled.data.connectionMode,
           ...(settled.data.providerName !== undefined
@@ -673,6 +682,7 @@ export function TerminalView({
     onExitCodeChangeRef.current?.(undefined);
     nativeSessionIdRef.current = payload.nativeSessionId;
     onTurnSignalRef.current?.(payload.turnSignal);
+    onSkillsRef.current?.(payload.skills);
     fit.fit();
     void attachExisting(payload.terminalId, Math.max(term.cols, 2), Math.max(term.rows, 2));
   });

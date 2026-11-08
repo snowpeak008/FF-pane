@@ -268,3 +268,98 @@ describe("launchCliWindow 角色与 hooks", () => {
     }
   });
 });
+
+describe("launchCliWindow 技能挂载（T11.9）", () => {
+  it("Claude 带上 --plugin-dir；Codex 把技能清单接在角色说明后面；结果里带挂载情况", async () => {
+    const captured: { args: readonly string[] }[] = [];
+    const manager = {
+      aliveCount: () => 0,
+      create: (input: { direct: { args: readonly string[] } }) => {
+        captured.push({ args: [...input.direct.args] });
+        return { id: `term-${captured.length}` };
+      },
+    } as unknown as PtyManager;
+    const report = {
+      mounted: ["codex-image-studio"],
+      skipped: [{ name: "gone", reason: "not-in-library" as const }],
+    };
+    const asked: string[] = [];
+    const deps = {
+      manager,
+      getProvider: async () => ({
+        id: "prov",
+        name: "Local",
+        templateId: "local-login",
+        defaultModelId: "sonnet",
+      }),
+      revealSecret: async () => undefined,
+      getMaxWorkbenchWindows: async () => 8,
+      isKnowledgeToolEnabled: async () => false,
+      getKnowledgeToolSettings: async () => undefined,
+      indexDbFile: join(fakeBin, "index.db"),
+      moduleDir: fakeBin,
+      mcpRegistry: new WorkbenchMcpTempRegistry(),
+      clampMax: (value: unknown) => (typeof value === "number" ? value : 8),
+      limitErrorPrefix: "limit",
+      tokenRegistry: createWindowTokenRegistry(),
+      authRegistry: createWorkbenchAuthRegistry(),
+      hookScriptPath: join(fakeBin, "workbench-hook.mjs"),
+      loadRoleInjection: async () => ({ developerInstructions: "ROLE TEXT" }),
+      resolveSkillMounts: async (input: {
+        readonly windowId: string;
+        readonly projectRoot: string;
+        readonly runtime: "claude-code" | "codex" | "grok";
+      }) => {
+        asked.push(`${input.windowId}:${input.runtime}`);
+        return input.runtime === "claude-code"
+          ? { claudePluginDir: "D:mountswin-skill-claude", report }
+          : { instructions: "## 本项目启用的技能\n- codex-image-studio：x", report };
+      },
+    };
+    writeFileSync(join(fakeBin, "workbench-hook.mjs"), "process.exit(0)\n", "utf8");
+    try {
+      const claude = await launchCliWindow(
+        {
+          windowId: "win-skill-claude",
+          projectId: "proj-role" as never,
+          projectRoot: fakeBin,
+          kind: "claude" as const,
+          route: localRoute(),
+          cols: 80,
+          rows: 24,
+          initialPrompt: "hi",
+        },
+        deps,
+      );
+      const claudeArgs = captured.at(-1)?.args ?? [];
+      const flag = claudeArgs.indexOf("--plugin-dir");
+      expect(flag).toBeGreaterThanOrEqual(0);
+      expect(claudeArgs[flag + 1]).toBe("D:mountswin-skill-claude");
+      expect(claudeArgs.at(-1)).toBe("hi");
+      expect(claude.skills).toEqual(report);
+
+      const codex = await launchCliWindow(
+        {
+          windowId: "win-skill-codex",
+          projectId: "proj-role" as never,
+          projectRoot: fakeBin,
+          kind: "codex" as const,
+          route: localRoute(),
+          cols: 80,
+          rows: 24,
+        },
+        deps,
+      );
+      const instructions =
+        captured.at(-1)?.args.find((arg) => arg.startsWith("developer_instructions=")) ?? "";
+      const text = JSON.parse(instructions.slice("developer_instructions=".length)) as string;
+      expect(text.startsWith("ROLE TEXT\n\n## 本项目启用的技能")).toBe(true);
+      expect(captured.at(-1)?.args).not.toContain("--plugin-dir");
+      expect(codex.skills).toEqual(report);
+      expect(asked).toEqual(["win-skill-claude:claude-code", "win-skill-codex:codex"]);
+    } finally {
+      releaseWindowHooks("win-skill-claude");
+      releaseWindowHooks("win-skill-codex");
+    }
+  });
+});

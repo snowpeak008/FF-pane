@@ -106,6 +106,21 @@ describe("ProjectRegistry", () => {
     ).rejects.toThrow(ProjectNotFoundError);
   });
 
+  it("项目启用的技能（T11.9）：整份替换、去空去重、空数组清掉字段、不碰项目外可写目录", async () => {
+    const a = await registry.addProject({ name: "a", rootPath: "/repos/a" });
+    await registry.setOutsideWriteDirs(a.id, ["D:/x"]);
+    const set = await registry.setSkills(a.id, ["codex-image-studio", " ", "codex-image-studio"]);
+    expect(set.skills).toEqual(["codex-image-studio"]);
+    expect(set.outsideWriteDirs).toEqual(["D:/x"]);
+    expect((await registry.listProjects())[0]?.skills).toEqual(["codex-image-studio"]);
+    const cleared = await registry.setSkills(a.id, []);
+    expect("skills" in cleared).toBe(false);
+    expect(cleared.outsideWriteDirs).toEqual(["D:/x"]);
+    await expect(registry.setSkills("project-deadbeef0000" as ProjectId, ["x"])).rejects.toThrow(
+      ProjectNotFoundError,
+    );
+  });
+
   it("restore：把被移除条目原样放回（保留 id 与 createdAt）", async () => {
     const a = await registry.addProject({ name: "a", rootPath: "/repos/a" });
     await registry.removeProject(a.id);
