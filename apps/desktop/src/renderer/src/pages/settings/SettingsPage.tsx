@@ -14,7 +14,6 @@ import { useUiStore } from "../../stores/ui";
 import { AppearanceSection } from "./AppearanceSection";
 import { ConfigToolSection } from "./ConfigToolSection";
 import { ConfigsSection } from "./configs/ConfigsSection";
-import { ImageGenSection } from "./ImageGenSection";
 import { KnowledgeToolSection } from "./KnowledgeToolSection";
 import { LanguageSection } from "./LanguageSection";
 import { ProvidersSection } from "./providers/ProvidersSection";
@@ -31,8 +30,7 @@ const GROUP_SECTIONS: Record<SettingsGroup, readonly (() => ReactNode)[]> = {
     () => <WorkbenchDefaultPermissionSection />,
     () => <WorkbenchRoleManualsSection />,
   ],
-  // 生图在 T11.9 第 6 步改走技能后去掉（技能计划 §5.1）
-  models: [() => <ProvidersSection />, () => <ImageGenSection />, () => <ConfigsSection />],
+  models: [() => <ProvidersSection />, () => <ConfigsSection />],
   skills: [() => <SkillsSection />],
   tools: [() => <KnowledgeToolSection />, () => <ConfigToolSection />],
 };

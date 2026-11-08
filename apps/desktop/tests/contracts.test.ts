@@ -62,14 +62,20 @@ describe("IPC 通道契约", () => {
     expect(INVOKE_CHANNELS).toContain("runtimes:reasoning-effort-levels");
   });
 
-  it("生图设置通道已登记到运行时清单", () => {
+  it("技能通道已登记到运行时清单；旧的生图设置通道已去掉（T11.9）", () => {
     for (const channel of [
-      "image-gen:get",
-      "image-gen:set-mode",
-      "image-gen:save-relay",
-      "image-gen:test-relay",
+      "projects:set-skills",
+      "skills:list",
+      "skills:import",
+      "skills:set-display-name",
+      "skills:set-applies-to",
+      "skills:remove",
+      "skills:open-dir",
     ]) {
       expect(INVOKE_CHANNELS, `缺通道：${channel}`).toContain(channel);
+    }
+    for (const channel of ["image-gen:get", "image-gen:set-mode", "image-gen:save-relay"]) {
+      expect(INVOKE_CHANNELS as readonly string[]).not.toContain(channel);
     }
   });
 });

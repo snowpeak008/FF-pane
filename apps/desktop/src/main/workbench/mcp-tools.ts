@@ -268,21 +268,10 @@ export interface WorkbenchToolDeps {
     | {
         readonly ok: true;
         readonly relativePath: string;
+        /** 这张图在画板上的那一行。改完图挂新版本时传回来。 */
+        readonly rowId?: string;
         readonly revision?: CanvasRevisionForTool;
       }
-    | { readonly ok: false; readonly error: string }
-  >;
-  readonly generateImage: (input: {
-    readonly projectId: string;
-    readonly projectRoot: string;
-    readonly openerId: string;
-    readonly openerTitle: string;
-    readonly prompt: string;
-    readonly sourceImagePath?: string;
-    readonly rowId?: string;
-    readonly asNewVersion?: boolean;
-  }) => Promise<
-    | { readonly ok: true; readonly relativePath: string }
     | { readonly ok: false; readonly error: string }
   >;
   /** AI 检查画板上的一张图（T11.0c）。谁能查由 checkAiReview 定。 */
@@ -516,8 +505,6 @@ export async function executeWorkbenchTool(
       return openPanel(caller, args, deps);
     case "ffpane_open_canvas":
       return openCanvas(caller, args, deps);
-    case "ffpane_generate_image":
-      return generateImage(caller, args, deps);
     case "ffpane_delete_canvas_file":
       return deleteCanvasFileTool(caller, args, deps);
     case "ffpane_canvas_review":
@@ -1746,65 +1733,9 @@ async function openCanvas(
   return ok({
     ok: true,
     path: result.relativePath,
+    ...(result.rowId !== undefined ? { rowId: result.rowId } : {}),
     ...(result.revision !== undefined ? { revision: result.revision } : {}),
   });
-}
-
-/** 正在出图的窗口。同一窗口上一张没出完就再调，直接拒绝，免得重复出图、重复扣额度。 */
-const generatingWindows = new Set<string>();
-
-async function generateImage(
-  caller: ToolWindowView,
-  args: Readonly<Record<string, unknown>>,
-  deps: WorkbenchToolDeps,
-): Promise<ToolTextResult> {
-  const prompt = args["prompt"];
-  if (typeof prompt !== "string" || prompt.trim() === "") {
-    return fail("ffpane_generate_image 需要 prompt（要画的画面）。");
-  }
-  if (generatingWindows.has(caller.id)) {
-    return fail("上一张还在生成，等它返回再出下一张。不要用 sleep 或 ls 去找图。");
-  }
-  generatingWindows.add(caller.id);
-  try {
-    return await generateImageNow(caller, prompt, args, deps);
-  } finally {
-    generatingWindows.delete(caller.id);
-  }
-}
-
-async function generateImageNow(
-  caller: ToolWindowView,
-  prompt: string,
-  args: Readonly<Record<string, unknown>>,
-  deps: WorkbenchToolDeps,
-): Promise<ToolTextResult> {
-  const sourceImagePath = args["sourceImagePath"];
-  const rowId = args["rowId"];
-  const asNewVersion = args["asNewVersion"] === true;
-  let result:
-    | { readonly ok: true; readonly relativePath: string }
-    | { readonly ok: false; readonly error: string };
-  try {
-    result = await deps.generateImage({
-      projectId: caller.projectId,
-      projectRoot: caller.projectRoot,
-      openerId: caller.id,
-      openerTitle: caller.title,
-      prompt: prompt.trim(),
-      ...(typeof sourceImagePath === "string" && sourceImagePath.trim() !== ""
-        ? { sourceImagePath: sourceImagePath.trim() }
-        : {}),
-      ...(typeof rowId === "string" && rowId.trim() !== "" ? { rowId: rowId.trim() } : {}),
-      ...(asNewVersion ? { asNewVersion: true } : {}),
-    });
-  } catch {
-    return fail("出图失败。");
-  }
-  if (!result.ok) {
-    return fail(result.error);
-  }
-  return ok({ ok: true, path: result.relativePath });
 }
 
 async function reviewCanvasTool(

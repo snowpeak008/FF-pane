@@ -20,6 +20,7 @@ import {
   isWorkbenchPermissionLevel,
   isWorkbenchRole,
   isWorkbenchRoleManualId,
+  locatePath,
   type ProjectId,
   type Provider,
   setActivePage,
@@ -42,7 +43,6 @@ import { pendingReviewCount } from "../../shared/workbench/canvas-review";
 import type { InvokeHandlers } from "../../shared-ipc/server";
 import { publishEvent } from "../../shared-ipc/server";
 import { resolveGlobalRoot } from "../data-root";
-import { generateProjectImage } from "../image-gen/generate";
 import { createMemoryIndexService, type MemoryIndexService } from "../memory-index";
 import { createSafeStorageBackend, createSecretStore, resolveSecretsFile } from "../secrets";
 import { type ConfigDraftHub, createConfigDraftHub } from "../session/config-draft-hub";
@@ -3382,41 +3382,13 @@ export async function createWorkbenchCliLayer(
       }
       const revision = await describeCanvasRevision(input.projectRoot, placed.relativePath);
       publishCanvasPlaced(input.projectId, input.projectRoot);
+      const rowId = locatePath(placed.board, placed.relativePath)?.rowId;
       return {
         ok: true as const,
         relativePath: placed.relativePath,
+        ...(rowId !== undefined ? { rowId } : {}),
         ...(revision !== undefined ? { revision } : {}),
       };
-    },
-    generateImage: async (input) => {
-      const outcome = await generateProjectImage(
-        {
-          projectRoot: input.projectRoot,
-          prompt: input.prompt,
-          ...(input.sourceImagePath !== undefined
-            ? { sourceImagePath: input.sourceImagePath }
-            : {}),
-          ...(input.rowId !== undefined ? { rowId: input.rowId } : {}),
-          ...(input.asNewVersion === true ? { asNewVersion: true } : {}),
-          placedBy: { windowId: input.openerId, title: input.openerTitle },
-        },
-        {
-          stores: {
-            readConfig: () => config.readConfig(),
-            updateConfig: (patch) => config.updateConfig(patch),
-            storeSecret: (plaintext) => secrets.storeSecret(plaintext),
-            revealSecret: (ref) => secrets.revealSecret(ref),
-            deleteSecret: (ref) => secrets.deleteSecret(ref),
-            hasSecret: (ref) => secrets.hasSecret(ref),
-            maskedTail: (ref) => secrets.maskedTail(ref),
-          },
-        },
-      );
-      if (!outcome.ok) {
-        return outcome;
-      }
-      publishCanvasPlaced(input.projectId, input.projectRoot);
-      return { ok: true as const, relativePath: outcome.relativePath };
     },
     reviewCanvasImage: async (caller, imagePath, pass, reason) => {
       const result = await aiReviewCanvasImage(caller.projectRoot, imagePath, caller, pass, reason);

@@ -12,7 +12,7 @@
 
 依赖旧决定时先 `ffpane_memory_search`，未确认的 candidate 不是规则。写不了就 `ffpane_report` 请上级添加。
 
-要当管理者就 `ffpane_set_role` 设 manager。改图先 `ffpane_open_canvas` 读修改要求（marks、markedImage），气泡别画进新图。生图优先用启用的技能，没有再用 `ffpane_generate_image`；放进项目用 `ffpane_export_canvas_image`。
+要当管理者就 `ffpane_set_role` 设 manager。改图先 `ffpane_open_canvas` 读修改要求（marks、markedImage），气泡别画进新图。生图用启用的技能，存进 `.ffpane/canvas/`，没有就问用户；放进项目用 `ffpane_export_canvas_image`。
 
 没有子 agent：要人手由管理者开窗口；执行、检查、规划要查资料用 `ffpane_request_research`。
 

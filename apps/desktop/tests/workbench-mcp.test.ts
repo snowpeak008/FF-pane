@@ -202,7 +202,6 @@ function harness(
       panels.push({ panel, title });
     },
     openCanvas: async () => ({ ok: true as const, relativePath: ".ffpane/canvas/a.png" }),
-    generateImage: async () => ({ ok: false as const, error: "测试里不生图。" }),
     reviewCanvasImage: async () => ({ ok: true as const, path: ".ffpane/canvas/a.png" }),
     deleteCanvasFile: async () => ({ ok: true as const, status: "requested" as const }),
     exportCanvasImage: async () => ({ ok: true as const, targetPath: "art/a.png" }),
@@ -378,7 +377,8 @@ describe("工具授权", () => {
     expect(byName.get("ffpane_close_window")).toContain("父级已关闭");
     expect(byName.get("ffpane_open_canvas")).toContain("revision");
     expect(byName.get("ffpane_open_canvas")).toContain("markedImage");
-    expect(byName.get("ffpane_generate_image")).toContain("任何窗口");
+    expect(byName.has("ffpane_generate_image")).toBe(false);
+    expect(byName.get("ffpane_open_canvas")).toContain("rowId");
     expect(byName.get("ffpane_open_panel")).toContain("plan");
     expect(byName.get("ffpane_open_panel")).toContain("tasks");
     expect(byName.get("ffpane_open_panel")).toContain("runs");
@@ -421,53 +421,40 @@ describe("工具授权", () => {
     expect(result.text).toContain("a.png.marked.png");
   });
 
-  it("任何窗口都能生图，且不往别的窗口写正文", async () => {
-    const { deps, reminders } = harness(tempDir());
-    const seen: string[] = [];
-    const watched: WorkbenchToolDeps = {
-      ...deps,
-      generateImage: async (input) => {
-        seen.push(`${input.openerTitle}:${input.prompt}`);
-        return { ok: true, relativePath: ".ffpane/canvas/gen.png" };
-      },
-    };
-    const result = await call(watched, "B", "ffpane_generate_image", { prompt: "一只猫" });
-    expect(result.isError).toBe(false);
-    expect(result.text).toContain(".ffpane/canvas/gen.png");
-    expect(seen).toEqual(["子:一只猫"]);
-    expect(reminders).toEqual([]);
-    const missing = await call(watched, "E", "ffpane_generate_image", {});
-    expect(missing.isError).toBe(true);
-    expect(missing.text).toContain("prompt");
-    expect(reminders).toEqual([]);
+  it("生图工具已去掉，改走项目启用的技能（T11.9）", async () => {
+    const { deps } = harness(tempDir());
+    const result = await call(deps, "B", "ffpane_generate_image", { prompt: "一只猫" });
+    expect(result.isError).toBe(true);
   });
 
-  it("同一窗口上一张没出完再调：直接拒绝，不重复出图；出完后可以再出", async () => {
+  it("打开画板返回这张图所在的行；带 rowId 和 asNewVersion 再调就挂到那一行（T11.9）", async () => {
     const { deps } = harness(tempDir());
-    let release: () => void = () => undefined;
-    let calls = 0;
-    const slow: WorkbenchToolDeps = {
+    const seen: string[] = [];
+    let clock = 1_700_000_000_000;
+    const watched: WorkbenchToolDeps = {
       ...deps,
-      generateImage: async () => {
-        calls += 1;
-        await new Promise<void>((done) => {
-          release = done;
-        });
-        return { ok: true, relativePath: ".ffpane/canvas/gen.png" };
+      // 打开画板每个窗口 3 秒一次；真用时出图至少几十秒，这里让时间往前走
+      now: () => {
+        clock += 10_000;
+        return clock;
+      },
+      openCanvas: async (input) => {
+        seen.push(`${input.imagePath}:${input.rowId ?? "-"}:${input.asNewVersion === true}`);
+        return { ok: true, relativePath: input.imagePath, rowId: input.rowId ?? "row-1" };
       },
     };
-    const first = call(slow, "B", "ffpane_generate_image", { prompt: "一只猫" });
-    await Promise.resolve();
-    const second = await call(slow, "B", "ffpane_generate_image", { prompt: "一只猫" });
-    expect(second.isError).toBe(true);
-    expect(second.text).toContain("上一张还在生成");
-    release();
-    expect((await first).isError).toBe(false);
-    expect(calls).toBe(1);
-    const again = call(slow, "B", "ffpane_generate_image", { prompt: "一只狗" });
-    await Promise.resolve();
-    release();
-    expect((await again).isError).toBe(false);
+    const first = await call(watched, "B", "ffpane_open_canvas", {
+      imagePath: ".ffpane/canvas/a.png",
+    });
+    expect(first.isError).toBe(false);
+    expect(JSON.parse(first.text)).toMatchObject({ path: ".ffpane/canvas/a.png", rowId: "row-1" });
+    const again = await call(watched, "B", "ffpane_open_canvas", {
+      imagePath: ".ffpane/canvas/a-night.png",
+      rowId: "row-1",
+      asNewVersion: true,
+    });
+    expect(again.isError).toBe(false);
+    expect(seen).toEqual([".ffpane/canvas/a.png:-:false", ".ffpane/canvas/a-night.png:row-1:true"]);
   });
 
   it("检查画板上的图：要写 pass 和理由，交给平台判断谁能查（T11.0c）", async () => {
