@@ -371,6 +371,7 @@ export const CONFIG_CONFIG_DRAFT_FIELDS = [
   "codex",
   "grok",
   "deepseek",
+  "cursor",
 ] as const;
 
 /** 自配置 sidecar 用来识别调用者角色的环境变量。只有 manager 能调用。 */
@@ -441,6 +442,11 @@ export const CONFIG_DRAFT_CONFIG_TOOL: McpToolDefinition = {
         ...CONFIG_ROUTE_SCHEMA,
         description:
           "DeepSeek route. Omit to leave DeepSeek unavailable. Must be relay: a DeepSeek provider (API key required) and an optional hand-typed model. The window launches Claude Code.",
+      },
+      cursor: {
+        ...CONFIG_ROUTE_SCHEMA,
+        description:
+          "Cursor route. Must be local_cli (the user's own Cursor login); model is optional (e.g. auto). Without this route Cursor windows still open with Cursor's default model.",
       },
     },
     required: ["name"],
@@ -827,6 +833,11 @@ function parseConfigRoute(
       }
     }
   }
+  if (label === "cursor" && record["connectionMode"] !== "local_cli") {
+    return {
+      error: 'Field "cursor.connectionMode" must be "local_cli". Cursor only uses the local login.',
+    };
+  }
   if (label === "deepseek" && record["connectionMode"] !== "relay") {
     return {
       error: 'Field "deepseek.connectionMode" must be "relay". DeepSeek requires an API key.',
@@ -917,6 +928,14 @@ export function parseConfigDraftArgs(args: Readonly<Record<string, unknown>>): P
     }
     deepseek = parsed.route;
   }
+  let cursor: ProjectConfigRoute | undefined;
+  if (args["cursor"] !== undefined) {
+    const parsed = parseConfigRoute(args["cursor"], "cursor");
+    if (!("ok" in parsed)) {
+      return { ok: false, error: parsed.error };
+    }
+    cursor = parsed.route;
+  }
   const id = nonEmptyString(args["id"]);
   const draft: ProjectConfigDraft = {
     name,
@@ -931,6 +950,7 @@ export function parseConfigDraftArgs(args: Readonly<Record<string, unknown>>): P
     ...(codex !== undefined ? { codex } : {}),
     ...(grok !== undefined ? { grok } : {}),
     ...(deepseek !== undefined ? { deepseek } : {}),
+    ...(cursor !== undefined ? { cursor } : {}),
   };
   return { ok: true, parsed: { kind: "config", ...(id !== undefined ? { id } : {}), draft } };
 }
@@ -1001,6 +1021,7 @@ export function sanitizeProjectConfig(config: ProjectConfig): {
   readonly codex?: ProjectConfigRoute;
   readonly grok?: ProjectConfigRoute;
   readonly deepseek?: ProjectConfigRoute;
+  readonly cursor?: ProjectConfigRoute;
 } {
   return {
     id: config.id,
@@ -1016,6 +1037,7 @@ export function sanitizeProjectConfig(config: ProjectConfig): {
     ...(config.codex !== undefined ? { codex: sanitizeRoute(config.codex) } : {}),
     ...(config.grok !== undefined ? { grok: sanitizeRoute(config.grok) } : {}),
     ...(config.deepseek !== undefined ? { deepseek: sanitizeRoute(config.deepseek) } : {}),
+    ...(config.cursor !== undefined ? { cursor: sanitizeRoute(config.cursor) } : {}),
   };
 }
 

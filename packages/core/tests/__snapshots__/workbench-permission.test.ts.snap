@@ -144,6 +144,48 @@ exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > codex × yolo × resume 1`] =
 ]
 `;
 
+exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > cursor × edit × fresh 1`] = `[]`;
+
+exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > cursor × edit × resume 1`] = `[]`;
+
+exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > cursor × edit-exec × fresh 1`] = `
+[
+  "--force",
+]
+`;
+
+exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > cursor × edit-exec × resume 1`] = `
+[
+  "--force",
+]
+`;
+
+exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > cursor × read-only × fresh 1`] = `
+[
+  "--mode",
+  "plan",
+]
+`;
+
+exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > cursor × read-only × resume 1`] = `
+[
+  "--mode",
+  "plan",
+]
+`;
+
+exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > cursor × yolo × fresh 1`] = `
+[
+  "--force",
+]
+`;
+
+exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > cursor × yolo × resume 1`] = `
+[
+  "--force",
+]
+`;
+
 exports[`WORKBENCH_PERMISSION_MAPPINGS snapshots > grok × edit × fresh 1`] = `
 [
   "--permission-mode",

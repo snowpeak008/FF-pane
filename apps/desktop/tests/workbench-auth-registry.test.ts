@@ -57,6 +57,50 @@ describe("createWorkbenchAuthRegistry", () => {
     expect(cleaned.windows["child"]?.permission).toBe("yolo");
   });
 
+  it("Cursor / Grok / DeepSeek 子窗口在界面回存布局后仍挂在管理者名下（T11.10 真机）", () => {
+    for (const kind of ["cursor", "grok", "deepseek"] as const) {
+      const registry = createWorkbenchAuthRegistry();
+      registry.upsert(
+        { id: "mgr", permission: "yolo", openedBy: "user", role: "manager" },
+        "proj-1" as never,
+      );
+      registry.pin(
+        {
+          id: "kid",
+          permission: "yolo",
+          openedBy: { windowId: "mgr" },
+          parentWindowId: "mgr",
+          role: "worker",
+        },
+        "proj-1" as never,
+      );
+      const base = { projectId: "proj-1" as never, cwd: "D:\\x", createdAt: 0 };
+      const layout = layoutWith({
+        mgr: {
+          ...base,
+          id: "mgr",
+          title: "M",
+          kind: "claude",
+          permission: "yolo",
+          openedBy: "user",
+        },
+        kid: {
+          ...base,
+          id: "kid",
+          title: "K",
+          kind,
+          permission: "yolo",
+          openedBy: { windowId: "mgr" },
+          parentWindowId: "mgr",
+        },
+      });
+      registry.syncLayout(layout);
+      registry.unpin("kid");
+      registry.syncLayout(layout);
+      expect(registry.get("kid")?.parentWindowId, kind).toBe("mgr");
+    }
+  });
+
   it("主进程 upsert 父级后 launch 封顶", () => {
     const registry = createWorkbenchAuthRegistry();
     registry.upsert({ id: "parent", permission: "edit", openedBy: "user" }, "proj-1" as never);

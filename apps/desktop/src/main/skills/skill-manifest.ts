@@ -17,7 +17,7 @@ export function isSkillAppliesTo(value: unknown): value is SkillAppliesTo {
 export type SkillAuthorGuess = "codex" | "claude" | "unknown";
 
 /** 窗口用的是哪家 CLI。DeepSeek 窗口走 Claude Code，算 claude-code。 */
-export type SkillRuntime = "claude-code" | "codex" | "grok";
+export type SkillRuntime = "claude-code" | "codex" | "grok" | "cursor";
 
 /** Claude 和 Codex 都要求：小写字母、数字、连字符，最长 64。 */
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;

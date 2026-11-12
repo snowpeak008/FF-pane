@@ -1,5 +1,5 @@
 /**
- * 工作台 CLI 窗口启动器（T10.4）：在 PTY 中直接跑 Claude Code / Codex。
+ * 工作台 CLI 窗口启动器（T10.4）：在 PTY 中直接跑 Claude Code / Codex / Grok / Cursor。
  * 密钥只经 env；renderer 不得传入 args/env/可执行路径。
  * Windows：解析 npm shim 真实目标，参数数组直启，绕开 cmd.exe。
  */
@@ -18,6 +18,7 @@ import {
   resolveHookNodeExecutable,
 } from "@ff-pane/adapters";
 import {
+  cursorEnvPlaceholder,
   FF_PANE_WB_PIPE_ENV,
   FF_PANE_WINDOW_TOKEN_ENV,
   injectTokenIntoMcpServers,
@@ -50,10 +51,17 @@ import type { PtyManager } from "../terminal/manager";
 import type { TerminalRecord } from "../terminal/types";
 import type { WorkbenchAuthRegistry } from "./auth-registry";
 import {
+  buildClaudeProviderSettings,
+  CLAUDE_KEY_ENV,
+  claudeKeyHelperCommand,
+  readClaudeSettingsEnvNames,
+} from "./claude-provider-settings";
+import {
   assertSecretAbsent,
   assertTokenAbsent,
   buildInteractiveClaudeArgs,
   buildInteractiveCodexArgs,
+  buildInteractiveCursorArgs,
   buildInteractiveGrokArgs,
   CLAUDE_INTERACTIVE_COMMAND,
   CODEX_INTERACTIVE_COMMAND,
@@ -61,6 +69,21 @@ import {
 } from "./cli-args";
 import type { CodexSessionClaimer } from "./codex-claim";
 import { CODEX_AUTO_COMPACT_TOKEN_KEY, resolveManagerCompact } from "./compact-launch";
+import {
+  CURSOR_AGENT_COMMAND,
+  type CursorCliTarget,
+  cursorProcessEnv,
+  cursorProxyEnv,
+  resolveCursorCliTarget,
+} from "./cursor-cli";
+import {
+  CURSOR_CONTEXT_FILE_ENV,
+  cursorProjectDir,
+  writeCursorContextFile,
+  writeCursorPlugin,
+  writeCursorProjectHooks,
+  writeCursorProjectMcpAllow,
+} from "./cursor-hook-config";
 import {
   bundledGrokHookPath,
   resolveGrokHookCommand,
@@ -71,6 +94,7 @@ import {
   prepareWindowHooks,
   releaseWindowHooks,
   resolveWorkbenchHookScriptPath,
+  windowHookDir,
 } from "./hook-launch";
 import { CLEAR_INPUT_KEYS, CODEX_SUBMIT_DELAY_MS, type IdleDeliverQueue } from "./idle-deliver";
 import { createWindowLaunchGate } from "./launch-gate";
@@ -111,7 +135,7 @@ export interface LaunchCliWindowInput {
   readonly windowId: string;
   readonly projectId: ProjectId;
   readonly projectRoot: string;
-  readonly kind: "claude" | "codex" | "grok" | "deepseek";
+  readonly kind: "claude" | "codex" | "grok" | "deepseek" | "cursor";
   /** 已按项目配置解析好的这一路。本机登录不带 providerId。 */
   readonly route: LaunchCliRoute;
   readonly cols: number;
@@ -135,7 +159,7 @@ export interface LaunchCliWindowInput {
 
 export interface LaunchCliWindowResult {
   readonly terminal: TerminalRecord;
-  readonly kind: "claude" | "codex" | "grok" | "deepseek";
+  readonly kind: "claude" | "codex" | "grok" | "deepseek" | "cursor";
   readonly nativeSessionId?: string;
   /** Codex：已开始后台认领会话 id。 */
   readonly claimingSession?: boolean;
@@ -187,7 +211,7 @@ export interface LaunchCliWindowDeps {
   readonly resolveSkillMounts?: (input: {
     readonly windowId: string;
     readonly projectRoot: string;
-    readonly runtime: "claude-code" | "codex" | "grok";
+    readonly runtime: "claude-code" | "codex" | "grok" | "cursor";
   }) => Promise<{
     readonly claudePluginDir?: string;
     readonly instructions?: string;
@@ -225,7 +249,7 @@ export interface LaunchCliWindowDeps {
   readonly loadRoleInjection?: (input: {
     readonly windowId: string;
     readonly role: WorkbenchRole;
-    readonly runtime: "claude-code" | "codex" | "grok";
+    readonly runtime: "claude-code" | "codex" | "grok" | "cursor";
   }) => Promise<{
     readonly claudePromptFile?: string;
     readonly developerInstructions?: string;
@@ -293,14 +317,71 @@ export function assertLaunchCliIpcSafe(request: object): void {
   }
 }
 
-function resolveCliCommand(runtime: "claude-code" | "codex" | "grok"): string {
+function resolveCliCommand(runtime: "claude-code" | "codex" | "grok" | "cursor"): string {
   if (runtime === "claude-code") {
     return CLAUDE_INTERACTIVE_COMMAND;
   }
   if (runtime === "grok") {
     return GROK_INTERACTIVE_COMMAND;
   }
+  if (runtime === "cursor") {
+    return CURSOR_AGENT_COMMAND;
+  }
   return CODEX_INTERACTIVE_COMMAND;
+}
+
+/**
+ * 自配置 MCP 写进 CLI 读的配置文件时（Grok、Cursor）：信箱等路径只写占位符，真实值放进 CLI 进程环境，
+ * 由 CLI 启动工具时展开。项目开关没开就不挂。返回要写文件的服务器表和要补的进程环境。
+ */
+function configToolForFile(input: {
+  readonly mcpServers: Readonly<Record<string, McpStdioServerSpec>>;
+  readonly configEnabled: boolean;
+  readonly role: WorkbenchRole;
+  readonly moduleDir: string;
+  readonly placeholder: (name: string) => string;
+}): {
+  readonly servers: Record<string, McpStdioServerSpec>;
+  readonly env: Record<string, string>;
+} {
+  const attachedConfig = input.mcpServers[DEFAULT_CONFIG_TOOL_SERVER_NAME];
+  const servers: Record<string, McpStdioServerSpec> = {};
+  for (const [name, spec] of Object.entries(input.mcpServers)) {
+    if (name !== DEFAULT_CONFIG_TOOL_SERVER_NAME) {
+      servers[name] = spec;
+    }
+  }
+  const env: Record<string, string> = {};
+  if (!input.configEnabled) {
+    return { servers, env };
+  }
+  servers[DEFAULT_CONFIG_TOOL_SERVER_NAME] = {
+    command: attachedConfig?.command ?? process.execPath,
+    args: attachedConfig?.args ?? [join(input.moduleDir, CONFIG_MCP_SCRIPT)],
+    env: {
+      ELECTRON_RUN_AS_NODE: "1",
+      [ENV_CONFIG_MAILBOX]: input.placeholder(ENV_CONFIG_MAILBOX),
+      [ENV_CONFIG_PROVIDERS]: input.placeholder(ENV_CONFIG_PROVIDERS),
+      [ENV_CONFIG_CONFIGS]: input.placeholder(ENV_CONFIG_CONFIGS),
+      [ENV_CONFIG_AUDIT]: input.placeholder(ENV_CONFIG_AUDIT),
+      [ENV_CONFIG_CALLER_ROLE]: input.placeholder(ENV_CONFIG_CALLER_ROLE),
+    },
+  };
+  env[ENV_CONFIG_CALLER_ROLE] = input.role;
+  if (attachedConfig?.env !== undefined) {
+    for (const key of [
+      ENV_CONFIG_MAILBOX,
+      ENV_CONFIG_PROVIDERS,
+      ENV_CONFIG_CONFIGS,
+      ENV_CONFIG_AUDIT,
+    ]) {
+      const value = attachedConfig.env[key];
+      if (value !== undefined && value.trim() !== "") {
+        env[key] = value;
+      }
+    }
+  }
+  return { servers, env };
 }
 
 async function resolveKnowledgeServers(
@@ -373,6 +454,17 @@ async function launchCliWindowBody(
   }
 
   const command = resolveCliCommand(runtime);
+  // Cursor 不在 PATH 上找：照它自己的启动脚本找版本目录里的 node.exe，找不到就别开。
+  let cursorTarget: CursorCliTarget | undefined;
+  if (runtime === "cursor") {
+    cursorTarget = resolveCursorCliTarget(process.env);
+    if (cursorTarget === undefined) {
+      throw new WorkbenchCliLaunchError(
+        "cli-missing",
+        "没找到 Cursor CLI（cursor-agent）。先在 PowerShell 里运行 irm 'https://cursor.com/install?win32=true' | iex 安装，再运行 cursor-agent login 登录。",
+      );
+    }
+  }
   const model = route.model?.trim() || undefined;
   const effort = resolveDispatchedReasoningEffort({
     runtime,
@@ -486,8 +578,13 @@ async function launchCliWindowBody(
     [WORKBENCH_MCP_SERVER_NAME]: buildWorkbenchMcpSpec(deps.moduleDir),
   };
   const windowToken = deps.tokenRegistry.issue(input.windowId);
-  const probed = resolveDirectCliTarget(command, [], process.env);
-  const nodePath = resolveHookNodeExecutable(process.env, probed);
+  const probed =
+    runtime === "cursor" ? undefined : resolveDirectCliTarget(command, [], process.env);
+  // Cursor 的钩子写在项目文件里、跨次启动都在：先用系统 node（路径稳定），没有再用 Cursor 自带的（会随更新换目录）。
+  const nodePath =
+    runtime === "cursor"
+      ? (resolveHookNodeExecutable(process.env) ?? cursorTarget?.nodeFile)
+      : resolveHookNodeExecutable(process.env, probed);
   const scriptPath =
     deps.hookScriptPath ??
     resolveWorkbenchHookScriptPath({
@@ -495,10 +592,33 @@ async function launchCliWindowBody(
       resourcesPath: deps.resourcesPath ?? "",
       moduleDir: deps.moduleDir,
     });
+  const cwd = (input.cwd?.trim() || input.projectRoot).trim();
+  // Claude（含 DeepSeek）走中转来源：地址和模型进 `--settings`，盖过用户和项目 settings 里的 env；
+  // 密钥只在进程环境，由 apiKeyHelper 读。本机登录不动，照旧用用户自己的 Claude 配置。
+  const claudeProvider =
+    runtime === "claude-code" &&
+    connectionMode === "relay" &&
+    provider !== undefined &&
+    provider.templateId !== "local-login"
+      ? buildClaudeProviderSettings({
+          injectEnv,
+          ...(model !== undefined ? { model } : {}),
+          ...(secret !== undefined && secret.length > 0
+            ? { apiKeyHelper: claudeKeyHelperCommand({ nodePath, scriptPath }) }
+            : {}),
+          existingEnvNames: readClaudeSettingsEnvNames({
+            cwd,
+            ...(process.env["CLAUDE_CONFIG_DIR"] !== undefined
+              ? { configDir: process.env["CLAUDE_CONFIG_DIR"] }
+              : {}),
+          }),
+        })
+      : undefined;
   const hooks = prepareWindowHooks({
     windowId: input.windowId,
     nodePath,
     scriptPath,
+    ...(claudeProvider !== undefined ? { claudeProvider } : {}),
   });
   const releaseFailedLaunch = async (): Promise<void> => {
     releaseWindowHooks(input.windowId);
@@ -512,8 +632,14 @@ async function launchCliWindowBody(
   let mcpTemp: WorkbenchMcpTempFile | undefined;
   let grokConfigPath: string | undefined;
   let grokHookPath: string | undefined;
+  let cursorPluginDir: string | undefined;
+  let cursorContextFile: string | undefined;
+  let cursorHooksPath: string | undefined;
+  let cursorCliConfigPath: string | undefined;
   const extraProcessEnv: Record<string, string> = { ...compact.env };
-  const cwd = (input.cwd?.trim() || input.projectRoot).trim();
+  if (claudeProvider?.apiKeyHelper !== undefined && secret !== undefined) {
+    extraProcessEnv[CLAUDE_KEY_ENV] = secret;
+  }
 
   let nativeSessionId: string | undefined = input.nativeSessionId?.trim() || undefined;
   let args: string[];
@@ -598,43 +724,15 @@ async function launchCliWindowBody(
       deps.isConfigToolEnabled !== undefined
         ? await deps.isConfigToolEnabled(input.projectRoot)
         : false;
-    const attachedConfig = mcpServers[DEFAULT_CONFIG_TOOL_SERVER_NAME];
-    const serversForFile: Record<string, McpStdioServerSpec> = {};
-    for (const [name, spec] of Object.entries(mcpServers)) {
-      if (name !== DEFAULT_CONFIG_TOOL_SERVER_NAME) {
-        serversForFile[name] = spec;
-      }
-    }
-    if (configEnabled) {
-      const placeholder = `\${`;
-      serversForFile[DEFAULT_CONFIG_TOOL_SERVER_NAME] = {
-        command: attachedConfig?.command ?? process.execPath,
-        args: attachedConfig?.args ?? [join(deps.moduleDir, CONFIG_MCP_SCRIPT)],
-        env: {
-          ELECTRON_RUN_AS_NODE: "1",
-          [ENV_CONFIG_MAILBOX]: `${placeholder}${ENV_CONFIG_MAILBOX}}`,
-          [ENV_CONFIG_PROVIDERS]: `${placeholder}${ENV_CONFIG_PROVIDERS}}`,
-          [ENV_CONFIG_CONFIGS]: `${placeholder}${ENV_CONFIG_CONFIGS}}`,
-          [ENV_CONFIG_AUDIT]: `${placeholder}${ENV_CONFIG_AUDIT}}`,
-          [ENV_CONFIG_CALLER_ROLE]: `${placeholder}${ENV_CONFIG_CALLER_ROLE}}`,
-        },
-      };
-      extraProcessEnv[ENV_CONFIG_CALLER_ROLE] = role;
-      if (attachedConfig?.env !== undefined) {
-        for (const key of [
-          ENV_CONFIG_MAILBOX,
-          ENV_CONFIG_PROVIDERS,
-          ENV_CONFIG_CONFIGS,
-          ENV_CONFIG_AUDIT,
-        ]) {
-          const value = attachedConfig.env[key];
-          if (value !== undefined && value.trim() !== "") {
-            extraProcessEnv[key] = value;
-          }
-        }
-      }
-    }
-    const withToken = injectTokenIntoMcpServers(serversForFile, windowToken, "grok-env-expand");
+    const forFile = configToolForFile({
+      mcpServers,
+      configEnabled,
+      role,
+      moduleDir: deps.moduleDir,
+      placeholder: (name) => `\${${name}}`,
+    });
+    Object.assign(extraProcessEnv, forFile.env);
+    const withToken = injectTokenIntoMcpServers(forFile.servers, windowToken, "grok-env-expand");
     const wantResume = input.resume === true;
     if (wantResume && nativeSessionId === undefined) {
       await releaseFailedLaunch();
@@ -696,6 +794,66 @@ async function launchCliWindowBody(
       ...(grokRules !== undefined ? { rules: grokRules } : {}),
       ...(input.initialPrompt !== undefined ? { initialPrompt: input.initialPrompt } : {}),
     });
+  } else if (runtime === "cursor") {
+    const wantResume = input.resume === true;
+    if (wantResume && nativeSessionId === undefined) {
+      await releaseFailedLaunch();
+      throw new WorkbenchCliLaunchError(
+        "invalid",
+        "Cursor 续接要有对话编号。请从本窗口的历史对话里选一段再续接。",
+      );
+    }
+    // 新开不指定编号：sessionStart 钩子会把 Cursor 分的编号报回来（同时把说明交给模型、标成可投递）。
+    if (!wantResume) {
+      nativeSessionId = undefined;
+    }
+    const configEnabled =
+      deps.isConfigToolEnabled !== undefined
+        ? await deps.isConfigToolEnabled(input.projectRoot)
+        : false;
+    const forFile = configToolForFile({
+      mcpServers,
+      configEnabled,
+      role,
+      moduleDir: deps.moduleDir,
+      placeholder: cursorEnvPlaceholder,
+    });
+    Object.assign(extraProcessEnv, forFile.env);
+    const withToken = injectTokenIntoMcpServers(forFile.servers, windowToken, "cursor-env-expand");
+    const hookDir = windowHookDir(input.windowId);
+    try {
+      if (hookDir !== undefined) {
+        cursorPluginDir = await writeCursorPlugin({ dir: hookDir, servers: withToken });
+        cursorContextFile = await writeCursorContextFile(
+          hookDir,
+          withSkills(roleInjection.developerInstructions),
+        );
+      }
+      const projectDir = cursorProjectDir(cwd);
+      if (nodePath !== undefined) {
+        cursorHooksPath = await writeCursorProjectHooks({ projectDir, nodePath, scriptPath });
+      }
+      // 同 Claude 的 --allowedTools：只放行工作台工具，知识库和自配置照旧由 Cursor 询问。
+      if (cursorPluginDir !== undefined) {
+        cursorCliConfigPath = await writeCursorProjectMcpAllow({
+          projectDir,
+          serverNames: [WORKBENCH_MCP_SERVER_NAME],
+        });
+      }
+    } catch (error) {
+      await releaseFailedLaunch();
+      throw error;
+    }
+    if (cursorContextFile !== undefined) {
+      extraProcessEnv[CURSOR_CONTEXT_FILE_ENV] = cursorContextFile;
+    }
+    args = buildInteractiveCursorArgs({
+      ...(wantResume && nativeSessionId !== undefined ? { resumeSessionId: nativeSessionId } : {}),
+      ...(model !== undefined ? { model } : {}),
+      permission,
+      ...(cursorPluginDir !== undefined ? { pluginDir: cursorPluginDir } : {}),
+      ...(input.initialPrompt !== undefined ? { initialPrompt: input.initialPrompt } : {}),
+    });
   } else {
     throw new WorkbenchCliLaunchError("unsupported-runtime", `unsupported runtime: ${runtime}`);
   }
@@ -730,6 +888,18 @@ async function launchCliWindowBody(
       assertSecretAbsent(secret, [hookBody]);
       assertTokenAbsent(windowToken, [hookBody]);
     }
+    for (const cursorFile of [
+      cursorPluginDir !== undefined ? join(cursorPluginDir, "mcp.json") : undefined,
+      cursorContextFile,
+      cursorHooksPath,
+      cursorCliConfigPath,
+    ]) {
+      if (cursorFile !== undefined) {
+        const body = readFileSync(cursorFile, "utf8");
+        assertSecretAbsent(secret, [body]);
+        assertTokenAbsent(windowToken, [body]);
+      }
+    }
     for (const hookFile of hooks.files) {
       const hookBody = readFileSync(hookFile, "utf8");
       assertSecretAbsent(secret, [hookBody]);
@@ -740,7 +910,14 @@ async function launchCliWindowBody(
     throw error;
   }
 
-  const direct = resolveDirectCliTarget(command, args, process.env);
+  const direct =
+    cursorTarget !== undefined
+      ? {
+          file: cursorTarget.nodeFile,
+          args: [cursorTarget.indexJs, ...args],
+          resolvedCommand: CURSOR_AGENT_COMMAND,
+        }
+      : resolveDirectCliTarget(command, args, process.env);
   if (direct === undefined) {
     await releaseFailedLaunch();
     throw new WorkbenchCliLaunchError(
@@ -752,14 +929,19 @@ async function launchCliWindowBody(
   }
 
   const { env } = buildAgentEnv({ inject: injectEnv, stripApiKeyEnv: true });
-  const stringEnv: Record<string, string> = {};
+  // 值为 undefined 的键：叠到主进程环境上时删掉（Cursor 窗口要删几个，见 cursorProcessEnv）。
+  let stringEnv: Record<string, string | undefined> = {};
   for (const [key, value] of Object.entries(env)) {
     if (value !== undefined) {
       stringEnv[key] = value;
     }
   }
+  if (runtime === "cursor") {
+    stringEnv = { ...cursorProcessEnv(stringEnv), ...cursorProxyEnv(stringEnv) };
+  }
   stringEnv[FF_PANE_WINDOW_TOKEN_ENV] = windowToken;
-  if (runtime === "claude-code") {
+  // Cursor 的项目外写入检查也在钩子里（preToolUse），用同一份允许目录。
+  if (runtime === "claude-code" || runtime === "cursor") {
     stringEnv[WRITE_ROOTS_ENV] = JSON.stringify(
       claudeWriteRoots({
         projectRoot: input.projectRoot,
@@ -838,10 +1020,12 @@ async function launchCliWindowBody(
       ? { submitDelayMs: CODEX_SUBMIT_DELAY_MS, clearInput: CLEAR_INPUT_KEYS }
       : {}),
     // Grok 没登录，没法真机核对回车时机，按 Codex 的间隔写回车，多等不到一秒没有坏处。
-    ...(runtime === "grok" ? { submitDelayMs: CODEX_SUBMIT_DELAY_MS } : {}),
+    // Cursor：真机打完字隔 0.6 秒回车能提交，同样按这个间隔。
+    ...(runtime === "grok" || runtime === "cursor" ? { submitDelayMs: CODEX_SUBMIT_DELAY_MS } : {}),
     // 有 UserPromptSubmit hook 的窗口有可靠的「一轮开始」信号，提交与否只认它。
     ...((runtime === "claude-code" && nodePath !== undefined) ||
-    (runtime === "grok" && grokHookPath !== undefined)
+    (runtime === "grok" && grokHookPath !== undefined) ||
+    (runtime === "cursor" && cursorHooksPath !== undefined)
       ? { verifySubmit: true, turnStartSource: true }
       : {}),
   });
@@ -892,9 +1076,13 @@ async function launchCliWindowBody(
         ? grokHookPath !== undefined
           ? "auto"
           : "manual"
-        : nodePath === undefined
-          ? "manual"
-          : "auto",
+        : runtime === "cursor"
+          ? cursorHooksPath !== undefined
+            ? "auto"
+            : "manual"
+          : nodePath === undefined
+            ? "manual"
+            : "auto",
     ...(skillMount !== undefined ? { skills: skillMount.report } : {}),
   };
 }

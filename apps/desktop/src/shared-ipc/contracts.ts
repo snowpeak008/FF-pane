@@ -295,7 +295,7 @@ export interface LaunchCliWindowRequest {
   readonly projectId: ProjectId;
   readonly projectRoot: string;
   /** claude、codex、grok 或 deepseek。主进程按项目配置选路，不读档案。 */
-  readonly kind: "claude" | "codex" | "grok" | "deepseek";
+  readonly kind: "claude" | "codex" | "grok" | "deepseek" | "cursor";
   /** 已忽略。旧客户端若仍传入，主进程不使用。 */
   readonly profileId?: string;
   readonly cols: number;
@@ -315,7 +315,7 @@ export interface LaunchCliWindowRequest {
 /** workbench:launch-cli 响应（不含密钥）。 */
 export interface LaunchCliWindowResponse {
   readonly terminal: TerminalInfo;
-  readonly kind: "claude" | "codex" | "grok" | "deepseek";
+  readonly kind: "claude" | "codex" | "grok" | "deepseek" | "cursor";
   readonly nativeSessionId?: string;
   /** Codex 新开：后台认领 session id 中。 */
   readonly claimingSession?: boolean;
@@ -1088,7 +1088,8 @@ export interface CliLoginProbeView {
 
 /** providers:list-local-models 请求。 */
 export interface ListLocalModelsRequest {
-  readonly runtime: CliLoginRuntimeWire;
+  /** "cursor"：工作台 Cursor 窗口（T11.10），跑 cursor-agent models。 */
+  readonly runtime: CliLoginRuntimeWire | "cursor";
 }
 
 /** 本地模型条目（同 adapters LocalModelEntry 的可序列化形状）。 */

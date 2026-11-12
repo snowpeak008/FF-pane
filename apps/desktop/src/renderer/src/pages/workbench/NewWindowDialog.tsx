@@ -82,9 +82,12 @@ export function NewWindowDialog({
         : kind === "grok"
           ? "grok-build"
           : undefined;
+  // Cursor 只有本机登录：配置里没有这一路也能开（主进程同样按本机登录处理）。
+  // 它的登录不经来源探测，没装时开窗会报出安装命令。
   const route =
     isAiWorkbenchKind(kind) && effective !== undefined
-      ? projectConfigRoute(effective, kind)
+      ? (projectConfigRoute(effective, kind) ??
+        (kind === "cursor" ? { connectionMode: "local_cli" as const } : undefined))
       : undefined;
   const routeMissing = kind !== "shell" && !loadingConfig && route === undefined;
 
@@ -178,6 +181,7 @@ export function NewWindowDialog({
                   ["codex", "workbench.newWindow.kindCodex"],
                   ["grok", "workbench.newWindow.kindGrok"],
                   ["deepseek", "workbench.newWindow.kindDeepseek"],
+                  ["cursor", "workbench.newWindow.kindCursor"],
                 ] as const
               ).map(([value, labelKey]) => (
                 <Button
@@ -197,6 +201,11 @@ export function NewWindowDialog({
           {kind === "deepseek" ? (
             <p className="text-sm text-fg-muted" data-testid="workbench-deepseek-hint">
               {t("workbench.newWindow.deepseekHint")}
+            </p>
+          ) : null}
+          {kind === "cursor" ? (
+            <p className="text-sm text-fg-muted" data-testid="workbench-cursor-hint">
+              {t("workbench.newWindow.cursorHint")}
             </p>
           ) : null}
 

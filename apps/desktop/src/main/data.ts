@@ -86,6 +86,7 @@ import {
 } from "./skills/skill-library";
 import { isSkillAppliesTo } from "./skills/skill-manifest";
 import { validateWorkbenchConfigDraft } from "./workbench/config-draft-validate";
+import { listCursorModels } from "./workbench/cursor-cli";
 import { keepModelEffortOverrides } from "./workbench/model-effort";
 
 /** 本数据层负责的 invoke 通道集合。 */
@@ -584,6 +585,9 @@ export async function createDataHandlers(
     // cli_login 本地模型枚举（T9.2 ③）：接线 adapters listLocalModels。
     // 不支持的 Runtime（claude-code / gemini-cli）由枚举层如实回 unsupported。
     "providers:list-local-models": async (request) => {
+      if (request.runtime === "cursor") {
+        return listCursorModels();
+      }
       if (!isCliLoginRuntime(request.runtime)) {
         return {
           ok: false,

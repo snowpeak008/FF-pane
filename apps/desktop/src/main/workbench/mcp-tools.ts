@@ -101,7 +101,7 @@ export interface ToolWindowView {
   /** 冷启动清洗锁。锁住的窗口不能新增记忆。 */
   readonly sanitizeLocked: boolean;
   /** 窗口类型。claude / deepseek 由 hook 把正文附给模型，其余只在提醒行带摘要。 */
-  readonly kind?: "claude" | "codex" | "grok" | "deepseek" | "shell";
+  readonly kind?: "claude" | "codex" | "grok" | "deepseek" | "cursor" | "shell";
   /** 观察本窗口的监管者。 */
   readonly watcherWindowId?: string;
   /** 调研小窗：替哪个窗口查的（T11.1）。 */
@@ -718,8 +718,14 @@ async function openWindow(
   const role = args["role"];
   const permission = args["permission"];
   const title = args["title"];
-  if (cli !== "claude" && cli !== "codex" && cli !== "grok" && cli !== "deepseek") {
-    return fail("cli 只能是 claude、codex、grok 或 deepseek。");
+  if (
+    cli !== "claude" &&
+    cli !== "codex" &&
+    cli !== "grok" &&
+    cli !== "deepseek" &&
+    cli !== "cursor"
+  ) {
+    return fail("cli 只能是 claude、codex、grok、deepseek 或 cursor。");
   }
   if (!isWorkbenchRole(role) || typeof permission !== "string" || typeof title !== "string") {
     return fail("ffpane_open_window 需要 cli、role、permission 和 title。");
@@ -1891,7 +1897,7 @@ async function watches(
 }
 
 export function hasInboxHook(view: ToolWindowView): boolean {
-  return view.kind === "claude" || view.kind === "deepseek";
+  return view.kind === "claude" || view.kind === "deepseek" || view.kind === "cursor";
 }
 
 function remindTarget(

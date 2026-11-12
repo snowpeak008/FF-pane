@@ -3,6 +3,7 @@
  * 非活动项目 / 非活动标签不挂载 xterm（PTY 继续跑，回放环形缓冲）。
  */
 
+import { isAiWorkbenchKind } from "@ff-pane/shared";
 import { SquareTerminal } from "lucide-react";
 import { type ReactElement, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -267,7 +268,7 @@ export function WorkbenchPage(): ReactElement {
       return;
     }
     const focused = projectLayout.windows[projectLayout.focusedWindowId];
-    if (focused === undefined || (focused.kind !== "claude" && focused.kind !== "codex")) {
+    if (focused === undefined || !isAiWorkbenchKind(focused.kind)) {
       toast.error(t("workbench.role.notAi"));
       return;
     }

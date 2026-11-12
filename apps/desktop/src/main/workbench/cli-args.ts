@@ -263,6 +263,50 @@ export function buildInteractiveGrokArgs(input: BuildInteractiveGrokArgsInput): 
   return args;
 }
 
+/** 交互式 Cursor 启动参数（T11.10）。新开不指定编号，由 sessionStart 钩子报回来。 */
+export interface BuildInteractiveCursorArgsInput {
+  /** 续接编号（`--resume <id>`）。 */
+  readonly resumeSessionId?: string;
+  readonly model?: string;
+  readonly permission?: WorkbenchPermissionLevel;
+  /** 本窗口插件目录（MCP）。 */
+  readonly pluginDir?: string;
+  readonly initialPrompt?: string;
+}
+
+/**
+ * 组装交互式 `cursor-agent` argv（不含 node.exe 和 index.js）。
+ * `--trust`：没见过的目录 Cursor 会先弹「Workspace Trust Required」，界面卡在那里（真机）；
+ * 帮助里写着只给无界面模式，实测交互界面也认。同 Grok，项目是用户自己加进来的。
+ * `--approve-mcps`：插件里的工作台 MCP 不再逐个询问。
+ */
+export function buildInteractiveCursorArgs(input: BuildInteractiveCursorArgsInput): string[] {
+  const args: string[] = ["--trust"];
+  const resumeId = input.resumeSessionId?.trim() ?? "";
+  if (resumeId !== "") {
+    args.push("--resume", resumeId);
+  }
+  if (input.permission !== undefined) {
+    args.push(
+      ...resolvePermissionCliArgs({
+        cli: "cursor",
+        level: input.permission,
+        resume: resumeId !== "",
+      }),
+    );
+  }
+  if (input.model !== undefined && input.model.trim() !== "") {
+    args.push("--model", input.model.trim());
+  }
+  if (input.pluginDir !== undefined && input.pluginDir.trim() !== "") {
+    args.push("--approve-mcps", "--plugin-dir", input.pluginDir);
+  }
+  if (input.initialPrompt !== undefined && input.initialPrompt.trim() !== "") {
+    args.push(input.initialPrompt);
+  }
+  return args;
+}
+
 /** 断言密钥明文不出现在 argv / 临时文件内容中（单测与启动后自检）。 */
 export function assertSecretAbsent(secret: string | undefined, surfaces: readonly string[]): void {
   if (secret === undefined || secret.length === 0) {

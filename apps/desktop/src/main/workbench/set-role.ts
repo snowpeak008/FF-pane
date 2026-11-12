@@ -57,7 +57,7 @@ export type SetWindowRoleResult =
   | { readonly ok: false; readonly reason: "unknown-window" | "forbidden" | "invalid-role" };
 
 function ensureAuthNode(registry: WorkbenchAuthRegistry, window: WorkbenchWindow): void {
-  if (window.kind !== "claude" && window.kind !== "codex") {
+  if (!isAiWorkbenchKind(window.kind)) {
     return;
   }
   if (registry.get(window.id) !== undefined) {

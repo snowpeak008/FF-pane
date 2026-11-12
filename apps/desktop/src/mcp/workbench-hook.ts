@@ -16,6 +16,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { readFileSync, rmSync } from "node:fs";
 import net from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { resolve } from "node:path";
@@ -27,6 +28,9 @@ export const INBOX_DIGEST_TIMEOUT_MS = 3000;
 /** 每调用完一个工具都要问一次，CLI 等着 hook 退出，所以给得短；取不到就算了，这一轮结束还有提醒。 */
 export const MID_TURN_TIMEOUT_MS = 800;
 export const INBOX_REMINDER_PREFIX = "[新消息]";
+/** 与 main/workbench/claude-provider-settings.ts 同名常量保持一致（脚本单独打包，不 import 主进程）。 */
+export const CLAUDE_KEY_ENV = "FF_PANE_CLAUDE_KEY";
+export const CLAUDE_KEY_HELPER_EVENT = "ApiKey";
 
 const TOOL_USE_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
 const TOOL_DIGEST = /^[a-f0-9]{64}$/;
@@ -458,6 +462,193 @@ export function resolveReportedHookEvent(argv: readonly string[]): string {
   return NAMED_HOOK_EVENTS.has(named) ? named : "";
 }
 
+// ---------- Cursor（T11.10）----------
+// 项目 .cursor/hooks.json 里的命令是 `"<node>" "<本脚本>" Cursor…`。stdin 是 Cursor 的事件 JSON，
+// stdout 回 Cursor 的格式。同项目的窗口共用这一份文件，靠环境里的窗口令牌认窗口；
+// 用户在 Cursor 编辑器里打开项目时也会跑到这里，那时没有令牌，什么也不做。
+
+export const CURSOR_SCRIPT_EVENTS = new Set([
+  "CursorSessionStart",
+  "CursorPromptSubmit",
+  "CursorPreToolUse",
+  "CursorPostToolUse",
+  "CursorStop",
+]);
+
+/** 钩子读完就删的说明文件（与主进程 cursor-hook-config.ts 同名）。 */
+export const CURSOR_CONTEXT_FILE_ENV = "FF_PANE_CURSOR_CONTEXT_FILE";
+
+/**
+ * Cursor 的钩子经 PowerShell 转一道，控制台代码页不是 UTF-8 时中文会乱。
+ * 输出只用 ASCII：非 ASCII 字符一律写成 \uXXXX，JSON 读出来一样。
+ */
+export function asciiJson(value: unknown): string {
+  return JSON.stringify(value).replace(
+    /[\u007f-\uffff]/g,
+    (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
+}
+
+/** stop 的 status：completed / aborted 当正常结束，error 当出错结束（不知道具体原因）。 */
+export function cursorStopEvent(raw: string): "Stop" | "StopFailure" {
+  try {
+    const status = (JSON.parse(raw.trim()) as { status?: unknown })?.status;
+    return status === "error" ? "StopFailure" : "Stop";
+  } catch {
+    return "Stop";
+  }
+}
+
+const CURSOR_FILE_TOOLS = new Set([
+  "Write",
+  "Edit",
+  "StrReplace",
+  "MultiEdit",
+  "Delete",
+  "EditNotebook",
+]);
+
+/**
+ * preToolUse 的项目外写入检查。工具名换成 Claude 的再用同一套检查：
+ * 改文件类看 file_path（或 path），Shell 当 PowerShell 查。该拒绝返回 Cursor 的拒绝输出，放行返回空串。
+ */
+export function cursorWriteGuardOutput(raw: string, rootsEnv: string | undefined): string {
+  const roots = parseWriteRoots(rootsEnv);
+  if (roots.length === 0) {
+    return "";
+  }
+  let value: { tool_name?: unknown; tool_input?: unknown; cwd?: unknown };
+  try {
+    value = JSON.parse(raw.trim()) as typeof value;
+  } catch {
+    return "";
+  }
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    typeof value.tool_name !== "string" ||
+    value.tool_input === null ||
+    typeof value.tool_input !== "object"
+  ) {
+    return "";
+  }
+  const input = value.tool_input as Record<string, unknown>;
+  const pick = (...keys: string[]): string | undefined => {
+    for (const key of keys) {
+      const item = input[key];
+      if (typeof item === "string" && item.trim() !== "") {
+        return item;
+      }
+    }
+    return undefined;
+  };
+  const cwd =
+    pick("cwd") ??
+    (typeof value.cwd === "string" && value.cwd !== "" ? value.cwd : undefined) ??
+    process.cwd();
+  let guarded: { toolName: string; toolInput: Record<string, unknown> } | undefined;
+  if (CURSOR_FILE_TOOLS.has(value.tool_name)) {
+    const filePath = pick("file_path", "path", "target_file");
+    guarded =
+      filePath === undefined
+        ? undefined
+        : { toolName: "Write", toolInput: { file_path: filePath } };
+  } else if (value.tool_name === "Shell") {
+    const command = pick("command");
+    guarded =
+      command === undefined ? undefined : { toolName: "PowerShell", toolInput: { command } };
+  }
+  if (guarded === undefined) {
+    return "";
+  }
+  const reason = checkWrite({ ...guarded, cwd }, roots, homedir(), tmpdir());
+  return reason === undefined
+    ? ""
+    : asciiJson({ permission: "deny", user_message: reason, agent_message: reason });
+}
+
+/** 读出本窗口的说明并删掉文件，只交给模型一次。没有就返回空串。 */
+function consumeCursorContext(): string {
+  const file = process.env[CURSOR_CONTEXT_FILE_ENV]?.trim() ?? "";
+  if (file === "") {
+    return "";
+  }
+  try {
+    const text = readFileSync(file, "utf8");
+    rmSync(file, { force: true });
+    return text.trim();
+  } catch {
+    return "";
+  }
+}
+
+async function runCursorHook(event: string, pipePath: string, token: string): Promise<void> {
+  const raw = await readStdinText();
+  if (event === "CursorPreToolUse") {
+    // 只做项目外写入检查，不上报、不需要管道。
+    const out = cursorWriteGuardOutput(raw, process.env[WRITE_ROOTS_ENV]);
+    if (out !== "") {
+      await writeStdoutLine(out);
+    }
+    return;
+  }
+  if (pipePath === "" || token === "") {
+    return;
+  }
+  if (event === "CursorStop") {
+    const reported = cursorStopEvent(raw);
+    await sendHookReport(
+      pipePath,
+      token,
+      reported,
+      undefined,
+      undefined,
+      reported === "StopFailure" ? "unknown" : undefined,
+    );
+    return;
+  }
+  if (event === "CursorPostToolUse") {
+    const pairing = extractHookPairing(raw);
+    await sendHookReport(pipePath, token, "PostToolUse", pairing.toolUseId, {
+      ...(pairing.toolName !== undefined ? { toolName: pairing.toolName } : {}),
+      ...(pairing.toolDigest !== undefined ? { toolDigest: pairing.toolDigest } : {}),
+    });
+    // 干活中途：上级或用户本人有新消息就插进去。
+    const midTurn = await requestInboxDigest(pipePath, token, MID_TURN_TIMEOUT_MS, "inbox-midturn");
+    if (midTurn !== "") {
+      await writeStdoutLine(asciiJson({ additional_context: midTurn }));
+    }
+    return;
+  }
+  const reportedEvent = event === "CursorSessionStart" ? "SessionStart" : "UserPromptSubmit";
+  await sendHookReport(
+    pipePath,
+    token,
+    reportedEvent,
+    undefined,
+    undefined,
+    undefined,
+    extractHookSessionId(reportedEvent, raw),
+  );
+  // 新开会话在 sessionStart 交说明；续接没有 sessionStart，就在第一次提交时交。
+  const parts = [consumeCursorContext()];
+  if (event === "CursorPromptSubmit") {
+    // 平台的新消息提醒：附上未读正文。用户自己发的话：只提一句还有几条未读。
+    parts.push(
+      await requestInboxDigest(
+        pipePath,
+        token,
+        INBOX_DIGEST_TIMEOUT_MS,
+        promptIsInboxReminder(raw) ? "inbox-digest" : "inbox-peek",
+      ),
+    );
+  }
+  const text = parts.filter((part) => part !== "").join("\n\n");
+  if (text !== "") {
+    await writeStdoutLine(asciiJson({ additional_context: text }));
+  }
+}
+
 function invokedDirectly(): boolean {
   const entry = process.argv[1] ?? "";
   const normalized = entry.replaceAll("\\", "/");
@@ -479,7 +670,19 @@ if (invokedDirectly()) {
   const event = resolveReportedHookEvent(process.argv);
   const pipePath = process.env["FF_PANE_WB_PIPE"] ?? "";
   const token = process.env["FF_PANE_WINDOW_TOKEN"] ?? "";
-  if (event === "PreToolUse") {
+  const named = process.argv[2] ?? "";
+  if (named === CLAUDE_KEY_HELPER_EVENT) {
+    // Claude 的 apiKeyHelper：只把本窗口进程环境里的密钥交给 Claude，不上报、不连管道。
+    process.stdout.write(process.env[CLAUDE_KEY_ENV] ?? "", () => {
+      process.exit(0);
+    });
+  } else if (CURSOR_SCRIPT_EVENTS.has(named)) {
+    void runCursorHook(named, pipePath, token)
+      .catch(() => undefined)
+      .then(() => {
+        process.exit(0);
+      });
+  } else if (event === "PreToolUse") {
     // 只做项目外写入检查，不上报、不需要管道。
     void readStdinText()
       .then(async (raw) => {

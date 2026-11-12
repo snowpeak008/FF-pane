@@ -17,6 +17,7 @@ import {
   DEFAULT_CONFIG_TOOL_SERVER_NAME,
   DEFAULT_WORKBENCH_ROLE,
   DEFAULT_WORKBENCH_WINDOW_PERMISSION,
+  isAiWorkbenchKind,
   isWorkbenchPermissionLevel,
   isWorkbenchRole,
   isWorkbenchRoleManualId,
@@ -1021,8 +1022,9 @@ export async function createWorkbenchCliLayer(
         if (meta?.sessionId !== undefined) {
           noteCodexThread(windowId, meta.sessionId);
         }
-      } else if (kind === "claude" || kind === "deepseek") {
+      } else if (kind === "claude" || kind === "deepseek" || kind === "cursor") {
         // Claude 的钩子也只装在这个进程上：报来的编号是它当前的对话（/resume、/clear 会换）。
+        // Cursor 的钩子虽写在项目文件里，但凭本窗口令牌上报，报来的编号同样是本窗口的。
         if (meta?.sessionId !== undefined) {
           noteClaudeSession(windowId, terminalId, meta.sessionId);
         }
@@ -1422,7 +1424,7 @@ export async function createWorkbenchCliLayer(
     }: {
       readonly windowId: string;
       readonly projectRoot: string;
-      readonly runtime: "claude-code" | "codex" | "grok";
+      readonly runtime: "claude-code" | "codex" | "grok" | "cursor";
     }) => {
       let enabled: readonly string[] = [];
       try {
@@ -1484,7 +1486,7 @@ export async function createWorkbenchCliLayer(
     }: {
       readonly windowId: string;
       readonly role: import("@ff-pane/shared").WorkbenchRole;
-      readonly runtime: "claude-code" | "codex" | "grok";
+      readonly runtime: "claude-code" | "codex" | "grok" | "cursor";
     }) => {
       const roleText = await composeWindowRolePrompt(resourcesDir, overridesDir, role);
       let outputLanguage: string | undefined;
@@ -1884,7 +1886,13 @@ export async function createWorkbenchCliLayer(
       return { ok: false, error: "找不到这个窗口。" };
     }
     const kind = stored.kind;
-    if (kind !== "claude" && kind !== "codex" && kind !== "grok" && kind !== "deepseek") {
+    if (
+      kind !== "claude" &&
+      kind !== "codex" &&
+      kind !== "grok" &&
+      kind !== "deepseek" &&
+      kind !== "cursor"
+    ) {
       return { ok: false, error: "只能重启 AI 窗口。" };
     }
     if (plan.resume && (plan.nativeSessionId === undefined || plan.nativeSessionId.trim() === "")) {
@@ -2148,9 +2156,11 @@ export async function createWorkbenchCliLayer(
               ? "grok"
               : request.kind === "deepseek"
                 ? "deepseek"
-                : undefined;
+                : request.kind === "cursor"
+                  ? "cursor"
+                  : undefined;
       if (kind === undefined) {
-        throw new Error("kind must be claude, codex, grok, or deepseek");
+        throw new Error("kind must be claude, codex, grok, deepseek, or cursor");
       }
       const resolved = await resolveProjectLaunchRoute({
         projectRoot: request.projectRoot,
@@ -3274,11 +3284,8 @@ export async function createWorkbenchCliLayer(
           break;
         }
       }
-      if (
-        found === undefined ||
-        (found.window.kind !== "claude" && found.window.kind !== "codex")
-      ) {
-        return { ok: false, error: "找不到这个 Claude 或 Codex 窗口。" };
+      if (found === undefined || !isAiWorkbenchKind(found.window.kind)) {
+        return { ok: false, error: "找不到这个 AI 窗口。" };
       }
       const node = authRegistry.get(input.windowId);
       if (node === undefined) {

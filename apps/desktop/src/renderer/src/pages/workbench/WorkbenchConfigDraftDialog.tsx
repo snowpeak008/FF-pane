@@ -136,6 +136,15 @@ function ConfigFields({ pending }: { readonly pending: WorkbenchConfigDraftEvent
             : routeText(current.deepseek),
         after: routeText(draft.deepseek),
       },
+      {
+        key: "cursor",
+        label: t("workbench.configDraft.field.cursor"),
+        before:
+          current === undefined
+            ? t("workbench.configDraft.currentEmpty")
+            : routeText(current.cursor),
+        after: routeText(draft.cursor),
+      },
     ];
     return (
       <div className="flex flex-col gap-3">

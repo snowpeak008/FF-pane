@@ -27,9 +27,13 @@ import {
 import { Field, Input } from "../../../components/ui/Input";
 import { invokeQuery } from "../../../ipc/query";
 
-type RouteSide = "claude" | "codex" | "grok" | "deepseek";
+type RouteSide = "claude" | "codex" | "grok" | "deepseek" | "cursor";
 
 function providersForSide(side: RouteSide, providers: readonly Provider[]): readonly Provider[] {
+  if (side === "cursor") {
+    // Cursor 只有本机登录，没有来源可选
+    return [];
+  }
   const cli =
     side === "claude"
       ? "claude-code"
@@ -127,6 +131,7 @@ export function ConfigEditorDialog({
   const [codex, setCodex] = useState<RouteDraft>(emptyRoute(true));
   const [grok, setGrok] = useState<RouteDraft>(emptyRoute(false));
   const [deepseek, setDeepseek] = useState<RouteDraft>(emptyRoute(false));
+  const [cursor, setCursor] = useState<RouteDraft>(emptyRoute(false));
   const [error, setError] = useState<string | undefined>(undefined);
   const [saving, setSaving] = useState(false);
 
@@ -145,6 +150,11 @@ export function ConfigEditorDialog({
         ? emptyRoute(false)
         : { ...routeFrom(config.deepseek), connectionMode: "relay" },
     );
+    setCursor(
+      config === null
+        ? emptyRoute(false)
+        : { ...routeFrom(config.cursor), connectionMode: "local_cli" },
+    );
     setError(undefined);
     setSaving(false);
   }, [config, open]);
@@ -154,7 +164,7 @@ export function ConfigEditorDialog({
   const saveDisabled =
     saving ||
     name.trim() === "" ||
-    (!claude.enabled && !codex.enabled && !grok.enabled && !deepseek.enabled) ||
+    (!claude.enabled && !codex.enabled && !grok.enabled && !deepseek.enabled && !cursor.enabled) ||
     (claude.enabled && claude.connectionMode === "relay" && claude.providerId === "") ||
     (codex.enabled && codex.connectionMode === "relay" && codex.providerId === "") ||
     (grok.enabled && grok.connectionMode === "relay" && grok.providerId === "") ||
@@ -172,26 +182,40 @@ export function ConfigEditorDialog({
     });
   };
 
+  const patchSide = (
+    side: RouteSide,
+    patch: Pick<RouteDraft, "probeNote" | "probedModels">,
+  ): void => {
+    const update = (current: RouteDraft): RouteDraft => ({ ...current, ...patch });
+    if (side === "claude") {
+      setClaude(update);
+    } else if (side === "grok") {
+      setGrok(update);
+    } else if (side === "cursor") {
+      setCursor(update);
+    } else if (side === "codex") {
+      setCodex(update);
+    }
+  };
+
   const probeModels = async (side: RouteSide): Promise<void> => {
     if (side === "deepseek") {
       return;
     }
+    // 读模型要跑一次 CLI（Cursor 约 3 秒），先说一声在读，不然看着像没反应
+    patchSide(side, { probeNote: t("settings.configs.field.modelsProbing"), probedModels: [] });
     const settled = await invokeQuery("providers:list-local-models", {
-      runtime: side === "claude" ? "claude-code" : side === "grok" ? "grok-build" : "codex",
+      runtime:
+        side === "claude"
+          ? "claude-code"
+          : side === "grok"
+            ? "grok-build"
+            : side === "cursor"
+              ? "cursor"
+              : "codex",
     });
     const apply = (note: string, models: readonly string[]): void => {
-      const patch = (current: RouteDraft): RouteDraft => ({
-        ...current,
-        probeNote: note,
-        probedModels: models,
-      });
-      if (side === "claude") {
-        setClaude(patch);
-      } else if (side === "grok") {
-        setGrok(patch);
-      } else {
-        setCodex(patch);
-      }
+      patchSide(side, { probeNote: note, probedModels: models });
     };
     if (settled.status === "error") {
       apply(settled.error.message, []);
@@ -202,7 +226,7 @@ export function ConfigEditorDialog({
       return;
     }
     apply(
-      "",
+      t("settings.configs.field.modelsProbed", { count: settled.data.models.length }),
       settled.data.models.map((item) => item.id),
     );
   };
@@ -212,6 +236,7 @@ export function ConfigEditorDialog({
     const codexRoute = toRoute(codex);
     const grokRoute = toRoute(grok);
     const deepseekRoute = toRoute(deepseek, true);
+    const cursorRoute = toRoute({ ...cursor, connectionMode: "local_cli", reasoningEffort: "" });
     const projectIds = config?.isDefault === true ? [] : ([...scope] as ProjectId[]);
     const draft: ProjectConfigDraft = {
       name: name.trim(),
@@ -222,6 +247,7 @@ export function ConfigEditorDialog({
       ...(codexRoute !== undefined ? { codex: codexRoute } : {}),
       ...(grokRoute !== undefined ? { grok: grokRoute } : {}),
       ...(deepseekRoute !== undefined ? { deepseek: deepseekRoute } : {}),
+      ...(cursorRoute !== undefined ? { cursor: cursorRoute } : {}),
     };
     setSaving(true);
     setError(undefined);
@@ -342,7 +368,20 @@ export function ConfigEditorDialog({
             onChange={setDeepseek}
             onProbe={() => undefined}
           />
-          {!claude.enabled && !codex.enabled && !grok.enabled && !deepseek.enabled ? (
+          <RouteFields
+            side="cursor"
+            title={t("settings.configs.field.routeCursor")}
+            draft={cursor}
+            providers={[]}
+            localOnly
+            onChange={setCursor}
+            onProbe={() => void probeModels("cursor")}
+          />
+          {!claude.enabled &&
+          !codex.enabled &&
+          !grok.enabled &&
+          !deepseek.enabled &&
+          !cursor.enabled ? (
             <p className="text-sm text-danger-text">{t("settings.configs.field.needRoute")}</p>
           ) : null}
           {error !== undefined ? (
@@ -377,6 +416,7 @@ function RouteFields({
   draft,
   providers,
   relayOnly = false,
+  localOnly = false,
   onChange,
   onProbe,
 }: {
@@ -385,6 +425,8 @@ function RouteFields({
   readonly draft: RouteDraft;
   readonly providers: readonly Provider[];
   readonly relayOnly?: boolean;
+  /** 只有本机登录（Cursor）：不显示连法和思考强度。 */
+  readonly localOnly?: boolean;
   readonly onChange: (next: RouteDraft) => void;
   readonly onProbe: () => void;
 }): ReactElement {
@@ -417,7 +459,12 @@ function RouteFields({
               {t("settings.configs.field.deepseekNote")}
             </p>
           ) : null}
-          {relayOnly ? null : (
+          {localOnly ? (
+            <p className="text-2xs text-fg-muted" data-testid={`config-${side}-note`}>
+              {t("settings.configs.field.cursorNote")}
+            </p>
+          ) : null}
+          {relayOnly || localOnly ? null : (
             <Field htmlFor={`config-${side}-mode`} label={t("settings.configs.field.connection")}>
               <select
                 id={`config-${side}-mode`}
@@ -461,7 +508,9 @@ function RouteFields({
             hint={
               side === "deepseek"
                 ? t("settings.configs.field.modelHintDeepseek")
-                : t("settings.configs.field.modelHint")
+                : side === "cursor"
+                  ? t("settings.configs.field.modelHintCursor")
+                  : t("settings.configs.field.modelHint")
             }
           >
             <Input
@@ -487,25 +536,46 @@ function RouteFields({
               </Button>
             ) : null}
             {draft.probeNote !== "" ? (
-              <p className="text-2xs text-fg-muted">{draft.probeNote}</p>
+              <p className="text-2xs text-fg-muted" data-testid={`config-${side}-probe-note`}>
+                {draft.probeNote}
+              </p>
+            ) : null}
+            {draft.probedModels.length > 0 ? (
+              // 读到的模型直接给个下拉，不用先点进输入框才看得到
+              <select
+                aria-label={t("settings.configs.field.pickProbedModel")}
+                className={selectClass}
+                data-testid={`config-${side}-model-pick`}
+                value={draft.probedModels.includes(draft.model) ? draft.model : ""}
+                onChange={(event) => onChange({ ...draft, model: event.target.value })}
+              >
+                <option value="">{t("settings.configs.field.pickProbedModel")}</option>
+                {draft.probedModels.map((model) => (
+                  <option key={model} value={model}>
+                    {model}
+                  </option>
+                ))}
+              </select>
             ) : null}
           </Field>
-          <Field htmlFor={`config-${side}-effort`} label={t("settings.configs.field.effort")}>
-            <select
-              id={`config-${side}-effort`}
-              className={selectClass}
-              data-testid={`config-${side}-effort`}
-              value={draft.reasoningEffort}
-              onChange={(event) => onChange({ ...draft, reasoningEffort: event.target.value })}
-            >
-              <option value="">{t("settings.configs.field.effortUnset")}</option>
-              {REASONING_EFFORT_LEVELS.map((level) => (
-                <option key={level} value={level}>
-                  {t(`settings.configs.field.effortLevel.${level}`)}
-                </option>
-              ))}
-            </select>
-          </Field>
+          {localOnly ? null : (
+            <Field htmlFor={`config-${side}-effort`} label={t("settings.configs.field.effort")}>
+              <select
+                id={`config-${side}-effort`}
+                className={selectClass}
+                data-testid={`config-${side}-effort`}
+                value={draft.reasoningEffort}
+                onChange={(event) => onChange({ ...draft, reasoningEffort: event.target.value })}
+              >
+                <option value="">{t("settings.configs.field.effortUnset")}</option>
+                {REASONING_EFFORT_LEVELS.map((level) => (
+                  <option key={level} value={level}>
+                    {t(`settings.configs.field.effortLevel.${level}`)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
         </>
       ) : null}
     </fieldset>

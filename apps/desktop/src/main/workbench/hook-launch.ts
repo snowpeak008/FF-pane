@@ -11,6 +11,7 @@ import { randomBytes } from "node:crypto";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { ClaudeProviderSettings } from "./claude-provider-settings";
 
 export const WORKBENCH_HOOK_SCRIPT = "workbench-hook.mjs";
 
@@ -72,36 +73,57 @@ export function claudeHookExec(
   };
 }
 
+/**
+ * claudeProvider：Claude 中转窗口的地址、模型和 apiKeyHelper，与 hooks 写进同一份 `--settings`。
+ * 没有 node 时不装 hooks，但有 claudeProvider 仍要写这份文件。
+ */
 export function prepareWindowHooks(input: {
   readonly windowId: string;
   readonly nodePath: string | undefined;
   readonly scriptPath: string;
+  readonly claudeProvider?: ClaudeProviderSettings;
 }): PreparedWindowHooks {
   releaseWindowHooks(input.windowId);
-  if (input.nodePath === undefined || input.nodePath.trim() === "") {
+  const nodePath =
+    input.nodePath === undefined || input.nodePath.trim() === "" ? undefined : input.nodePath;
+  if (nodePath === undefined && input.claudeProvider === undefined) {
     return { notifyArgv: [], files: [] };
   }
-  const nodePath = input.nodePath;
   const dir = join(tmpdir(), `ffpane-wb-hooks-${randomBytes(6).toString("hex")}`);
   mkdirSync(dir, { recursive: true });
   dirs.set(input.windowId, dir);
-  const claudeHooks: Record<string, unknown> = {};
-  for (const event of WORKBENCH_HOOK_EVENTS) {
-    claudeHooks[event] = [{ hooks: [claudeHookExec(nodePath, input.scriptPath, event)] }];
+  const settings: Record<string, unknown> = {};
+  if (nodePath !== undefined) {
+    const claudeHooks: Record<string, unknown> = {};
+    for (const event of WORKBENCH_HOOK_EVENTS) {
+      claudeHooks[event] = [{ hooks: [claudeHookExec(nodePath, input.scriptPath, event)] }];
+    }
+    claudeHooks["PreToolUse"] = [
+      {
+        matcher: WRITE_GUARD_TOOL_MATCHER,
+        hooks: [claudeHookExec(nodePath, input.scriptPath, "PreToolUse")],
+      },
+    ];
+    settings["hooks"] = claudeHooks;
   }
-  claudeHooks["PreToolUse"] = [
-    {
-      matcher: WRITE_GUARD_TOOL_MATCHER,
-      hooks: [claudeHookExec(nodePath, input.scriptPath, "PreToolUse")],
-    },
-  ];
+  if (input.claudeProvider !== undefined) {
+    settings["env"] = input.claudeProvider.env;
+    if (input.claudeProvider.apiKeyHelper !== undefined) {
+      settings["apiKeyHelper"] = input.claudeProvider.apiKeyHelper;
+    }
+  }
   const settingsPath = join(dir, "claude-settings.json");
-  writeFileSync(settingsPath, `${JSON.stringify({ hooks: claudeHooks }, null, 2)}\n`, "utf8");
+  writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
   return {
     settingsPath,
-    notifyArgv: [nodePath, input.scriptPath],
+    notifyArgv: nodePath !== undefined ? [nodePath, input.scriptPath] : [],
     files: [settingsPath],
   };
+}
+
+/** 本窗口的钩子临时目录（装了钩子才有）。Cursor 的插件和说明文件也放这里，关窗一起删。 */
+export function windowHookDir(windowId: string): string | undefined {
+  return dirs.get(windowId);
 }
 
 export function releaseWindowHooks(windowId: string): void {

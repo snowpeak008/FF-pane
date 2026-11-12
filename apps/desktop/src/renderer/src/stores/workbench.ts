@@ -265,7 +265,7 @@ function nextShellTitle(layout: ProjectWorkbenchLayout): string {
 }
 
 function nextCliTitle(
-  kind: "claude" | "codex" | "grok" | "deepseek",
+  kind: "claude" | "codex" | "grok" | "deepseek" | "cursor",
   layout: ProjectWorkbenchLayout,
 ): string {
   const n = Object.values(layout.windows).filter((window) => window.kind === kind).length + 1;
@@ -277,6 +277,9 @@ function nextCliTitle(
   }
   if (kind === "grok") {
     return `Grok ${n}`;
+  }
+  if (kind === "cursor") {
+    return `Cursor ${n}`;
   }
   return `DeepSeek ${n}`;
 }
@@ -696,7 +699,7 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
   setWindowPermission(projectId, windowId, permission) {
     patchProject(set, get, projectId, (current) => {
       const self = current.windows[windowId];
-      if (self === undefined || (self.kind !== "claude" && self.kind !== "codex")) {
+      if (self === undefined || !isAiWorkbenchKind(self.kind)) {
         return current;
       }
       const nextWindows: Record<string, WorkbenchWindow> = { ...current.windows };
@@ -726,7 +729,7 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
         if (!walkAncestors(id).includes(windowId)) {
           continue;
         }
-        if ((node.kind !== "claude" && node.kind !== "codex") || node.permission === undefined) {
+        if (!isAiWorkbenchKind(node.kind) || node.permission === undefined) {
           continue;
         }
         if (WORKBENCH_PERMISSION_RANK[node.permission] <= WORKBENCH_PERMISSION_RANK[permission]) {

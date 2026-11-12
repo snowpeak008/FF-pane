@@ -18,6 +18,7 @@ import type {
 import {
   DEFAULT_WORKBENCH_ROLE,
   DEFAULT_WORKBENCH_WINDOW_PERMISSION,
+  isAiWorkbenchKind,
   isWorkbenchPermissionLevel,
   isWorkbenchRole,
   minPermissionLevel,
@@ -29,8 +30,12 @@ interface StoredAuthNode extends WorkbenchAuthNode {
   readonly projectId: ProjectId;
 }
 
+/**
+ * 所有 AI 窗口都进权威表（Grok、DeepSeek、Cursor 也算）。原来只认 Claude / Codex：
+ * 界面一回存布局，别的种类的子窗口就从表里掉出去，管理者读不到输出、发不了消息、关不掉（T11.10 真机）。
+ */
 function toAuthNode(window: WorkbenchWindow): WorkbenchAuthNode | undefined {
-  if (window.kind !== "claude" && window.kind !== "codex") {
+  if (!isAiWorkbenchKind(window.kind)) {
     return undefined;
   }
   return {

@@ -220,8 +220,9 @@ const TOOL_DEFINITIONS: readonly McpToolDefinition[] = [
       properties: {
         cli: {
           type: "string",
-          enum: ["claude", "codex", "grok", "deepseek"],
-          description: "子窗口使用的 CLI。deepseek 启动本机 Claude，模型是 DeepSeek。",
+          enum: ["claude", "codex", "grok", "deepseek", "cursor"],
+          description:
+            "子窗口使用的 CLI。deepseek 启动本机 Claude，模型是 DeepSeek。cursor 启动本机 Cursor CLI（用户的 Cursor 账号）。",
         },
         profileId: {
           type: "string",

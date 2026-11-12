@@ -52,8 +52,15 @@ export function clampMaxWorkbenchWindows(value: unknown): number {
   return Math.min(MAX_MAX_WORKBENCH_WINDOWS, Math.max(MIN_MAX_WORKBENCH_WINDOWS, floored));
 }
 
-/** 窗口内容种类；T10.4 起含 Claude Code / Codex，T10.16 起含 Grok，T10.17 起含 DeepSeek。 */
-export const WORKBENCH_WINDOW_KINDS = ["shell", "claude", "codex", "grok", "deepseek"] as const;
+/** 窗口内容种类；T10.4 起含 Claude Code / Codex，T10.16 起含 Grok，T10.17 起含 DeepSeek，T11.10 起含 Cursor。 */
+export const WORKBENCH_WINDOW_KINDS = [
+  "shell",
+  "claude",
+  "codex",
+  "grok",
+  "deepseek",
+  "cursor",
+] as const;
 
 /** 窗口内容种类。 */
 export type WorkbenchWindowKind = (typeof WORKBENCH_WINDOW_KINDS)[number];
@@ -74,14 +81,19 @@ export function isAiWorkbenchKind(kind: string): kind is WorkbenchAiKind {
 /**
  * AI 窗口 kind ↔ 实际启动的 runtime。
  * DeepSeek 没有自己的命令，启动本机 Claude Code。
- * Grok 用 "grok"，与旧适配器 "grok-build" 分开。
+ * Grok 用 "grok"，与旧适配器 "grok-build" 分开。Cursor 跑 Cursor CLI（cursor-agent）。
  */
-export function workbenchKindToRuntime(kind: WorkbenchAiKind): "claude-code" | "codex" | "grok" {
+export function workbenchKindToRuntime(
+  kind: WorkbenchAiKind,
+): "claude-code" | "codex" | "grok" | "cursor" {
   if (kind === "codex") {
     return "codex";
   }
   if (kind === "grok") {
     return "grok";
+  }
+  if (kind === "cursor") {
+    return "cursor";
   }
   return "claude-code";
 }
@@ -89,7 +101,7 @@ export function workbenchKindToRuntime(kind: WorkbenchAiKind): "claude-code" | "
 /** 注入密钥和地址时用的模板 CLI。DeepSeek 用自己的来源，不走普通 Claude 来源。 */
 export function workbenchKindToInjectionCli(
   kind: WorkbenchAiKind,
-): "claude-code" | "codex" | "grok" | "deepseek" {
+): "claude-code" | "codex" | "grok" | "deepseek" | "cursor" {
   if (kind === "deepseek") {
     return "deepseek";
   }
@@ -106,6 +118,9 @@ export function runtimeToWorkbenchKind(runtime: string): WorkbenchAiKind | undef
   }
   if (runtime === "grok") {
     return "grok";
+  }
+  if (runtime === "cursor") {
+    return "cursor";
   }
   return undefined;
 }

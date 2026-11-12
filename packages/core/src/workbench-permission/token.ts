@@ -97,7 +97,16 @@ export const FF_PANE_WINDOW_TOKEN_ENV_PLACEHOLDER = `\${${FF_PANE_WINDOW_TOKEN_E
 /** Claude MCP 配置里的管道名占位符（由 CLI 从进程 env 展开）。 */
 export const FF_PANE_WB_PIPE_ENV_PLACEHOLDER = `\${${FF_PANE_WB_PIPE_ENV}}`;
 
-export type McpTokenDeliveryMode = "claude-env-expand" | "grok-env-expand" | "codex-forward";
+/** Cursor 插件 mcp.json 的展开写法是 `${env:名字}`（T11.10 实测；MCP 进程不继承 CLI 的环境）。 */
+export function cursorEnvPlaceholder(name: string): string {
+  return `\${env:${name}}`;
+}
+
+export type McpTokenDeliveryMode =
+  | "claude-env-expand"
+  | "grok-env-expand"
+  | "cursor-env-expand"
+  | "codex-forward";
 
 type McpSpecLike = {
   readonly command: string;
@@ -110,6 +119,7 @@ type McpSpecLike = {
 /**
  * 把令牌通道接到 MCP 规格（值永不进配置明文 / Codex `-c`）：
  * - claude-env-expand / grok-env-expand：配置只写 `${FF_PANE_WINDOW_TOKEN}`，由 CLI 从进程 env 展开
+ * - cursor-env-expand：同上，写法是 `${env:FF_PANE_WINDOW_TOKEN}`
  * - codex-forward：仅 env_vars 白名单名（值在 CLI 父进程 env）
  */
 export function injectTokenIntoMcpServers<T extends McpSpecLike>(
@@ -126,6 +136,17 @@ export function injectTokenIntoMcpServers<T extends McpSpecLike>(
           ...(spec.env ?? {}),
           [FF_PANE_WINDOW_TOKEN_ENV]: FF_PANE_WINDOW_TOKEN_ENV_PLACEHOLDER,
           [FF_PANE_WB_PIPE_ENV]: FF_PANE_WB_PIPE_ENV_PLACEHOLDER,
+        },
+      };
+      continue;
+    }
+    if (mode === "cursor-env-expand") {
+      out[name] = {
+        ...spec,
+        env: {
+          ...(spec.env ?? {}),
+          [FF_PANE_WINDOW_TOKEN_ENV]: cursorEnvPlaceholder(FF_PANE_WINDOW_TOKEN_ENV),
+          [FF_PANE_WB_PIPE_ENV]: cursorEnvPlaceholder(FF_PANE_WB_PIPE_ENV),
         },
       };
       continue;

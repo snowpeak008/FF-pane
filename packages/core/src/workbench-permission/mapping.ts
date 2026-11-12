@@ -9,7 +9,7 @@
 import type { WorkbenchPermissionLevel } from "@ff-pane/shared";
 
 /** 映射适用的交互式 CLI。 */
-export type WorkbenchPermissionCli = "claude-code" | "codex" | "grok";
+export type WorkbenchPermissionCli = "claude-code" | "codex" | "grok" | "cursor";
 
 /** 单条等级 × CLI 映射。 */
 export interface WorkbenchPermissionMapping {
@@ -177,6 +177,36 @@ export const WORKBENCH_PERMISSION_MAPPINGS: readonly WorkbenchPermissionMapping[
     cli: "grok",
     freshArgs: ["--always-approve"],
     resumeArgs: ["--always-approve"],
+  },
+  // —— Cursor（交互式 cursor-agent 2026.11.05；新开和续接都是 --resume，同一组参数）——
+  {
+    level: "read-only",
+    cli: "cursor",
+    freshArgs: ["--mode", "plan"],
+    resumeArgs: ["--mode", "plan"],
+    notes: "plan：只读规划，不改文件、不跑命令。",
+  },
+  {
+    level: "edit",
+    cli: "cursor",
+    freshArgs: [],
+    resumeArgs: [],
+    notes: "不加参数：改文件直接改，命令按用户自己的 Cursor 设置询问。",
+  },
+  {
+    level: "edit-exec",
+    cli: "cursor",
+    freshArgs: ["--force"],
+    resumeArgs: ["--force"],
+    notes:
+      "Cursor 没有只放行命令的一档。不加参数时每条命令都弹确认，管理者派的执行窗口会一直卡着（真机），所以同 Codex 这一档不再询问；项目外写入仍由 preToolUse 钩子拦。",
+  },
+  {
+    level: "yolo",
+    cli: "cursor",
+    freshArgs: ["--force"],
+    resumeArgs: ["--force"],
+    notes: "--force：全部放行。项目外写入仍由 preToolUse 钩子拦（T11.8）。",
   },
 ];
 

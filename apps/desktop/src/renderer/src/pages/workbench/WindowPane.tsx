@@ -309,7 +309,9 @@ export function WindowPane({
           ? t("workbench.window.kind.grok")
           : window.kind === "deepseek"
             ? t("workbench.window.kind.deepseek")
-            : t("workbench.window.kind.shell");
+            : window.kind === "cursor"
+              ? t("workbench.window.kind.cursor")
+              : t("workbench.window.kind.shell");
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: pane focus-on-click
@@ -670,7 +672,7 @@ export function WindowPane({
           </Button>
         </Tooltip>
       </div>
-      {isCli && role === "manager" ? (
+      {isCli && role === "manager" && window.kind !== "cursor" ? (
         <div
           className="flex shrink-0 items-center gap-x-2 overflow-hidden whitespace-nowrap border-b border-border bg-surface-sunken px-2 py-1"
           data-testid="workbench-compact-slider"
@@ -923,7 +925,9 @@ export function WindowPane({
             >
               {window.kind === "grok"
                 ? t("workbench.deliver.grokManual")
-                : t("workbench.deliver.noNode")}
+                : window.kind === "cursor"
+                  ? t("workbench.deliver.cursorManual")
+                  : t("workbench.deliver.noNode")}
             </div>
           ) : null}
           {deliverPending.count > 0 && deliverPending.mode !== "clear" ? (
@@ -1013,7 +1017,9 @@ export function WindowPane({
                         ? "grok"
                         : window.kind === "deepseek"
                           ? "deepseek"
-                          : "claude",
+                          : window.kind === "cursor"
+                            ? "cursor"
+                            : "claude",
                   projectRoot,
                   autoStart: autoStart || resumeNext,
                   permission,

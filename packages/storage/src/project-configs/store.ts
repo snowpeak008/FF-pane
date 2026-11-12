@@ -149,6 +149,9 @@ function pickConfig(value: unknown): ProjectConfig | undefined {
   const codex = pickRoute(raw["codex"]);
   const grok = pickRoute(raw["grok"]);
   const deepseek = pickRoute(raw["deepseek"]);
+  const cursorRoute = pickRoute(raw["cursor"]);
+  // Cursor 只有本机登录：文件里被手改成中转的，读的时候丢掉这一路。
+  const cursor = cursorRoute?.connectionMode === "local_cli" ? cursorRoute : undefined;
   const isDefault = raw["isDefault"] === true;
   return {
     id: raw["id"] as ProjectConfigId,
@@ -160,6 +163,7 @@ function pickConfig(value: unknown): ProjectConfig | undefined {
     ...(codex !== undefined ? { codex } : {}),
     ...(grok !== undefined ? { grok } : {}),
     ...(deepseek !== undefined ? { deepseek } : {}),
+    ...(cursor !== undefined ? { cursor } : {}),
   };
 }
 
@@ -191,6 +195,9 @@ function normalizeRoute(
     }
     return { connectionMode: "local_cli" as ConnectionMode, ...extras };
   }
+  if (label === "Cursor") {
+    throw new ProjectConfigDraftInvalidError("Cursor 只能用本机登录");
+  }
   const providerId = route.providerId?.trim() ?? "";
   if (providerId === "") {
     throw new ProjectConfigDraftInvalidError(`${label} 走中转时必须选择来源`);
@@ -211,8 +218,17 @@ export function normalizeProjectConfigDraft(draft: ProjectConfigDraft): ProjectC
   const codex = normalizeRoute(draft.codex, "Codex");
   const grok = normalizeRoute(draft.grok, "Grok");
   const deepseek = normalizeRoute(draft.deepseek, "DeepSeek");
-  if (claude === undefined && codex === undefined && grok === undefined && deepseek === undefined) {
-    throw new ProjectConfigDraftInvalidError("至少配置 Claude、Codex、Grok 或 DeepSeek 一路");
+  const cursor = normalizeRoute(draft.cursor, "Cursor");
+  if (
+    claude === undefined &&
+    codex === undefined &&
+    grok === undefined &&
+    deepseek === undefined &&
+    cursor === undefined
+  ) {
+    throw new ProjectConfigDraftInvalidError(
+      "至少配置 Claude、Codex、Grok、DeepSeek 或 Cursor 一路",
+    );
   }
   if (
     draft.defaultPermission !== undefined &&
@@ -233,6 +249,7 @@ export function normalizeProjectConfigDraft(draft: ProjectConfigDraft): ProjectC
     ...(codex !== undefined ? { codex } : {}),
     ...(grok !== undefined ? { grok } : {}),
     ...(deepseek !== undefined ? { deepseek } : {}),
+    ...(cursor !== undefined ? { cursor } : {}),
   };
 }
 

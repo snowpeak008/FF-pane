@@ -51,7 +51,7 @@ const EMPTY: ManagerCompactLaunch = { env: {} };
  */
 export function resolveManagerCompact(input: {
   readonly role: WorkbenchRole;
-  readonly kind: "claude" | "codex" | "grok" | "deepseek";
+  readonly kind: "claude" | "codex" | "grok" | "deepseek" | "cursor";
   readonly percent: unknown;
   readonly model?: string;
 }): ManagerCompactLaunch {
@@ -75,6 +75,10 @@ export function resolveManagerCompact(input: {
         [CLAUDE_AUTOCOMPACT_PCT_ENV]: String(percent),
       },
     };
+  }
+  if (input.kind === "cursor") {
+    // Cursor CLI 没有压缩比例的设置，交给它自己。
+    return EMPTY;
   }
   if (input.kind === "grok") {
     const grokPercent = Math.min(percent, GROK_COMPACT_PERCENT_CAP);

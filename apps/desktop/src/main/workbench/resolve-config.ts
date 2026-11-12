@@ -1,6 +1,7 @@
 /**
  * 按「项目绑定的配置 → 默认配置」选出 Claude 或 Codex 这一路。
  * 本机登录不读取来源、不注入密钥。
+ * Cursor 只有本机登录：配置里没有这一路也能开，用 Cursor 自己的默认模型。
  */
 
 import {
@@ -51,7 +52,9 @@ export async function resolveProjectLaunchRoute(
   if (effective === undefined) {
     return { ok: false, error: "没有可用的项目配置。" };
   }
-  const spec = projectConfigRoute(effective, input.kind);
+  const spec =
+    projectConfigRoute(effective, input.kind) ??
+    (input.kind === "cursor" ? { connectionMode: "local_cli" as const } : undefined);
   const cliName =
     input.kind === "claude"
       ? "Claude"
@@ -59,7 +62,9 @@ export async function resolveProjectLaunchRoute(
         ? "Codex"
         : input.kind === "grok"
           ? "Grok"
-          : "DeepSeek";
+          : input.kind === "cursor"
+            ? "Cursor"
+            : "DeepSeek";
   if (spec === undefined) {
     return {
       ok: false,

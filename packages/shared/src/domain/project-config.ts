@@ -1,5 +1,5 @@
 /**
- * 项目配置：一张表里 Claude、Codex、Grok、DeepSeek 各一路。
+ * 项目配置：一张表里 Claude、Codex、Grok、DeepSeek、Cursor 各一路。
  * 项目可绑定一张配置；没绑定时用标记为默认的那张。
  * 可用项目范围缺省或空数组 = 所有项目。
  */
@@ -34,6 +34,8 @@ export interface ProjectConfig {
   readonly codex?: ProjectConfigRoute;
   readonly grok?: ProjectConfigRoute;
   readonly deepseek?: ProjectConfigRoute;
+  /** Cursor 只认本机登录（cursor-agent login），没有中转。 */
+  readonly cursor?: ProjectConfigRoute;
 }
 
 /** 创建 / 更新时提交的内容（id 由存储层生成）。 */
@@ -82,6 +84,7 @@ export function projectConfigRoute(
     readonly codex?: ProjectConfigRoute;
     readonly grok?: ProjectConfigRoute;
     readonly deepseek?: ProjectConfigRoute;
+    readonly cursor?: ProjectConfigRoute;
   },
   kind: WorkbenchAiKind,
 ): ProjectConfigRoute | undefined {
@@ -93,6 +96,9 @@ export function projectConfigRoute(
   }
   if (kind === "grok") {
     return config.grok;
+  }
+  if (kind === "cursor") {
+    return config.cursor;
   }
   return config.deepseek;
 }

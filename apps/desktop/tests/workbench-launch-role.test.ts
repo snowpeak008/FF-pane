@@ -308,7 +308,7 @@ describe("launchCliWindow 技能挂载（T11.9）", () => {
       resolveSkillMounts: async (input: {
         readonly windowId: string;
         readonly projectRoot: string;
-        readonly runtime: "claude-code" | "codex" | "grok";
+        readonly runtime: "claude-code" | "codex" | "grok" | "cursor";
       }) => {
         asked.push(`${input.windowId}:${input.runtime}`);
         return input.runtime === "claude-code"
