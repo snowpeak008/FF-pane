@@ -9,10 +9,15 @@ import { installCsp } from "./csp";
 import { createDataHandlers } from "./data";
 import { resolveGlobalRoot } from "./data-root";
 import {
+  diagnosticsLogDir,
   forwardRendererReports,
   installDiagnostics,
   installMainLogFile,
+  type MainWatchdog,
+  offerToEndStaleInstance,
+  readStaleInstance,
   startLocalCrashReporter,
+  startMainWatchdog,
   watchWindowResponsiveness,
 } from "./diagnostics";
 import { createKnowledgeHandlers } from "./knowledge";
@@ -48,6 +53,19 @@ let mainWindow: BrowserWindow | null = null;
 let terminalLayer: TerminalLayer | null = null;
 /** 工作台 CLI 启动层（T10.4）；退出时清临时 MCP。 */
 let workbenchCliLayer: WorkbenchCliLayer | null = null;
+/** 主线程看门狗（T11.12）；冒烟模式不开。 */
+let mainWatchdog: MainWatchdog | null = null;
+
+/**
+ * 开发态测试开关（T11.12 e2e）：让主线程永远卡住，模拟 2026-11-12 关窗卡死。
+ * FF_PANE_TEST_FREEZE_MAIN=after:<毫秒> 启动后卡；=close 关窗时卡。打包后不认。
+ */
+const testFreezeMain = app.isPackaged ? undefined : process.env["FF_PANE_TEST_FREEZE_MAIN"];
+
+function freezeMainThreadForTest(): void {
+  console.error("[main] FF_PANE_TEST_FREEZE_MAIN: freezing the main thread");
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
+}
 
 function createMainWindow(options: {
   readonly hidden: boolean;
@@ -91,6 +109,10 @@ function createMainWindow(options: {
         return;
       }
       closing = true;
+      mainWatchdog?.markClosing();
+      if (testFreezeMain === "close") {
+        freezeMainThreadForTest();
+      }
       const flush = options.flushLayouts;
       const finish = (): void => {
         if (window.isDestroyed()) {
@@ -181,6 +203,12 @@ function registerAppHandlers(): void {
 async function bootstrap(): Promise<void> {
   if (!isSmokeMode) {
     installMainLogFile(join(resolveGlobalRoot(), "logs"));
+    mainWatchdog = startMainWatchdog({ logDir: diagnosticsLogDir() });
+    app.on("before-quit", () => mainWatchdog?.markClosing());
+    const freezeAfter = /^after:(\d+)$/.exec(testFreezeMain ?? "");
+    if (freezeAfter !== null) {
+      setTimeout(freezeMainThreadForTest, Number(freezeAfter[1]));
+    }
   }
   installAppMenu(resolveAppMenuLanguage(app.getLocale()));
   installCsp(session.defaultSession, devRendererUrl !== undefined);
@@ -366,12 +394,8 @@ async function bootstrap(): Promise<void> {
   });
 }
 
-// T11.0d：只开一份。再双击启动时把已有的窗口切到前面，新的这份直接退出。
-// 冒烟自检要能和正在用的 FF-pane 同时跑，不拿锁。
-const singleInstance = isSmokeMode || app.requestSingleInstanceLock();
-if (!singleInstance) {
-  app.quit();
-} else {
+/** ready 之前要做的：崩溃记录、画板图片协议。 */
+function prepareBeforeReady(): void {
   if (!isSmokeMode) {
     startLocalCrashReporter();
   }
@@ -388,6 +412,10 @@ if (!singleInstance) {
       },
     },
   ]);
+}
+
+/** 拿到单实例锁之后：再双击时把窗口切到前面，然后正常启动。 */
+function runAsPrimary(): Promise<void> {
   app.on("second-instance", () => {
     const window = mainWindow;
     if (window === null || window.isDestroyed()) {
@@ -399,13 +427,37 @@ if (!singleInstance) {
     window.show();
     window.focus();
   });
+  return app.whenReady().then(bootstrap);
+}
+
+function exitOnStartupFailure(thrown: unknown): void {
+  console.error(`[main] 启动失败：${String(thrown)}`);
+  app.exit(1);
+}
+
+// T11.0d：只开一份。再双击启动时把已有的窗口切到前面，新的这份直接退出。
+// 冒烟自检要能和正在用的 FF-pane 同时跑，不拿锁。
+// T11.12：上一份卡死时它收不到「切到前面」，还占着锁，再双击就永远打不开。先看它留下的
+// instance.json：心跳停了 30 秒以上、进程还在，就问要不要结束它重新打开。
+const staleInstance = isSmokeMode ? undefined : readStaleInstance(Date.now());
+if (staleInstance !== undefined) {
+  prepareBeforeReady();
   app
     .whenReady()
-    .then(bootstrap)
-    .catch((thrown: unknown) => {
-      console.error(`[main] 启动失败：${String(thrown)}`);
-      app.exit(1);
-    });
+    .then(() => offerToEndStaleInstance(readStaleInstance))
+    .then(async (ended) => {
+      if (!ended || !app.requestSingleInstanceLock()) {
+        app.quit();
+        return;
+      }
+      await runAsPrimary();
+    })
+    .catch(exitOnStartupFailure);
+} else if (isSmokeMode || app.requestSingleInstanceLock()) {
+  prepareBeforeReady();
+  runAsPrimary().catch(exitOnStartupFailure);
+} else {
+  app.quit();
 }
 
 app.on("window-all-closed", () => {

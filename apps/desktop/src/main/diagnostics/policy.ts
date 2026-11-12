@@ -17,6 +17,75 @@ export const LOG_KEEP_DAYS = 7;
 /** 关窗退出超过这么久还没退干净就强退。 */
 export const QUIT_WATCHDOG_MS = 5_000;
 
+/** 主线程给看门狗工作线程发心跳的间隔（T11.12）。 */
+export const WATCHDOG_BEAT_MS = 2_000;
+/** 看门狗每隔多久判断一次。 */
+export const WATCHDOG_TICK_MS = 1_000;
+/** 平时主线程多久没心跳就记一行「冻住」。不杀：写堆快照之类可能合法地卡一阵。 */
+export const MAIN_FROZEN_LOG_MS = 60_000;
+/** 关窗、退出过程中主线程多久没心跳就强退整棵进程树。 */
+export const CLOSING_FROZEN_KILL_MS = 10_000;
+/** 关窗、退出开始后最多等多久（正常收尾：布局 0.8 秒 ×2 + 终端 3.5 秒 + 主线程看门狗 5 秒以内）。 */
+export const CLOSING_MAX_MS = 20_000;
+/** 看门狗写 instance.json 的间隔。 */
+export const INSTANCE_WRITE_MS = 10_000;
+/** 再双击时，上一份最后一次心跳超过这么久就算卡死。 */
+export const STALE_INSTANCE_MS = 30_000;
+/**
+ * 发现上一份像是卡死后，再等这么久重读一次：电脑睡眠刚醒时心跳时间也是旧的，
+ * 醒来后主线程 2 秒内发心跳、看门狗 10 秒内写盘，重读就对得上。
+ */
+export const STALE_RECHECK_MS = INSTANCE_WRITE_MS + WATCHDOG_BEAT_MS + 1_000;
+
+/** instance.json：上一份 FF-pane 的进程号、启动时间、最后一次收到主线程心跳的时间。 */
+export interface InstanceInfo {
+  readonly pid: number;
+  readonly startedAt: number;
+  readonly lastBeat: number;
+}
+
+/** 读不懂（半截、旧格式、手改坏了）就当没有，走原来的路。 */
+export function parseInstanceInfo(text: string): InstanceInfo | undefined {
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const { pid, startedAt, lastBeat } = record;
+  if (
+    typeof pid !== "number" ||
+    !Number.isInteger(pid) ||
+    pid <= 0 ||
+    typeof startedAt !== "number" ||
+    typeof lastBeat !== "number"
+  ) {
+    return undefined;
+  }
+  return { pid, startedAt, lastBeat };
+}
+
+export function isInstanceStale(
+  info: InstanceInfo,
+  now: number,
+  staleMs: number = STALE_INSTANCE_MS,
+): boolean {
+  return now - info.lastBeat >= staleMs;
+}
+
+/** 弹框里说「已经多久没有响应」：不到 1 分钟说秒，否则说分钟。 */
+export function describeSilence(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 60) {
+    return `${seconds} 秒`;
+  }
+  return `${Math.round(seconds / 60)} 分钟`;
+}
+
 export type RendererGoneAction = "reload" | "give-up" | "none";
 
 /**
@@ -102,6 +171,25 @@ export function staleLogFiles(
     }
   }
   return out;
+}
+
+/** 崩溃记录（Crashpad/reports 里的 .dmp）只留最近几份、不超过几天（T11.12）。 */
+export const CRASH_REPORTS_KEEP = 5;
+export const CRASH_REPORTS_KEEP_DAYS = 14;
+
+/** 要删的崩溃记录：超过保留天数的，加上按时间排在第 keep 份之后的。不认识的文件不动。 */
+export function staleCrashReports(
+  entries: readonly { readonly name: string; readonly mtimeMs: number }[],
+  now: number,
+  keep: number = CRASH_REPORTS_KEEP,
+  keepDays: number = CRASH_REPORTS_KEEP_DAYS,
+): readonly string[] {
+  const dumps = entries
+    .filter((entry) => entry.name.toLowerCase().endsWith(".dmp"))
+    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return dumps
+    .filter((entry, index) => index >= keep || now - entry.mtimeMs >= keepDays * 86_400_000)
+    .map((entry) => entry.name);
 }
 
 export function toMb(bytes: number): number {

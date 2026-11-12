@@ -2,11 +2,12 @@
  * T10.12a：没有档案也能按默认配置开窗口；只配一路时另一路被拒；收窄范围被拦。
  */
 
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { gotoRoute, launchApp } from "./_launch";
+import { e2eTempDir, gotoRoute, launchApp, removeE2eTempDirs } from "./_launch";
+
+test.afterEach(removeE2eTempDirs);
 
 function seedFakeCli(dir: string, name: "claude" | "codex"): void {
   const bin = join(dir, "node_modules", name, "bin");
@@ -34,8 +35,8 @@ function seedFakeCli(dir: string, name: "claude" | "codex"): void {
 }
 
 test("没有档案时默认配置能开 Claude 和 Codex", async () => {
-  const fakeBin = mkdtempSync(join(tmpdir(), "ffpane-e2e-cfg-bin-"));
-  const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-cfg-proj-"));
+  const fakeBin = e2eTempDir("ffpane-e2e-cfg-bin-");
+  const projectDir = e2eTempDir("ffpane-e2e-cfg-proj-");
   seedFakeCli(fakeBin, "claude");
   seedFakeCli(fakeBin, "codex");
   const launched = await launchApp({ pathPrepend: fakeBin });
@@ -70,8 +71,8 @@ test("没有档案时默认配置能开 Claude 和 Codex", async () => {
 });
 
 test("配置只配 Claude 时不能开 Codex", async () => {
-  const fakeBin = mkdtempSync(join(tmpdir(), "ffpane-e2e-cfg-one-"));
-  const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-cfg-one-proj-"));
+  const fakeBin = e2eTempDir("ffpane-e2e-cfg-one-");
+  const projectDir = e2eTempDir("ffpane-e2e-cfg-one-proj-");
   seedFakeCli(fakeBin, "claude");
   seedFakeCli(fakeBin, "codex");
   const launched = await launchApp({ pathPrepend: fakeBin });
@@ -118,8 +119,8 @@ test("配置只配 Claude 时不能开 Codex", async () => {
 });
 
 test("收窄配置范围时，名单外仍绑定的项目会拦住保存", async () => {
-  const alphaDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-cfg-a-"));
-  const betaDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-cfg-b-"));
+  const alphaDir = e2eTempDir("ffpane-e2e-cfg-a-");
+  const betaDir = e2eTempDir("ffpane-e2e-cfg-b-");
   const launched = await launchApp();
   try {
     const { page } = launched;
@@ -166,8 +167,8 @@ test("收窄配置范围时，名单外仍绑定的项目会拦住保存", async
 });
 
 test("新开窗口的权限初值先看配置，没有则用全局默认；全放开仍要确认", async () => {
-  const fakeBin = mkdtempSync(join(tmpdir(), "ffpane-e2e-cfg-perm-bin-"));
-  const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-cfg-perm-proj-"));
+  const fakeBin = e2eTempDir("ffpane-e2e-cfg-perm-bin-");
+  const projectDir = e2eTempDir("ffpane-e2e-cfg-perm-proj-");
   seedFakeCli(fakeBin, "claude");
   const launched = await launchApp({ pathPrepend: fakeBin });
   try {

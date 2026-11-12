@@ -2,12 +2,13 @@
  * T10.7a：假 CLI 走 Claude MCP 配置，管理者开窗口、执行者汇报、越权被拒。
  */
 
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
-import { gotoRoute, type LaunchedApp, launchApp } from "./_launch";
+import { e2eTempDir, gotoRoute, type LaunchedApp, launchApp, removeE2eTempDirs } from "./_launch";
+
+test.afterEach(removeE2eTempDirs);
 
 const fixture = join(dirname(fileURLToPath(import.meta.url)), "fake-workbench-cli.js");
 
@@ -84,8 +85,8 @@ async function readReplayForWindow(page: LaunchedApp["page"], windowId: string):
 
 test("管理者开窗口，执行者汇报，越权被拒，记录落盘", async () => {
   test.setTimeout(120_000);
-  const fakeBinDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-mcp-"));
-  const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-mcp-proj-"));
+  const fakeBinDir = e2eTempDir("ffpane-e2e-mcp-");
+  const projectDir = e2eTempDir("ffpane-e2e-mcp-proj-");
   seedFakeClaude(fakeBinDir);
   const launched = await launchApp({ pathPrepend: fakeBinDir });
   try {
@@ -234,8 +235,8 @@ async function seedClaudeProfile(page: LaunchedApp["page"]): Promise<void> {
 
 test("管理者读取并关闭子窗口，再打开任务页", async () => {
   test.setTimeout(120_000);
-  const fakeBinDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-mcp-close-"));
-  const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-mcp-close-proj-"));
+  const fakeBinDir = e2eTempDir("ffpane-e2e-mcp-close-");
+  const projectDir = e2eTempDir("ffpane-e2e-mcp-close-proj-");
   seedFakeClaude(fakeBinDir);
   const launched = await launchApp({
     pathPrepend: fakeBinDir,
@@ -283,8 +284,8 @@ test("管理者读取并关闭子窗口，再打开任务页", async () => {
 
 test("窗口请用户拍板：界面上点选项，决定作为消息发回给它", async () => {
   test.setTimeout(150_000);
-  const fakeBinDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-mcp-decision-"));
-  const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-mcp-decision-proj-"));
+  const fakeBinDir = e2eTempDir("ffpane-e2e-mcp-decision-");
+  const projectDir = e2eTempDir("ffpane-e2e-mcp-decision-proj-");
   seedFakeClaude(fakeBinDir);
   const launched = await launchApp({
     pathPrepend: fakeBinDir,
@@ -328,8 +329,8 @@ test("窗口请用户拍板：界面上点选项，决定作为消息发回给�
 
 test("在线监管：一直挂着等事件，拍板结果从等待里拿到，点下线后停下", async () => {
   test.setTimeout(150_000);
-  const fakeBinDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-mcp-online-"));
-  const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-mcp-online-proj-"));
+  const fakeBinDir = e2eTempDir("ffpane-e2e-mcp-online-");
+  const projectDir = e2eTempDir("ffpane-e2e-mcp-online-proj-");
   seedFakeClaude(fakeBinDir);
   const launched = await launchApp({
     pathPrepend: fakeBinDir,
@@ -379,8 +380,8 @@ test("在线监管：一直挂着等事件，拍板结果从等待里拿到，�
 
 test("重启后子窗口仍被封顶，续接管理者可以再开窗口", async () => {
   test.setTimeout(120_000);
-  const fakeBinDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-mcp-restart-"));
-  const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-mcp-restart-proj-"));
+  const fakeBinDir = e2eTempDir("ffpane-e2e-mcp-restart-");
+  const projectDir = e2eTempDir("ffpane-e2e-mcp-restart-proj-");
   seedFakeClaude(fakeBinDir);
   let launched = await launchApp({
     pathPrepend: fakeBinDir,
@@ -463,8 +464,8 @@ test("重启后子窗口仍被封顶，续接管理者可以再开窗口", async
 
 test("隐藏面板：看板、计划预览、记录筛选，侧栏不再有旧页面", async () => {
   test.setTimeout(180_000);
-  const fakeBinDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-mcp-panel-"));
-  const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-mcp-panel-proj-"));
+  const fakeBinDir = e2eTempDir("ffpane-e2e-mcp-panel-");
+  const projectDir = e2eTempDir("ffpane-e2e-mcp-panel-proj-");
   seedFakeClaude(fakeBinDir);
   const launched = await launchApp({
     pathPrepend: fakeBinDir,
@@ -549,8 +550,8 @@ test("隐藏面板：看板、计划预览、记录筛选，侧栏不再有旧�
 
 test("从项目页收到打开任务面板后，切到工作台并打开抽屉", async () => {
   test.setTimeout(120_000);
-  const fakeBinDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-mcp-away-"));
-  const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-mcp-away-proj-"));
+  const fakeBinDir = e2eTempDir("ffpane-e2e-mcp-away-");
+  const projectDir = e2eTempDir("ffpane-e2e-mcp-away-proj-");
   const triggerFile = join(fakeBinDir, "open-panel.trigger");
   seedFakeClaude(fakeBinDir);
   const launched = await launchApp({
@@ -603,8 +604,8 @@ test("从项目页收到打开任务面板后，切到工作台并打开抽屉",
 
 test("管理者写入记忆，子窗口能查到但不能写，记忆页可删除", async () => {
   test.setTimeout(120_000);
-  const fakeBinDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-mcp-mem-"));
-  const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-mcp-mem-proj-"));
+  const fakeBinDir = e2eTempDir("ffpane-e2e-mcp-mem-");
+  const projectDir = e2eTempDir("ffpane-e2e-mcp-mem-proj-");
   seedFakeClaude(fakeBinDir);
   const launched = await launchApp({
     pathPrepend: fakeBinDir,

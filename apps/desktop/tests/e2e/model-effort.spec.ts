@@ -3,12 +3,13 @@
  * 改管理者自己则先出现确认，点确认后才续接。
  */
 
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
-import { gotoRoute, type LaunchedApp, launchApp } from "./_launch";
+import { e2eTempDir, gotoRoute, type LaunchedApp, launchApp, removeE2eTempDirs } from "./_launch";
+
+test.afterEach(removeE2eTempDirs);
 
 const fixture = join(dirname(fileURLToPath(import.meta.url)), "fake-workbench-cli.js");
 
@@ -88,8 +89,8 @@ async function openManagerWindow(page: LaunchedApp["page"], projectName: string)
 
 test("管理者改工作者强度：忙时排队，空闲后平台自己续接并带上新强度", async () => {
   test.setTimeout(120_000);
-  const fakeBinDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-effort-bin-"));
-  const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-effort-proj-"));
+  const fakeBinDir = e2eTempDir("ffpane-e2e-effort-bin-");
+  const projectDir = e2eTempDir("ffpane-e2e-effort-proj-");
   seedFakeClaude(fakeBinDir);
   const launched = await launchApp({
     pathPrepend: fakeBinDir,
@@ -124,8 +125,8 @@ test("管理者改工作者强度：忙时排队，空闲后平台自己续接�
 
 test("改管理者自己时先确认，点确认后才续接", async () => {
   test.setTimeout(120_000);
-  const fakeBinDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-effort-self-bin-"));
-  const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-effort-self-proj-"));
+  const fakeBinDir = e2eTempDir("ffpane-e2e-effort-self-bin-");
+  const projectDir = e2eTempDir("ffpane-e2e-effort-self-proj-");
   seedFakeClaude(fakeBinDir);
   const launched = await launchApp({
     pathPrepend: fakeBinDir,
@@ -158,8 +159,8 @@ test("改管理者自己时先确认，点确认后才续接", async () => {
 
 test("T11.1：普通窗口自己改成管理者，空闲后带着子 agent 限制续接，不弹确认框", async () => {
   test.setTimeout(120_000);
-  const fakeBinDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-role-self-bin-"));
-  const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-role-self-proj-"));
+  const fakeBinDir = e2eTempDir("ffpane-e2e-role-self-bin-");
+  const projectDir = e2eTempDir("ffpane-e2e-role-self-proj-");
   seedFakeClaude(fakeBinDir);
   const launched = await launchApp({
     pathPrepend: fakeBinDir,
@@ -214,8 +215,8 @@ async function readLiveReplay(page: LaunchedApp["page"], windowId: string): Prom
 
 test("窗口不在当前标签页时，改强度也由平台重启生效，切回去接上新终端", async () => {
   test.setTimeout(150_000);
-  const fakeBinDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-effort-hidden-bin-"));
-  const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-effort-hidden-proj-"));
+  const fakeBinDir = e2eTempDir("ffpane-e2e-effort-hidden-bin-");
+  const projectDir = e2eTempDir("ffpane-e2e-effort-hidden-proj-");
   seedFakeClaude(fakeBinDir);
   const launched = await launchApp({
     pathPrepend: fakeBinDir,

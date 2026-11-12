@@ -67,6 +67,8 @@ asarUnpack:
   - node_modules/sqlite-vec-*/**
   - node_modules/@koromix/koffi-*/**
   - node_modules/@lydell/node-pty-*/**
+  # T11.12 主线程看门狗脚本：交给 worker_threads 读，不依赖 asar 里的虚拟路径。
+  - out/main/watchdog-worker.mjs
 
 # 角色说明书随安装包放在 resources/workbench-roles（不进 asar，开发态走 apps/desktop/resources）。
 extraResources:

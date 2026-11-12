@@ -76,3 +76,95 @@ test("同一份数据再启动一次：新的那份直接退出，原来的还�
     await launched.cleanup();
   }
 });
+
+/** 进程还在不在（Windows 下 process.kill(pid, 0) 只看得出句柄能不能开，够用）。 */
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+test("T11.12 关窗时主线程卡死：看门狗 10 秒左右结束整个进程", async () => {
+  test.setTimeout(90_000);
+  const launched = await launchApp({ extraEnv: { FF_PANE_TEST_FREEZE_MAIN: "close" } });
+  try {
+    const { app, dataRoot } = launched;
+    const pid = app.process().pid;
+    expect(pid).toBeDefined();
+    // 先让 evaluate 返回，再关窗（关窗处理里主线程会卡住）
+    await app.evaluate(({ BrowserWindow }) => {
+      setTimeout(() => BrowserWindow.getAllWindows()[0]?.close(), 200);
+    });
+    const closedAt = Date.now();
+    await expect
+      .poll(() => isAlive(pid as number), { timeout: 30_000, intervals: [500] })
+      .toBe(false);
+    expect(Date.now() - closedAt).toBeGreaterThan(8_000);
+    expect(mainLog(dataRoot)).toContain("[watchdog] main thread frozen while closing");
+  } finally {
+    await launched.cleanup();
+  }
+});
+
+test("T11.12 上一份卡死：再起一份时结束它，新的一份接着正常启动", async () => {
+  test.setTimeout(150_000);
+  // 启动收尾（切语言、改配置）要走主线程，留够时间再卡
+  const launched = await launchApp({ extraEnv: { FF_PANE_TEST_FREEZE_MAIN: "after:8000" } });
+  let second: ReturnType<typeof spawn> | undefined;
+  try {
+    const { app, dataRoot, userDataDir } = launched;
+    const frozenPid = app.process().pid as number;
+    const instanceFile = join(userDataDir, "instance.json");
+    // 卡住 30 秒后 instance.json 里的心跳才算过期
+    await expect
+      .poll(
+        () => {
+          try {
+            const info = JSON.parse(readFileSync(instanceFile, "utf8")) as { lastBeat: number };
+            return Date.now() - info.lastBeat;
+          } catch {
+            return 0;
+          }
+        },
+        { timeout: 60_000, intervals: [1_000] },
+      )
+      .toBeGreaterThan(32_000);
+
+    const electronPath = createRequire(import.meta.url)("electron") as unknown as string;
+    const env: Record<string, string> = { ...launched.env, FF_PANE_TEST_STALE_CHOICE: "end" };
+    delete env["FF_PANE_TEST_FREEZE_MAIN"];
+    second = spawn(electronPath, [".", `--user-data-dir=${userDataDir}`], {
+      cwd: desktopDir,
+      env,
+      stdio: "ignore",
+    });
+    const secondPid = second.pid as number;
+    // 新的一份先等 13 秒重读，再结束卡死的那份
+    await expect
+      .poll(() => isAlive(frozenPid), { timeout: 45_000, intervals: [1_000] })
+      .toBe(false);
+    // 然后拿到锁正常启动：自己写 instance.json，人还在
+    await expect
+      .poll(
+        () => {
+          try {
+            return (JSON.parse(readFileSync(instanceFile, "utf8")) as { pid: number }).pid;
+          } catch {
+            return 0;
+          }
+        },
+        { timeout: 30_000, intervals: [1_000] },
+      )
+      .toBe(secondPid);
+    expect(isAlive(secondPid)).toBe(true);
+    expect(mainLog(dataRoot).match(/\[diagnostics\] FF-pane .* started/g)?.length).toBe(2);
+  } finally {
+    if (second?.pid !== undefined && isAlive(second.pid)) {
+      spawn("taskkill", ["/F", "/T", "/PID", String(second.pid)], { stdio: "ignore" });
+    }
+    await launched.cleanup();
+  }
+});

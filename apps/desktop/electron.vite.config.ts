@@ -22,10 +22,15 @@ export default defineConfig({
           "workbench-hook": resolve(__dirname, "src/mcp/workbench-hook.ts"),
           // T10.7a 工作台 MCP sidecar：与知识库 sidecar 相同，由 CLI 以 ELECTRON_RUN_AS_NODE 拉起。
           "workbench-mcp": resolve(__dirname, "src/mcp/workbench-server.ts"),
+          // T11.12 主线程看门狗：主进程用 worker_threads 拉起。只引 Node 内置模块和
+          // watchdog-policy.ts（主进程不引它），不会拆出公共 chunk；.mjs 解包出 asar 后也按 ESM 读。
+          "watchdog-worker": resolve(__dirname, "src/main/diagnostics/watchdog-worker.ts"),
         },
         output: {
           entryFileNames: (chunk) =>
-            chunk.name === "workbench-hook" ? "workbench-hook.mjs" : "[name].js",
+            chunk.name === "workbench-hook" || chunk.name === "watchdog-worker"
+              ? `${chunk.name}.mjs`
+              : "[name].js",
         },
       },
     },

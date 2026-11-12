@@ -11,6 +11,8 @@ export default defineConfig({
   resolve: { alias: workspaceSrcAlias },
   test: {
     alias: workspaceSrcAlias,
+    // T11.12：单测的临时文件放专用目录，跑完删掉（见 vitest.temp-setup.ts）
+    globalSetup: ["./vitest.temp-setup.ts"],
     projects: [
       "packages/*",
       "apps/*",

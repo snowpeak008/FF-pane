@@ -109,6 +109,28 @@ export interface LaunchOptions {
   readonly extraEnv?: Readonly<Record<string, string>>;
 }
 
+const e2eTempDirs: string[] = [];
+
+/**
+ * 测试自己建的临时目录（假 CLI、假项目）。要在 spec 里 `test.afterEach(removeE2eTempDirs)`，
+ * 每个测试跑完删掉（T11.12：以前不删，系统临时目录里攒了一百多个）。
+ */
+export function e2eTempDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  e2eTempDirs.push(dir);
+  return dir;
+}
+
+export function removeE2eTempDirs(): void {
+  for (const dir of e2eTempDirs.splice(0)) {
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 250 });
+    } catch {
+      // 假 CLI 还没退干净、文件被占着：留给系统清
+    }
+  }
+}
+
 /**
  * 启动构建产物（out/main/index.js，经 package.json main 解析），返回首窗 Page。
  * 调用方负责在 finally 中 await cleanup()。

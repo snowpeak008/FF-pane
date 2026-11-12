@@ -4,12 +4,13 @@
  * 管理者限流、监管者掉线时，汇报不打进终端，记进管理者的「待处理」，管理者窗口盖上暂停提示。
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
-import { gotoRoute, type LaunchedApp, launchApp } from "./_launch";
+import { e2eTempDir, gotoRoute, type LaunchedApp, launchApp, removeE2eTempDirs } from "./_launch";
+
+test.afterEach(removeE2eTempDirs);
 
 const fixture = join(dirname(fileURLToPath(import.meta.url)), "fake-workbench-cli.js");
 
@@ -106,8 +107,8 @@ function windowIdAfter(replay: string, marker: string): string {
 
 test("执行挂到监管者下：界面存过布局后，汇报照样抄送给在线的监管者", async () => {
   test.setTimeout(150_000);
-  const fakeBinDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-watch-bin-"));
-  const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-watch-proj-"));
+  const fakeBinDir = e2eTempDir("ffpane-e2e-watch-bin-");
+  const projectDir = e2eTempDir("ffpane-e2e-watch-proj-");
   seedFakeClaude(fakeBinDir);
   const launched = await launchApp({
     pathPrepend: fakeBinDir,
@@ -155,8 +156,8 @@ test("执行挂到监管者下：界面存过布局后，汇报照样抄送给�
 
 test("管理者限流、监管者掉线：汇报记进待处理，不打进终端；管理者窗口盖上暂停提示", async () => {
   test.setTimeout(180_000);
-  const fakeBinDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-team-bin-"));
-  const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-team-proj-"));
+  const fakeBinDir = e2eTempDir("ffpane-e2e-team-bin-");
+  const projectDir = e2eTempDir("ffpane-e2e-team-proj-");
   seedFakeClaude(fakeBinDir);
   const launched = await launchApp({
     pathPrepend: fakeBinDir,

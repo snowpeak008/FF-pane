@@ -12,6 +12,7 @@ import {
   CLAUDE_MCP_FILE_NAME,
   type McpStdioServerSpec,
 } from "@ff-pane/adapters";
+import { KNOWLEDGE_AUDIT_DIR_PREFIX } from "../session/knowledge-tool";
 
 /** 可识别前缀；完整目录名另含随机 hex，避免固定短名可枚举。 */
 export const WORKBENCH_MCP_DIR_PREFIX = "ff-pane-wb-mcp-";
@@ -58,10 +59,15 @@ export function writeWorkbenchClaudeMcpFile(
 }
 
 /**
- * 本应用在 os.tmpdir() 下建的临时目录前缀：MCP 配置、窗口钩子配置。
+ * 本应用在 os.tmpdir() 下建的临时目录前缀：MCP 配置、窗口钩子配置、知识库检索审计。
  * 正常关窗时会删；应用被强退或崩溃时会留下（2026-10-21 实测攒了两千多个钩子目录，每个几 KB）。
+ * 知识库审计目录每开一个窗口建一个、工作台不读回，只靠这里清（T11.12，2026-11-12 攒了 27 个）。
  */
-const WORKBENCH_TEMP_DIR_PREFIXES = [WORKBENCH_MCP_DIR_PREFIX, "ffpane-wb-hooks-"] as const;
+const WORKBENCH_TEMP_DIR_PREFIXES = [
+  WORKBENCH_MCP_DIR_PREFIX,
+  "ffpane-wb-hooks-",
+  KNOWLEDGE_AUDIT_DIR_PREFIX,
+] as const;
 
 /**
  * 清扫 os.tmpdir() 下本应用留下的陈旧临时目录（只认上面这几个前缀）。
