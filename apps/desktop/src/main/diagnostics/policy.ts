@@ -192,6 +192,31 @@ export function staleCrashReports(
     .map((entry) => entry.name);
 }
 
+/** 界面没响应期间 GPU 进程用的 CPU 少于这么多秒，就当它卡死了（T11.13）。 */
+export const GPU_STUCK_CPU_SECONDS = 0.5;
+/** 自动结束 GPU 进程后，再等这么久界面还没缓过来才弹框。 */
+export const GPU_UNSTICK_WAIT_MS = 15_000;
+
+/** GPU 进程的进程号和启动以来用掉的 CPU 秒数。 */
+export interface GpuSample {
+  readonly pid: number;
+  readonly cpuSeconds: number;
+}
+
+/**
+ * 界面没响应 30 秒时，GPU 进程是不是卡死了（T11.13）。
+ * 2026-11-13：系统内存耗尽，GPU 进程分配失败后卡在崩溃处理里睡着不退，界面同步等它，永远等不到。
+ * 卡在那里的 GPU 进程一点 CPU 都不用：同一个进程、这段时间 CPU 几乎没走就判卡死。
+ * 界面只是忙（GPU 闲着）也会判成卡死，结束 GPU 进程最多让界面闪一下重画，终端不受影响。
+ * GPU 进程中途换了（Chromium 已经重开过）或拿不到数就不判。
+ */
+export function isGpuStuck(before: GpuSample | undefined, after: GpuSample | undefined): boolean {
+  if (before === undefined || after === undefined || before.pid !== after.pid) {
+    return false;
+  }
+  return after.cpuSeconds - before.cpuSeconds < GPU_STUCK_CPU_SECONDS;
+}
+
 export function toMb(bytes: number): number {
   return Math.round(bytes / (1024 * 1024));
 }

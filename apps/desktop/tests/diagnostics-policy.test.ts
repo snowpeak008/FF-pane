@@ -6,7 +6,9 @@ import { describe, expect, it } from "vitest";
 import {
   decideRendererGone,
   formatMemoryLine,
+  GPU_STUCK_CPU_SECONDS,
   HEAP_SNAPSHOT_MB,
+  isGpuStuck,
   logFileNameFor,
   MEMORY_WARN_MB,
   type MemorySample,
@@ -109,5 +111,24 @@ describe("日志文件", () => {
         now,
       ),
     ).toEqual(["main-2026-10-20.log", "main-2026-09-01.log"]);
+  });
+});
+
+describe("isGpuStuck（T11.13）", () => {
+  it("同一个 GPU 进程这段时间几乎没用 CPU：判卡死", () => {
+    expect(isGpuStuck({ pid: 7, cpuSeconds: 12 }, { pid: 7, cpuSeconds: 12.1 })).toBe(true);
+    expect(isGpuStuck({ pid: 7, cpuSeconds: 12 }, { pid: 7, cpuSeconds: 12 })).toBe(true);
+  });
+
+  it("GPU 进程在干活：不判", () => {
+    expect(
+      isGpuStuck({ pid: 7, cpuSeconds: 12 }, { pid: 7, cpuSeconds: 12 + GPU_STUCK_CPU_SECONDS }),
+    ).toBe(false);
+  });
+
+  it("GPU 进程中途换了、或拿不到数：不判", () => {
+    expect(isGpuStuck({ pid: 7, cpuSeconds: 12 }, { pid: 8, cpuSeconds: 0 })).toBe(false);
+    expect(isGpuStuck(undefined, { pid: 7, cpuSeconds: 12 })).toBe(false);
+    expect(isGpuStuck({ pid: 7, cpuSeconds: 12 }, undefined)).toBe(false);
   });
 });

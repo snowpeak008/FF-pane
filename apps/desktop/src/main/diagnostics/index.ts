@@ -27,6 +27,9 @@ import {
   decideRendererGone,
   describeSilence,
   formatMemoryLine,
+  GPU_UNSTICK_WAIT_MS,
+  type GpuSample,
+  isGpuStuck,
   logFileNameFor,
   MEMORY_LOG_INTERVAL_MS,
   type MemorySample,
@@ -329,6 +332,16 @@ export function forwardRendererReports(window: BrowserWindow): void {
   });
 }
 
+/** GPU 进程的进程号和启动以来用掉的 CPU 秒数；拿不到就是 undefined。 */
+function sampleGpuProcess(): GpuSample | undefined {
+  const gpu = app.getAppMetrics().find((metric) => metric.type === "GPU");
+  const cpuSeconds = gpu?.cpu.cumulativeCPUUsage;
+  if (gpu === undefined || cpuSeconds === undefined) {
+    return undefined;
+  }
+  return { pid: gpu.pid, cpuSeconds };
+}
+
 /** GPU 进程的一行状态（界面卡住时记进日志）。 */
 function describeGpuProcess(): string {
   const gpu = app.getAppMetrics().find((metric) => metric.type === "GPU");
@@ -336,7 +349,8 @@ function describeGpuProcess(): string {
     return "gpu process: none";
   }
   const mb = Math.round((gpu.memory.privateBytes ?? gpu.memory.workingSetSize) / 1024);
-  return `gpu process: pid=${gpu.pid} mem=${mb}MB cpu=${gpu.cpu.percentCPUUsage.toFixed(1)}%`;
+  const cpu = gpu.cpu.cumulativeCPUUsage;
+  return `gpu process: pid=${gpu.pid} mem=${mb}MB cpuTotal=${cpu === undefined ? "?" : cpu.toFixed(1)}s`;
 }
 
 /** 结束 GPU 进程，Chromium 会自己重开一个。返回有没有结束。 */
@@ -360,42 +374,75 @@ function restartGpuProcess(): boolean {
  * T11.12：2026-11-12 界面卡在等 GPU 进程回话（建图形上下文的同步调用），光重载界面还会卡在同一个
  * GPU 进程上，所以重新加载时先结束 GPU 进程（Chromium 自己重开），再重载界面。
  * 窗口最小化或藏起来时弹框不挂在它上面，不然弹框也跟着看不见。
+ * T11.13：30 秒时 GPU 进程这段时间几乎没用 CPU（2026-11-13 卡在崩溃处理里就是这样），先不弹框，
+ * 自动结束 GPU 进程；再等 15 秒还没缓过来才弹框。每次卡住只自动结束一次。
+ * 界面缓过来时弹框自动收起（11-13 那个弹框一直开着，挡住了正常关窗）。
  */
 export function watchWindowResponsiveness(window: BrowserWindow): void {
   let timer: ReturnType<typeof setTimeout> | null = null;
-  let prompting = false;
-  window.on("unresponsive", () => {
-    console.error("[diagnostics] window unresponsive");
-    if (timer !== null || prompting) {
+  let prompt: AbortController | null = null;
+  let unresponsiveSince = 0;
+  let gpuAtStart: GpuSample | undefined;
+
+  const showPrompt = (): void => {
+    timer = null;
+    if (window.isDestroyed()) {
       return;
     }
+    console.error("[diagnostics] asking whether to reload the unresponsive renderer");
+    const controller = new AbortController();
+    prompt = controller;
+    const options = {
+      type: "warning" as const,
+      title: "FF-pane",
+      message: `界面已经 ${describeSilence(Date.now() - unresponsiveSince)}没有响应。`,
+      detail: "可以重新加载界面（终端在后台运行，不受影响），或者继续等待。",
+      buttons: ["重新加载界面", "继续等待"],
+      defaultId: 0,
+      cancelId: 1,
+      signal: controller.signal,
+    };
+    const visible = window.isVisible() && !window.isMinimized();
+    void (visible ? dialog.showMessageBox(window, options) : dialog.showMessageBox(options)).then(
+      ({ response }) => {
+        if (prompt === controller) {
+          prompt = null;
+        }
+        if (controller.signal.aborted) {
+          return;
+        }
+        if (response === 0 && !window.isDestroyed()) {
+          console.error("[diagnostics] user chose to reload the unresponsive renderer");
+          restartGpuProcess();
+          window.webContents.forcefullyCrashRenderer();
+        }
+      },
+    );
+  };
+
+  window.on("unresponsive", () => {
+    console.error("[diagnostics] window unresponsive");
+    if (timer !== null || prompt !== null) {
+      return;
+    }
+    unresponsiveSince = Date.now();
+    gpuAtStart = sampleGpuProcess();
     timer = setTimeout(() => {
       timer = null;
       if (window.isDestroyed()) {
         return;
       }
       console.error(`[diagnostics] still unresponsive after 30s; ${describeGpuProcess()}`);
-      prompting = true;
-      const options = {
-        type: "warning" as const,
-        title: "FF-pane",
-        message: "界面已经 30 秒没有响应。",
-        detail: "可以重新加载界面（终端在后台运行，不受影响），或者继续等待。",
-        buttons: ["重新加载界面", "继续等待"],
-        defaultId: 0,
-        cancelId: 1,
-      };
-      const visible = window.isVisible() && !window.isMinimized();
-      void (visible ? dialog.showMessageBox(window, options) : dialog.showMessageBox(options)).then(
-        ({ response }) => {
-          prompting = false;
-          if (response === 0 && !window.isDestroyed()) {
-            console.error("[diagnostics] user chose to reload the unresponsive renderer");
-            restartGpuProcess();
-            window.webContents.forcefullyCrashRenderer();
-          }
-        },
-      );
+      if (isGpuStuck(gpuAtStart, sampleGpuProcess())) {
+        console.error(
+          "[diagnostics] gpu process used almost no cpu while the window hung; restarting it",
+        );
+        if (restartGpuProcess()) {
+          timer = setTimeout(showPrompt, GPU_UNSTICK_WAIT_MS);
+          return;
+        }
+      }
+      showPrompt();
     }, UNRESPONSIVE_PROMPT_MS);
   });
   window.on("responsive", () => {
@@ -403,6 +450,11 @@ export function watchWindowResponsiveness(window: BrowserWindow): void {
     if (timer !== null) {
       clearTimeout(timer);
       timer = null;
+    }
+    if (prompt !== null) {
+      console.error("[diagnostics] closing the unresponsive prompt");
+      prompt.abort();
+      prompt = null;
     }
   });
 }

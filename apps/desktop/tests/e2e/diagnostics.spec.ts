@@ -51,6 +51,52 @@ test("界面进程没了自动重载，日志里有记录", async () => {
   }
 });
 
+test("T11.13 界面卡住、GPU 进程不动：自动结束 GPU 进程，缓过来后弹框自动收起", async () => {
+  test.setTimeout(150_000);
+  const launched = await launchApp();
+  try {
+    const { app, dataRoot } = launched;
+    const emit = (name: "unresponsive" | "responsive"): Promise<void> =>
+      app.evaluate(({ BrowserWindow }, event) => {
+        BrowserWindow.getAllWindows()[0]?.emit(event);
+      }, name);
+    // 真卡住要有系统级输入等着界面处理，Chromium 才发这个事件（合成输入不算），这里直接发。
+    // 界面闲着时 GPU 进程也几乎不用 CPU，和 11-13 卡在崩溃处理里一样。
+    const gpuBefore = await app.evaluate(
+      ({ app: electronApp }) =>
+        electronApp.getAppMetrics().find((metric) => metric.type === "GPU")?.pid,
+    );
+    await emit("unresponsive");
+    const timing = { timeout: 60_000, intervals: [1_000] };
+    await expect.poll(() => mainLog(dataRoot), timing).toContain("gpu process used almost no cpu");
+    expect(mainLog(dataRoot)).toContain(`killed gpu process ${gpuBefore}`);
+    await expect
+      .poll(
+        () =>
+          app.evaluate(
+            ({ app: electronApp }) =>
+              electronApp.getAppMetrics().find((metric) => metric.type === "GPU")?.pid,
+          ),
+        timing,
+      )
+      .not.toBe(gpuBefore);
+    // 自动结束 GPU 进程后 15 秒还算没缓过来：弹框；缓过来时弹框自动收起。
+    await expect.poll(() => mainLog(dataRoot), timing).toContain("asking whether to reload");
+    await emit("responsive");
+    await expect.poll(() => mainLog(dataRoot), timing).toContain("closing the unresponsive prompt");
+    expect(mainLog(dataRoot)).not.toContain("user chose to reload");
+    expect(
+      await app.evaluate(({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows()[0]?.webContents.executeJavaScript(
+          "document.querySelector('nav') !== null",
+        ),
+      ),
+    ).toBe(true);
+  } finally {
+    await launched.cleanup();
+  }
+});
+
 test("同一份数据再启动一次：新的那份直接退出，原来的还在", async () => {
   const launched = await launchApp();
   try {
