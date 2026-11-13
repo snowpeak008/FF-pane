@@ -37,7 +37,7 @@ import { useWorkbenchRuntimeStore } from "../../stores/workbench-runtime";
 import { type ConversationLaunchPlan, planConversationLaunch } from "./conversation-launch";
 import { needsSensitiveLaunchConfirm, rememberSensitiveLaunchConfirm } from "./sensitive-launch";
 import { TerminalView } from "./TerminalView";
-import { RuntimeBadges } from "./WorkbenchRuntimeBar";
+import { WindowRuntimeBadges } from "./WorkbenchRuntimeBar";
 
 export interface WindowPaneProps {
   readonly window: WorkbenchWindow;
@@ -95,7 +95,7 @@ export function WindowPane({
   const takeInitialPrompt = useWorkbenchStore((s) => s.takeInitialPrompt);
   const getProjectLayout = useWorkbenchStore((s) => s.getProjectLayout);
   const inbox = useWorkbenchStore((s) => s.inboxByWindow[window.id]);
-  const runtime = useWorkbenchRuntimeStore((s) => s.windows[window.id]);
+  const online = useWorkbenchRuntimeStore((s) => s.windows[window.id]?.online === true);
 
   const isCli = isAiWorkbenchKind(window.kind);
   const permission = window.permission ?? DEFAULT_WORKBENCH_WINDOW_PERMISSION;
@@ -410,7 +410,7 @@ export function WindowPane({
                 )}
               </span>
             ) : null}
-            {runtime !== undefined ? <RuntimeBadges status={runtime} /> : null}
+            <WindowRuntimeBadges windowId={window.id} />
             {isCli ? (
               <span className="ml-1 font-normal text-fg-muted" data-testid="workbench-window-route">
                 ·{" "}
@@ -607,18 +607,14 @@ export function WindowPane({
                 : t("workbench.window.status.starting")}
         </span>
         {isCli && (window.role === "supervisor" || window.role === "manager") ? (
-          <Tooltip
-            content={t(
-              runtime?.online === true ? "workbench.online.stopHint" : "workbench.online.startHint",
-            )}
-          >
+          <Tooltip content={t(online ? "workbench.online.stopHint" : "workbench.online.startHint")}>
             <Button
               variant="ghost"
               size="sm"
               data-testid="workbench-online-toggle"
-              data-online={runtime?.online === true ? "yes" : "no"}
+              data-online={online ? "yes" : "no"}
               onClick={() => {
-                const next = runtime?.online !== true;
+                const next = !online;
                 void invokeQuery("workbench:set-online", {
                   windowId: window.id,
                   online: next,
@@ -632,7 +628,7 @@ export function WindowPane({
               }}
             >
               <Radio aria-hidden size={14} />
-              {t(runtime?.online === true ? "workbench.online.stop" : "workbench.online.start")}
+              {t(online ? "workbench.online.stop" : "workbench.online.start")}
             </Button>
           </Tooltip>
         ) : null}

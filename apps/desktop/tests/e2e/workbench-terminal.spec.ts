@@ -232,3 +232,51 @@ test("workbench terminal survives page switch (T10.1 compat)", async () => {
     .poll(async () => readReplayForWindow(page, windowId), { timeout: 20_000 })
     .toContain("ffpane-e2e");
 });
+
+test("WebGL 上下文丢了、等不到恢复：终端先退回 DOM 渲染，再自动装回（T11.14）", async () => {
+  const { page } = launched;
+  await selectProject(page, "WB Project A");
+  await gotoRoute(page, "/workbench");
+  const host = page.getByTestId("terminal-host").first();
+  await expect(host).toBeVisible({ timeout: 15_000 });
+  const renderer = (): Promise<string> =>
+    host.evaluate((el) =>
+      el.querySelector(".xterm-rows") !== null
+        ? "dom"
+        : el.querySelector(".xterm-screen canvas") !== null
+          ? "webgl"
+          : "none",
+    );
+  await expect.poll(renderer, { timeout: 15_000 }).toBe("webgl");
+  // 页面里每 50ms 记一次渲染方式；然后让 WebGL 上下文丢掉且永不恢复（11-13 现场 GPU 进程连崩两次后就是这样）。
+  // 只结束一次 GPU 进程时上下文会恢复，xterm 自己接上，不走这条路。
+  await host.evaluate((el) => {
+    const w = window as unknown as { __rendererTrace: string[] };
+    w.__rendererTrace = [];
+    const timer = setInterval(() => {
+      const now =
+        el.querySelector(".xterm-rows") !== null
+          ? "dom"
+          : el.querySelector(".xterm-screen canvas") !== null
+            ? "webgl"
+            : "none";
+      if (w.__rendererTrace.at(-1) !== now) {
+        w.__rendererTrace.push(now);
+      }
+    }, 50);
+    setTimeout(() => clearInterval(timer), 30_000);
+    for (const canvas of el.querySelectorAll(".xterm-screen canvas")) {
+      (canvas as HTMLCanvasElement)
+        .getContext("webgl2")
+        ?.getExtension("WEBGL_lose_context")
+        ?.loseContext();
+    }
+  });
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => (window as unknown as { __rendererTrace: string[] }).__rendererTrace),
+      { timeout: 25_000 },
+    )
+    .toEqual(["webgl", "dom", "webgl"]);
+});

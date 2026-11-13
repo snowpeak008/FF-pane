@@ -58,18 +58,40 @@ async function installWebgl(
 
 /** 和主进程的内存记录同一频率。 */
 const REPORT_INTERVAL_MS = 5 * 60_000;
+/** 多久清一次性能记录。 */
+const PERF_CLEAR_INTERVAL_MS = 60_000;
+
+/**
+ * 清掉页面里攒的性能记录，返回清了几条（T11.14）。
+ * 开发版 React 19.2 每渲染一个组件记一条 performance.measure、从不清理，每条约 800 字节、在 JS 堆外；
+ * 11-13 现场 67 分钟攒了约 43.5 万条。本应用自己不用性能记录，生产版 React 也不记；
+ * 开发者工具录性能是实时抓的，清了不受影响。
+ */
+export function clearPerformanceEntries(
+  perf: Pick<Performance, "getEntriesByType" | "clearMeasures" | "clearMarks">,
+): number {
+  const count = perf.getEntriesByType("measure").length + perf.getEntriesByType("mark").length;
+  perf.clearMeasures();
+  perf.clearMarks();
+  return count;
+}
 
 /**
  * 每 5 分钟往控制台写一行界面内存：主进程把 [renderer-mem] 开头的行收进日志，
- * 界面进程再涨时分得清是 JS 堆、图集还是别的。
+ * 界面进程再涨时分得清是 JS 堆、图集还是别的。每分钟清一次性能记录，日志里记这 5 分钟清了几条。
  */
 export function startRendererMemoryReport(): void {
+  let perfCleared = 0;
+  setInterval(() => {
+    perfCleared += clearPerformanceEntries(performance);
+  }, PERF_CLEAR_INTERVAL_MS);
   setInterval(() => {
     const heap = (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory;
     const stats = terminalWebgl.stats();
     console.info(
-      `[renderer-mem] jsHeap=${heap === undefined ? "?" : Math.round(heap.usedJSHeapSize / 1048576)}MB terminals=${stats.terminals} webgl=${stats.webgl} atlas=${Math.round(stats.atlasBytes / 1048576)}MB atlasRecycles=${stats.recycles} dom=${document.getElementsByTagName("*").length}`,
+      `[renderer-mem] jsHeap=${heap === undefined ? "?" : Math.round(heap.usedJSHeapSize / 1048576)}MB terminals=${stats.terminals} webgl=${stats.webgl} atlas=${Math.round(stats.atlasBytes / 1048576)}MB atlasRecycles=${stats.recycles} dom=${document.getElementsByTagName("*").length} perfCleared=${perfCleared}`,
     );
+    perfCleared = 0;
   }, REPORT_INTERVAL_MS);
 }
 

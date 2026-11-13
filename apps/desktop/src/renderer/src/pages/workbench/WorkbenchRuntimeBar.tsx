@@ -75,6 +75,19 @@ export function WorkbenchRuntimeBar({
   );
 }
 
+/**
+ * 一个窗口标题栏上的运行状态徽章，自己订阅这个窗口的状态：
+ * 状态变了只重画徽章，不连带整个窗口和标题栏上的按钮、提示框（T11.14）。
+ */
+export function WindowRuntimeBadges({
+  windowId,
+}: {
+  readonly windowId: string;
+}): ReactElement | null {
+  const status = useWorkbenchRuntimeStore((s) => s.windows[windowId]);
+  return status === undefined ? null : <RuntimeBadges status={status} />;
+}
+
 /** 窗口标题栏上的平台状态：空闲 / 忙 / 等批准，长时间无输出、持锁等锁、上次 API 出错。 */
 export function RuntimeBadges({
   status,

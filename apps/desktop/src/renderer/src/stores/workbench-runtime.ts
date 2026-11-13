@@ -2,6 +2,8 @@
  * 工作台运行状态：平台看到的窗口状态、持锁等锁，以及本机可用内存和磁盘。
  * 由 WorkbenchRuntimeBar 每 3 秒向主进程取一次，窗口标题栏只读。
  * 内容没变的窗口沿用原来的对象，免得每次轮询都让所有窗口（连同终端）重新渲染。
+ * 内存按标题栏显示的精度（0.1GB）取整：工作集每 3 秒都在小幅波动，按 10MB 取整几乎每次都算变了，
+ * 开发版 React 每次重画都记一条性能记录（T11.14）。
  */
 
 import { create } from "zustand";
@@ -12,6 +14,8 @@ import type {
 
 /** 标题栏只在忙且这么久没输出时才提示，低于它的静默秒数不用存。 */
 export const QUIET_NOTICE_SECONDS = 120;
+/** 标题栏内存显示到 0.1GB。 */
+export const MEMORY_DISPLAY_STEP_BYTES = 1024 ** 3 / 10;
 
 export interface WorkbenchRuntimeState {
   readonly windows: Readonly<Record<string, WorkbenchWindowRuntimeStatus>>;
@@ -20,7 +24,7 @@ export interface WorkbenchRuntimeState {
   readonly clear: () => void;
 }
 
-/** 只留标题栏用得到的内容：静默不到提示线时去掉，内存按 10MB 取整。 */
+/** 只留标题栏用得到的内容：静默不到提示线时去掉，内存按显示精度取整。 */
 function forDisplay(status: WorkbenchWindowRuntimeStatus): WorkbenchWindowRuntimeStatus {
   const { quietSeconds, memory, ...rest } = status;
   return {
@@ -35,7 +39,8 @@ function forDisplay(status: WorkbenchWindowRuntimeStatus): WorkbenchWindowRuntim
           memory: {
             processCount: memory.processCount,
             workingSetBytes:
-              Math.round(memory.workingSetBytes / (10 * 1024 * 1024)) * 10 * 1024 * 1024,
+              Math.round(memory.workingSetBytes / MEMORY_DISPLAY_STEP_BYTES) *
+              MEMORY_DISPLAY_STEP_BYTES,
           },
         }
       : {}),

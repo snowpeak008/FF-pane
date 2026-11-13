@@ -6,7 +6,8 @@
  * 页面合并后旧画布要等垃圾回收才放掉。所以：
  * - 图集超过上限，把所有终端的 WebGL 一起卸掉重装，旧图集随最后一个持有者释放；
  * - 合并掉的页、释放后的图集画布当场清成 0×0；卸载时主动释放 WebGL 上下文；
- * - 终端在 WebGL 加载完之前就被销毁（React 开发模式会先挂一次再卸掉），不再装上去。
+ * - 终端在 WebGL 加载完之前就被销毁（React 开发模式会先挂一次再卸掉），不再装上去；
+ * - WebGL 上下文丢了（GPU 进程崩了或被结束）隔 2 秒装回去；一分钟内连丢 3 次就不再装，退回 DOM 渲染（T11.14）。
  * 本文件不碰 DOM，单测直接测；真 addon 的装卸在 terminal-webgl.ts。
  */
 
@@ -14,6 +15,11 @@
 export const WEBGL_ATLAS_BUDGET_BYTES = 64 * 1024 * 1024;
 /** 图集加了新页之后隔这么久再量，合并掉连续加页。 */
 export const WEBGL_ATLAS_CHECK_MS = 2000;
+/** 上下文丢了隔这么久再装回去（等 Chromium 把 GPU 进程重开好）。 */
+export const WEBGL_REINSTALL_DELAY_MS = 2000;
+/** 一个终端在这段时间里连丢这么多次上下文就不再装。 */
+export const WEBGL_LOSS_WINDOW_MS = 60_000;
+export const WEBGL_LOSS_MAX = 3;
 
 export interface AtlasCanvas {
   width: number;
@@ -44,6 +50,7 @@ export interface WebglPoolDeps<T> {
   readonly schedule: (delayMs: number, fn: () => void) => () => void;
   readonly budgetBytes?: number;
   readonly onRecycle?: (atlasBytes: number) => void;
+  readonly now?: () => number;
 }
 
 export interface WebglPoolStats {
@@ -65,10 +72,13 @@ interface Slot<T> {
   closed: boolean;
   /** 每次装都加一：重装之后，之前还没装完的那次作废。 */
   generation: number;
+  /** 最近丢上下文的时间。 */
+  losses: number[];
 }
 
 export function createWebglPool<T>(deps: WebglPoolDeps<T>): WebglPool<T> {
   const budget = deps.budgetBytes ?? WEBGL_ATLAS_BUDGET_BYTES;
+  const now = deps.now ?? Date.now;
   const slots = new Set<Slot<T>>();
   const pages = new Set<AtlasCanvas>();
   let cancelCheck: (() => void) | undefined;
@@ -149,9 +159,20 @@ export function createWebglPool<T>(deps: WebglPoolDeps<T>): WebglPool<T> {
           wipe(canvas);
         });
         renderer.onContextLoss(() => {
-          if (slot.renderer === renderer) {
-            release(slot);
+          if (slot.renderer !== renderer) {
+            return;
           }
+          release(slot);
+          const at = now();
+          slot.losses = [...slot.losses.filter((t) => at - t < WEBGL_LOSS_WINDOW_MS), at];
+          if (slot.losses.length >= WEBGL_LOSS_MAX) {
+            return;
+          }
+          deps.schedule(WEBGL_REINSTALL_DELAY_MS, () => {
+            if (!slot.closed && slot.renderer === undefined) {
+              install(slot);
+            }
+          });
         });
       },
       () => undefined,
@@ -173,7 +194,7 @@ export function createWebglPool<T>(deps: WebglPoolDeps<T>): WebglPool<T> {
 
   return {
     attach(term) {
-      const slot: Slot<T> = { term, closed: false, generation: 0 };
+      const slot: Slot<T> = { term, closed: false, generation: 0, losses: [] };
       slots.add(slot);
       install(slot);
       return () => {

@@ -7,6 +7,8 @@ import {
   type AtlasCanvas,
   createWebglPool,
   WEBGL_ATLAS_CHECK_MS,
+  WEBGL_LOSS_WINDOW_MS,
+  WEBGL_REINSTALL_DELAY_MS,
   type WebglRendererLike,
 } from "../src/renderer/src/pages/workbench/webgl-pool";
 
@@ -39,6 +41,7 @@ function setup(budgetBytes = 1000) {
   const timers: { delay: number; fn: () => void; cancelled: boolean }[] = [];
   let deferInstall = false;
   const recycled: number[] = [];
+  const clock = { now: 0 };
 
   const makeRenderer = (term: string): FakeRenderer => {
     const change = emitter<AtlasCanvas>();
@@ -99,6 +102,7 @@ function setup(budgetBytes = 1000) {
       };
     },
     onRecycle: (bytes) => recycled.push(bytes),
+    now: () => clock.now,
   });
 
   const runTimers = (): void => {
@@ -115,6 +119,7 @@ function setup(budgetBytes = 1000) {
     pending,
     timers,
     recycled,
+    clock,
     runTimers,
     defer: () => {
       deferInstall = true;
@@ -210,6 +215,58 @@ describe("createWebglPool", () => {
     expect(t.renderers[0]?.released).toBe(true);
     expect(t.renderers[1]?.released).toBe(false);
     expect(t.pool.stats()).toMatchObject({ terminals: 2, webgl: 1 });
+  });
+
+  it("上下文丢了隔一会儿装回去（T11.14）", async () => {
+    const t = setup();
+    t.pool.attach("a");
+    await flush();
+    t.renderers[0]?.loseContext();
+    expect(t.timers.some((timer) => timer.delay === WEBGL_REINSTALL_DELAY_MS)).toBe(true);
+    expect(t.pool.stats()).toMatchObject({ terminals: 1, webgl: 0 });
+    t.runTimers();
+    await flush();
+    expect(t.renderers).toHaveLength(2);
+    expect(t.renderers[1]?.released).toBe(false);
+    expect(t.pool.stats()).toMatchObject({ terminals: 1, webgl: 1 });
+  });
+
+  it("一分钟内连丢 3 次就不再装；隔得久的不算", async () => {
+    const t = setup();
+    t.pool.attach("a");
+    await flush();
+    for (let i = 0; i < 2; i += 1) {
+      t.renderers.at(-1)?.loseContext();
+      t.runTimers();
+      await flush();
+    }
+    t.renderers.at(-1)?.loseContext();
+    t.runTimers();
+    await flush();
+    expect(t.renderers).toHaveLength(3);
+    expect(t.pool.stats()).toMatchObject({ terminals: 1, webgl: 0 });
+
+    const u = setup();
+    u.pool.attach("a");
+    await flush();
+    for (let i = 0; i < 3; i += 1) {
+      u.clock.now += WEBGL_LOSS_WINDOW_MS;
+      u.renderers.at(-1)?.loseContext();
+      u.runTimers();
+      await flush();
+    }
+    expect(u.pool.stats()).toMatchObject({ terminals: 1, webgl: 1 });
+  });
+
+  it("等着装回去时终端关了：不再装", async () => {
+    const t = setup();
+    const detach = t.pool.attach("a");
+    await flush();
+    t.renderers[0]?.loseContext();
+    detach();
+    t.runTimers();
+    await flush();
+    expect(t.renderers).toHaveLength(1);
   });
 
   it("重装途中又关掉：之前那次装完也不留", async () => {
