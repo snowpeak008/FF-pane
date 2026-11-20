@@ -92,6 +92,52 @@ Tony 说开到 10 个以上窗口，FF-pane 的内存他接受不了。2026-11-2
   - 管理者调 `ffpane_restart_window` 重启一个执行窗口，重启后新令牌能用、旧令牌被拒。
 - 现场验收：Tony 开 10 个窗口，任务管理器里不再有 `workbench-mcp` 的 electron 进程，比改之前少约 200MB；团队照常收发消息，管理者照常被叫醒。
 
+### 3.4 开工前调研结果（2026-11-20，只做了调研，没改 `apps/desktop/src`）
+
+**怎么测的：** `test-results/scratch/mcp-http/` 下写了一个最小的本机 HTTP MCP 测试服务（`server.mjs`，`node:http`，两个工具：马上回的 `probe_ping`、挂 N 秒的 `probe_wait`；保活可选不发 / SSE 注释行 / MCP 进度通知，每 15 秒）和对照用的 stdio 版（`stdio-probe.mjs`）。用本机真 CLI 的无界面模式跑（`run.sh`），每次一个 scratch 项目目录，令牌只放进 CLI 进程环境的 `FF_PANE_WINDOW_TOKEN`。各 CLI 的 MCP 配置都走命令行参数或 scratch 目录里的项目文件，不写 `~/.claude`、`~/.codex`、`~/.cursor`、`~/.grok`：Claude 用 `--mcp-config --strict-mcp-config --no-session-persistence`；Codex 用 `-c`、`--ignore-user-config`、`--ephemeral`；Cursor、Grok 的家目录指到 scratch（`USERPROFILE` / `GROK_HOME`）。原始日志在 `runs/<cli>-<场景>/`（`server.log` 是服务端每个请求一行，`out.txt` 是 CLI 输出）。
+
+**1. 四家都支持 HTTP 方式，令牌都能从环境变量传：**
+
+| CLI（本机版本） | 配置写法（键名） | 令牌怎么传 | 实测到哪一步 |
+|---|---|---|---|
+| Claude Code 2.1.302 | `--mcp-config` 的 json：`{"type":"http","url":"…","headers":{"Authorization":"Bearer ${FF_PANE_WINDOW_TOKEN}"},"timeout":<毫秒>}` | `${VAR}` 由 CLI 从进程环境展开（服务端收到的是真令牌） | 调工具、挂 9 分钟都测了 |
+| Codex 0.166.0 | `-c mcp_servers.<名>.url="…"`、`bearer_token_env_var="FF_PANE_WINDOW_TOKEN"`、`tool_timeout_sec=600`；另有 `http_headers`、`env_http_headers`、`startup_timeout_sec`、`default_tools_approval_mode`、`tools.<工具>.approval_mode` | `bearer_token_env_var` 指环境变量名 | 调工具、挂 9 分钟都测了 |
+| Cursor CLI 2026.11.05 | mcp.json：`{"url":"…","headers":{"Authorization":"Bearer ${env:FF_PANE_WINDOW_TOKEN}"}}`（和现在插件目录里的 mcp.json 同一种文件） | `${env:VAR}` 展开 | 只测到连上、握手、列出工具（`agent mcp list-tools`）。本机 Cursor CLI 现在没登录，跑不了让模型调工具 |
+| Grok 1.0.62 | 项目 `.grok/config.toml`：`[mcp_servers.<名>]` 下 `url = "…"`，`[mcp_servers.<名>.headers]` 下 `Authorization = "Bearer ${FF_PANE_WINDOW_TOKEN}"`；另有 `tool_timeout_sec`（默认 6000）、`startup_timeout_sec`（默认 30） | `${VAR}` 展开 | 只测到连上、握手、列出 2 个工具（`grok mcp doctor`）。本机 Grok 现在没登录 |
+
+- Host / Origin：四家发来的 `Host` 都是 `127.0.0.1:<端口>`，都不带 `Origin`，计划里的 Host / Origin 检查不会挡住它们。
+- 四家都会先 `GET /mcp`（想开服务端推送流），回 405 都能接着用；Codex、Grok 结束时发 `DELETE`。
+- Claude 和 Grok 握手前先发一个 `server/discover`（协议版本 `2026-07-28`），回「方法不存在」（-32601）后改用 `initialize`。现在的 `mcp/protocol.ts` 对不认识的方法就是回 -32601，不用改；HTTP 那层不能按 `Mcp-Protocol-Version` 头拒请求。
+- Codex 的审批：`codex exec -a never` 下，没有注解的工具调用被拒（「MCP tool call requires approval, but approval policy is never」），加 `default_tools_approval_mode="approve"` 才放行。**stdio 版对照结果完全一样**，和 HTTP 无关；FF-pane 现在的交互式 Codex 窗口本来就能调工作台工具，改 HTTP 时照现在的做法即可，这里只记一笔。
+
+**2. 挂 9 分钟（`probe_wait` 540 秒）会不会超时：**
+
+| | 不发保活 | SSE 注释行 | MCP 进度通知 |
+|---|---|---|---|
+| Codex（`tool_timeout_sec=600`） | 540 秒正常收到 | 540 秒正常收到 | 540 秒正常收到 |
+| Claude，不加设置 | **300 秒被掐断** | **300 秒被掐断** | 540 秒正常收到 |
+| Claude，配置里加 `"timeout":600000` | — | 540 秒正常收到 | — |
+| Claude，环境变量 `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT=600000` | **358 秒连接被断**（「transport dropped mid-call」） | 540 秒正常收到 | — |
+| Claude，stdio 对照（FF-pane 现在的接法） | 540 秒正常收到 | | |
+
+- Claude 的报错原文：`tool "probe_wait" sent no response or progress for 300s; aborting … set a per-server "timeout" (ms) … or set CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT (ms)`。这是 HTTP 方式才有的空闲上限，stdio 没有，所以现在的 Claude 窗口不受影响。
+- **SSE 注释行不算「有动静」**，只有进度通知（或者最终结果）才重新计时；但光把上限调大、一个字节都不发，连接本身 6 分钟左右会断。
+- Claude、Codex 调工具时都带了 `progressToken`，所以服务端能发进度通知。
+- Cursor、Grok 的 9 分钟没测（没登录）。Grok 自己的工具超时默认 6000 秒；Cursor 没查到超时设置。
+
+**3. 推荐做法（按上面的结果）：**
+
+- 长调用回 SSE，每 15 秒**同时**发一行注释和一条进度通知（带了 `progressToken` 才发通知）：注释保连接，通知让 Claude 重新计时；
+- Claude 的 `--mcp-config` 里再加 `"timeout": 600000` 兜底（万一哪次请求没带 `progressToken`）；
+- Codex 照旧 `tool_timeout_sec=600`；
+- 上线前用真 Claude、真 Codex 在 FF-pane 里再各挂一次满 9 分钟的 `ffpane_wait_events`（§3.3）。
+
+**4. 和计划不一样、要 Tony 定的：**
+
+1. **Grok 支持 HTTP。** 计划 §3.2 第 2 条写「先确认支持不支持，不支持就继续用小进程」。现在确认支持（握手和工具列表都通了），是否把 Grok 也改成 HTTP？要改的话，调工具和挂 9 分钟得等 Grok 登录后再测。
+2. **Cursor、Grok 只测到连上为止。** 本机两个 CLI 现在都没登录，没法让模型真调一次工具。要测完需要 Tony 先登录（Cursor 可以在 FF-pane 设置里登；Grok 是 `grok login`），或者这两家先留在小进程，等以后再换。
+3. **保活光发注释行不够。** 计划 §3.2 第 3 条写「注释行，或 MCP 的进度通知」二选一；实测 Claude 只认进度通知，所以要按上面第 3 点两样都发，Claude 配置里再加 `"timeout"`。计划里举例的 `MCP_TOOL_TIMEOUT` 没测；Claude 报错里点名、实测管用的是 `"timeout"` 和 `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT`。
+
 ## 4. 不做
 
 - 不换 Tauri，不重写主进程（理由见内存优化计划 §0.1f）。
