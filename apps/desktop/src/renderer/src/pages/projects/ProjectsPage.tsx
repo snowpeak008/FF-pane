@@ -111,11 +111,7 @@ export function ProjectsPage(): ReactElement {
 
   return (
     <>
-      <PageHeader
-        title={t("nav.projects.label")}
-        description={t("nav.projects.question")}
-        actions={hasProjects ? newButton : undefined}
-      />
+      <PageHeader title={t("nav.projects.label")} actions={hasProjects ? newButton : undefined} />
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {state.status === "loading" ? <LoadingState variant="list" /> : null}

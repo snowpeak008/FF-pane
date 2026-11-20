@@ -5,10 +5,12 @@
 import type { WorkbenchAiKind } from "@ff-pane/shared";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
+import { TerminalSquare } from "lucide-react";
 import { type ReactElement, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TerminalInfo } from "../../../../shared-ipc/contracts";
 import { Button } from "../../components/ui/Button";
+import { Tooltip } from "../../components/ui/Tooltip";
 import { invokeQuery } from "../../ipc/query";
 import { useSubscription } from "../../ipc/useSubscription";
 import { cn } from "../../lib/cn";
@@ -134,6 +136,14 @@ export function TerminalView({
     () => cliLaunch !== undefined && cliLaunch.autoStart === false,
   );
   const [resumePickerHint, setResumePickerHint] = useState(false);
+  // 「请在终端里选要续接的对话」只是提醒，几秒后自己收起（§9 界面精简）。
+  useEffect(() => {
+    if (!resumePickerHint) {
+      return;
+    }
+    const timer = setTimeout(() => setResumePickerHint(false), 8000);
+    return () => clearTimeout(timer);
+  }, [resumePickerHint]);
 
   const onTerminalIdChangeRef = useRef(onTerminalIdChange);
   onTerminalIdChangeRef.current = onTerminalIdChange;
@@ -808,14 +818,18 @@ export function TerminalView({
           >
             {t("workbench.terminal.restartFresh")}
           </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            data-testid="cli-convert-shell"
-            onClick={() => onConvertToShell?.()}
-          >
-            {t("workbench.terminal.convertToShell")}
-          </Button>
+          <Tooltip content={t("workbench.terminal.convertToShell")}>
+            <Button
+              size="sm"
+              variant="ghost"
+              iconOnly
+              aria-label={t("workbench.terminal.convertToShell")}
+              data-testid="cli-convert-shell"
+              onClick={() => onConvertToShell?.()}
+            >
+              <TerminalSquare aria-hidden size={14} />
+            </Button>
+          </Tooltip>
         </div>
       ) : exitCode !== undefined ? (
         <div

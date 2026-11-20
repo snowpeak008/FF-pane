@@ -99,6 +99,17 @@ describe("ConfigStore", () => {
     expect(bad.workbenchMinFreeDiskMb).toBe(65_536);
   });
 
+  it("Cursor 默认模型（T11.18）：没设不出现；合规的留下；空白、怪字符丢掉", async () => {
+    expect((await store.readConfig()).cursorDefaultModel).toBeUndefined();
+    const set = await store.updateConfig({ cursorDefaultModel: " composer-2.5 " });
+    expect(set.cursorDefaultModel).toBe("composer-2.5");
+    const blank = await store.updateConfig({ cursorDefaultModel: "   " });
+    expect(blank.cursorDefaultModel).toBeUndefined();
+    const weird = await store.updateConfig({ cursorDefaultModel: "auto --force" });
+    expect(weird.cursorDefaultModel).toBeUndefined();
+    expect((await store.readConfig()).cursorDefaultModel).toBeUndefined();
+  });
+
   it("版本不支持：抛 ConfigFileInvalidError", async () => {
     await writeTextAtomic(configFile, JSON.stringify({ version: 999, config: {} }));
     await expect(store.readConfig()).rejects.toThrow(ConfigFileInvalidError);

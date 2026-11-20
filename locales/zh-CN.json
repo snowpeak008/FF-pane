@@ -267,13 +267,15 @@
       "pending": "编号识别中",
       "resumeCurrent": "续接当前对话",
       "fresh": "开新对话",
-      "pickHistory": "从历史续接"
+      "pickHistory": "从历史续接",
+      "copyId": "复制会话号 {{id}}",
+      "unidentifiedShort": "编号?"
     },
     "terminal": {
       "exited": "已退出（退出码 {{code}}）",
       "restart": "重新启动",
       "resume": "续接上次会话",
-      "resumePickerHint": "编号未识别，已打开选择器。请在终端里选要续接的对话，不会自动接最近一条。",
+      "resumePickerHint": "请在终端里选要续接的对话。",
       "restartFresh": "重新开始",
       "platformRestarting": "平台正在重启这个窗口，稍等片刻会自动接上。",
       "convertToShell": "转为 PowerShell",
@@ -291,7 +293,7 @@
       "kindDeepseek": "DeepSeek",
       "kindCursor": "Cursor",
       "deepseekHint": "窗口里是 Claude 的界面，模型是 DeepSeek。要先在配置里选 DeepSeek，填密钥和模型。",
-      "cursorHint": "窗口里是 Cursor CLI，用你在本机 cursor-agent login 登录的账号。会在项目的 .cursor/hooks.json 里加几条本软件的钩子（不动你自己的条目）。",
+      "cursorHint": "会在项目的 .cursor/hooks.json 里加几条本软件的钩子（不动你自己的条目）。",
       "profile": "启动配置",
       "permission": "权限等级",
       "role": "角色",
@@ -366,7 +368,8 @@
       "needsRestart": "需重启生效",
       "capped": "已按父级上限封顶为 {{level}}",
       "apply": "应用",
-      "applyAndRestart": "应用并重启续接"
+      "applyAndRestart": "应用并重启续接",
+      "menuItem": "权限：{{level}}"
     },
     "role": {
       "level": {
@@ -383,7 +386,16 @@
       "rejected": "不能把这个窗口设成该角色",
       "dropped": "窗口已退出，角色说明没写进去。下次启动会自动注入",
       "grantPending": "管理权待恢复",
-      "restartForSubagents": "换了角色，能不能开子 agent 也变了（只有普通窗口能开），窗口会续接重启后生效；在忙就等它空闲。"
+      "restartForSubagents": "换了角色，能不能开子 agent 也变了（只有普通窗口能开），窗口会续接重启后生效；在忙就等它空闲。",
+      "short": {
+        "manager": "管",
+        "planner": "规",
+        "worker": "执",
+        "reviewer": "检",
+        "supervisor": "监",
+        "researcher": "研",
+        "none": "普"
+      }
     },
     "resumeConfirm": {
       "title": "确认启动这个窗口？",
@@ -451,8 +463,8 @@
       "prevImage": "← 上一张",
       "nextImage": "下一张 →",
       "unplaceRow": "回到自动排",
-      "openWithPending": "画板 · 待检查 {{count}}",
-      "selectHint": "点一张图选中：可以看大图、标已看、标不要、删除。双击直接看大图。滚轮缩放，拖空白处移动，拖图挪位置。"
+      "selectHint": "点一张图选中：可以看大图、标已看、标不要、删除。双击直接看大图。滚轮缩放，拖空白处移动，拖图挪位置。",
+      "pendingHint": "画板：{{count}} 张待检查"
     },
     "drawer": {
       "noProject": "先选一个项目，再打开工作台面板。",
@@ -508,7 +520,11 @@
       "noNode": "没有可用的 node.exe，收不到回合结束信号。有待投递内容时请点立即发送。",
       "grokManual": "这次没装上 Grok 的回合结束信号。钩子程序的路径里不能有空格。有待投递内容时请点立即发送。软件不会因为等了一会儿就把字写进终端。",
       "cursorManual": "这次没装上 Cursor 的回合信号（项目的 .cursor/hooks.json 读不了，或路径里有特殊字符）。有待投递内容时请点立即发送。",
-      "codexManualHint": "点「立即发送」会把排队的字和一次回车写进当前终端。Codex 在第一轮结束前收不到权限信号。画面上如果已经有确认框，不要点这个按钮。"
+      "codexManualHint": "点「立即发送」会把排队的字和一次回车写进当前终端。Codex 在第一轮结束前收不到权限信号。画面上如果已经有确认框，不要点这个按钮。",
+      "manualBadge": "手动",
+      "blockedShort": "等批准",
+      "draftShort": "有草稿",
+      "busyShort": "回合中"
     },
     "inbox": {
       "unread": "{{count}} 未读",
@@ -565,7 +581,8 @@
           "not-running": "下次手动重启时生效",
           "no-session": "无法续接，下次手动重启时生效",
           "failed": "续接失败"
-        }
+        },
+        "badge": "待生效"
       },
       "compact": {
         "label": "到了这个比例它自己收一次",
@@ -574,12 +591,28 @@
         "notLater": "不能比原来更晚才压。",
         "notStatus": "压缩仍是命令行自己的摘要，不是监管者那一页四行近况。",
         "grokCap": "Grok 自己大约到 85% 就收。滑块再高，这一次也按 85% 传，不会更晚。",
-        "percent": "{{percent}}%"
+        "percent": "{{percent}}%",
+        "menuLabel": "自动压缩"
       },
       "teamPaused": {
         "title": "团队已暂停，等你叫醒管理者",
         "body": "管理者停下了，监管者也不在线。期间的汇报和状态都记在 .ffpane/briefs/待处理-<管理者编号>.md 里，不会丢。你在这个窗口里给管理者发一句话，它醒来后会先看待处理。",
         "dismiss": "知道了"
+      },
+      "menu": "更多操作",
+      "details": {
+        "kind": "种类",
+        "role": "角色",
+        "permission": "权限",
+        "openedBy": "开启",
+        "route": "来源",
+        "pending": "待生效",
+        "skills": "技能",
+        "session": "会话",
+        "report": "汇报",
+        "memory": "内存",
+        "locks": "锁",
+        "error": "出错"
       }
     },
     "limit": {
@@ -600,7 +633,11 @@
       "low": "资源偏低，开新窗口会被拒绝",
       "sep": "、",
       "memory": "{{memory}} GB · {{count}} 个进程",
-      "online": "在线监管中"
+      "online": "在线监管中",
+      "dot": " · ",
+      "quietShort": "静 {{minutes}} 分",
+      "pausedShort": "暂停",
+      "errorShort": "出错"
     },
     "decision": {
       "title": "待你拍板（{{count}}）",
@@ -655,17 +692,6 @@
       "outsideDirsLabel": "项目外可写目录",
       "outsideDirsPlaceholder": "一行一个，例如 D:\\WorkWork\\共享素材",
       "outsideDirsHint": "AI 窗口只能写项目目录和临时目录；这里列的目录也能写。只有你能在这里改，改完要重开窗口才生效。",
-      "plan": "计划 v{{n}} · {{status}}",
-      "noPlan": "尚无计划",
-      "activeTasks": "进行中任务 {{n}}",
-      "taskTotal": "共 {{n}} 个任务（含已接受与已取消）",
-      "lastActivity": "最后活动 {{time}} · {{source}}",
-      "noActivity": "尚无活动",
-      "activitySource": {
-        "plan": "计划",
-        "run": "执行记录",
-        "session": "会话"
-      },
       "workbenchMissing": "数据目录 .workbench/ 读不到，卡片信息不可用",
       "partial": "部分信息读取失败：{{parts}}",
       "partSeparator": "、",
@@ -1467,12 +1493,63 @@
     "projects": "项目切换",
     "collapse": "收起次级侧栏",
     "expand": "展开次级侧栏",
-    "settled": {
-      "done": "有任务已完成（未读）",
-      "failed": "有任务已失败（未读）",
-      "blocked": "有任务被阻塞（未读）"
-    },
     "switchTo": "切换到项目：{{name}}",
     "windowCount": "{{count}} 个运行中窗口"
+  },
+  "cursor": {
+    "title": "Cursor",
+    "intro": "FF-pane 开的 Cursor 窗口用这里登录的账号。登录、换账号、选模型都在这里，不用去终端敲命令。",
+    "refresh": "刷新状态",
+    "switch": "换账号",
+    "update": "更新到新版",
+    "goInstall": "去设置里安装",
+    "status": {
+      "missing": "没找到 Cursor CLI",
+      "unknown": "取不到登录状态",
+      "loggedOut": "还没登录 Cursor",
+      "loggedIn": "已登录 {{who}}",
+      "loggedInTier": "已登录 {{who}}（{{tier}}）",
+      "tierFree": "免费档",
+      "version": "CLI {{version}}",
+      "updateAvailable": "有新版 {{version}}"
+    },
+    "login": {
+      "action": "登录",
+      "here": "在这里登录 Cursor",
+      "starting": "正在启动登录…",
+      "waiting": "请在浏览器里登录 Cursor，登录完这里会自己更新。",
+      "switchHint": "浏览器里如果还登着别的账号，先在 Cursor 网页上退出，或选另一个账号。",
+      "open": "打开浏览器",
+      "copy": "复制链接",
+      "copied": "已复制登录链接",
+      "cancel": "取消",
+      "cancelled": "已取消登录",
+      "done": "已登录 {{email}}",
+      "failed": "登录没成功：",
+      "retry": "重试"
+    },
+    "logout": {
+      "action": "退出登录",
+      "confirmTitle": "开着的 Cursor 窗口还用旧账号",
+      "runningBody": "开着的 {{count}} 个 Cursor 窗口还用旧账号，重开后才换。要继续吗？"
+    },
+    "install": {
+      "action": "安装 Cursor CLI",
+      "confirmTitle": "安装 Cursor CLI？",
+      "confirmBody": "会在 PowerShell 里跑官方安装命令 irm 'https://cursor.com/install?win32=true' | iex（从 cursor.com 下载安装脚本并执行），装到 %LOCALAPPDATA%\\cursor-agent。要一两分钟。"
+    },
+    "command": {
+      "ok": "完成。",
+      "failed": "没成功。"
+    },
+    "model": {
+      "label": "默认模型",
+      "hint": "FF-pane 开 Cursor 窗口用这个模型；项目配置里给 Cursor 填了模型的，用项目的。不改 Cursor 自己的设置。",
+      "freeHint": "免费档只能用 Auto 和少数模型；选了用不了的，窗口里会报「Model unavailable on Free」。",
+      "auto": "Auto（推荐）",
+      "list": "列出模型",
+      "saveError": "保存默认模型失败",
+      "using": "模型 {{model}}"
+    }
   }
 }

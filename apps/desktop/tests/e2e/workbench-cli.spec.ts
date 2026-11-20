@@ -9,6 +9,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import { gotoRoute, type LaunchedApp, launchApp } from "./_launch";
+import { dismissOverlays, openWindowMenu, windowDetails } from "./_workbench-ui";
 
 function writeFakeCli(dir: string, name: "claude" | "codex", envKey: string): void {
   const bin = join(dir, "node_modules", name, "bin");
@@ -657,11 +658,15 @@ test("T10.5：只读 Claude 权限参数 + 令牌 env 存在 + 改 yolo 重启",
     await confirmAiWindow(page, "claude", undefined, "read-only");
 
     const windowId = await requireWindowId(page, 0);
-    await expect(page.getByTestId("workbench-permission-badge")).toHaveAttribute(
+    const permPane = page.locator(`[data-window-id="${windowId}"]`);
+    await expect(permPane.getByTestId("workbench-window-header")).toHaveAttribute(
       "data-permission",
       "read-only",
     );
-    await expect(page.getByTestId("workbench-opened-by")).toContainText(/you|你/i);
+    await expect(
+      (await windowDetails(page, permPane)).getByTestId("workbench-opened-by"),
+    ).toContainText(/you|你/i);
+    await dismissOverlays(page);
 
     await expect
       .poll(async () => readReplayForWindow(page, windowId), { timeout: 20_000 })
@@ -695,12 +700,12 @@ test("T10.5：只读 Claude 权限参数 + 令牌 env 存在 + 改 yolo 重启",
 
     await expect(page.getByTestId("terminal-cli-stopped")).toBeVisible({ timeout: 15_000 });
 
-    await page.getByTestId("workbench-permission-badge").click();
+    await (await openWindowMenu(page, permPane)).getByTestId("workbench-permission-badge").click();
     await expect(page.getByTestId("workbench-permission-editor")).toBeVisible();
     await page.getByTestId("workbench-permission-select").selectOption("yolo");
     await page.getByTestId("workbench-permission-yolo-confirm").check();
     await page.getByTestId("workbench-permission-apply").click();
-    await expect(page.getByTestId("workbench-permission-badge")).toHaveAttribute(
+    await expect(permPane.getByTestId("workbench-window-header")).toHaveAttribute(
       "data-permission",
       "yolo",
     );
@@ -809,7 +814,7 @@ test("T10.6：worker 说明书注入，运行中改管理者，设置覆盖进�
     expect(replayBefore).toContain("FAKE_CLAUDE_ENV_FF_PANE_WB_PIPE=present");
 
     await pane.getByTestId("workbench-role-badge").click();
-    await pane.getByTestId("workbench-role-option-manager").click();
+    await page.getByTestId("workbench-role-option-manager").click();
     await expect(pane.locator("[data-manager='true']")).toBeVisible();
     await expect(pane.getByTestId("workbench-deliver-now")).toBeVisible();
     await page.waitForTimeout(1_500);
@@ -824,7 +829,7 @@ test("T10.6：worker 说明书注入，运行中改管理者，设置覆盖进�
       .poll(async () => readReplayForWindow(page, windowId), { timeout: 20_000 })
       .toContain("FAKE_CLAUDE_HOOK_EXIT=PermissionRequest:0");
     await pane.getByTestId("workbench-role-badge").click();
-    await pane.getByTestId("workbench-role-option-planner").click();
+    await page.getByTestId("workbench-role-option-planner").click();
     await expect(pane.getByTestId("workbench-deliver-blocked")).toBeVisible();
     await expect(pane.getByTestId("workbench-deliver-now")).toHaveCount(0);
     await page.waitForTimeout(2_000);
@@ -948,12 +953,13 @@ test("T10.6：Codex notify 的 agent-turn-complete 之后才自动投递", async
     expect(argv.join("\n")).not.toContain("features.hooks");
 
     await pane.getByTestId("workbench-role-badge").click();
-    await pane.getByTestId("workbench-role-option-manager").click();
+    await page.getByTestId("workbench-role-option-manager").click();
     await expect(pane.getByTestId("workbench-deliver-now")).toBeVisible();
-    await expect(pane.getByTestId("workbench-codex-manual-hint")).toContainText("one Enter");
-    await expect(pane.getByTestId("workbench-codex-manual-hint")).toContainText(
-      "do not press this button",
-    );
+    await pane.getByTestId("workbench-deliver-now").hover();
+    const codexHint = page.getByTestId("workbench-codex-manual-hint").first();
+    await expect(codexHint).toContainText("one Enter");
+    await expect(codexHint).toContainText("do not press this button");
+    await dismissOverlays(page);
     await page.waitForTimeout(1_500);
     expect(await readReplayForWindow(page, windowId)).not.toContain("manager.md");
 
@@ -1095,9 +1101,21 @@ test("T10.15b：同目录三个 Codex 各自认出编号，开新对话后能从
     for (let i = 0; i < 3; i += 1) {
       await page.getByTestId("workbench-new-tab").click();
       await confirmAiWindow(page, "codex");
-      const chip = page.getByTestId("workbench-session-id");
-      await expect(chip).toBeVisible({ timeout: 15_000 });
-      const sessionId = await chip.getAttribute("title");
+      const codexPane = page.getByTestId("workbench-window").last();
+      await expect(codexPane.getByTestId("workbench-window-title")).toBeVisible();
+      let sessionId: string | null = null;
+      await expect
+        .poll(
+          async () => {
+            const menu = await openWindowMenu(page, codexPane);
+            const chip = menu.getByTestId("workbench-session-id");
+            sessionId = (await chip.count()) > 0 ? await chip.getAttribute("title") : null;
+            await dismissOverlays(page);
+            return sessionId;
+          },
+          { timeout: 15_000 },
+        )
+        .not.toBeNull();
       expect(sessionId).toMatch(/^[0-9a-f-]{36}$/i);
       if (sessionId !== null) {
         opened.push(sessionId);
@@ -1111,7 +1129,8 @@ test("T10.15b：同目录三个 Codex 各自认出编号，开新对话后能从
       throw new Error("missing visible codex window");
     }
     const target = { id: visibleId, session: previous };
-    await page.getByTestId("workbench-session-fresh").click();
+    const visiblePane = page.locator(`[data-window-id="${visibleId}"]`);
+    await (await openWindowMenu(page, visiblePane)).getByTestId("workbench-session-fresh").click();
     await expect
       .poll(
         async () => {
@@ -1133,7 +1152,9 @@ test("T10.15b：同目录三个 Codex 各自认出编号，开新对话后能从
       )
       .not.toBe(target.session);
 
-    await page.getByTestId("workbench-session-history").selectOption(target.session);
+    await (await openWindowMenu(page, visiblePane))
+      .getByTestId("workbench-session-history")
+      .selectOption(target.session);
     await expect
       .poll(
         async () => {
@@ -1266,9 +1287,9 @@ test("T11.9：技能库导入、改名、替换保留配置，项目勾上后 Cl
     const argv = parseArgvJson(replay, "FAKE_CLAUDE");
     const pluginDir = argv[argv.indexOf("--plugin-dir") + 1] ?? "";
     expect(pluginDir.startsWith(join(dataRoot, "skill-mounts"))).toBe(true);
-    const chip = page
-      .locator(`[data-window-id="${windowId}"]`)
-      .getByTestId("workbench-window-skills");
+    const chip = (
+      await windowDetails(page, page.locator(`[data-window-id="${windowId}"]`))
+    ).getByTestId("workbench-window-skills");
     await expect(chip).toHaveAttribute("data-mounted", "1");
     await expect(chip).toHaveAttribute("data-skipped", "0");
     // 技能库里那一份没被动过

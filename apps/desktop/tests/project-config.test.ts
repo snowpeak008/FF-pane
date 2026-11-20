@@ -75,6 +75,26 @@ describe("项目配置选路", () => {
       error: "配置「只有 Claude」没有 DeepSeek 这一路，不能开这个窗口。",
     });
 
+    // T11.18：Cursor 这一路没填模型时用设置里的默认（auto），不再让 Cursor 用它自己记的默认。
+    const cursor = await resolveProjectLaunchRoute({
+      projectRoot,
+      projectId: "proj-1",
+      kind: "cursor",
+      configs,
+      getProvider: async () => undefined,
+      cursorDefaultModel: "auto",
+    });
+    expect(cursor.ok && cursor.route.model).toBe("auto");
+    const claudeIgnoresCursorDefault = await resolveProjectLaunchRoute({
+      projectRoot,
+      projectId: "proj-1",
+      kind: "claude",
+      configs,
+      getProvider: async () => undefined,
+      cursorDefaultModel: "auto",
+    });
+    expect(claudeIgnoresCursorDefault.ok && claudeIgnoresCursorDefault.route.model).toBe("sonnet");
+
     const unbound = await resolveProjectLaunchRoute({
       projectRoot: join(root, "other"),
       projectId: "proj-2",

@@ -79,6 +79,23 @@ export interface GlobalConfig {
    * 只含方案和中转站的地址、模型名、密钥引用，不含密钥明文。
    */
   readonly imageGen?: ImageGenSettings;
+  /**
+   * T11.18 —— FF-pane 开 Cursor 窗口时的默认模型：项目配置里 Cursor 这一路没填模型时带上。
+   * 缺省 DEFAULT_CURSOR_MODEL（auto，免费档也能用）。不改 Cursor 自己的 cli-config.json。
+   */
+  readonly cursorDefaultModel?: string;
+}
+
+/**
+ * Cursor 窗口的出厂默认模型。不传 --model 时 Cursor 用它自己记的默认，
+ * 那个可能是免费档用不了的模型（真机 2026-11-14：记的是 Opus，账号是免费档）。
+ */
+export const DEFAULT_CURSOR_MODEL = "auto";
+
+/** 设置里记的 Cursor 默认模型，没记就是 auto。 */
+export function effectiveCursorDefaultModel(value: string | undefined): string {
+  const trimmed = value?.trim() ?? "";
+  return trimmed === "" ? DEFAULT_CURSOR_MODEL : trimmed;
 }
 
 /** AI 输出语言的出厂默认（产品中文优先）。 */

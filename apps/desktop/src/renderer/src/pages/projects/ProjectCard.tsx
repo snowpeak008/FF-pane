@@ -16,7 +16,7 @@ import {
 import { Tooltip } from "../../components/ui/Tooltip";
 import { invokeQuery } from "../../ipc/query";
 import { cn } from "../../lib/cn";
-import { formatAbsoluteTime, formatRelativeTime } from "../../lib/time";
+import { formatAbsoluteTime } from "../../lib/time";
 import { skillLimitKey, skillTitle } from "../settings/skills/skill-labels";
 
 /** 每个窗口挂的技能建议不超过这么多（技能计划 §8.3），多了只提示不拦。 */
@@ -163,16 +163,17 @@ export function ProjectCard({
           padding="compact"
           selected={active}
           onClick={() => onOpen(project)}
-          className="flex w-full flex-col gap-2 pr-10"
+          className="flex w-full flex-col gap-2 pr-16"
+          title={`${project.rootPath}
+${t("projects.card.createdAt", {
+  time: formatAbsoluteTime(project.createdAt, locale),
+})}`}
         >
           <span className="flex items-center gap-1.5 truncate text-sm font-medium text-fg">
             {active ? <Check aria-hidden className="shrink-0 text-primary-text" size={14} /> : null}
             {project.name}
           </span>
-          <span
-            className="w-full truncate font-mono text-xs text-fg-muted"
-            title={project.rootPath}
-          >
+          <span className="w-full truncate font-mono text-xs text-fg-muted">
             {project.rootPath}
           </span>
 
@@ -189,19 +190,30 @@ export function ProjectCard({
             <span
               className="flex items-center gap-1 text-xs text-fg-muted"
               data-testid={`project-skills-count-${project.id}`}
+              title={t("projects.card.skillsCount", { count: enabledCount })}
             >
               <Sparkles aria-hidden className="shrink-0" size={12} />
-              {t("projects.card.skillsCount", { count: enabledCount })}
+              {enabledCount}
+              <span className="sr-only">
+                {t("projects.card.skillsCount", { count: enabledCount })}
+              </span>
             </span>
           ) : null}
-
-          <span
-            className="font-mono text-xs text-fg-subtle"
-            title={formatAbsoluteTime(project.createdAt, locale)}
-          >
-            {t("projects.card.createdAt", { time: formatRelativeTime(project.createdAt, locale) })}
-          </span>
         </CardButton>
+        <Tooltip content={t("projects.card.configLabel")}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            iconOnly
+            aria-label={t("projects.card.configLabel")}
+            className="absolute top-2 right-9"
+            data-testid={`project-bind-config-${project.id}`}
+            onClick={openBind}
+          >
+            <Settings aria-hidden size={14} />
+          </Button>
+        </Tooltip>
         <Tooltip content={t("projects.card.removeLabel", { name: project.name })} wrapTrigger>
           <Button
             variant="ghost"
@@ -216,17 +228,6 @@ export function ProjectCard({
           </Button>
         </Tooltip>
       </div>
-      <Button
-        type="button"
-        variant="secondary"
-        size="lg"
-        className="w-full"
-        data-testid={`project-bind-config-${project.id}`}
-        onClick={openBind}
-      >
-        <Settings aria-hidden size={16} />
-        {t("projects.card.configLabel")}
-      </Button>
       <Dialog open={bindOpen} onOpenChange={setBindOpen}>
         <DialogContent data-testid="project-config-dialog">
           <DialogHeader title={t("projects.card.configTitle", { name: project.name })} />

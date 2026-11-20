@@ -6,6 +6,7 @@ import {
   buildInteractiveCodexArgs,
 } from "../src/main/workbench/cli-args";
 import {
+  canManagerRelaunch,
   canSetModelEffort,
   createModelEffortController,
   decideModelEffort,
@@ -92,6 +93,71 @@ describe("canSetModelEffort", () => {
         targetRole: "worker",
         tree: nodes,
       }).ok,
+    ).toBe(false);
+  });
+});
+
+describe("canManagerRelaunch", () => {
+  // 现场（2026-11-13）：全放开的管理者开的全放开执行，软件重启后停着，管理者重启不了，空等了近 5 小时。
+  const yoloTree = (): Record<string, WorkbenchAuthNode> => ({
+    mgr: { ...node("mgr", "manager"), permission: "yolo" },
+    fix: { ...node("fix", "worker", "mgr"), permission: "yolo" },
+    deep: { ...node("deep", "worker", "fix"), permission: "edit" },
+    sub: { ...node("sub", "manager", "mgr"), permission: "edit" },
+    stranger: { ...node("stranger", "worker"), permission: "read-only" },
+  });
+
+  it("全放开的管理者能重启自己开的全放开执行，也能重启后代的后代", () => {
+    for (const targetId of ["fix", "deep"]) {
+      expect(
+        canManagerRelaunch({ callerId: "mgr", callerGranted: true, targetId, tree: yoloTree() }).ok,
+        targetId,
+      ).toBe(true);
+    }
+  });
+
+  it("权限比管理者高的窗口不行", () => {
+    const nodes = {
+      ...yoloTree(),
+      mgr: { ...node("mgr", "manager"), permission: "edit" as const },
+    };
+    const result = canManagerRelaunch({
+      callerId: "mgr",
+      callerGranted: true,
+      targetId: "fix",
+      tree: nodes,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.ok ? "" : result.error).toContain("权限比你高");
+    expect(
+      canManagerRelaunch({ callerId: "mgr", callerGranted: true, targetId: "deep", tree: nodes })
+        .ok,
+    ).toBe(true);
+  });
+
+  it("别的管理者、自己、无关窗口、没授予的管理者、非管理者都不行", () => {
+    const nodes = yoloTree();
+    expect(
+      canManagerRelaunch({ callerId: "mgr", callerGranted: true, targetId: "sub", tree: nodes }).ok,
+    ).toBe(false);
+    expect(
+      canManagerRelaunch({ callerId: "mgr", callerGranted: true, targetId: "mgr", tree: nodes }).ok,
+    ).toBe(false);
+    expect(
+      canManagerRelaunch({
+        callerId: "mgr",
+        callerGranted: true,
+        targetId: "stranger",
+        tree: nodes,
+      }).ok,
+    ).toBe(false);
+    expect(
+      canManagerRelaunch({ callerId: "mgr", callerGranted: false, targetId: "fix", tree: nodes })
+        .ok,
+    ).toBe(false);
+    expect(
+      canManagerRelaunch({ callerId: "fix", callerGranted: false, targetId: "deep", tree: nodes })
+        .ok,
     ).toBe(false);
   });
 });

@@ -8,14 +8,11 @@ import {
   DEFAULT_WORKBENCH_WINDOW_PERMISSION,
   isAiWorkbenchKind,
   MANAGER_COMPACT_PERCENT_WHEN_ENABLED,
-  MAX_MANAGER_COMPACT_PERCENT,
-  MIN_MANAGER_COMPACT_PERCENT,
-  parseManagerCompactPercent,
-  shortSessionId,
   WORKBENCH_PERMISSION_LEVELS,
   WORKBENCH_ROLES,
 } from "@ff-pane/shared";
-import { Bot, Maximize2, Minimize2, Plus, Radio, Sparkles, SquareTerminal, X } from "lucide-react";
+import * as PopoverPrimitive from "@radix-ui/react-popover";
+import { Maximize2, Minimize2, X } from "lucide-react";
 import {
   type ReactElement,
   type PointerEvent as ReactPointerEvent,
@@ -26,6 +23,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import type { WindowSkillsReport } from "../../../../shared-ipc/contracts";
+import { CliKindIcon } from "../../components/icons/CliKindIcon";
 import { Button } from "../../components/ui/Button";
 import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
 import { Tooltip } from "../../components/ui/Tooltip";
@@ -37,7 +35,14 @@ import { useWorkbenchRuntimeStore } from "../../stores/workbench-runtime";
 import { type ConversationLaunchPlan, planConversationLaunch } from "./conversation-launch";
 import { needsSensitiveLaunchConfirm, rememberSensitiveLaunchConfirm } from "./sensitive-launch";
 import { TerminalView } from "./TerminalView";
-import { WindowRuntimeBadges } from "./WorkbenchRuntimeBar";
+import { reportKey, WindowDetails } from "./WindowDetails";
+import { WindowMenu } from "./WindowMenu";
+import {
+  AttentionBadge,
+  WindowAttentionBadges,
+  type WindowLifecycle,
+  WindowStatusDot,
+} from "./WorkbenchRuntimeBar";
 
 export interface WindowPaneProps {
   readonly window: WorkbenchWindow;
@@ -101,7 +106,6 @@ export function WindowPane({
   const permission = window.permission ?? DEFAULT_WORKBENCH_WINDOW_PERMISSION;
   const role = window.role ?? DEFAULT_WORKBENCH_ROLE;
   const [editingPermission, setEditingPermission] = useState(false);
-  const [roleMenuOpen, setRoleMenuOpen] = useState(false);
   const [pendingPermission, setPendingPermission] = useState<WorkbenchPermissionLevel>(permission);
   const [yoloConfirm, setYoloConfirm] = useState(false);
   const [launchNonce, setLaunchNonce] = useState(0);
@@ -163,30 +167,7 @@ export function WindowPane({
     return t("workbench.permission.openedByWindow", { name });
   }, [getProjectLayout, isCli, t, window.openedBy, window.projectId]);
 
-  const permissionBadgeClass =
-    permission === "yolo"
-      ? "bg-danger-surface text-danger-text ring-1 ring-danger-text/40"
-      : permission === "edit-exec"
-        ? "bg-warning-surface text-warning-text"
-        : permission === "edit"
-          ? "bg-primary/15 text-primary"
-          : "bg-surface-active text-fg-muted";
-
-  const roleBadgeClass =
-    role === "manager"
-      ? "bg-primary text-primary-fg"
-      : role === "planner"
-        ? "bg-primary-surface text-primary-text"
-        : role === "worker"
-          ? "bg-warning-surface text-warning-text"
-          : role === "reviewer"
-            ? "bg-success-surface text-success-text"
-            : role === "supervisor"
-              ? "bg-status-pending-surface text-status-pending-text"
-              : "bg-surface-active text-fg-muted";
-
   const chooseRole = (next: WorkbenchRole): void => {
-    setRoleMenuOpen(false);
     void applyWindowRole(window.projectId, window.id, next).then((result) => {
       if (!result.ok) {
         toast.error(t("workbench.role.rejected"), { description: result.message });
@@ -313,6 +294,27 @@ export function WindowPane({
               ? t("workbench.window.kind.cursor")
               : t("workbench.window.kind.shell");
 
+  const lifecycle: WindowLifecycle =
+    exitCode !== undefined
+      ? "exited"
+      : running
+        ? "running"
+        : isCli && !autoStart && window.terminalId === undefined
+          ? "stopped"
+          : "starting";
+
+  const modelEffortNote =
+    modelEffort !== null
+      ? `${t("workbench.window.modelEffort.pending", {
+          reason: t(`workbench.window.modelEffort.reason.${modelEffort.reason}`),
+          model: modelEffort.model ?? window.modelOverride ?? t("workbench.window.modelDefault"),
+          effort:
+            modelEffort.effort ?? window.effortOverride ?? t("workbench.window.effortDefault"),
+        })}${modelEffort.error !== undefined && modelEffort.error !== "" ? ` ${modelEffort.error}` : ""}`
+      : undefined;
+
+  const lastReport = inbox?.lastReportStatus;
+
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: pane focus-on-click
     <section
@@ -327,12 +329,24 @@ export function WindowPane({
       data-focused={focused ? "true" : "false"}
       onMouseDown={onFocus}
     >
+      {/* 一行标题栏（§9 界面精简）：种类图标、状态点、窗口名、要用户动手的小标、角色；其余在窗口名的悬浮提示和「⋯」菜单里。 */}
       <div
         className={cn(
           "relative z-10 flex h-7 min-w-0 shrink-0 items-center gap-1 overflow-hidden border-b border-border px-1",
           isCli && role === "manager" ? "bg-primary-surface" : "bg-surface-sunken",
+          // 全放开的窗口左边描一道红；权限本身在提示和菜单里。
+          isCli && permission === "yolo" && "border-l-2 border-l-danger",
         )}
         data-manager={isCli && role === "manager" ? "true" : "false"}
+        data-permission={isCli ? permission : undefined}
+        data-opened-by={
+          isCli
+            ? window.openedBy === undefined || window.openedBy === "user"
+              ? "user"
+              : window.openedBy.windowId
+            : undefined
+        }
+        data-report-status={lastReport}
         data-testid="workbench-window-header"
         onPointerDown={(event) => {
           // 标题和空白处能拖；其他按钮、改名输入框照常点。
@@ -347,10 +361,17 @@ export function WindowPane({
           onDragStart(event);
         }}
       >
-        <span className="flex shrink-0 items-center gap-1 px-1 text-fg-muted" title={kindLabel}>
-          {isCli ? <Bot aria-hidden size={12} /> : <SquareTerminal aria-hidden size={12} />}
-          <span className="text-2xs font-medium">{kindLabel}</span>
-        </span>
+        <Tooltip content={kindLabel}>
+          <span
+            className="flex shrink-0 items-center px-0.5"
+            role="img"
+            aria-label={kindLabel}
+            data-testid="workbench-window-kind"
+          >
+            <CliKindIcon kind={window.kind} />
+          </span>
+        </Tooltip>
+        <WindowStatusDot windowId={window.id} lifecycle={lifecycle} />
         {editing ? (
           <input
             className="min-w-0 flex-1 rounded-sm border border-border-strong bg-surface px-1 text-xs text-fg"
@@ -375,274 +396,170 @@ export function WindowPane({
             }}
           />
         ) : (
-          <button
-            type="button"
-            className="min-w-0 flex-1 cursor-grab truncate px-1 text-left text-xs font-medium text-fg"
-            data-drag-handle
-            onDoubleClick={() => {
-              setDraft(window.title);
-              setEditing(true);
-            }}
+          <WindowDetails
+            window={window}
+            isCli={isCli}
+            kindLabel={kindLabel}
+            role={role}
+            permission={permission}
+            openedByLabel={openedByLabel}
+            skillsReport={skillsReport}
+            lastReportStatus={lastReport}
+            permissionCapped={permissionCappedHint}
+            modelEffortNote={modelEffortNote}
           >
-            {window.title}
-            {inbox !== undefined && inbox.unread > 0 ? (
-              <span
-                className="ml-1 rounded-sm bg-danger-surface px-1 text-2xs text-danger-text"
-                data-testid="workbench-unread-badge"
-              >
-                {t("workbench.inbox.unread", { count: inbox.unread })}
-              </span>
-            ) : null}
-            {inbox?.lastReportStatus !== undefined ? (
-              <span
-                className="ml-1 rounded-sm bg-surface-active px-1 text-2xs text-fg-muted"
-                data-testid="workbench-report-badge"
-                data-report-status={inbox.lastReportStatus}
-              >
-                {t(
-                  inbox.lastReportStatus === "done"
-                    ? "workbench.inbox.reportDone"
-                    : inbox.lastReportStatus === "blocked"
-                      ? "workbench.inbox.reportBlocked"
-                      : inbox.lastReportStatus === "failed"
-                        ? "workbench.inbox.reportFailed"
-                        : "workbench.inbox.reportProgress",
-                )}
-              </span>
-            ) : null}
-            <WindowRuntimeBadges windowId={window.id} />
-            {isCli ? (
-              <span className="ml-1 font-normal text-fg-muted" data-testid="workbench-window-route">
-                ·{" "}
-                {t("workbench.window.routeSummary", {
-                  route:
-                    window.routeMode === "relay"
-                      ? t("workbench.window.routeRelay", {
-                          name: window.routeProviderName ?? "",
-                        })
-                      : window.routeMode === "local_cli"
-                        ? t("workbench.window.routeLocal")
-                        : t("workbench.window.routePending"),
-                  model: window.routeModel ?? t("workbench.window.modelDefault"),
-                  effort: window.routeEffort ?? t("workbench.window.effortDefault"),
-                })}
-              </span>
-            ) : null}
-            {modelEffort !== null ? (
-              <span
-                className="shrink-0 text-2xs text-warning-text"
-                data-testid="workbench-model-effort-pending"
-                data-reason={modelEffort.reason}
-              >
-                {t("workbench.window.modelEffort.pending", {
-                  reason: t(`workbench.window.modelEffort.reason.${modelEffort.reason}`),
-                  model:
-                    modelEffort.model ?? window.modelOverride ?? t("workbench.window.modelDefault"),
-                  effort:
-                    modelEffort.effort ??
-                    window.effortOverride ??
-                    t("workbench.window.effortDefault"),
-                })}
-                {modelEffort.error !== undefined && modelEffort.error !== ""
-                  ? ` ${modelEffort.error}`
-                  : ""}
-                {modelEffort.reason === "confirm" ? (
-                  <button
-                    type="button"
-                    className="ml-1 underline"
-                    data-testid="workbench-model-effort-confirm"
-                    onClick={() => {
-                      modelEffortConfirmRef.current = true;
-                      setSensitiveOpen(true);
-                    }}
-                  >
-                    {t("workbench.window.modelEffort.confirmAgain")}
-                  </button>
-                ) : null}
-              </span>
-            ) : null}
-          </button>
-        )}
-        {isCli ? (
-          <>
             <button
               type="button"
-              className={cn("shrink-0 rounded-sm px-1 text-2xs font-medium", permissionBadgeClass)}
-              data-testid="workbench-permission-badge"
-              data-permission={permission}
-              title={t("workbench.permission.badgeHint")}
-              onClick={() => {
-                setPendingPermission(permission);
-                setYoloConfirm(false);
-                setEditingPermission(true);
+              className="min-w-0 flex-1 cursor-grab truncate px-1 text-left text-xs font-medium text-fg"
+              data-drag-handle
+              data-testid="workbench-window-title"
+              onDoubleClick={() => {
+                setDraft(window.title);
+                setEditing(true);
               }}
             >
-              {t(`workbench.permission.level.${permission}`)}
+              {window.title}
             </button>
-            <span className="relative shrink-0">
-              <button
-                type="button"
-                className={cn("rounded-sm px-1 text-2xs font-medium", roleBadgeClass)}
-                data-testid="workbench-role-badge"
-                data-role={role}
-                title={t("workbench.role.badgeHint")}
-                onClick={() => setRoleMenuOpen((open) => !open)}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  setRoleMenuOpen(true);
-                }}
-              >
-                {t(`workbench.role.level.${role}`)}
-              </button>
-              {roleMenuOpen ? (
-                <div
-                  className="absolute right-0 top-full z-20 mt-1 flex min-w-24 flex-col rounded-sm border border-border bg-surface p-1 shadow-sm"
-                  data-testid="workbench-role-menu"
-                >
-                  {WORKBENCH_ROLES.map((item) => (
-                    <button
-                      key={item}
-                      type="button"
-                      className="rounded-sm px-2 py-1 text-left text-2xs text-fg hover:bg-surface-hover"
-                      data-testid={`workbench-role-option-${item}`}
-                      onClick={() => chooseRole(item)}
-                    >
-                      {t(`workbench.role.level.${item}`)}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </span>
-            {openedByLabel !== undefined ? (
-              <span
-                className="max-w-[7rem] shrink-0 truncate text-2xs text-fg-muted"
-                data-testid="workbench-opened-by"
-                title={openedByLabel}
-              >
-                {openedByLabel}
-              </span>
-            ) : null}
-            {window.managerGrantPending === true ? (
-              <span
-                className="shrink-0 text-2xs text-warning-text"
-                data-testid="workbench-manager-grant-pending"
-              >
-                {t("workbench.role.grantPending")}
-              </span>
-            ) : null}
-            {window.permissionNeedsDowngrade === true ? (
-              <span className="shrink-0 text-2xs text-warning-text">
-                {t("workbench.permission.needsRestart")}
-              </span>
-            ) : null}
-            {permissionCappedHint ? (
-              <span
-                className="shrink-0 text-2xs text-warning-text"
-                data-testid="workbench-permission-capped"
-              >
-                {t("workbench.permission.capped", {
-                  level: t(`workbench.permission.level.${permission}`),
-                })}
-              </span>
-            ) : null}
-          </>
+          </WindowDetails>
+        )}
+        {inbox !== undefined && inbox.unread > 0 ? (
+          <span
+            className="shrink-0 rounded-full bg-danger px-1.5 text-2xs font-medium leading-4 text-danger-fg"
+            data-testid="workbench-unread-badge"
+            role="img"
+            aria-label={t("workbench.inbox.unread", { count: inbox.unread })}
+          >
+            {inbox.unread}
+          </span>
         ) : null}
-        {skillsReport !== undefined &&
-        (skillsReport.mounted.length > 0 || skillsReport.skipped.length > 0) ? (
-          <Tooltip
-            content={
-              <span className="flex flex-col gap-0.5">
-                {skillsReport.mounted.length > 0 ? (
-                  <span>
-                    {t("workbench.skills.mounted", {
-                      names: skillsReport.mounted.join(t("settings.skills.listSeparator")),
-                    })}
-                  </span>
-                ) : null}
-                {skillsReport.skipped.map((item) => (
-                  <span key={item.name}>
-                    {t("workbench.skills.skipped", {
-                      name: item.name,
-                      reason: t(`workbench.skills.reason.${item.reason}`),
-                    })}
-                  </span>
-                ))}
-                <span className="text-fg-muted">{t("workbench.skills.restartHint")}</span>
-              </span>
+        {lastReport === "blocked" || lastReport === "failed" ? (
+          <AttentionBadge
+            tone={lastReport === "failed" ? "danger" : "warning"}
+            testId="workbench-report-badge"
+          >
+            {t(reportKey(lastReport))}
+          </AttentionBadge>
+        ) : null}
+        <WindowAttentionBadges windowId={window.id} />
+        {manualTurnSignal ? (
+          <AttentionBadge
+            tone="warning"
+            testId="workbench-manual-turn-signal"
+            hint={
+              window.kind === "grok"
+                ? t("workbench.deliver.grokManual")
+                : window.kind === "cursor"
+                  ? t("workbench.deliver.cursorManual")
+                  : t("workbench.deliver.noNode")
             }
           >
-            <span
-              className={cn(
-                "flex shrink-0 items-center gap-0.5 rounded-sm px-1 text-2xs",
-                skillsReport.skipped.length > 0
-                  ? "bg-warning-surface text-warning-text"
-                  : "bg-surface-active text-fg-muted",
-              )}
-              data-testid="workbench-window-skills"
-              data-mounted={skillsReport.mounted.length}
-              data-skipped={skillsReport.skipped.length}
-            >
-              <Sparkles aria-hidden size={11} />
-              {t("workbench.skills.chip", { count: skillsReport.mounted.length })}
-            </span>
-          </Tooltip>
+            {t("workbench.deliver.manualBadge")}
+          </AttentionBadge>
         ) : null}
-        <span
-          className={cn(
-            "shrink-0 rounded-sm px-1 text-2xs",
-            exitCode !== undefined
-              ? "bg-danger-surface text-danger-text"
-              : running
-                ? "bg-success-surface text-success-text"
-                : "bg-surface-active text-fg-muted",
-          )}
-          data-testid="workbench-window-status"
-        >
-          {exitCode !== undefined
-            ? t("workbench.window.status.exited")
-            : running
-              ? t("workbench.window.status.running")
-              : isCli && !autoStart && window.terminalId === undefined
-                ? t("workbench.window.status.stopped")
-                : t("workbench.window.status.starting")}
-        </span>
-        {isCli && (window.role === "supervisor" || window.role === "manager") ? (
-          <Tooltip content={t(online ? "workbench.online.stopHint" : "workbench.online.startHint")}>
-            <Button
-              variant="ghost"
-              size="sm"
-              data-testid="workbench-online-toggle"
-              data-online={online ? "yes" : "no"}
-              onClick={() => {
-                const next = !online;
-                void invokeQuery("workbench:set-online", {
-                  windowId: window.id,
-                  online: next,
-                }).then((settled) => {
-                  if (settled.status === "error") {
-                    toast.error(settled.error.message);
-                    return;
-                  }
-                  toast.message(t(next ? "workbench.online.started" : "workbench.online.stopped"));
-                });
-              }}
-            >
-              <Radio aria-hidden size={14} />
-              {t(online ? "workbench.online.stop" : "workbench.online.start")}
-            </Button>
-          </Tooltip>
-        ) : null}
-        <Tooltip content={t("workbench.window.addWindow")}>
-          <Button
-            variant="ghost"
-            size="sm"
-            iconOnly
-            aria-label={t("workbench.window.addWindow")}
-            onClick={onAddWindow}
+        {isCli && window.sessionUnidentified === true ? (
+          <AttentionBadge
+            tone="warning"
+            testId="workbench-session-unidentified"
+            hint={t("workbench.session.unidentified")}
           >
-            <Plus aria-hidden size={14} />
-          </Button>
-        </Tooltip>
+            {t("workbench.session.unidentifiedShort")}
+          </AttentionBadge>
+        ) : null}
+        {modelEffort !== null && modelEffortNote !== undefined ? (
+          <span
+            className="flex shrink-0 items-center gap-0.5"
+            data-testid="workbench-model-effort-pending"
+            data-reason={modelEffort.reason}
+          >
+            <AttentionBadge tone="warning" hint={modelEffortNote}>
+              {t("workbench.window.modelEffort.badge")}
+            </AttentionBadge>
+            {modelEffort.reason === "confirm" ? (
+              <AttentionBadge
+                tone="warning"
+                testId="workbench-model-effort-confirm"
+                onClick={() => {
+                  modelEffortConfirmRef.current = true;
+                  setSensitiveOpen(true);
+                }}
+              >
+                {t("workbench.window.modelEffort.confirmAgain")}
+              </AttentionBadge>
+            ) : null}
+          </span>
+        ) : null}
+        {isCli && window.managerGrantPending === true ? (
+          <AttentionBadge tone="warning" testId="workbench-manager-grant-pending">
+            {t("workbench.role.grantPending")}
+          </AttentionBadge>
+        ) : null}
+        {isCli && window.permissionNeedsDowngrade === true ? (
+          <AttentionBadge tone="warning">{t("workbench.permission.needsRestart")}</AttentionBadge>
+        ) : null}
+        {isCli ? <RoleBadge role={role} onChoose={chooseRole} /> : null}
+        <WindowMenu
+          window={window}
+          isCli={isCli}
+          permission={permission}
+          canGoOnline={isCli && (role === "supervisor" || role === "manager")}
+          online={online}
+          showCompact={isCli && role === "manager" && window.kind !== "cursor"}
+          onResumeCurrent={() => {
+            queueConversationPlan(
+              planConversationLaunch({
+                action: "resume-current",
+                ...(window.nativeSessionId !== undefined
+                  ? { currentId: window.nativeSessionId }
+                  : {}),
+                unidentified: window.sessionUnidentified === true,
+              }),
+            );
+          }}
+          onFresh={() => {
+            queueConversationPlan({ kind: "fresh" });
+          }}
+          onPickHistory={(historyId) => {
+            queueConversationPlan(
+              planConversationLaunch({
+                action: "resume-history",
+                historyId,
+              }),
+            );
+          }}
+          onEditPermission={() => {
+            setPendingPermission(permission);
+            setYoloConfirm(false);
+            setEditingPermission(true);
+          }}
+          onToggleOnline={() => {
+            const next = !online;
+            void invokeQuery("workbench:set-online", {
+              windowId: window.id,
+              online: next,
+            }).then((settled) => {
+              if (settled.status === "error") {
+                toast.error(settled.error.message);
+                return;
+              }
+              toast.message(t(next ? "workbench.online.started" : "workbench.online.stopped"));
+            });
+          }}
+          onCompactUnspecified={(unspecified) => {
+            patchWindow(window.projectId, window.id, {
+              compactPercent: unspecified
+                ? null
+                : (window.compactPercent ?? MANAGER_COMPACT_PERCENT_WHEN_ENABLED),
+            });
+            void flushWorkbenchLayouts();
+          }}
+          onCompactPercent={(percent) => {
+            patchWindow(window.projectId, window.id, { compactPercent: percent });
+          }}
+          onCompactCommit={() => {
+            void flushWorkbenchLayouts();
+          }}
+          onAddWindow={onAddWindow}
+        />
         <Tooltip
           content={maximized ? t("workbench.window.restore") : t("workbench.window.maximize")}
         >
@@ -668,70 +585,6 @@ export function WindowPane({
           </Button>
         </Tooltip>
       </div>
-      {isCli && role === "manager" && window.kind !== "cursor" ? (
-        <div
-          className="flex shrink-0 items-center gap-x-2 overflow-hidden whitespace-nowrap border-b border-border bg-surface-sunken px-2 py-1"
-          data-testid="workbench-compact-slider"
-          data-compact={window.compactPercent ?? "default"}
-        >
-          <span className="text-2xs text-fg">{t("workbench.window.compact.label")}</span>
-          <label className="flex items-center gap-1 text-2xs text-fg-muted">
-            <input
-              type="checkbox"
-              data-testid="workbench-compact-unspecified"
-              checked={window.compactPercent === undefined}
-              onChange={(event) => {
-                patchWindow(window.projectId, window.id, {
-                  compactPercent: event.target.checked
-                    ? null
-                    : (window.compactPercent ?? MANAGER_COMPACT_PERCENT_WHEN_ENABLED),
-                });
-                void flushWorkbenchLayouts();
-              }}
-            />
-            {t("workbench.window.compact.unspecified")}
-          </label>
-          <input
-            type="range"
-            min={MIN_MANAGER_COMPACT_PERCENT}
-            max={MAX_MANAGER_COMPACT_PERCENT}
-            step={1}
-            disabled={window.compactPercent === undefined}
-            value={window.compactPercent ?? MIN_MANAGER_COMPACT_PERCENT}
-            data-testid="workbench-compact-range"
-            aria-label={t("workbench.window.compact.label")}
-            onChange={(event) => {
-              const parsed = parseManagerCompactPercent(Number(event.target.value));
-              if (parsed === undefined) {
-                return;
-              }
-              patchWindow(window.projectId, window.id, { compactPercent: parsed });
-            }}
-            onPointerUp={() => {
-              void flushWorkbenchLayouts();
-            }}
-            onKeyUp={() => {
-              void flushWorkbenchLayouts();
-            }}
-            onBlur={() => {
-              void flushWorkbenchLayouts();
-            }}
-          />
-          {window.compactPercent !== undefined ? (
-            <span className="text-2xs text-fg" data-testid="workbench-compact-value">
-              {t("workbench.window.compact.percent", { percent: window.compactPercent })}
-            </span>
-          ) : null}
-          <span
-            className="min-w-0 truncate text-2xs text-fg-muted"
-            title={`${t("workbench.window.compact.reopen")} ${t("workbench.window.compact.notLater")} ${t("workbench.window.compact.notStatus")}`}
-          >
-            {t("workbench.window.compact.reopen")} {t("workbench.window.compact.notLater")}{" "}
-            {t("workbench.window.compact.notStatus")}
-            {window.kind === "grok" ? ` ${t("workbench.window.compact.grokCap")}` : ""}
-          </span>
-        </div>
-      ) : null}
       {editingPermission ? (
         <div
           className="flex flex-wrap items-center gap-2 border-b border-border bg-surface-sunken px-2 py-1.5"
@@ -804,89 +657,6 @@ export function WindowPane({
           </Button>
         </div>
       ) : null}
-      {isCli ? (
-        <div
-          className="flex shrink-0 items-center gap-2 overflow-hidden whitespace-nowrap border-b border-border px-2 py-1 text-2xs"
-          data-testid="workbench-session-bar"
-        >
-          {window.sessionUnidentified === true ? (
-            <span data-testid="workbench-session-unidentified" className="text-warning-text">
-              {t("workbench.session.unidentified")}
-            </span>
-          ) : window.nativeSessionId !== undefined ? (
-            <button
-              type="button"
-              className="font-mono text-fg"
-              data-testid="workbench-session-id"
-              title={window.nativeSessionId}
-              onClick={() => {
-                const id = window.nativeSessionId;
-                if (id !== undefined) {
-                  void navigator.clipboard.writeText(id);
-                }
-              }}
-            >
-              {shortSessionId(window.nativeSessionId)}
-            </button>
-          ) : (
-            <span data-testid="workbench-session-pending" className="text-fg-muted">
-              {t("workbench.session.pending")}
-            </span>
-          )}
-          <button
-            type="button"
-            className="rounded-sm px-1 py-0.5 text-fg"
-            data-testid="workbench-session-resume"
-            onClick={() => {
-              queueConversationPlan(
-                planConversationLaunch({
-                  action: "resume-current",
-                  ...(window.nativeSessionId !== undefined
-                    ? { currentId: window.nativeSessionId }
-                    : {}),
-                  unidentified: window.sessionUnidentified === true,
-                }),
-              );
-            }}
-          >
-            {t("workbench.session.resumeCurrent")}
-          </button>
-          <button
-            type="button"
-            className="rounded-sm px-1 py-0.5 text-fg"
-            data-testid="workbench-session-fresh"
-            onClick={() => {
-              queueConversationPlan({ kind: "fresh" });
-            }}
-          >
-            {t("workbench.session.fresh")}
-          </button>
-          <select
-            className="rounded-sm border border-border bg-surface px-1 py-0.5"
-            data-testid="workbench-session-history"
-            value=""
-            onChange={(event) => {
-              const historyId = event.target.value;
-              if (historyId === "") {
-                return;
-              }
-              queueConversationPlan(
-                planConversationLaunch({
-                  action: "resume-history",
-                  historyId,
-                }),
-              );
-            }}
-          >
-            <option value="">{t("workbench.session.pickHistory")}</option>
-            {(window.conversations ?? []).map((item) => (
-              <option key={item.id} value={item.id}>
-                {shortSessionId(item.id)}
-              </option>
-            ))}
-          </select>
-        </div>
-      ) : null}
       {/* 提示条浮在终端上沿，不占高度：它们随投递排队时有时无，挤占高度会让终端改行数、CLI 整屏重画 */}
       <div className="relative flex min-h-0 flex-1 flex-col">
         {teamPaused !== null && !teamPaused.dismissed ? (
@@ -914,18 +684,6 @@ export function WindowPane({
           </div>
         ) : null}
         <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-col">
-          {manualTurnSignal ? (
-            <div
-              className="pointer-events-auto border-b border-border bg-warning-surface px-2 py-1 text-2xs text-warning-text"
-              data-testid="workbench-manual-turn-signal"
-            >
-              {window.kind === "grok"
-                ? t("workbench.deliver.grokManual")
-                : window.kind === "cursor"
-                  ? t("workbench.deliver.cursorManual")
-                  : t("workbench.deliver.noNode")}
-            </div>
-          ) : null}
           {deliverPending.count > 0 && deliverPending.mode !== "clear" ? (
             <div
               className="pointer-events-auto flex flex-wrap items-center gap-2 border-b border-border bg-warning-surface px-2 py-1 text-2xs text-warning-text"
@@ -934,7 +692,17 @@ export function WindowPane({
             >
               <span>{t("workbench.deliver.pending", { count: deliverPending.count })}</span>
               {deliverPending.mode === "manual" ? (
-                <>
+                <Tooltip
+                  content={
+                    window.kind === "codex" ? (
+                      <span data-testid="workbench-codex-manual-hint">
+                        {t("workbench.deliver.codexManualHint")}
+                      </span>
+                    ) : (
+                      t("workbench.deliver.send")
+                    )
+                  }
+                >
                   <button
                     type="button"
                     className="rounded-sm bg-primary px-1.5 py-0.5 text-primary-fg"
@@ -955,41 +723,45 @@ export function WindowPane({
                   >
                     {t("workbench.deliver.send")}
                   </button>
-                  {window.kind === "codex" ? (
-                    <span data-testid="workbench-codex-manual-hint">
-                      {t("workbench.deliver.codexManualHint")}
-                    </span>
-                  ) : null}
-                </>
+                </Tooltip>
               ) : (
-                <>
+                <Tooltip
+                  content={
+                    deliverPending.mode === "blocked" ? (
+                      <span className="flex flex-col gap-0.5">
+                        <span>{t("workbench.deliver.blocked")}</span>
+                        <span data-testid="workbench-deliver-permission-hold">
+                          {t("workbench.deliver.permissionHold")}
+                        </span>
+                      </span>
+                    ) : deliverPending.mode === "draft" ? (
+                      t("workbench.deliver.draft")
+                    ) : (
+                      t("workbench.deliver.busy")
+                    )
+                  }
+                >
                   <span data-testid="workbench-deliver-blocked">
                     {deliverPending.mode === "blocked"
-                      ? t("workbench.deliver.blocked")
+                      ? t("workbench.deliver.blockedShort")
                       : deliverPending.mode === "draft"
-                        ? t("workbench.deliver.draft")
-                        : t("workbench.deliver.busy")}
+                        ? t("workbench.deliver.draftShort")
+                        : t("workbench.deliver.busyShort")}
                   </span>
-                  {deliverPending.mode === "blocked" ? (
-                    <span data-testid="workbench-deliver-permission-hold">
-                      {t("workbench.deliver.permissionHold")}
-                    </span>
-                  ) : null}
-                </>
+                </Tooltip>
               )}
-              <button
-                type="button"
-                className="rounded-sm px-1.5 py-0.5 text-fg"
-                data-testid="workbench-deliver-cancel"
-                onClick={() => {
-                  void invokeQuery("workbench:deliver-cancel", { windowId: window.id });
-                }}
-              >
-                {t("workbench.deliver.cancel")}
-              </button>
-              <span className="text-fg-muted" data-testid="workbench-deliver-cancel-hint">
-                {t("workbench.deliver.cancelHint")}
-              </span>
+              <Tooltip content={t("workbench.deliver.cancelHint")}>
+                <button
+                  type="button"
+                  className="rounded-sm px-1.5 py-0.5 text-fg"
+                  data-testid="workbench-deliver-cancel"
+                  onClick={() => {
+                    void invokeQuery("workbench:deliver-cancel", { windowId: window.id });
+                  }}
+                >
+                  {t("workbench.deliver.cancel")}
+                </button>
+              </Tooltip>
             </div>
           ) : null}
         </div>
@@ -1117,5 +889,74 @@ export function WindowPane({
         }}
       />
     </section>
+  );
+}
+
+const ROLE_BADGE_CLASS: Record<WorkbenchRole, string> = {
+  manager: "bg-primary text-primary-fg",
+  planner: "bg-primary-surface text-primary-text",
+  worker: "bg-warning-surface text-warning-text",
+  reviewer: "bg-success-surface text-success-text",
+  supervisor: "bg-status-pending-surface text-status-pending-text",
+  researcher: "bg-surface-active text-fg-muted",
+  none: "bg-surface-active text-fg-muted",
+};
+
+/** 角色只留一个字的小标（管 / 监 / 执…），全名在提示里；点开或右键换角色。 */
+function RoleBadge({
+  role,
+  onChoose,
+}: {
+  readonly role: WorkbenchRole;
+  readonly onChoose: (role: WorkbenchRole) => void;
+}): ReactElement {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  return (
+    <PopoverPrimitive.Root open={open} onOpenChange={setOpen}>
+      <Tooltip content={`${t(`workbench.role.level.${role}`)} · ${t("workbench.role.badgeHint")}`}>
+        <PopoverPrimitive.Trigger asChild>
+          <button
+            type="button"
+            className={cn(
+              "shrink-0 rounded-sm px-1 text-2xs font-medium leading-4",
+              ROLE_BADGE_CLASS[role],
+            )}
+            data-testid="workbench-role-badge"
+            data-role={role}
+            aria-label={t(`workbench.role.level.${role}`)}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              setOpen(true);
+            }}
+          >
+            {t(`workbench.role.short.${role}`)}
+          </button>
+        </PopoverPrimitive.Trigger>
+      </Tooltip>
+      <PopoverPrimitive.Portal>
+        <PopoverPrimitive.Content
+          align="end"
+          sideOffset={4}
+          className="z-50 flex min-w-24 flex-col rounded-md border border-border bg-surface-raised p-1 shadow-raised"
+          data-testid="workbench-role-menu"
+        >
+          {WORKBENCH_ROLES.map((item) => (
+            <button
+              key={item}
+              type="button"
+              className="rounded-sm px-2 py-1 text-left text-xs text-fg hover:bg-surface-hover"
+              data-testid={`workbench-role-option-${item}`}
+              onClick={() => {
+                setOpen(false);
+                onChoose(item);
+              }}
+            >
+              {t(`workbench.role.level.${item}`)}
+            </button>
+          ))}
+        </PopoverPrimitive.Content>
+      </PopoverPrimitive.Portal>
+    </PopoverPrimitive.Root>
   );
 }

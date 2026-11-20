@@ -13,6 +13,7 @@ import type {
 import {
   DEFAULT_WORKBENCH_ROLE,
   DEFAULT_WORKBENCH_WINDOW_PERMISSION,
+  effectiveCursorDefaultModel,
   isAiWorkbenchKind,
   projectConfigRoute,
   selectEffectiveProjectConfig,
@@ -22,6 +23,8 @@ import {
 import { type ReactElement, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+import type { CursorAccountStatus } from "../../../../shared-ipc/contracts";
+import { CursorAccountPanel } from "../../components/cursor/CursorAccountPanel";
 import { Button } from "../../components/ui/Button";
 import {
   Dialog,
@@ -63,6 +66,10 @@ export function NewWindowDialog({
   const { state: configState } = useInvokeQuery("config:get");
   const globalPermission =
     queryData(configState)?.defaultWorkbenchPermission ?? DEFAULT_WORKBENCH_WINDOW_PERMISSION;
+  const cursorDefaultModel = effectiveCursorDefaultModel(
+    queryData(configState)?.cursorDefaultModel,
+  );
+  const [cursorStatus, setCursorStatus] = useState<CursorAccountStatus | undefined>(undefined);
 
   const [kind, setKind] = useState<NewWindowKindChoice>("shell");
   const [initialPrompt, setInitialPrompt] = useState("");
@@ -149,11 +156,14 @@ export function NewWindowDialog({
     };
   }, [aiRuntime, open]);
 
+  // Cursor 没装就开不出来；没登录不拦（CLI 自己也会提示登录），面板上已标黄。
+  const cursorMissing = kind === "cursor" && cursorStatus?.installed === false;
   const canConfirm =
     kind === "shell" ||
     (!routeMissing &&
       !loadingConfig &&
       !cliMissing &&
+      !cursorMissing &&
       !probing &&
       (permission !== "yolo" || yoloConfirm));
 
@@ -204,9 +214,14 @@ export function NewWindowDialog({
             </p>
           ) : null}
           {kind === "cursor" ? (
-            <p className="text-sm text-fg-muted" data-testid="workbench-cursor-hint">
-              {t("workbench.newWindow.cursorHint")}
-            </p>
+            <CursorAccountPanel
+              model={route?.model?.trim() || cursorDefaultModel}
+              onStatus={setCursorStatus}
+              onGoSettings={() => {
+                onOpenChange(false);
+                navigate("/settings?group=models");
+              }}
+            />
           ) : null}
 
           {kind !== "shell" ? (

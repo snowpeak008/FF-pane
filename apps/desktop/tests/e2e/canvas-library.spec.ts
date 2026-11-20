@@ -261,7 +261,10 @@ test("画板图片走 ffpane-canvas://：缩略图、大图、带标记预览；
 
     // 关掉画板后 AI 往目录里存一张图：不弹画板，按钮上记一张待检查（T11.0c）。
     writeFileSync(join(canvasDir, "shot.png"), makePng(40, 20));
-    await expect(page.getByTestId("open-canvas")).toHaveText("Canvas · 1 to review");
+    await expect(page.getByTestId("open-canvas")).toHaveAttribute(
+      "aria-label",
+      "Canvas: 1 to review",
+    );
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await page.getByTestId("open-canvas").click();
     const shot = page.locator('button[title*="shot.png"]');
@@ -275,7 +278,7 @@ test("画板图片走 ffpane-canvas://：缩略图、大图、带标记预览；
     await expect(page.getByTestId("canvas-review-state")).toHaveText("Seen");
     await expect(shot.getByTestId("canvas-pending-dot")).toHaveCount(0);
     await page.keyboard.press("Escape");
-    await expect(page.getByTestId("open-canvas")).toHaveText("Open canvas");
+    await expect(page.getByTestId("open-canvas")).toHaveAttribute("aria-label", "Open canvas");
   } finally {
     await launched.cleanup();
     rmSync(projectDir, { recursive: true, force: true });

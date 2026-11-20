@@ -8,7 +8,7 @@
  * 忙或在等批准就排队，空闲后自动做。
  */
 
-import { isDescendantOf, type WorkbenchAuthNode } from "@ff-pane/core";
+import { canDelegate, isDescendantOf, type WorkbenchAuthNode } from "@ff-pane/core";
 import {
   normalizeReasoningEffort,
   type ReasoningEffortLevel,
@@ -19,7 +19,8 @@ import {
 import type { DeliverPhase } from "./idle-deliver";
 
 export const MODEL_EFFORT_AUTO_MESSAGE = "排队中：窗口在忙，空闲后自动重启生效";
-export const MODEL_EFFORT_CONFIRM_MESSAGE = "等用户确认：管理者或 yolo 窗口重启前要用户点确认";
+export const MODEL_EFFORT_CONFIRM_MESSAGE =
+  "等用户确认：管理者窗口、或权限比你高的窗口重启前要用户点确认";
 export const MODEL_EFFORT_DEFERRED_MESSAGE = "仅记录：现在没法让它生效，下次启动时生效";
 
 const DESCENDANT_ROLES: readonly WorkbenchRole[] = [
@@ -95,6 +96,37 @@ export function canSetModelEffort(input: {
       ok: false,
       error: "只能改自己，或自己后代里的写计划、执行、监管者、检查、普通窗口。",
     };
+  }
+  return { ok: true };
+}
+
+/**
+ * 管理者能不能自己重启 / 续接这个窗口，不等用户确认：自己后代里的非管理者窗口，权限不高于自己。
+ * 全放开的管理者开的全放开窗口也算——续接只接回原对话、权限不变，不是提权。
+ * 原来只放只读窗口，软件一重启，全放开的执行就停在那里等用户点续接，用户不知道就一直卡着。
+ */
+export function canManagerRelaunch(input: {
+  readonly callerId: string;
+  readonly callerGranted: boolean;
+  readonly targetId: string;
+  readonly tree: Readonly<Record<string, WorkbenchAuthNode>>;
+}): { readonly ok: true } | { readonly ok: false; readonly error: string } {
+  const caller = input.tree[input.callerId];
+  if (!input.callerGranted || caller?.role !== "manager") {
+    return { ok: false, error: "只有管理者能重启窗口。" };
+  }
+  const target = input.tree[input.targetId];
+  if (target === undefined) {
+    return { ok: false, error: "找不到这个窗口。" };
+  }
+  if (target.role === "manager") {
+    return { ok: false, error: "管理者窗口要用户在那个窗口续接。" };
+  }
+  if (!isDescendantOf(input.callerId, input.targetId, input.tree)) {
+    return { ok: false, error: "只能重启你自己开的窗口，或它们再开的窗口。" };
+  }
+  if (!canDelegate(caller.permission, target.permission)) {
+    return { ok: false, error: "它的权限比你高，要用户在那个窗口重启。" };
   }
   return { ok: true };
 }

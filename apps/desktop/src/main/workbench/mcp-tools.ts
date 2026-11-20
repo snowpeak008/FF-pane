@@ -320,7 +320,8 @@ export interface WorkbenchToolDeps {
   /** 窗口现在用的模型和强度。不在运行时只给记下的设置。 */
   readonly modelInfo?: (windowId: string) => Promise<WindowModelInfo | undefined>;
   /**
-   * 管理者重启自己开的只读窗口。能续接就续接，不能续接（或 fresh）就开新对话。
+   * 管理者重启自己后代里权限不高于它的窗口（全放开也算）。能续接就续接，停着的按记下的对话编号续接；
+   * 不能续接（或 fresh）就开新对话。
    * 授权在实现里做。
    */
   readonly restartWindow?: (input: {
@@ -354,6 +355,7 @@ export interface WorkbenchToolDeps {
   readonly closeSelfLater: (windowId: string) => void;
   /** 已授权：改后代权限、写回布局，并按空闲续接的规则重启。 */
   readonly setPermission: (input: {
+    readonly callerId: string;
     readonly windowId: string;
     readonly permission: WorkbenchPermissionLevel;
   }) => Promise<
@@ -1057,7 +1059,7 @@ async function setPermission(
         : "只能改自己后代窗口的权限。",
     );
   }
-  const applied = await deps.setPermission({ windowId: targetId, permission });
+  const applied = await deps.setPermission({ callerId: caller.id, windowId: targetId, permission });
   if (!applied.ok) {
     return fail(applied.error);
   }

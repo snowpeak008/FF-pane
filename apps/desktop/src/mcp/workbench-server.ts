@@ -15,6 +15,16 @@ import { WORKBENCH_MCP_SERVER_NAME, WORKBENCH_MCP_TOOLS } from "./workbench-tool
 
 const SERVER_VERSION = "1.0.0";
 const CALL_TIMEOUT_MS = 20_000;
+/**
+ * 要等窗口重启完的工具：主进程最多等 60 秒重启生效（改模型）或 20 秒看清屏幕上的模型（重启），
+ * 按 20 秒算总是先超时，管理者看到「控制通道超时」以为没做，再调一次又重启一遍。
+ */
+const RELAUNCH_CALL_TIMEOUT_MS = 90_000;
+const RELAUNCH_TOOLS: ReadonlySet<string> = new Set([
+  "ffpane_restart_window",
+  "ffpane_set_model_effort",
+  "ffpane_set_permission",
+]);
 
 export const WINDOW_TOKEN_LITERAL = `\${${FF_PANE_WINDOW_TOKEN_ENV}}`;
 export const PIPE_LITERAL = `\${${FF_PANE_WB_PIPE_ENV}}`;
@@ -107,7 +117,9 @@ export function createWorkbenchMcpOptions(
     const timeoutMs =
       name === "ffpane_wait_events"
         ? (clampWaitSeconds(args["timeoutSec"]) + 20) * 1000
-        : CALL_TIMEOUT_MS;
+        : RELAUNCH_TOOLS.has(name)
+          ? RELAUNCH_CALL_TIMEOUT_MS
+          : CALL_TIMEOUT_MS;
     return callControlTool(pipe, token, name, args, timeoutMs);
   },
 ): McpServerOptions {

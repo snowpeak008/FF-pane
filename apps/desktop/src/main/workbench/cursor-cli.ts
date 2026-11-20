@@ -256,35 +256,65 @@ export type CursorModelsResult =
       readonly detail: string;
     };
 
-/** 跑 `cursor-agent models` 列出这个账号能用的模型（设置页「列出模型」）。 */
-export async function listCursorModels(
-  env: NodeJS.ProcessEnv = process.env,
-  timeoutMs = 30_000,
-): Promise<CursorModelsResult> {
-  const target = resolveCursorCliTarget(env);
-  if (target === undefined) {
-    return { ok: false, error: "cli_missing", detail: "没找到 Cursor CLI（cursor-agent）。" };
-  }
+/** 一次 CLI 子命令的结果。没装、超时、出错都不抛。 */
+export type CursorCliRun =
+  | { readonly ok: true; readonly stdout: string; readonly stderr: string }
+  | {
+      readonly ok: false;
+      readonly error: "cli_missing" | "timeout" | "cli_error";
+      readonly stdout: string;
+      readonly detail: string;
+    };
+
+/** 子命令进程的环境：同 Cursor 窗口（去掉 Git Bash 变量、补系统代理），再叠上 extra。 */
+export function cursorCommandEnv(
+  env: NodeJS.ProcessEnv,
+  extra: Readonly<Record<string, string>> = {},
+): Record<string, string> {
   const stringEnv: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) {
     if (value !== undefined) {
       stringEnv[key] = value;
     }
   }
+  return Object.fromEntries(
+    Object.entries({
+      ...cursorProcessEnv(stringEnv, {}),
+      ...cursorProxyEnv(stringEnv),
+      ...extra,
+    }).filter((entry): entry is [string, string] => entry[1] !== undefined),
+  );
+}
+
+/** 直启跑一个 cursor-agent 子命令（`status`、`about`、`models`、`logout`、`update`）。 */
+export async function runCursorCli(
+  args: readonly string[],
+  options: {
+    readonly env?: NodeJS.ProcessEnv;
+    readonly timeoutMs?: number;
+    readonly target?: CursorCliTarget;
+  } = {},
+): Promise<CursorCliRun> {
+  const env = options.env ?? process.env;
+  const target = options.target ?? resolveCursorCliTarget(env);
+  if (target === undefined) {
+    return {
+      ok: false,
+      error: "cli_missing",
+      stdout: "",
+      detail: "没找到 Cursor CLI（cursor-agent）。",
+    };
+  }
   const { execFile } = await import("node:child_process");
-  return await new Promise<CursorModelsResult>((done) => {
+  return await new Promise<CursorCliRun>((done) => {
     execFile(
       target.nodeFile,
-      [target.indexJs, "models"],
+      [target.indexJs, ...args],
       {
-        env: Object.fromEntries(
-          Object.entries({
-            ...cursorProcessEnv(stringEnv, {}),
-            ...cursorProxyEnv(stringEnv),
-          }).filter(([, value]) => value !== undefined),
-        ),
-        timeout: timeoutMs,
+        env: cursorCommandEnv(env),
+        timeout: options.timeoutMs ?? 30_000,
         windowsHide: true,
+        maxBuffer: 4 * 1024 * 1024,
       },
       (error, stdout, stderr) => {
         if (error !== null) {
@@ -292,21 +322,36 @@ export async function listCursorModels(
           done({
             ok: false,
             error: killed ? "timeout" : "cli_error",
-            detail: `${String(stderr || stdout || error.message)
+            stdout: String(stdout),
+            detail: stripAnsi(String(stderr || stdout || error.message))
               .trim()
-              .slice(0, 300)}`,
+              .slice(0, 600),
           });
           return;
         }
-        const models = parseCursorModels(String(stdout));
-        done(
-          models.length > 0
-            ? { ok: true, models, detail: "cursor-agent models" }
-            : { ok: false, error: "parse_error", detail: String(stdout).trim().slice(0, 300) },
-        );
+        done({ ok: true, stdout: String(stdout), stderr: String(stderr) });
       },
     );
   });
+}
+
+/** 跑 `cursor-agent models` 列出这个账号能用的模型（设置页「列出模型」）。 */
+export async function listCursorModels(
+  env: NodeJS.ProcessEnv = process.env,
+  timeoutMs = 30_000,
+): Promise<CursorModelsResult> {
+  const run = await runCursorCli(["models"], { env, timeoutMs });
+  if (!run.ok) {
+    return {
+      ok: false,
+      error: run.error,
+      detail: run.detail.slice(0, 300),
+    };
+  }
+  const models = parseCursorModels(run.stdout);
+  return models.length > 0
+    ? { ok: true, models, detail: "cursor-agent models" }
+    : { ok: false, error: "parse_error", detail: run.stdout.trim().slice(0, 300) };
 }
 
 /**

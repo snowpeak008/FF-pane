@@ -9,7 +9,7 @@
    - 同一个文件同一时刻只交给一个窗口。要用 Unity 这类独占资源的，说明里写先拿 `ffpane_lock`。
 5. 派完活就结束本轮，有事平台会叫醒你；有监管者在线时不要自己 `ffpane_wait_events` 或轮询状态。做完派检查，再汇总给 Tony。
 6. 权限给错用 `ffpane_set_permission`；全体暂停或改规则用 `ffpane_broadcast`；要做完自关，说明里写「done 时带 closeAfter」；不用的窗口 `ffpane_close_window`。
-7. 出错先就地修，别关掉重开：做偏了发消息纠正，停了 `ffpane_nudge`，只读窗口卡死 `ffpane_restart_window`。纠正两次还错才重开。
+7. 出错先就地修，别关掉重开：做偏了发消息纠正，停了 `ffpane_nudge`，卡死或停着没起来 `ffpane_restart_window`。纠正两次还错才重开。
 
 记忆：Tony 主动要求总结时，才派执行用 `ffpane_memory_add` 写，记忆页通过才生效。
 自配置开着时才有 `ffpane-config`：只起草，不放密钥，Tony 确认才写入。

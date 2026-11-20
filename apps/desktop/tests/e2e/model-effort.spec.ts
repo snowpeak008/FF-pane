@@ -8,6 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import { e2eTempDir, gotoRoute, type LaunchedApp, launchApp, removeE2eTempDirs } from "./_launch";
+import { windowDetails } from "./_workbench-ui";
 
 test.afterEach(removeE2eTempDirs);
 
@@ -103,9 +104,10 @@ test("管理者改工作者强度：忙时排队，空闲后平台自己续接�
     await expect
       .poll(async () => readReplayForWindow(page, managerId), { timeout: 90_000 })
       .toContain("FFPANE_MCP_EFFORT=");
-    // 子窗口打出标记时 Stop 还没到，仍算忙：工具说排队中，空闲后由平台自己续接。
+    // 子窗口忙就排队、空闲后由平台自己续接；已经空闲就当场续接，等重启完返回已生效。
+    // 以前这里总是「排队中」，其实是控制通道 20 秒就超时：第一次调用被截断，脚本重试时撞上正在进行的重启（1.0.34 放宽到 90 秒）。
     const managerReplay = await readReplayForWindow(page, managerId);
-    expect(managerReplay).toContain("排队中");
+    expect(managerReplay).toMatch(/排队中|已生效/);
 
     const child = page.getByTestId("workbench-window").filter({ hasText: "强度工" });
     await expect(child).toBeVisible();
@@ -117,7 +119,9 @@ test("管理者改工作者强度：忙时排队，空闲后平台自己续接�
     const replay = await readReplayForWindow(page, childId ?? "");
     expect(replay).toContain("--effort");
     expect(replay).toContain("high");
-    await expect(child.getByTestId("workbench-window-route")).toContainText("high");
+    await expect(
+      (await windowDetails(page, child)).getByTestId("workbench-window-route"),
+    ).toContainText("high");
   } finally {
     await launched.cleanup();
   }
@@ -151,7 +155,11 @@ test("改管理者自己时先确认，点确认后才续接", async () => {
     const replay = await readReplayForWindow(page, managerId);
     expect(replay).toContain("--effort");
     expect(replay).toContain("low");
-    await expect(page.getByTestId("workbench-window-route")).toContainText("low");
+    await expect(
+      (await windowDetails(page, page.locator(`[data-window-id="${managerId}"]`))).getByTestId(
+        "workbench-window-route",
+      ),
+    ).toContainText("low");
   } finally {
     await launched.cleanup();
   }
@@ -252,7 +260,9 @@ test("窗口不在当前标签页时，改强度也由平台重启生效，切�
     const back = page.getByTestId("workbench-window").filter({ hasText: "强度工" });
     await expect(back).toBeVisible();
     await expect(back.getByTestId("terminal-cli-stopped")).toHaveCount(0);
-    await expect(back.getByTestId("workbench-window-route")).toContainText("high");
+    await expect(
+      (await windowDetails(page, back)).getByTestId("workbench-window-route"),
+    ).toContainText("high");
   } finally {
     await launched.cleanup();
   }

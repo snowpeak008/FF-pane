@@ -6,6 +6,7 @@ import { CANVAS_IMAGE_SCHEME } from "../shared/canvas-image-url";
 import { publishEvent, registerInvokeHandlers } from "../shared-ipc/server";
 import { installAppMenu, resolveAppMenuLanguage } from "./app-menu";
 import { installCsp } from "./csp";
+import { createCursorAccountHandlers } from "./cursor-account";
 import { createDataHandlers } from "./data";
 import { resolveGlobalRoot } from "./data-root";
 import {
@@ -292,6 +293,12 @@ async function bootstrap(): Promise<void> {
   // 退出钩子（T8.2b / T8.5c / T10.2'）：flush 布局 → 在飞收尾 → 关 opencode server。
   const quitCoordinator = createQuitCoordinator(quitDeps);
   app.on("before-quit", (event) => quitCoordinator.onBeforeQuit(event));
+
+  // Cursor 账号管理（T11.18）：设置里看状态、软件里登录 / 退出 / 更新 / 安装。
+  registerInvokeHandlers(
+    ipcMain,
+    createCursorAccountHandlers(() => mainWindow),
+  );
 
   // 知识库层接线（T6.5）：索引库连接 + sqlite-vec 装载 + 导入编排。
   // 独立 try：装配失败（索引库损坏等）只让知识库页不可用，不牵连数据层与会话层。

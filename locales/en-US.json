@@ -267,13 +267,15 @@
       "pending": "Recognizing session id",
       "resumeCurrent": "Resume current conversation",
       "fresh": "New conversation",
-      "pickHistory": "Resume from history"
+      "pickHistory": "Resume from history",
+      "copyId": "Copy session ID {{id}}",
+      "unidentifiedShort": "ID?"
     },
     "terminal": {
       "exited": "Exited (code {{code}})",
       "restart": "Restart",
       "resume": "Resume last session",
-      "resumePickerHint": "Session id was not recognized. A picker is open. Choose the conversation in the terminal. The latest one is not resumed automatically.",
+      "resumePickerHint": "Pick the conversation to resume in the terminal.",
       "restartFresh": "Start fresh",
       "platformRestarting": "The platform is restarting this window. It reconnects automatically.",
       "convertToShell": "Convert to PowerShell",
@@ -291,7 +293,7 @@
       "kindDeepseek": "DeepSeek",
       "kindCursor": "Cursor",
       "deepseekHint": "The window shows Claude's interface. The model is DeepSeek. Choose the DeepSeek route first, then fill in the API key and model.",
-      "cursorHint": "Runs the Cursor CLI with the account you signed in to with cursor-agent login. Adds a few FF-pane hooks to the project's .cursor/hooks.json (your own entries are kept).",
+      "cursorHint": "Adds a few FF-pane hooks to the project's .cursor/hooks.json (your own entries are kept).",
       "profile": "Launch profile",
       "permission": "Permission level",
       "role": "Role",
@@ -366,7 +368,8 @@
       "needsRestart": "Restart required",
       "capped": "Capped to {{level}} by parent ceiling",
       "apply": "Apply",
-      "applyAndRestart": "Apply and restart"
+      "applyAndRestart": "Apply and restart",
+      "menuItem": "Access: {{level}}"
     },
     "role": {
       "level": {
@@ -383,7 +386,16 @@
       "rejected": "This window cannot be given that role",
       "dropped": "The window had exited, so the role note was not written. The next launch injects it",
       "grantPending": "Manager authority not restored",
-      "restartForSubagents": "The new role changes whether this window can open sub-agents (only plain windows can). It will restart with its conversation to apply this; if busy it waits until idle."
+      "restartForSubagents": "The new role changes whether this window can open sub-agents (only plain windows can). It will restart with its conversation to apply this; if busy it waits until idle.",
+      "short": {
+        "manager": "Mgr",
+        "planner": "Plan",
+        "worker": "Work",
+        "reviewer": "Rev",
+        "supervisor": "Sup",
+        "researcher": "Res",
+        "none": "—"
+      }
     },
     "resumeConfirm": {
       "title": "Start this window?",
@@ -451,8 +463,8 @@
       "prevImage": "← Previous",
       "nextImage": "Next →",
       "unplaceRow": "Back to auto layout",
-      "openWithPending": "Canvas · {{count}} to review",
-      "selectHint": "Click an image to select it: open large, mark seen, mark unwanted, delete. Double-click to open large. Scroll to zoom, drag empty space to pan, drag an image to move it."
+      "selectHint": "Click an image to select it: open large, mark seen, mark unwanted, delete. Double-click to open large. Scroll to zoom, drag empty space to pan, drag an image to move it.",
+      "pendingHint": "Canvas: {{count}} to review"
     },
     "drawer": {
       "noProject": "Choose a project before opening the workbench panel.",
@@ -508,7 +520,11 @@
       "noNode": "No node.exe is available, so turn-complete signals cannot arrive. Use Send now for anything waiting.",
       "grokManual": "This Grok window has no turn-ended signal. The hook program path cannot contain spaces. Use Send now for anything waiting. The app will not type into the terminal just because time passed.",
       "cursorManual": "Cursor's turn signals could not be installed this time (the project's .cursor/hooks.json could not be read, or a path has special characters). Click Send now when something is waiting.",
-      "codexManualHint": "Send now writes the queued text and one Enter into this terminal. Codex gets no permission signal before the first turn ends. If a confirmation is already on screen, do not press this button."
+      "codexManualHint": "Send now writes the queued text and one Enter into this terminal. Codex gets no permission signal before the first turn ends. If a confirmation is already on screen, do not press this button.",
+      "manualBadge": "Manual",
+      "blockedShort": "Waiting for approval",
+      "draftShort": "Draft in input",
+      "busyShort": "Turn running"
     },
     "inbox": {
       "unread": "{{count}} unread",
@@ -565,7 +581,8 @@
           "not-running": "applies on the next manual restart",
           "no-session": "cannot resume yet; applies on the next manual restart",
           "failed": "resume failed"
-        }
+        },
+        "badge": "Pending"
       },
       "compact": {
         "label": "It summarizes itself once usage reaches this share",
@@ -574,12 +591,28 @@
         "notLater": "It cannot wait longer than it already does.",
         "notStatus": "This is the command line's own summary, not the supervisor's four-line status.",
         "grokCap": "Grok already summarizes around 85%. A higher slider still sends 85% for this process, so it does not wait longer.",
-        "percent": "{{percent}}%"
+        "percent": "{{percent}}%",
+        "menuLabel": "Auto compact"
       },
       "teamPaused": {
         "title": "The team is paused until you wake the manager",
         "body": "The manager has stopped and no supervisor is online. Reports and status updates are kept in .ffpane/briefs/待处理-<manager id>.md. Send the manager a message in this window; it reads the pending page first.",
         "dismiss": "Got it"
+      },
+      "menu": "More actions",
+      "details": {
+        "kind": "Kind",
+        "role": "Role",
+        "permission": "Access",
+        "openedBy": "Opened",
+        "route": "Route",
+        "pending": "Pending",
+        "skills": "Skills",
+        "session": "Session",
+        "report": "Report",
+        "memory": "Memory",
+        "locks": "Locks",
+        "error": "Error"
       }
     },
     "limit": {
@@ -600,7 +633,11 @@
       "low": "Resources low; new windows will be refused",
       "sep": ", ",
       "memory": "{{memory}} GB · {{count}} processes",
-      "online": "Online"
+      "online": "Online",
+      "dot": " · ",
+      "quietShort": "Quiet {{minutes}}m",
+      "pausedShort": "Paused",
+      "errorShort": "Error"
     },
     "decision": {
       "title": "Waiting for your decision ({{count}})",
@@ -655,17 +692,6 @@
       "outsideDirsLabel": "Writable folders outside the project",
       "outsideDirsPlaceholder": "One per line, e.g. D:\\WorkWork\\shared-assets",
       "outsideDirsHint": "AI windows can only write inside the project and the temp folder, plus the folders listed here. Only you can change this; reopen windows for it to take effect.",
-      "plan": "Plan v{{n}} · {{status}}",
-      "noPlan": "No plan yet",
-      "activeTasks": "{{n}} in progress",
-      "taskTotal": "{{n}} tasks in total (including accepted and cancelled)",
-      "lastActivity": "Last activity {{time}} · {{source}}",
-      "noActivity": "No activity yet",
-      "activitySource": {
-        "plan": "plan",
-        "run": "runs",
-        "session": "session"
-      },
       "workbenchMissing": "Cannot read .workbench/ — details unavailable",
       "partial": "Some details failed to load: {{parts}}",
       "partSeparator": ", ",
@@ -1467,12 +1493,63 @@
     "projects": "Project switcher",
     "collapse": "Collapse secondary panel",
     "expand": "Expand secondary panel",
-    "settled": {
-      "done": "A task is done (unread)",
-      "failed": "A task failed (unread)",
-      "blocked": "A task is blocked (unread)"
-    },
     "switchTo": "Switch to project: {{name}}",
     "windowCount": "{{count}} running window(s)"
+  },
+  "cursor": {
+    "title": "Cursor",
+    "intro": "Cursor windows opened by FF-pane use the account signed in here. Sign in, switch accounts and pick a model here — no terminal commands needed.",
+    "refresh": "Refresh status",
+    "switch": "Switch account",
+    "update": "Update to latest",
+    "goInstall": "Install in Settings",
+    "status": {
+      "missing": "Cursor CLI not found",
+      "unknown": "Couldn't read sign-in status",
+      "loggedOut": "Not signed in to Cursor",
+      "loggedIn": "Signed in as {{who}}",
+      "loggedInTier": "Signed in as {{who}} ({{tier}})",
+      "tierFree": "Free",
+      "version": "CLI {{version}}",
+      "updateAvailable": "{{version}} available"
+    },
+    "login": {
+      "action": "Sign in",
+      "here": "Sign in to Cursor here",
+      "starting": "Starting sign-in…",
+      "waiting": "Sign in to Cursor in your browser. This updates by itself when you're done.",
+      "switchHint": "If the browser is still signed in to another account, sign out on the Cursor website first or pick another account.",
+      "open": "Open browser",
+      "copy": "Copy link",
+      "copied": "Sign-in link copied",
+      "cancel": "Cancel",
+      "cancelled": "Sign-in cancelled",
+      "done": "Signed in as {{email}}",
+      "failed": "Sign-in failed:",
+      "retry": "Retry"
+    },
+    "logout": {
+      "action": "Sign out",
+      "confirmTitle": "Open Cursor windows keep the old account",
+      "runningBody": "{{count}} open Cursor window(s) keep using the old account until reopened. Continue?"
+    },
+    "install": {
+      "action": "Install Cursor CLI",
+      "confirmTitle": "Install Cursor CLI?",
+      "confirmBody": "Runs the official install command irm 'https://cursor.com/install?win32=true' | iex in PowerShell (downloads and runs the install script from cursor.com) into %LOCALAPPDATA%\\cursor-agent. Takes a minute or two."
+    },
+    "command": {
+      "ok": "Done.",
+      "failed": "Failed."
+    },
+    "model": {
+      "label": "Default model",
+      "hint": "Cursor windows opened by FF-pane use this model; a model set for Cursor in the project config wins. Cursor's own settings are not changed.",
+      "freeHint": "The Free plan only allows Auto and a few models; picking one it can't use makes the window report \"Model unavailable on Free\".",
+      "auto": "Auto (recommended)",
+      "list": "List models",
+      "saveError": "Couldn't save the default model",
+      "using": "model {{model}}"
+    }
   }
 }

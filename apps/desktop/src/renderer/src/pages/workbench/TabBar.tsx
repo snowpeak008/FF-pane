@@ -6,10 +6,10 @@
  */
 
 import type { WorkbenchTab } from "@ff-pane/shared";
-import { Plus, SquarePlus, X } from "lucide-react";
+import { Plus, SquarePlus, Users, X } from "lucide-react";
 import { type ReactElement, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { WindowDropTarget } from "../../../../shared/workbench/grid";
+import { tabDisplayTitle, type WindowDropTarget } from "../../../../shared/workbench/grid";
 import { Button } from "../../components/ui/Button";
 import { cn } from "../../lib/cn";
 
@@ -97,6 +97,9 @@ export function TabBar({
                   "bg-primary-surface ring-2 ring-primary ring-inset",
               )}
             >
+              {tab.teamOf !== undefined ? (
+                <Users aria-hidden size={13} className="shrink-0 text-fg-muted" />
+              ) : null}
               <button
                 type="button"
                 className="h-full min-w-0 flex-1 truncate text-left text-sm"
@@ -108,7 +111,7 @@ export function TabBar({
                   setEditingId(tab.id);
                 }}
               >
-                {tab.title}
+                {tabDisplayTitle(tab)}
               </button>
               <button
                 type="button"
@@ -117,6 +120,7 @@ export function TabBar({
                   active ? "opacity-100" : "opacity-0 group-hover:opacity-100",
                 )}
                 aria-label={t("workbench.tab.close")}
+                title={t("workbench.tab.close")}
                 onClick={() => onClose(tab.id)}
               >
                 <X aria-hidden size={14} />

@@ -17,6 +17,7 @@ import {
   DEFAULT_CONFIG_TOOL_SERVER_NAME,
   DEFAULT_WORKBENCH_ROLE,
   DEFAULT_WORKBENCH_WINDOW_PERMISSION,
+  effectiveCursorDefaultModel,
   isAiWorkbenchKind,
   isWorkbenchPermissionLevel,
   isWorkbenchRole,
@@ -132,6 +133,7 @@ import {
   type WorkbenchToolDeps,
 } from "./mcp-tools";
 import {
+  canManagerRelaunch,
   canSetModelEffort,
   createModelEffortController,
   type ModelEffortApplyMode,
@@ -277,6 +279,9 @@ export async function createWorkbenchCliLayer(
   const projectConfigs = createProjectConfigStore(layout.configsFile);
   const providers = createProviderStore(layout.providersFile);
   const config = createConfigStore(layout.configFile);
+  /** 设置里的 Cursor 默认模型（T11.18），没设是 auto。 */
+  const cursorDefaultModel = async (): Promise<string> =>
+    effectiveCursorDefaultModel((await config.readConfig()).cursorDefaultModel);
   const secrets = createSecretStore({
     backend: createSafeStorageBackend(),
     secretsFile: resolveSecretsFile(layout.rootDir),
@@ -1701,6 +1706,16 @@ export async function createWorkbenchCliLayer(
     const phase = terminalId !== undefined ? idleQueue.phaseOf(terminalId) : ("unknown" as const);
     // T11.1 改角色要重启：不用确认；不在空闲就当聊过，等空闲续接，不在一轮中间冷重启。
     const policy = policyRestartPending.has(windowId);
+    // 管理者要求的重启（改模型、改权限），它管得了这个窗口就不用用户确认。当场再核一次，权限变了就不算。
+    const approvedBy = managerRelaunchBy.get(windowId);
+    const managerApproved =
+      approvedBy !== undefined &&
+      canManagerRelaunch({
+        callerId: approvedBy,
+        callerGranted: authRegistry.isManagerGranted(approvedBy),
+        targetId: windowId,
+        tree: authRegistry.snapshot(),
+      }).ok;
     const hadConversation =
       terminalId !== undefined &&
       (record?.metadata?.["resumed"] === true ||
@@ -1711,7 +1726,7 @@ export async function createWorkbenchCliLayer(
       running: terminalId !== undefined,
       phase,
       canResume: terminalId !== undefined && resumeId !== undefined && resumeId.trim() !== "",
-      needsConfirm: !policy && (role === "manager" || permission === "yolo"),
+      needsConfirm: !policy && !managerApproved && (role === "manager" || permission === "yolo"),
       hadConversation,
       // 改权限、改角色只能靠重启；/model 只换模型和强度。
       canSwitchInWindow: kind === "codex" && !permissionChangePending.has(windowId) && !policy,
@@ -1742,6 +1757,8 @@ export async function createWorkbenchCliLayer(
   const awaitedRuns = new WeakSet<Promise<ModelEffortRunOutcome>>();
   /** 谁要求改的模型：排队后生效或失败时告诉它。 */
   const modelEffortRequester = new Map<string, string>();
+  /** 哪个管理者要求重启的这个窗口（改模型、改权限）：生效前不等用户确认，做完就清。 */
+  const managerRelaunchBy = new Map<string, string>();
   const MODEL_EFFORT_AWAIT_MS = 60_000;
   const sleep = (ms: number): Promise<void> =>
     new Promise((done) => {
@@ -1911,6 +1928,7 @@ export async function createWorkbenchCliLayer(
         const provider = await providers.getProvider(id as never);
         return provider === undefined ? undefined : { id: provider.id, name: provider.name };
       },
+      cursorDefaultModel: await cursorDefaultModel(),
     });
     if (!resolved.ok) {
       return { ok: false, error: resolved.error };
@@ -2082,6 +2100,7 @@ export async function createWorkbenchCliLayer(
         modelEffortRuns.delete(windowId);
       }
       modelEffort.settled(windowId, outcome.ok, outcome.ok ? undefined : outcome.error);
+      managerRelaunchBy.delete(windowId);
       const requester = modelEffortRequester.get(windowId);
       if (awaitedRuns.has(run) || requester === undefined || requester === windowId) {
         return;
@@ -2101,7 +2120,7 @@ export async function createWorkbenchCliLayer(
   /** 把一次生效的结果换成工具返回。等太久就当排队中，完成后再发提醒。 */
   const awaitModelEffortRun = async (
     windowId: string,
-    readOnly: boolean,
+    canRestart: boolean,
   ): Promise<ModelEffortApplyResult | undefined> => {
     const run = modelEffortRuns.get(windowId);
     if (run === undefined) {
@@ -2119,7 +2138,7 @@ export async function createWorkbenchCliLayer(
     if (!outcome.ok) {
       return {
         status: "recorded",
-        message: `仅记录：这次没能生效（${outcome.error}）。下次启动时生效${readOnly ? "；它是只读窗口，可以用 ffpane_restart_window 重启" : "；需要现在生效请用户在那个窗口重启"}。`,
+        message: `仅记录：这次没能生效（${outcome.error}）。下次启动时生效${canRestart ? "；可以用 ffpane_restart_window 重启它" : "；需要现在生效请用户在那个窗口重启"}。`,
       };
     }
     return {
@@ -2171,6 +2190,7 @@ export async function createWorkbenchCliLayer(
           const provider = await providers.getProvider(id as never);
           return provider === undefined ? undefined : { id: provider.id, name: provider.name };
         },
+        cursorDefaultModel: await cursorDefaultModel(),
       });
       if (!resolved.ok) {
         throw new Error(resolved.error);
@@ -2829,26 +2849,18 @@ export async function createWorkbenchCliLayer(
     },
     modelInfo: (windowId) => describeModel(windowId),
     restartWindow: async ({ callerId, windowId, fresh }) => {
-      const caller = authRegistry.get(callerId);
-      if (caller?.role !== "manager" || !authRegistry.isManagerGranted(callerId)) {
-        return { ok: false, error: "只有管理者能重启窗口。" };
+      const allowed = canManagerRelaunch({
+        callerId,
+        callerGranted: authRegistry.isManagerGranted(callerId),
+        targetId: windowId,
+        tree: authRegistry.snapshot(),
+      });
+      if (!allowed.ok) {
+        return allowed;
       }
       const facts = await modelEffortFacts(windowId);
-      const node = authRegistry.get(windowId);
-      const openedBy = node?.openedBy ?? facts.stored?.openedBy;
-      const parentId = node?.parentWindowId ?? facts.stored?.parentWindowId;
-      const openedByCaller =
-        typeof openedBy === "object" && openedBy !== null
-          ? openedBy.windowId === callerId
-          : parentId === callerId;
-      if (facts.stored === undefined || !openedByCaller) {
-        return { ok: false, error: "只能重启你自己开的窗口。" };
-      }
-      if (facts.permission !== "read-only") {
-        return {
-          ok: false,
-          error: "只能重启只读窗口。别的窗口请用 ffpane_set_model_effort，或请用户在那个窗口重启。",
-        };
+      if (facts.stored === undefined) {
+        return { ok: false, error: "找不到这个窗口。" };
       }
       if (facts.phase === "blocked") {
         return { ok: false, error: "它在等用户批准，先不重启。" };
@@ -2856,8 +2868,20 @@ export async function createWorkbenchCliLayer(
       if (modelEffortRuns.has(windowId)) {
         return { ok: false, error: "它正在重启。" };
       }
+      // 软件重启后停着的窗口没有终端，按布局里记的对话编号续接；以前这里会悄悄开新对话，前面的活全丢。
+      const stoppedSession =
+        !facts.running && facts.stored.sessionUnidentified !== true ? facts.sessionId : undefined;
+      if (!fresh && !facts.running && facts.stored.sessionUnidentified === true) {
+        return {
+          ok: false,
+          error:
+            "认不出它原来的对话编号，续接要用户在那个窗口里选。确定不要原对话，就传 fresh: true 开新的。",
+        };
+      }
       // 没聊过天的会话没有可续接的记录（Claude 续接空会话会报错），直接开新的。
-      const resume = !fresh && facts.canResume && facts.hadConversation;
+      const resume =
+        !fresh &&
+        (facts.running ? facts.canResume && facts.hadConversation : stoppedSession !== undefined);
       const relaunched = await relaunchWindow(windowId, {
         resume,
         ...(resume && facts.sessionId !== undefined ? { nativeSessionId: facts.sessionId } : {}),
@@ -2867,6 +2891,7 @@ export async function createWorkbenchCliLayer(
       }
       permissionChangePending.delete(windowId);
       policyRestartPending.delete(windowId);
+      managerRelaunchBy.delete(windowId);
       modelEffort.drop(windowId);
       const actual = await settleActualModel(windowId, relaunched.result);
       return { ok: true, how: resume ? "resume" : "fresh", ...actual };
@@ -2968,7 +2993,7 @@ export async function createWorkbenchCliLayer(
         readLayouts: () => layouts.readAll(),
         saveLayout: (next) => layouts.saveProject(next),
         launch: (input) => launchCliWindow(input, launchDeps()),
-        resolveRoute: (routeInput) =>
+        resolveRoute: async (routeInput) =>
           resolveProjectLaunchRoute({
             projectRoot: routeInput.projectRoot,
             projectId: routeInput.projectId,
@@ -2978,6 +3003,7 @@ export async function createWorkbenchCliLayer(
               const provider = await providers.getProvider(id as never);
               return provider === undefined ? undefined : { id: provider.id, name: provider.name };
             },
+            cursorDefaultModel: await cursorDefaultModel(),
           }),
         describeCaller: async (windowId) => {
           const layoutsAll = await layouts.readAll();
@@ -3243,13 +3269,26 @@ export async function createWorkbenchCliLayer(
         const previous = modelEffortView.get(input.windowId);
         modelEffortView.set(input.windowId, { ...previous, permission: input.permission });
         permissionChangePending.add(input.windowId);
+        if (
+          canManagerRelaunch({
+            callerId: input.callerId,
+            callerGranted: authRegistry.isManagerGranted(input.callerId),
+            targetId: input.windowId,
+            tree: authRegistry.snapshot(),
+          }).ok
+        ) {
+          managerRelaunchBy.set(input.windowId, input.callerId);
+        }
         const facts = await modelEffortFacts(input.windowId);
         const decision = modelEffort.request(input.windowId, facts, {
           ...(window.modelOverride !== undefined ? { model: window.modelOverride } : {}),
           ...(window.effortOverride !== undefined ? { effort: window.effortOverride } : {}),
         });
         if (decision.launch) {
-          const applied = await awaitModelEffortRun(input.windowId, false);
+          const applied = await awaitModelEffortRun(
+            input.windowId,
+            managerRelaunchBy.has(input.windowId),
+          );
           if (applied !== undefined) {
             return {
               ok: true,
@@ -3337,14 +3376,22 @@ export async function createWorkbenchCliLayer(
           : {}),
       });
       modelEffortRequester.set(input.windowId, input.callerId);
+      const canRestart = canManagerRelaunch({
+        callerId: input.callerId,
+        callerGranted: authRegistry.isManagerGranted(input.callerId),
+        targetId: input.windowId,
+        tree,
+      }).ok;
+      if (canRestart) {
+        managerRelaunchBy.set(input.windowId, input.callerId);
+      }
       const facts = await modelEffortFacts(input.windowId);
       const decision = modelEffort.request(input.windowId, facts, {
         ...(nextWindow.modelOverride !== undefined ? { model: nextWindow.modelOverride } : {}),
         ...(nextWindow.effortOverride !== undefined ? { effort: nextWindow.effortOverride } : {}),
       });
-      const readOnly = facts.permission === "read-only";
       if (decision.launch) {
-        const applied = await awaitModelEffortRun(input.windowId, readOnly);
+        const applied = await awaitModelEffortRun(input.windowId, canRestart);
         if (applied !== undefined) {
           return { ok: true, ...applied };
         }
@@ -3357,8 +3404,8 @@ export async function createWorkbenchCliLayer(
           ok: true,
           status: "recorded",
           message: `${decision.message}${
-            decision.reason === "no-session" && readOnly
-              ? "。它是只读窗口，可以用 ffpane_restart_window 重启让它生效"
+            canRestart
+              ? "。可以用 ffpane_restart_window 重启让它生效"
               : decision.reason === "no-session"
                 ? "。需要现在生效请用户在那个窗口重启"
                 : ""

@@ -24,6 +24,7 @@ import {
   isWorkbenchPermissionLevel,
   mergeImageGenSettings,
   sanitizeImageGenSettings,
+  validateModelOverride,
 } from "@ff-pane/shared";
 import { readJson, writeJsonAtomic } from "../fs/index.js";
 import { ConfigFileInvalidError } from "./errors.js";
@@ -57,6 +58,26 @@ function normalizeConfig(config: GlobalConfig): GlobalConfig {
       ? config.defaultWorkbenchPermission
       : DEFAULT_WORKBENCH_WINDOW_PERMISSION,
   };
+  // Cursor 默认模型会原样当 --model 参数传，不合规的（空白、控制字符、怪字符）直接丢掉。
+  if (normalized.cursorDefaultModel !== undefined) {
+    const checked =
+      typeof normalized.cursorDefaultModel === "string"
+        ? validateModelOverride(normalized.cursorDefaultModel)
+        : undefined;
+    const { cursorDefaultModel: omitted, ...rest } = normalized;
+    void omitted;
+    return withImageGenNormalized(
+      checked?.ok === true ? { ...rest, cursorDefaultModel: checked.model } : rest,
+      imageGen,
+    );
+  }
+  return withImageGenNormalized(normalized, imageGen);
+}
+
+function withImageGenNormalized(
+  normalized: GlobalConfig,
+  imageGen: ImageGenSettings | undefined,
+): GlobalConfig {
   if (imageGen === undefined) {
     if (normalized.imageGen === undefined) {
       return normalized;

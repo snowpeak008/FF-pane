@@ -343,7 +343,7 @@ export interface WorkbenchSessionClaimedEvent {
 }
 
 /**
- * 平台自己重启了这个窗口（改模型 / 思考强度，或管理者重启只读窗口）。
+ * 平台自己重启了这个窗口（改模型 / 思考强度，或管理者重启它名下的窗口）。
  * 旧终端已经结束，界面改接新终端；窗口不在当前标签页时，下次显示再接上。
  */
 export interface WorkbenchTerminalReplacedEvent {
@@ -505,6 +505,40 @@ export interface WorkbenchDecision {
   readonly options: readonly string[];
   readonly briefPath?: string;
   readonly createdAt: number;
+}
+
+/**
+ * Cursor CLI 的账号状态（T11.18）。不含任何令牌：界面只看得到邮箱、名字、档位。
+ * authenticated 缺省 = 取不到（CLI 报错），detail 里是原文。
+ */
+export interface CursorAccountStatus {
+  readonly installed: boolean;
+  readonly version?: string;
+  readonly authenticated?: boolean;
+  readonly email?: string;
+  readonly name?: string;
+  /** 订阅档位，如 Free、Pro。 */
+  readonly tier?: string;
+  readonly latestVersion?: string;
+  readonly updateAvailable?: boolean;
+  readonly detail?: string;
+}
+
+/** 软件里登录 Cursor 的进度：认出登录链接、结束。 */
+export type CursorLoginEvent =
+  | { readonly phase: "url"; readonly url: string }
+  | { readonly phase: "done"; readonly ok: true; readonly status: CursorAccountStatus }
+  | {
+      readonly phase: "done";
+      readonly ok: false;
+      readonly error: string;
+      readonly cancelled?: boolean;
+    };
+
+/** 退出登录、更新、安装的结果：输出取末尾一段。 */
+export interface CursorCommandResult {
+  readonly ok: boolean;
+  readonly output: string;
 }
 
 export interface WorkbenchRuntimeStatusResponse {
@@ -1898,6 +1932,20 @@ export interface IpcInvokeContracts {
     request: ListLocalModelsRequest;
     response: ListLocalModelsResponse;
   };
+  /** Cursor CLI 装没装、登录的账号、档位、版本（T11.18）。 */
+  "cursor:status": { request: undefined; response: CursorAccountStatus };
+  /** 开始在软件里登录：认出登录链接后发 cursor:login 事件。 */
+  "cursor:login-start": {
+    request: undefined;
+    response: { readonly ok: true } | { readonly ok: false; readonly error: string };
+  };
+  "cursor:login-cancel": { request: undefined; response: undefined };
+  /** 用系统浏览器打开主进程认出来的登录链接（只放行 https://cursor.com）。 */
+  "cursor:login-open": { request: undefined; response: { readonly ok: boolean } };
+  "cursor:logout": { request: undefined; response: CursorCommandResult };
+  "cursor:update": { request: undefined; response: CursorCommandResult };
+  /** 跑官方安装命令（界面先确认）。 */
+  "cursor:install": { request: undefined; response: CursorCommandResult };
   /**
    * T9.4b —— 推理强度可见档。非白名单返回空；opencode 读不到该模型 effort values 也返回空。
    */
@@ -2025,6 +2073,8 @@ export interface IpcEventContracts {
   "app:memory-warning": {
     payload: { readonly kind: "main" | "renderer"; readonly mb: number };
   };
+  /** 软件里登录 Cursor 的进度（T11.18）。 */
+  "cursor:login": { payload: CursorLoginEvent };
   /** 自配置工具草案事件（config-draft / config-draft-resolved 等）。 */
   "session:event": { payload: SessionStreamEvent };
   /** 知识库导入 / 重建进度（T6.5 / §8.3.2「导入进度」）。 */
@@ -2151,6 +2201,13 @@ export const INVOKE_CHANNELS = [
   "providers:fetch-models",
   "providers:probe-cli-login",
   "providers:list-local-models",
+  "cursor:status",
+  "cursor:login-start",
+  "cursor:login-cancel",
+  "cursor:login-open",
+  "cursor:logout",
+  "cursor:update",
+  "cursor:install",
   "runtimes:reasoning-effort-levels",
   "secrets:masked-tail",
   "config:get",
@@ -2198,6 +2255,7 @@ export const INVOKE_CHANNELS = [
 export const EVENT_CHANNELS = [
   "smoke:event",
   "app:memory-warning",
+  "cursor:login",
   "session:event",
   "knowledge:import-progress",
   "terminal:output",

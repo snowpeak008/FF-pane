@@ -18,6 +18,7 @@ import {
   resetGridSizes,
   resizePair,
   slotLine,
+  tabDisplayTitle,
   withCellSizes,
   withLineSizes,
 } from "../src/shared/workbench/grid";
@@ -155,6 +156,9 @@ describe("管理者开子窗口", () => {
     expect(layout.tabs[1]?.slots).toEqual(["c6", "c7", "c8", "c9", "c10", "c11"]);
     expect(layout.tabs[1]?.teamOf).toBe("mgr");
     expect(layout.tabs[1]?.title).toBe("团队：mgr");
+    // 界面上不显示「团队：」前缀，用团队图标代替（§9 界面精简）；数据照旧存。
+    expect(tabDisplayTitle(layout.tabs[1] ?? { title: "" })).toBe("mgr");
+    expect(tabDisplayTitle({ title: "团队：随手起的名字" })).toBe("团队：随手起的名字");
     expect(layout.tabs[2]?.slots).toEqual(["c12", null, null, null, null, null]);
     expect(layout.activeTabId).toBe(userTab);
     expect(layout.focusedWindowId).toBe("mgr");

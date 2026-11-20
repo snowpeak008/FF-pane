@@ -6,6 +6,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { e2eTempDir, gotoRoute, launchApp, removeE2eTempDirs } from "./_launch";
+import { dismissOverlays, windowDetails } from "./_workbench-ui";
 
 test.afterEach(removeE2eTempDirs);
 
@@ -61,9 +62,11 @@ test("没有档案时默认配置能开 Claude 和 Codex", async () => {
       await expect(page.getByTestId("workbench-new-confirm")).toBeEnabled({ timeout: 15_000 });
       await page.getByTestId("workbench-new-confirm").click();
       const pane = page.locator(`[data-window-kind="${kind}"]`).last();
-      await expect(pane.getByTestId("workbench-window-route")).toContainText("Local login", {
-        timeout: 20_000,
-      });
+      await expect(pane.getByTestId("workbench-window-title")).toBeVisible({ timeout: 20_000 });
+      await expect(
+        (await windowDetails(page, pane)).getByTestId("workbench-window-route"),
+      ).toContainText("Local login", { timeout: 20_000 });
+      await dismissOverlays(page);
     }
   } finally {
     await launched.cleanup();

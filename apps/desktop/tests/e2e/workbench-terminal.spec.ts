@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { gotoRoute, type LaunchedApp, launchApp } from "./_launch";
+import { openWindowMenu } from "./_workbench-ui";
 
 let launched: LaunchedApp;
 let projectA: string;
@@ -125,7 +126,9 @@ test("multi-project split panes keep output across switches", async () => {
     .poll(async () => readReplayForWindow(page, windowA1), { timeout: 20_000 })
     .toContain("MARKER_A1");
 
-  await page.getByRole("button", { name: "Add window after this one" }).first().click();
+  await (await openWindowMenu(page, page.getByTestId("workbench-window").first()))
+    .getByRole("button", { name: "Add window after this one" })
+    .click();
   await confirmShellInNewWindowDialog(page);
   await expect(page.getByTestId("workbench-window")).toHaveCount(2, { timeout: 15_000 });
   const windowA2 = await requireWindowId(page, 1);
@@ -151,7 +154,9 @@ test("multi-project split panes keep output across switches", async () => {
     .poll(async () => readReplayForWindow(page, windowB1), { timeout: 20_000 })
     .toContain("MARKER_B1");
 
-  await page.getByRole("button", { name: "Add window after this one" }).first().click();
+  await (await openWindowMenu(page, page.getByTestId("workbench-window").first()))
+    .getByRole("button", { name: "Add window after this one" })
+    .click();
   await confirmShellInNewWindowDialog(page);
   await expect(page.getByTestId("workbench-window")).toHaveCount(2, { timeout: 15_000 });
   const windowB2 = await requireWindowId(page, 1);

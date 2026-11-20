@@ -392,6 +392,18 @@ function nextTabTitle(layout: ProjectWorkbenchLayout): string {
   }
 }
 
+/** 团队页标题的老前缀。数据里照旧这样存（旧布局靠它认团队页），界面上用团队图标代替，不显示前缀。 */
+const TEAM_TAB_PREFIX = "团队：";
+
+/** 标签上显示的名字：团队页去掉「团队：」前缀（§9 界面精简）。 */
+export function tabDisplayTitle(tab: { readonly title: string; readonly teamOf?: string }): string {
+  if (tab.teamOf !== undefined && tab.title.startsWith(TEAM_TAB_PREFIX)) {
+    const rest = tab.title.slice(TEAM_TAB_PREFIX.length).trim();
+    return rest.length > 0 ? rest : tab.title;
+  }
+  return tab.title;
+}
+
 export function sanitizeLayoutTitle(title: string, fallback: string): string {
   let cleaned = "";
   for (const char of title) {
@@ -477,7 +489,7 @@ export function placeOpenedWindow(
   const manager = layout.windows[managerWindowId];
   const created = newTab(
     newTabId,
-    `团队：${sanitizeLayoutTitle(manager?.title ?? child.title, "窗口")}`,
+    `${TEAM_TAB_PREFIX}${sanitizeLayoutTitle(manager?.title ?? child.title, "窗口")}`,
     child.id,
     managerWindowId,
   );

@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, type Locator, test } from "@playwright/test";
 import { gotoRoute, type LaunchedApp, launchApp } from "./_launch";
+import { openWindowMenu } from "./_workbench-ui";
 
 let launched: LaunchedApp;
 let projectDir: string;
@@ -120,7 +121,9 @@ async function terminalKept(page: Page, windowId: string): Promise<boolean> {
 }
 
 async function addWindowAfter(page: Page, windowId: string): Promise<void> {
-  await pane(page, windowId).getByRole("button", { name: "Add window after this one" }).click();
+  await (await openWindowMenu(page, pane(page, windowId)))
+    .getByRole("button", { name: "Add window after this one" })
+    .click();
   await confirmShell(page);
 }
 

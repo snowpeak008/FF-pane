@@ -4,7 +4,7 @@
  */
 
 import { isAiWorkbenchKind } from "@ff-pane/shared";
-import { SquareTerminal } from "lucide-react";
+import { Image, SquareTerminal } from "lucide-react";
 import { type ReactElement, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
@@ -20,6 +20,7 @@ import { EmptyState } from "../../components/states/EmptyState";
 import { LoadingState } from "../../components/states/LoadingState";
 import { Button } from "../../components/ui/Button";
 import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
+import { Tooltip } from "../../components/ui/Tooltip";
 import { useActiveProject } from "../../hooks/useActiveProject";
 import { invokeQuery, queryData } from "../../ipc/query";
 import { useInvokeQuery } from "../../ipc/useInvokeQuery";
@@ -32,7 +33,7 @@ import { TabBar } from "./TabBar";
 import { WorkbenchCanvasPanel } from "./WorkbenchCanvasPanel";
 import { WorkbenchDecisions } from "./WorkbenchDecisions";
 import { WorkbenchDrawer } from "./WorkbenchDrawer";
-import { WorkbenchRuntimeBar } from "./WorkbenchRuntimeBar";
+import { WorkbenchResourcesIcon, WorkbenchRuntimeBar } from "./WorkbenchRuntimeBar";
 import { useWindowDrag } from "./window-drag";
 
 export function WorkbenchPage(): ReactElement {
@@ -315,21 +316,46 @@ export function WorkbenchPage(): ReactElement {
 
   return (
     <>
+      {/* §9 界面精简：工作目录和左边选中的项目重复，只放进标题的悬浮提示；画板只留图标和待检查数。 */}
       <PageHeader
-        title={t("nav.workbench.label")}
-        description={t("workbench.cwd.project", { path: entry.rootPath })}
+        title={
+          <Tooltip content={t("workbench.cwd.project", { path: entry.rootPath })} align="start">
+            <span data-testid="workbench-title">{t("nav.workbench.label")}</span>
+          </Tooltip>
+        }
         actions={
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            data-testid="open-canvas"
-            onClick={() => useWorkbenchCanvasStore.getState().openCanvas(null)}
-          >
-            {canvasPending > 0
-              ? t("workbench.canvas.openWithPending", { count: canvasPending })
-              : t("workbench.canvas.open")}
-          </Button>
+          <>
+            <WorkbenchResourcesIcon />
+            <Tooltip
+              content={
+                canvasPending > 0
+                  ? t("workbench.canvas.pendingHint", { count: canvasPending })
+                  : t("workbench.canvas.open")
+              }
+            >
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="gap-1 px-1.5"
+                data-testid="open-canvas"
+                data-pending={canvasPending}
+                aria-label={
+                  canvasPending > 0
+                    ? t("workbench.canvas.pendingHint", { count: canvasPending })
+                    : t("workbench.canvas.open")
+                }
+                onClick={() => useWorkbenchCanvasStore.getState().openCanvas(null)}
+              >
+                <Image aria-hidden size={14} />
+                {canvasPending > 0 ? (
+                  <span className="rounded-full bg-warning-surface px-1.5 text-2xs font-medium leading-4 text-warning-text">
+                    {canvasPending}
+                  </span>
+                ) : null}
+              </Button>
+            </Tooltip>
+          </>
         }
       />
       <div className="relative flex min-h-0 flex-1 flex-col" data-testid="workbench-root">

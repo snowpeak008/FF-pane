@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { gotoRoute, type LaunchedApp, launchApp } from "./_launch";
+import { openWindowMenu } from "./_workbench-ui";
 
 async function createProject(
   app: LaunchedApp["app"],
@@ -113,7 +114,9 @@ test("restart restores layout tabs/split/titles and shell stays usable", async (
       .poll(async () => readReplayForWindow(page, windowA), { timeout: 20_000 })
       .toMatch(/\S/);
 
-    await page.getByRole("button", { name: "Add window after this one" }).first().click();
+    await (await openWindowMenu(page, page.getByTestId("workbench-window").first()))
+      .getByRole("button", { name: "Add window after this one" })
+      .click();
     await confirmShellInNewWindowDialog(page);
     await expect(page.getByTestId("workbench-window")).toHaveCount(2, { timeout: 15_000 });
     const windowB = await requireWindowId(page, 1);

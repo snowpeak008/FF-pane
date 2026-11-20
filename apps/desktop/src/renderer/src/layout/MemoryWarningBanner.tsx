@@ -3,6 +3,7 @@
  * 常驻在内容列顶上，不弹窗、不抢焦点；点「知道了」本次运行不再显示。
  */
 
+import { X } from "lucide-react";
 import { type ReactElement, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { EventPayload } from "../../../shared-ipc/contracts";
@@ -33,10 +34,12 @@ export function MemoryWarningBanner(): ReactElement | null {
       </span>
       <button
         type="button"
-        className="rounded-sm px-2 py-0.5 hover:bg-surface-hover"
+        className="rounded-sm p-0.5 hover:bg-surface-hover"
+        aria-label={t("app.memoryWarning.dismiss")}
+        title={t("app.memoryWarning.dismiss")}
         onClick={() => setDismissed(true)}
       >
-        {t("app.memoryWarning.dismiss")}
+        <X aria-hidden size={14} />
       </button>
     </div>
   );

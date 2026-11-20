@@ -1,7 +1,7 @@
 /**
  * 按「项目绑定的配置 → 默认配置」选出 Claude 或 Codex 这一路。
  * 本机登录不读取来源、不注入密钥。
- * Cursor 只有本机登录：配置里没有这一路也能开，用 Cursor 自己的默认模型。
+ * Cursor 只有本机登录：配置里没有这一路也能开。没填模型时用设置里的 Cursor 默认模型（T11.18）。
  */
 
 import {
@@ -35,6 +35,8 @@ export interface ResolveProjectLaunchRouteInput {
   readonly getProvider: (
     id: string,
   ) => Promise<{ readonly id: string; readonly name: string } | undefined>;
+  /** 设置里的 Cursor 默认模型（T11.18）：Cursor 这一路没填模型时用它。 */
+  readonly cursorDefaultModel?: string;
 }
 
 export async function resolveProjectLaunchRoute(
@@ -77,7 +79,9 @@ export async function resolveProjectLaunchRoute(
       error: `配置「${effective.name}」的 DeepSeek 必须选择来源并填写密钥。`,
     };
   }
-  const model = spec.model?.trim() || undefined;
+  const model =
+    spec.model?.trim() ||
+    (input.kind === "cursor" ? input.cursorDefaultModel?.trim() || undefined : undefined);
   const reasoningEffort = spec.reasoningEffort;
   const shared = {
     configId: effective.id,

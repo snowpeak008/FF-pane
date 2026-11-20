@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import { e2eTempDir, gotoRoute, type LaunchedApp, launchApp, removeE2eTempDirs } from "./_launch";
+import { dismissOverlays, openWindowMenu, windowDetails } from "./_workbench-ui";
 
 test.afterEach(removeE2eTempDirs);
 
@@ -156,7 +157,7 @@ test("管理者开窗口，执行者汇报，越权被拒，记录落盘", async
 
     const child = page.getByTestId("workbench-window").filter({ hasText: "前端A" });
     await expect(child).toBeVisible();
-    await expect(child).toContainText(/Opened by|由 /);
+    await expect(child.locator("[data-opened-by]")).not.toHaveAttribute("data-opened-by", "user");
     await expect(child.locator("[data-permission]")).toHaveAttribute("data-permission", "edit");
     await expect(child.locator("[data-role]")).toHaveAttribute("data-role", "worker");
     await expect(child.locator("[data-report-status]")).toHaveAttribute(
@@ -354,12 +355,15 @@ test("在线监管：一直挂着等事件，拍板结果从等待里拿到，�
     const windowId = await pane.getAttribute("data-window-id");
     expect(windowId).toBeTruthy();
     await pane.getByTestId("workbench-role-badge").click();
-    await pane.getByTestId("workbench-role-option-supervisor").click();
+    await page.getByTestId("workbench-role-option-supervisor").click();
     await expect
       .poll(async () => readReplayForWindowId(page, windowId ?? ""), { timeout: 90_000 })
       .toContain("FFPANE_ONLINE_LOOP=1");
     await expect(pane.getByTestId("workbench-runtime-online")).toBeVisible({ timeout: 15_000 });
-    await expect(pane.getByTestId("workbench-online-toggle")).toHaveAttribute("data-online", "yes");
+    await expect(
+      (await openWindowMenu(page, pane)).getByTestId("workbench-online-toggle"),
+    ).toHaveAttribute("data-online", "yes");
+    await dismissOverlays(page);
 
     const card = page.getByTestId("workbench-decision");
     await expect(card).toBeVisible({ timeout: 30_000 });
@@ -368,7 +372,7 @@ test("在线监管：一直挂着等事件，拍板结果从等待里拿到，�
       .poll(async () => readReplayForWindowId(page, windowId ?? ""), { timeout: 30_000 })
       .toContain("FFPANE_ONLINE_GOT_DECISION=1");
 
-    await pane.getByTestId("workbench-online-toggle").click();
+    await (await openWindowMenu(page, pane)).getByTestId("workbench-online-toggle").click();
     await expect
       .poll(async () => readReplayForWindowId(page, windowId ?? ""), { timeout: 30_000 })
       .toContain("FFPANE_ONLINE_STOPPED=1");
@@ -405,7 +409,9 @@ test("重启后子窗口仍被封顶，续接管理者可以再开窗口", async
     // 这里要从普通窗口开始：脚本按「已经是管理者」认出是重启后的第二次启动。
     await page.getByTestId("workbench-new-confirm").click();
 
-    const manager = page.getByTestId("workbench-window").filter({ hasText: "Opened by you" });
+    const manager = page
+      .getByTestId("workbench-window")
+      .filter({ has: page.locator('[data-opened-by="user"]') });
     const managerId = await manager.getAttribute("data-window-id");
     expect(managerId).toBeTruthy();
     await expect
@@ -433,7 +439,10 @@ test("重启后子窗口仍被封顶，续接管理者可以再开窗口", async
     await gotoRoute(restarted, "/workbench");
     const restoredChild = restarted.getByTestId("workbench-window").filter({ hasText: "前端A" });
     await expect(restoredChild).toBeVisible();
-    await expect(restoredChild.getByTestId("workbench-opened-by")).toContainText(/Opened by /);
+    await expect(
+      (await windowDetails(restarted, restoredChild)).getByTestId("workbench-opened-by"),
+    ).toContainText(/Opened by /);
+    await dismissOverlays(restarted);
     await expect(restoredChild.locator("[data-permission]")).toHaveAttribute(
       "data-permission",
       "edit",
@@ -445,7 +454,7 @@ test("重启后子窗口仍被封顶，续接管理者可以再开窗口", async
     );
     const restoredManager = restarted
       .getByTestId("workbench-window")
-      .filter({ hasText: "Opened by you" });
+      .filter({ has: restarted.locator('[data-opened-by="user"]') });
     await expect(restoredManager.getByTestId("workbench-unread-badge")).toBeVisible();
     await restoredManager.getByTestId("cli-resume").click({ force: true });
     const confirm = restarted.getByRole("dialog");

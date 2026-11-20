@@ -531,7 +531,7 @@ describe("清单新增工具", () => {
       permission: "read-only",
     });
     expect(okResult.json).toMatchObject({ ok: true, windowId: "C", permission: "read-only" });
-    expect(permissionsSet).toEqual([{ windowId: "C", permission: "read-only" }]);
+    expect(permissionsSet).toEqual([{ callerId: "A", windowId: "C", permission: "read-only" }]);
     const higher = await call(deps, "A", "ffpane_set_permission", {
       windowId: "B",
       permission: "yolo",
