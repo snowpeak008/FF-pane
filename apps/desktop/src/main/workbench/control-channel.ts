@@ -1,7 +1,8 @@
 /**
  * 工作台控制通道（T10.6'，T10.7 扩展工具调用）。
  *
- * 本地 IPC，禁止 HTTP / TCP 端口：
+ * 本地 IPC，禁止 HTTP / TCP 端口（工作台 MCP 另有一个只听本机回环、按窗口令牌认人的 HTTP 服务，
+ * 见 mcp-http.ts，T11.19；钩子和 stdio 小进程仍走这里）：
  * - Windows：命名管道 `\\.\pipe\ff-pane-wb-<随机>`
  * - 其它平台：临时目录里的 Unix socket
  *

@@ -36,14 +36,29 @@ function randomDirPrefix(): string {
   return `${WORKBENCH_MCP_DIR_PREFIX}${hex}-`;
 }
 
-/** 写入 Claude `--mcp-config` 临时文件（内容与 headless 适配器同形）。 */
+/**
+ * 写入 Claude `--mcp-config` 临时文件（stdio 部分与 headless 适配器同形）。
+ * `httpServers`：不开小进程、直接连主进程 HTTP 服务的条目（T11.19），原样并进去。
+ */
 export function writeWorkbenchClaudeMcpFile(
   servers: Readonly<Record<string, McpStdioServerSpec>>,
-  options: { readonly dir?: string } = {},
+  options: {
+    readonly dir?: string;
+    readonly httpServers?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+  } = {},
 ): WorkbenchMcpTempFile {
   const directory = mkdtempSync(join(options.dir ?? tmpdir(), randomDirPrefix()));
   const path = join(directory, CLAUDE_MCP_FILE_NAME);
-  writeFileSync(path, buildClaudeMcpConfig(servers), "utf8");
+  let contents = buildClaudeMcpConfig(servers);
+  if (options.httpServers !== undefined && Object.keys(options.httpServers).length > 0) {
+    const parsed = JSON.parse(contents) as { mcpServers: Record<string, unknown> };
+    contents = JSON.stringify(
+      { mcpServers: { ...parsed.mcpServers, ...options.httpServers } },
+      null,
+      2,
+    );
+  }
+  writeFileSync(path, contents, "utf8");
   let removed = false;
   return {
     path,

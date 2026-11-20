@@ -13,7 +13,7 @@ import { clampWaitSeconds } from "../main/workbench/online-hub";
 import { handleMcpLine, type McpServerOptions, type McpToolResult } from "./protocol";
 import { WORKBENCH_MCP_SERVER_NAME, WORKBENCH_MCP_TOOLS } from "./workbench-tools";
 
-const SERVER_VERSION = "1.0.0";
+export const WORKBENCH_MCP_SERVER_VERSION = "1.0.0";
 const CALL_TIMEOUT_MS = 20_000;
 /**
  * 要等窗口重启完的工具：主进程最多等 60 秒重启生效（改模型）或 20 秒看清屏幕上的模型（重启），
@@ -28,6 +28,20 @@ const RELAUNCH_TOOLS: ReadonlySet<string> = new Set([
 
 export const WINDOW_TOKEN_LITERAL = `\${${FF_PANE_WINDOW_TOKEN_ENV}}`;
 export const PIPE_LITERAL = `\${${FF_PANE_WB_PIPE_ENV}}`;
+
+/**
+ * 一次工具调用最多等主进程多久（stdio 小进程和主进程里的 HTTP 服务共用，T11.19）。
+ * 挂着等事件的工具按它自己的等待时长放宽，多留 20 秒给主进程回结果。
+ */
+export function workbenchToolCallTimeoutMs(
+  name: string,
+  args: Readonly<Record<string, unknown>>,
+): number {
+  if (name === "ffpane_wait_events") {
+    return (clampWaitSeconds(args["timeoutSec"]) + 20) * 1000;
+  }
+  return RELAUNCH_TOOLS.has(name) ? RELAUNCH_CALL_TIMEOUT_MS : CALL_TIMEOUT_MS;
+}
 
 export function workbenchCredentialError(env: NodeJS.ProcessEnv): string | undefined {
   const token = env[FF_PANE_WINDOW_TOKEN_ENV] ?? "";
@@ -113,20 +127,13 @@ export function createWorkbenchMcpOptions(
   ) => {
     const pipe = env[FF_PANE_WB_PIPE_ENV] ?? "";
     const token = env[FF_PANE_WINDOW_TOKEN_ENV] ?? "";
-    // 挂着等事件的工具：按它自己的等待时长放宽，多留 20 秒给主进程回结果。
-    const timeoutMs =
-      name === "ffpane_wait_events"
-        ? (clampWaitSeconds(args["timeoutSec"]) + 20) * 1000
-        : RELAUNCH_TOOLS.has(name)
-          ? RELAUNCH_CALL_TIMEOUT_MS
-          : CALL_TIMEOUT_MS;
-    return callControlTool(pipe, token, name, args, timeoutMs);
+    return callControlTool(pipe, token, name, args, workbenchToolCallTimeoutMs(name, args));
   },
 ): McpServerOptions {
   const credentialError = workbenchCredentialError(env);
   return {
     name: WORKBENCH_MCP_SERVER_NAME,
-    version: SERVER_VERSION,
+    version: WORKBENCH_MCP_SERVER_VERSION,
     tools: WORKBENCH_MCP_TOOLS,
     execute: async (name, args) => {
       if (credentialError !== undefined) {

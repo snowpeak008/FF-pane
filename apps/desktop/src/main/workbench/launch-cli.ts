@@ -98,12 +98,18 @@ import {
 } from "./hook-launch";
 import { CLEAR_INPUT_KEYS, CODEX_SUBMIT_DELAY_MS, type IdleDeliverQueue } from "./idle-deliver";
 import { createWindowLaunchGate } from "./launch-gate";
-import { buildWorkbenchMcpSpec, WORKBENCH_MCP_SERVER_NAME } from "./mcp-server-spec";
+import {
+  buildWorkbenchClaudeHttpEntry,
+  buildWorkbenchCodexHttpOverrides,
+  buildWorkbenchMcpSpec,
+  WORKBENCH_MCP_SERVER_NAME,
+} from "./mcp-server-spec";
 import {
   type WorkbenchMcpTempFile,
   WorkbenchMcpTempRegistry,
   writeWorkbenchClaudeMcpFile,
 } from "./mcp-temp";
+import { workbenchMcpTransportFor } from "./mcp-transport";
 import type { LaunchCliRoute } from "./resolve-config";
 import { subagentPolicyFor } from "./role-tool-policy";
 import { claudeWriteRoots, codexWritableRootsOverride, WRITE_ROOTS_ENV } from "./write-roots";
@@ -266,6 +272,11 @@ export interface LaunchCliWindowDeps {
   }) => Promise<Readonly<Record<string, McpStdioServerSpec>>>;
   /** 控制通道管道名。写入 CLI 环境 FF_PANE_WB_PIPE，不进 argv。 */
   readonly controlPipe?: string;
+  /**
+   * T11.19：主进程里共用的工作台 MCP HTTP 服务地址。缺省（服务没起来）时全部走 stdio 小进程；
+   * 有地址时按 `mcp-transport.ts` 的表决定每种运行时用哪种。
+   */
+  readonly workbenchMcpUrl?: string;
   /** 启动成功后登记空闲投递会话（无 initialPrompt 仍保持未知，直到 hook）。 */
   readonly idleQueue?: IdleDeliverQueue;
   /** PTY 已起来、权威表已写回之后。用来恢复管理权，失败不得当成启动失败。 */
@@ -566,6 +577,10 @@ async function launchCliWindowBody(
       : text === undefined || text.trim() === ""
         ? skillMount.instructions
         : `${text.trimEnd()}\n\n${skillMount.instructions}`;
+  const workbenchHttpUrl =
+    deps.workbenchMcpUrl !== undefined && workbenchMcpTransportFor(runtime) === "http"
+      ? deps.workbenchMcpUrl
+      : undefined;
   const mcpServers: Record<string, McpStdioServerSpec> = {
     ...(await resolveKnowledgeServers(deps, input.projectRoot)),
     ...(deps.resolveConfigTool !== undefined
@@ -575,7 +590,10 @@ async function launchCliWindowBody(
           role,
         })
       : {}),
-    [WORKBENCH_MCP_SERVER_NAME]: buildWorkbenchMcpSpec(deps.moduleDir),
+    // 走 HTTP 时不开小进程，条目另外写（Claude 并进 --mcp-config，Codex 另给 -c）
+    ...(workbenchHttpUrl === undefined
+      ? { [WORKBENCH_MCP_SERVER_NAME]: buildWorkbenchMcpSpec(deps.moduleDir) }
+      : {}),
   };
   const windowToken = deps.tokenRegistry.issue(input.windowId);
   const probed =
@@ -647,11 +665,18 @@ async function launchCliWindowBody(
   let resumePicker = false;
 
   if (runtime === "claude-code") {
-    let serversForMcp = mcpServers;
-    if (Object.keys(mcpServers).length > 0) {
+    if (Object.keys(mcpServers).length > 0 || workbenchHttpUrl !== undefined) {
       // 文件只写 ${FF_PANE_WINDOW_TOKEN}；真实值仅在 CLI 进程 env，由 Claude 展开后交给 MCP
-      serversForMcp = injectTokenIntoMcpServers(mcpServers, windowToken, "claude-env-expand");
-      mcpTemp = writeWorkbenchClaudeMcpFile(serversForMcp);
+      const serversForMcp = injectTokenIntoMcpServers(mcpServers, windowToken, "claude-env-expand");
+      mcpTemp = writeWorkbenchClaudeMcpFile(serversForMcp, {
+        ...(workbenchHttpUrl !== undefined
+          ? {
+              httpServers: {
+                [WORKBENCH_MCP_SERVER_NAME]: buildWorkbenchClaudeHttpEntry(workbenchHttpUrl),
+              },
+            }
+          : {}),
+      });
       deps.mcpRegistry.track(input.windowId, mcpTemp);
     }
     const wantResume = input.resume === true;
@@ -697,8 +722,10 @@ async function launchCliWindowBody(
     if (Object.keys(mcpServers).length > 0) {
       serversForMcp = injectTokenIntoMcpServers(mcpServers, windowToken, "codex-forward");
     }
-    const mcpOverrides =
-      Object.keys(serversForMcp).length > 0 ? buildCodexMcpOverrides(serversForMcp) : {};
+    const mcpOverrides = {
+      ...(Object.keys(serversForMcp).length > 0 ? buildCodexMcpOverrides(serversForMcp) : {}),
+      ...(workbenchHttpUrl !== undefined ? buildWorkbenchCodexHttpOverrides(workbenchHttpUrl) : {}),
+    };
     const mergedOverrides = { ...configOverrides, ...mcpOverrides };
     const resuming = input.resume === true;
     if (!resuming) {

@@ -1,5 +1,6 @@
 /**
  * T10.7a E2E 假 CLI：按 Claude 方式读取 --mcp-config，自行展开 ${VAR}，拉起 sidecar。
+ * T11.19：工作台条目是 `type: http` 时不拉 sidecar，直接 POST 到主进程的 HTTP 服务（回 JSON 或 SSE）。
  * 按 whoami 是否有上级，走管理者或执行者脚本。不经 shell。
  */
 
@@ -22,6 +23,58 @@ function loadServer() {
   const raw = JSON.parse(readFileSync(argv[index + 1], "utf8"));
   const servers = raw.mcpServers ?? raw;
   return servers["ffpane-workbench"];
+}
+
+/**
+ * 钩子脚本：stdio 时和 sidecar 在同一目录；HTTP 时没有 sidecar，从 --settings 里的钩子命令取
+ * （真 Claude 也是从那里拿）。
+ */
+function hookScriptPath(spec) {
+  const script = Array.isArray(spec.args) ? spec.args[0] : undefined;
+  if (typeof script === "string") {
+    return join(dirname(script), "workbench-hook.mjs");
+  }
+  const argv = process.argv.slice(2);
+  const index = argv.indexOf("--settings");
+  if (index < 0 || argv[index + 1] === undefined) {
+    return undefined;
+  }
+  const text = readFileSync(argv[index + 1], "utf8");
+  const match = /"((?:[^"\\]|\\.)*workbench-hook\.mjs)"/.exec(text);
+  return match === null ? undefined : JSON.parse(`"${match[1]}"`);
+}
+
+/** HTTP 方式：每次一个 POST；工具调用回的是 SSE，取最后一条带 id 的。 */
+function createHttpSession(spec) {
+  const headers = {
+    "Content-Type": "application/json",
+    Accept: "application/json, text/event-stream",
+  };
+  for (const [key, value] of Object.entries(spec.headers ?? {})) {
+    headers[key] = expand(String(value));
+  }
+  let id = 0;
+  const post = (body) => fetch(spec.url, { method: "POST", headers, body: JSON.stringify(body) });
+  const request = async (method, params) => {
+    id += 1;
+    const response = await post({ jsonrpc: "2.0", id, method, params });
+    const text = await response.text();
+    if ((response.headers.get("content-type") ?? "").includes("text/event-stream")) {
+      const events = text
+        .split("\n")
+        .filter((line) => line.startsWith("data: "))
+        .map((line) => JSON.parse(line.slice(6)))
+        .filter((event) => event.id !== undefined);
+      return events.at(-1) ?? {};
+    }
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { error: { message: `HTTP ${response.status}` } };
+    }
+  };
+  const notify = (method) => post({ jsonrpc: "2.0", method }).then(() => undefined);
+  return { request, notify };
 }
 
 function startSidecar(spec) {
@@ -74,11 +127,10 @@ function toolText(response) {
 }
 
 function fireStop(spec) {
-  const script = Array.isArray(spec.args) ? spec.args[0] : undefined;
-  if (typeof script !== "string") {
+  const hook = hookScriptPath(spec);
+  if (hook === undefined) {
     return;
   }
-  const hook = join(dirname(script), "workbench-hook.mjs");
   const child = spawn(process.execPath, [hook, "Stop"], {
     env: process.env,
     windowsHide: true,
@@ -89,11 +141,10 @@ function fireStop(spec) {
 
 /** 触发一个钩子事件，stdin 给 JSON。 */
 function fireHook(spec, event, stdin) {
-  const script = Array.isArray(spec.args) ? spec.args[0] : undefined;
-  if (typeof script !== "string") {
+  const hook = hookScriptPath(spec);
+  if (hook === undefined) {
     return;
   }
-  const hook = join(dirname(script), "workbench-hook.mjs");
   const child = spawn(process.execPath, [hook, event], {
     env: process.env,
     windowsHide: true,
@@ -105,11 +156,10 @@ function fireHook(spec, event, stdin) {
 
 /** 模拟 Claude 的 StopFailure：这一轮因 API 错误结束（只带错误类型）。 */
 function fireStopFailure(spec, errorType) {
-  const script = Array.isArray(spec.args) ? spec.args[0] : undefined;
-  if (typeof script !== "string") {
+  const hook = hookScriptPath(spec);
+  if (hook === undefined) {
     return;
   }
-  const hook = join(dirname(script), "workbench-hook.mjs");
   const child = spawn(process.execPath, [hook, "StopFailure"], {
     env: process.env,
     windowsHide: true,
@@ -135,22 +185,32 @@ async function main() {
     }
   }
   const spec = loadServer();
-  if (spec === undefined || typeof spec.command !== "string") {
+  const http = spec !== undefined && spec.type === "http" && typeof spec.url === "string";
+  if (spec === undefined || (!http && typeof spec.command !== "string")) {
     process.stdout.write("FFPANE_MCP_NOCONFIG\n");
     keepAlive();
     return;
   }
-  const sidecar = startSidecar(spec);
+  process.stdout.write(`FFPANE_MCP_TRANSPORT=${http ? "http" : "stdio"}\n`);
   let sidecarErr = "";
-  sidecar.stderr.setEncoding("utf8");
-  sidecar.stderr.on("data", (chunk) => {
-    sidecarErr += chunk;
-  });
-  const request = createSession(sidecar);
-  await request("initialize", { protocolVersion: "2025-06-18" });
-  sidecar.stdin.write(
-    `${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`,
-  );
+  let request;
+  if (http) {
+    const session = createHttpSession(spec);
+    request = session.request;
+    await request("initialize", { protocolVersion: "2025-06-18" });
+    await session.notify("notifications/initialized");
+  } else {
+    const sidecar = startSidecar(spec);
+    sidecar.stderr.setEncoding("utf8");
+    sidecar.stderr.on("data", (chunk) => {
+      sidecarErr += chunk;
+    });
+    request = createSession(sidecar);
+    await request("initialize", { protocolVersion: "2025-06-18" });
+    sidecar.stdin.write(
+      `${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`,
+    );
+  }
   const tool = async (name, args) =>
     toolText(await request("tools/call", { name, arguments: args }));
 

@@ -41,6 +41,12 @@ import {
   resolveProjectLayout,
 } from "@ff-pane/storage";
 import { app, type BrowserWindow, shell } from "electron";
+import type { McpToolResult } from "../../mcp/protocol";
+import {
+  WORKBENCH_MCP_SERVER_VERSION,
+  workbenchToolCallTimeoutMs,
+} from "../../mcp/workbench-server";
+import { WORKBENCH_MCP_SERVER_NAME, WORKBENCH_MCP_TOOLS } from "../../mcp/workbench-tools";
 import { pendingReviewCount } from "../../shared/workbench/canvas-review";
 import type { InvokeHandlers } from "../../shared-ipc/server";
 import { publishEvent } from "../../shared-ipc/server";
@@ -120,6 +126,7 @@ import {
   WorkbenchMcpTempRegistry,
 } from "./launch-cli";
 import { decideManagerGrantRestore } from "./manager-grant";
+import { createWorkbenchMcpHttpServer, type WorkbenchMcpHttpServer } from "./mcp-http";
 import { cleanupStaleWorkbenchMcpDirs } from "./mcp-temp";
 import {
   executeWorkbenchTool,
@@ -1261,6 +1268,55 @@ export async function createWorkbenchCliLayer(
     },
   });
 
+  // T11.19：工作台 MCP 的 HTTP 服务，Claude / Codex 窗口共用，不再每个窗口开一个小进程。
+  // 工具走和控制通道同一段分发（onTool），超时照 stdio 小进程的规矩。起不来就全部退回小进程。
+  let mcpHttp: WorkbenchMcpHttpServer | undefined;
+  try {
+    mcpHttp = await createWorkbenchMcpHttpServer({
+      tokens: tokenRegistry,
+      name: WORKBENCH_MCP_SERVER_NAME,
+      version: WORKBENCH_MCP_SERVER_VERSION,
+      tools: WORKBENCH_MCP_TOOLS,
+      execute: async (windowId, name, args) => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const timeout = new Promise<McpToolResult>((resolve) => {
+          timer = setTimeout(
+            () => {
+              resolve({ text: "控制通道超时。请稍后重试。", isError: true });
+            },
+            workbenchToolCallTimeoutMs(name, args),
+          );
+        });
+        const call = Promise.resolve(
+          onTool({ windowId, type: "tool", body: { name, arguments: args } }),
+        ).then((decided): McpToolResult => {
+          if (!decided.ok) {
+            return { text: "控制通道拒绝了这次工具调用。", isError: true };
+          }
+          const result = decided.result as { readonly text?: unknown; readonly isError?: unknown };
+          const text = typeof result?.text === "string" ? result.text : "";
+          return {
+            text: text.length > 0 ? text : "工具没有返回内容。",
+            ...(result?.isError === true ? { isError: true } : {}),
+          };
+        });
+        try {
+          return await Promise.race([call, timeout]);
+        } finally {
+          clearTimeout(timer);
+        }
+      },
+      log: (message) => {
+        console.error(`[wb-mcp-http] ${message}`);
+      },
+    });
+    console.log(`[wb-mcp-http] listening on ${mcpHttp.url}`);
+  } catch (thrown) {
+    console.error(
+      `[wb-mcp-http] failed to start, all windows use the stdio sidecar: ${thrown instanceof Error ? thrown.message : String(thrown)}`,
+    );
+  }
+
   const cursors = createInboxCursorStore(inboxCursorPath(layout.rootDir));
 
   /** 应用这次运行里启动过的窗口。没启动过又要续接的，是重开项目后用户点了「续接」。 */
@@ -1614,6 +1670,7 @@ export async function createWorkbenchCliLayer(
     limitErrorPrefix: WORKBENCH_WINDOW_LIMIT_ERROR_PREFIX,
     codexClaimer,
     controlPipe: control.address,
+    ...(mcpHttp !== undefined ? { workbenchMcpUrl: mcpHttp.url } : {}),
     isPackaged: app.isPackaged,
     resourcesPath: process.resourcesPath,
     appPath: app.getAppPath(),
@@ -3493,6 +3550,7 @@ export async function createWorkbenchCliLayer(
         stopCodexTail(windowId);
       }
       await control.close();
+      await mcpHttp?.close();
       idleQueue.dispose();
       codexClaimer.dispose();
       tokenRegistry.clear();

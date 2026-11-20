@@ -1,5 +1,6 @@
 /**
  * T10.7a：假 CLI 走 Claude MCP 配置，管理者开窗口、执行者汇报、越权被拒。
+ * T11.19：默认走主进程的 HTTP 服务；第一条另用 FF_PANE_MCP_TRANSPORT=stdio 跑一遍退路（小进程）。
  */
 
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -84,12 +85,14 @@ async function readReplayForWindow(page: LaunchedApp["page"], windowId: string):
   }, windowId);
 }
 
-test("管理者开窗口，执行者汇报，越权被拒，记录落盘", async () => {
-  test.setTimeout(120_000);
+async function managerOpensWorker(transport: "http" | "stdio"): Promise<void> {
   const fakeBinDir = e2eTempDir("ffpane-e2e-mcp-");
   const projectDir = e2eTempDir("ffpane-e2e-mcp-proj-");
   seedFakeClaude(fakeBinDir);
-  const launched = await launchApp({ pathPrepend: fakeBinDir });
+  const launched = await launchApp({
+    pathPrepend: fakeBinDir,
+    ...(transport === "stdio" ? { extraEnv: { FF_PANE_MCP_TRANSPORT: "stdio" } } : {}),
+  });
   try {
     const { app, page } = launched;
     await createProject(app, page, projectDir, "E2E MCP");
@@ -152,6 +155,7 @@ test("管理者开窗口，执行者汇报，越权被拒，记录落盘", async
       )
       .toContain("[新消息] 来自");
     const managerReplay = await readReplayForWindow(page, managerId ?? "");
+    expect(managerReplay).toContain(`FFPANE_MCP_TRANSPORT=${transport}`);
     expect(managerReplay).toContain("汇报:done");
     expect(managerReplay).toContain("前端完成");
 
@@ -175,6 +179,7 @@ test("管理者开窗口，执行者汇报，越权被拒，记录落盘", async
     const childReplay = await readReplayForWindow(page, childId ?? "");
     expect(childReplay).toContain("FFPANE_MCP_WORKER_SEND=denied");
     expect(childReplay).toContain("FFPANE_MCP_WORKER_REPORT=ok");
+    expect(childReplay).toContain(`FFPANE_MCP_TRANSPORT=${transport}`);
 
     const threadDir = join(projectDir, ".ffpane", "threads");
     const names = readdirSync(threadDir);
@@ -197,6 +202,16 @@ test("管理者开窗口，执行者汇报，越权被拒，记录落盘", async
   } finally {
     await launched.cleanup();
   }
+}
+
+test("管理者开窗口，执行者汇报，越权被拒，记录落盘", async () => {
+  test.setTimeout(120_000);
+  await managerOpensWorker("http");
+});
+
+test("退路：FF_PANE_MCP_TRANSPORT=stdio 时照旧走小进程，同样能开窗口、汇报（T11.19）", async () => {
+  test.setTimeout(120_000);
+  await managerOpensWorker("stdio");
 });
 
 async function seedClaudeProfile(page: LaunchedApp["page"]): Promise<void> {
