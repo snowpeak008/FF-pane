@@ -3,6 +3,7 @@
  * 兼容并覆盖原 T10.1 workbench-terminal 回放断言。
  */
 
+import { execSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,17 +14,20 @@ import { openWindowMenu } from "./_workbench-ui";
 let launched: LaunchedApp;
 let projectA: string;
 let projectB: string;
+let projectLeak: string;
 
 test.beforeAll(async () => {
   launched = await launchApp();
   projectA = mkdtempSync(join(tmpdir(), "ffpane-e2e-wb-a-"));
   projectB = mkdtempSync(join(tmpdir(), "ffpane-e2e-wb-b-"));
+  projectLeak = mkdtempSync(join(tmpdir(), "ffpane-e2e-wb-leak-"));
 });
 
 test.afterAll(async () => {
   await launched.cleanup();
   rmSync(projectA, { recursive: true, force: true });
   rmSync(projectB, { recursive: true, force: true });
+  rmSync(projectLeak, { recursive: true, force: true });
 });
 
 async function createProject(
@@ -284,4 +288,74 @@ test("WebGL 上下文丢了、等不到恢复：终端先退回 DOM 渲染，再
       { timeout: 25_000 },
     )
     .toEqual(["webgl", "dom", "webgl"]);
+});
+
+test("开关窗口 20 次，主进程私有内存涨幅不超过 60MB（T11.19 node-pty 漏线程）", async () => {
+  test.setTimeout(300_000);
+  const { app, page } = launched;
+  await createProject(app, page, projectLeak, "WB Project Leak");
+  await selectProject(page, "WB Project Leak");
+  await gotoRoute(page, "/workbench");
+  await page.evaluate(async () => {
+    // biome-ignore lint/suspicious/noExplicitAny: E2E
+    await (window as any).ffpane.invoke("config:update", { maxWorkbenchWindows: 12 });
+  });
+  await page.getByTestId("workbench-new-tab").click();
+  await confirmShellInNewWindowDialog(page);
+  await expect(page.getByTestId("workbench-window")).toHaveCount(1, { timeout: 15_000 });
+  const mainPrivateMb = (): Promise<number> =>
+    app.evaluate(({ app: electronApp }) => {
+      const main = electronApp.getAppMetrics().find((metric) => metric.pid === process.pid);
+      const kb = main?.memory.privateBytes ?? main?.memory.workingSetSize ?? 0;
+      return Math.round(kb / 1024);
+    });
+  const mainPid = await app.evaluate(() => process.pid);
+  const mainThreads = (): number =>
+    Number(
+      execSync(`powershell -NoProfile -Command "(Get-Process -Id ${mainPid}).Threads.Count"`)
+        .toString()
+        .trim(),
+    );
+  const openAndClose = async (): Promise<void> => {
+    await (await openWindowMenu(page, page.getByTestId("workbench-window").first()))
+      .getByRole("button", { name: "Add window after this one" })
+      .click();
+    await confirmShellInNewWindowDialog(page);
+    await expect(page.getByTestId("workbench-window")).toHaveCount(2, { timeout: 15_000 });
+    const windowId = await requireWindowId(page, 1);
+    // 等终端真连上、有输出，再关
+    await expect
+      .poll(async () => readReplayForWindow(page, windowId), { timeout: 20_000 })
+      .toMatch(/\S/);
+    await page
+      .getByTestId("workbench-window")
+      .nth(1)
+      .getByRole("button", { name: "Close window" })
+      .click();
+    await expect(page.getByTestId("workbench-window")).toHaveCount(1, { timeout: 10_000 });
+  };
+  // 先开关一次，把第一次才加载的东西排除在外
+  await openAndClose();
+  await page.waitForTimeout(7_000);
+  const before = await mainPrivateMb();
+  const threadsBefore = mainThreads();
+  for (let round = 0; round < 20; round += 1) {
+    await openAndClose();
+  }
+  // 退出后 2 秒收工作线程，kill 后最晚 5 秒。刚关完时 JS 垃圾还没回收，私有内存会先高 50MB 左右，
+  // 十几秒内回落（实测 232 → 162MB）；漏掉的工作线程不会回落。所以等它落下来，最多 30 秒。
+  // 不修时每关一个窗口漏一个约 11MB 的工作线程，20 次约 220MB。
+  let after = before;
+  await expect
+    .poll(
+      async () => {
+        after = await mainPrivateMb();
+        return after - before;
+      },
+      { timeout: 30_000, intervals: [7_000, 3_000] },
+    )
+    .toBeLessThanOrEqual(60);
+  console.log(
+    `[T11.19] after 20 open/close: main private ${before}MB -> ${after}MB, threads ${threadsBefore} -> ${mainThreads()}`,
+  );
 });

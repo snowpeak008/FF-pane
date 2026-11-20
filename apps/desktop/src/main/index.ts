@@ -26,7 +26,13 @@ import type { MemoryIndexService } from "./memory-index";
 import { createQuitCoordinator, type QuitCoordinatorDeps } from "./session/quit";
 import { startSmokeMode } from "./smoke";
 import { runSqliteCheck } from "./sqlite-check";
-import { createTerminalLayer, runPtyCheck, type TerminalLayer } from "./terminal";
+import {
+  conoutWorkerStats,
+  createTerminalLayer,
+  releaseAllConoutWorkers,
+  runPtyCheck,
+  type TerminalLayer,
+} from "./terminal";
 import { loadWindowState, trackWindowState } from "./window-state";
 import {
   createWorkbenchAuthRegistry,
@@ -283,6 +289,8 @@ async function bootstrap(): Promise<void> {
       if (left !== undefined && left > 0) {
         console.error(`[main] ${left} terminal exit callback(s) still pending at quit`);
       }
+      // T11.19：回调都送到以后再收终端输出工作线程，不等平时那 2 秒。
+      releaseAllConoutWorkers();
     },
     runtimeCloseBudgetMs: TERMINAL_SETTLE_BUDGET_MS + 500,
     flushLayouts: () => layoutFlush.requestFlush(),
@@ -388,6 +396,7 @@ async function bootstrap(): Promise<void> {
   installDiagnostics({
     getWindow: () => mainWindow,
     terminalStats: () => terminalLayer?.manager.bufferStats() ?? { count: 0, bufferedBytes: 0 },
+    conoutWorkerStats,
     onMemoryWarning: (warning) => {
       if (mainWindow !== null && !mainWindow.isDestroyed()) {
         publishEvent(mainWindow.webContents, "app:memory-warning", warning);

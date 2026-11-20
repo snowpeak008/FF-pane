@@ -88,6 +88,18 @@ describe("内存警戒和快照", () => {
     expect(line).toContain("rss=300MB");
     expect(line).toContain("renderer=500MB");
     expect(line).toContain("terminals=3");
+    expect(line).toContain("private=?MB");
+    expect(line).not.toContain("ptyWorkers");
+  });
+
+  it("记主进程私有内存和终端输出工作线程开过 / 已结束（T11.19）", () => {
+    const line = formatMemoryLine({
+      ...base,
+      mainPrivateMb: 180,
+      conoutWorkers: { opened: 62, released: 51 },
+    });
+    expect(line).toContain("private=180MB");
+    expect(line).toContain("ptyWorkers=62/51");
   });
 });
 

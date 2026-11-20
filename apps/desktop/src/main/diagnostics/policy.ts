@@ -112,11 +112,15 @@ export interface MemorySample {
   readonly mainHeapUsedMb: number;
   readonly mainExternalMb: number;
   readonly mainArrayBuffersMb: number;
+  /** 主进程私有内存（MB，任务管理器口径，含工作线程）；拿不到时缺省。 */
+  readonly mainPrivateMb?: number;
   /** 界面进程私有内存（MB）；拿不到时缺省。 */
   readonly rendererMb?: number;
   readonly gpuMb?: number;
   readonly terminals: number;
   readonly terminalBufferedMb: number;
+  /** 终端输出工作线程开过 / 已结束（T11.19）。两数之差远大于开着的终端数就是又漏了。 */
+  readonly conoutWorkers?: { readonly opened: number; readonly released: number };
 }
 
 export type MemoryWarning = { readonly kind: "main" | "renderer"; readonly mb: number };
@@ -139,9 +143,12 @@ export function shouldWriteHeapSnapshot(sample: MemorySample, alreadyWritten: bo
 /** 日志里的一行内存记录。 */
 export function formatMemoryLine(sample: MemorySample): string {
   const parts = [
-    `main rss=${sample.mainRssMb}MB heap=${sample.mainHeapUsedMb}MB external=${sample.mainExternalMb}MB arrayBuffers=${sample.mainArrayBuffersMb}MB`,
+    `main rss=${sample.mainRssMb}MB private=${sample.mainPrivateMb ?? "?"}MB heap=${sample.mainHeapUsedMb}MB external=${sample.mainExternalMb}MB arrayBuffers=${sample.mainArrayBuffersMb}MB`,
     `renderer=${sample.rendererMb ?? "?"}MB gpu=${sample.gpuMb ?? "?"}MB`,
-    `terminals=${sample.terminals} buffered=${sample.terminalBufferedMb}MB`,
+    `terminals=${sample.terminals} buffered=${sample.terminalBufferedMb}MB` +
+      (sample.conoutWorkers === undefined
+        ? ""
+        : ` ptyWorkers=${sample.conoutWorkers.opened}/${sample.conoutWorkers.released}`),
   ];
   return `[memory] ${parts.join(" | ")}`;
 }

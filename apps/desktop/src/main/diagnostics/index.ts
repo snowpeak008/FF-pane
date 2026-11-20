@@ -160,6 +160,8 @@ export function installMainLogFile(dir: string): void {
 export interface DiagnosticsOptions {
   readonly getWindow: () => BrowserWindow | null;
   readonly terminalStats: () => { readonly count: number; readonly bufferedBytes: number };
+  /** 终端输出工作线程开过 / 已结束几个（T11.19）。 */
+  readonly conoutWorkerStats?: () => { readonly opened: number; readonly released: number };
   readonly onMemoryWarning: (warning: MemoryWarning) => void;
 }
 
@@ -240,9 +242,12 @@ export function installDiagnostics(options: DiagnosticsOptions): void {
       window !== null && !window.isDestroyed() ? window.webContents.getOSProcessId() : undefined;
     let rendererMb: number | undefined;
     let gpuMb: number | undefined;
+    let mainPrivateMb: number | undefined;
     for (const metric of app.getAppMetrics()) {
       const kb = metric.memory.privateBytes ?? metric.memory.workingSetSize;
-      if (metric.pid === rendererPid) {
+      if (metric.pid === process.pid) {
+        mainPrivateMb = Math.round(kb / 1024);
+      } else if (metric.pid === rendererPid) {
         rendererMb = Math.round(kb / 1024);
       } else if (metric.type === "GPU") {
         gpuMb = Math.round(kb / 1024);
@@ -254,10 +259,14 @@ export function installDiagnostics(options: DiagnosticsOptions): void {
       mainHeapUsedMb: toMb(usage.heapUsed),
       mainExternalMb: toMb(usage.external),
       mainArrayBuffersMb: toMb(usage.arrayBuffers),
+      ...(mainPrivateMb !== undefined ? { mainPrivateMb } : {}),
       ...(rendererMb !== undefined ? { rendererMb } : {}),
       ...(gpuMb !== undefined ? { gpuMb } : {}),
       terminals: terminals.count,
       terminalBufferedMb: toMb(terminals.bufferedBytes),
+      ...(options.conoutWorkerStats !== undefined
+        ? { conoutWorkers: options.conoutWorkerStats() }
+        : {}),
     };
   };
   const tick = (): void => {

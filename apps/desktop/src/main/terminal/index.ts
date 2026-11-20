@@ -1,5 +1,5 @@
 /** 主进程终端模块出口（T10.1）。 */
-export { createNodePtyFactory } from "./factory";
+export { conoutWorkerStats, createNodePtyFactory, releaseAllConoutWorkers } from "./factory";
 export {
   createTerminalLayer,
   isWorkbenchWindowLimitError,
