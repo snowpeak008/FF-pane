@@ -57,6 +57,13 @@ import {
   readClaudeSettingsEnvNames,
 } from "./claude-provider-settings";
 import {
+  CLAUDE_SANDBOX_COMMAND_TOOLS,
+  CLAUDE_SANDBOX_GATE_ENV,
+  type ClaudeSandboxCheck,
+  claudeSandboxSettings,
+  usesClaudeSandbox,
+} from "./claude-sandbox";
+import {
   assertSecretAbsent,
   assertTokenAbsent,
   buildInteractiveClaudeArgs,
@@ -112,7 +119,12 @@ import {
 import { workbenchMcpTransportFor } from "./mcp-transport";
 import type { LaunchCliRoute } from "./resolve-config";
 import { subagentPolicyFor } from "./role-tool-policy";
-import { claudeWriteRoots, codexWritableRootsOverride, WRITE_ROOTS_ENV } from "./write-roots";
+import {
+  claudeWriteRoots,
+  cleanOutsideDirs,
+  codexWritableRootsOverride,
+  WRITE_ROOTS_ENV,
+} from "./write-roots";
 
 /** initialPrompt IPC 上限（字节按 UTF-16 码元计；更长内容走 T10.7 briefs）。 */
 export const MAX_INITIAL_PROMPT_CHARS = 32 * 1024;
@@ -128,7 +140,8 @@ export class WorkbenchCliLaunchError extends Error {
     | "ipc-rejected"
     | "limit"
     | "invalid"
-    | "prompt-too-long";
+    | "prompt-too-long"
+    | "sandbox-unavailable";
 
   constructor(code: WorkbenchCliLaunchError["code"], message: string) {
     super(message);
@@ -210,6 +223,16 @@ export interface LaunchCliWindowDeps {
   readonly isConfigToolEnabled?: (projectRoot: string) => Promise<boolean>;
   /** Tony 在项目卡片里填的项目外可写目录（T11.8）。缺省没有。 */
   readonly outsideWriteDirs?: (projectRoot: string) => Promise<readonly string[]>;
+  /** T11.20：项目卡片里给 Claude 沙盒多加的域名（默认名单之外）。缺省没有。 */
+  readonly sandboxNetworkDomains?: (projectRoot: string) => Promise<readonly string[]>;
+  /**
+   * T11.20：开可改可跑命令的 Claude 窗口前查 Claude 版本和沙盒装没装。缺省不查
+   * （单测、e2e 的假 CLI；真开窗由 handlers 接上 claude-sandbox-probe）。
+   */
+  readonly checkClaudeSandbox?: (target: {
+    readonly file: string;
+    readonly args: readonly string[];
+  }) => Promise<ClaudeSandboxCheck>;
   /**
    * T11.9：按项目启用的技能给这个窗口准备挂载。Claude 返回插件目录，Codex / Grok 返回要追加到说明里的技能清单。
    * 缺省不挂技能。出错时由实现自己兜住，不让开窗失败。
@@ -535,6 +558,27 @@ async function launchCliWindowBody(
   if (runtime === "codex") {
     configOverrides = { ...configOverrides, ...codexWritableRootsOverride(outsideDirs) };
   }
+  // T11.20：可改可跑命令的 Claude 窗口在项目内沙盒里跑命令。开不了就不开，不退回一直问，也不变成全放开。
+  const sandboxed = usesClaudeSandbox({ runtime, permission });
+  let claudeSandbox: Record<string, unknown> | undefined;
+  if (sandboxed) {
+    if (deps.checkClaudeSandbox !== undefined) {
+      const target = resolveDirectCliTarget(command, [], process.env);
+      if (target !== undefined) {
+        const check = await deps.checkClaudeSandbox({ file: target.file, args: target.args });
+        if (!check.ok) {
+          throw new WorkbenchCliLaunchError("sandbox-unavailable", check.message);
+        }
+      }
+    }
+    claudeSandbox = claudeSandboxSettings({
+      outsideDirs: cleanOutsideDirs(outsideDirs),
+      extraDomains:
+        deps.sandboxNetworkDomains !== undefined
+          ? await deps.sandboxNetworkDomains(input.projectRoot)
+          : [],
+    });
+  }
   const compact = resolveManagerCompact({
     role,
     kind,
@@ -637,6 +681,9 @@ async function launchCliWindowBody(
     nodePath,
     scriptPath,
     ...(claudeProvider !== undefined ? { claudeProvider } : {}),
+    ...(claudeSandbox !== undefined ? { claudeSandbox } : {}),
+    // T11.20：全放开不靠用户自己的设置跳过启动确认（默认选项是退出）。
+    ...(runtime === "claude-code" && permission === "yolo" ? { skipBypassConfirm: true } : {}),
   });
   const releaseFailedLaunch = async (): Promise<void> => {
     releaseWindowHooks(input.windowId);
@@ -655,6 +702,9 @@ async function launchCliWindowBody(
   let cursorHooksPath: string | undefined;
   let cursorCliConfigPath: string | undefined;
   const extraProcessEnv: Record<string, string> = { ...compact.env };
+  if (sandboxed) {
+    extraProcessEnv[CLAUDE_SANDBOX_GATE_ENV] = "1";
+  }
   if (claudeProvider?.apiKeyHelper !== undefined && secret !== undefined) {
     extraProcessEnv[CLAUDE_KEY_ENV] = secret;
   }
@@ -708,6 +758,7 @@ async function launchCliWindowBody(
           }
         : {}),
       ...(role === "supervisor" ? { readOnlyShell: true } : {}),
+      ...(sandboxed ? { sandboxCommandTools: CLAUDE_SANDBOX_COMMAND_TOOLS } : {}),
       ...(roleInjection.claudePromptFile !== undefined
         ? { appendSystemPromptFile: roleInjection.claudePromptFile }
         : {}),

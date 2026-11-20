@@ -541,6 +541,26 @@ export interface CursorCommandResult {
   readonly output: string;
 }
 
+/** 设置里「Claude 沙盒」一栏看的状态（T11.20）。 */
+export interface ClaudeSandboxStatusView {
+  /** 只有 Windows 要装（其他平台 Claude 自带的沙盒不用装）。 */
+  readonly platformSupported: boolean;
+  readonly claudeFound: boolean;
+  readonly claudeVersion?: string;
+  readonly minVersion: string;
+  /** 版本够不够开「可改+跑命令」的 Claude 窗口。认不出版本时算够。 */
+  readonly versionOk: boolean;
+  readonly installed: boolean;
+  /** Claude 说的不能用的原因（原文）。 */
+  readonly reasons: readonly string[];
+}
+
+/** `claude sandbox install / uninstall` 的结果。 */
+export interface ClaudeSandboxCommandResult {
+  readonly ok: boolean;
+  readonly message: string;
+}
+
 export interface WorkbenchRuntimeStatusResponse {
   readonly windows: Readonly<Record<string, WorkbenchWindowRuntimeStatus>>;
   readonly resources: {
@@ -805,6 +825,12 @@ export interface RemoveProjectRequest {
 export interface SetProjectOutsideWriteDirsRequest {
   readonly id: ProjectId;
   readonly dirs: readonly string[];
+}
+
+/** projects:set-sandbox-network-domains 请求（T11.20）：整份替换 Claude 沙盒多连的域名，空数组即只用默认名单。 */
+export interface SetProjectSandboxNetworkDomainsRequest {
+  readonly id: ProjectId;
+  readonly domains: readonly string[];
 }
 
 /** projects:set-skills 请求（T11.9）：整份替换这个项目启用的技能（原名），空数组即都不用。 */
@@ -1886,6 +1912,11 @@ export interface IpcInvokeContracts {
     request: SetProjectOutsideWriteDirsRequest;
     response: ProjectRegistryEntry;
   };
+  /** T11.20：Claude 沙盒里命令能多连的域名。只有界面能改，存在 projects.json。有不合法的整份拒绝。 */
+  "projects:set-sandbox-network-domains": {
+    request: SetProjectSandboxNetworkDomainsRequest;
+    response: ProjectRegistryEntry;
+  };
   /** T11.9：这个项目启用哪些技能。只有界面能改，存在 projects.json。下次开窗口生效。 */
   "projects:set-skills": { request: SetProjectSkillsRequest; response: ProjectRegistryEntry };
   /** T11.9 技能库。 */
@@ -1946,6 +1977,12 @@ export interface IpcInvokeContracts {
   "cursor:update": { request: undefined; response: CursorCommandResult };
   /** 跑官方安装命令（界面先确认）。 */
   "cursor:install": { request: undefined; response: CursorCommandResult };
+  /** T11.20：Claude 版本够不够、Windows 沙盒装没装。 */
+  "claude-sandbox:status": { request: undefined; response: ClaudeSandboxStatusView };
+  /** T11.20：`claude sandbox install`（界面先确认；会弹一次 UAC）。 */
+  "claude-sandbox:install": { request: undefined; response: ClaudeSandboxCommandResult };
+  /** T11.20：`claude sandbox uninstall --json`（界面先确认；会弹一次 UAC）。 */
+  "claude-sandbox:uninstall": { request: undefined; response: ClaudeSandboxCommandResult };
   /**
    * T9.4b —— 推理强度可见档。非白名单返回空；opencode 读不到该模型 effort values 也返回空。
    */
@@ -2140,6 +2177,7 @@ export const INVOKE_CHANNELS = [
   "diagnostics:check-sqlite",
   "diagnostics:check-pty",
   "dialog:pick-directory",
+  "projects:set-sandbox-network-domains",
   "projects:set-skills",
   "skills:list",
   "skills:import",
@@ -2202,6 +2240,9 @@ export const INVOKE_CHANNELS = [
   "providers:probe-cli-login",
   "providers:list-local-models",
   "cursor:status",
+  "claude-sandbox:status",
+  "claude-sandbox:install",
+  "claude-sandbox:uninstall",
   "cursor:login-start",
   "cursor:login-cancel",
   "cursor:login-open",

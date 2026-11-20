@@ -30,6 +30,7 @@ import {
 } from "@ff-pane/core";
 import {
   type ApiKeyRef,
+  cleanSandboxDomains,
   type HabitEntry,
   type HabitEntryId,
   isProjectConfigScopeOpen,
@@ -98,6 +99,7 @@ type DataChannel =
   | "projects:remove"
   | "projects:restore"
   | "projects:set-outside-write-dirs"
+  | "projects:set-sandbox-network-domains"
   | "projects:set-skills"
   | "skills:list"
   | "skills:import"
@@ -392,6 +394,17 @@ export async function createDataHandlers(
       ),
 
     // T11.9：项目启用哪些技能只有界面能改，存在 projects.json。只收技能库里有的原名。下次开窗口生效。
+    // T11.20：沙盒能多连的域名，写法跟着 sandbox-runtime（不收 `*`、`*.com`）。有一条不合法就整份不存。
+    "projects:set-sandbox-network-domains": async (request) => {
+      const cleaned = cleanSandboxDomains(request.domains);
+      if (cleaned.invalid.length > 0) {
+        throw new Error(
+          `这些域名不能用：${cleaned.invalid.join("、")}。写成 example.com 或 *.example.com，不能写 * 或 *.com 这类太宽的。`,
+        );
+      }
+      return registry.setSandboxNetworkDomains(request.id, cleaned.domains);
+    },
+
     "projects:set-skills": async (request) => {
       const known = new Set((await readSkillIndex(skillsLayout)).map((entry) => entry.name));
       return registry.setSkills(

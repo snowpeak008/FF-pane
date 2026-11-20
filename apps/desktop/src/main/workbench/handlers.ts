@@ -95,6 +95,12 @@ import {
 } from "./canvas-library";
 import { createCanvasImageHandler } from "./canvas-thumbs";
 import { ensureCanvasWatcher } from "./canvas-watcher";
+import {
+  detectSandboxStartupFailure,
+  judgeClaudeSandbox,
+  sandboxStartupFailureMessage,
+} from "./claude-sandbox";
+import { checkClaudeSandbox } from "./claude-sandbox-probe";
 import { closeDescendantWindow } from "./close-descendant";
 import { CodexSessionClaimer, isAutomatedTestEnv, resolveCodexHome } from "./codex-claim";
 import { switchCodexModelInWindow } from "./codex-model-switch";
@@ -252,7 +258,12 @@ export interface WorkbenchCliLayer {
   /** 终端退出（自然退出或被关闭）：放锁；自然退出时告诉监管者或上级。 */
   readonly noteWindowExit: (
     windowId: string,
-    exit: { readonly exitCode: number; readonly killed: boolean },
+    exit: {
+      readonly exitCode: number;
+      readonly killed: boolean;
+      /** 终端最后一段输出（T11.20：认出 Claude 沙盒没起来）。 */
+      readonly outputTail?: string;
+    },
   ) => void;
   readonly dispose: () => Promise<void>;
 }
@@ -272,6 +283,22 @@ export interface WorkbenchCliLayerOptions {
 
 function mainModuleDir(): string {
   return dirname(fileURLToPath(import.meta.url));
+}
+
+/**
+ * T11.20 开可改可跑命令的 Claude 窗口前的检查。自动化测试里用的是假 CLI，默认不查；
+ * 要测拦截时设 FF_PANE_E2E_CLAUDE_SANDBOX=old（版本太旧）或 missing（没装沙盒）。
+ */
+function claudeSandboxChecker(): typeof checkClaudeSandbox {
+  if (!isAutomatedTestEnv()) {
+    return checkClaudeSandbox;
+  }
+  const simulate = process.env["FF_PANE_E2E_CLAUDE_SANDBOX"];
+  return async () =>
+    judgeClaudeSandbox({
+      version: simulate === "old" ? "2.1.302" : undefined,
+      installed: simulate !== "missing",
+    });
 }
 
 /**
@@ -866,7 +893,7 @@ export async function createWorkbenchCliLayer(
   };
   const noteWindowExit = (
     windowId: string,
-    exit: { readonly exitCode: number; readonly killed: boolean },
+    exit: { readonly exitCode: number; readonly killed: boolean; readonly outputTail?: string },
   ): void => {
     clearPermissionTimer(windowId);
     // 窗口退出后续接用布局里记的编号（界面收到过认领）；再启动时钩子会重新报。
@@ -888,7 +915,18 @@ export async function createWorkbenchCliLayer(
       notifyLockGranted(grant);
     }
     // 关窗、重启是本软件结束的，不打扰；自己退出的（崩溃、限流中断或 /exit）才报。
-    if (!exit.killed) {
+    // T11.20：Claude 沙盒没起来（failIfUnavailable 退出）单独说清楚原因和办法。
+    const sandboxFailure =
+      !exit.killed && exit.outputTail !== undefined
+        ? detectSandboxStartupFailure(exit.outputTail)
+        : undefined;
+    if (sandboxFailure !== undefined) {
+      console.error(`[workbench] claude sandbox unavailable for ${windowId}: ${sandboxFailure}`);
+      void notifyOverseer(
+        windowId,
+        `的终端退出了：${sandboxStartupFailureMessage(sandboxFailure)}`,
+      );
+    } else if (!exit.killed) {
       void notifyOverseer(
         windowId,
         `的终端自己退出了（退出码 ${exit.exitCode}）。它持有的锁已放掉。需要的话请用户在那个窗口重启或续接。`,
@@ -1478,6 +1516,18 @@ export async function createWorkbenchCliLayer(
         return [];
       }
     },
+    sandboxNetworkDomains: async (projectRoot: string) => {
+      try {
+        const listed = await projects.listProjects();
+        const entry = listed.find(
+          (item) => item.rootPath.toLowerCase() === projectRoot.toLowerCase(),
+        );
+        return entry?.sandboxNetworkDomains ?? [];
+      } catch {
+        return [];
+      }
+    },
+    checkClaudeSandbox: claudeSandboxChecker(),
     resolveSkillMounts: async ({
       windowId,
       projectRoot,

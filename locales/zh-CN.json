@@ -359,7 +359,7 @@
         "edit-exec": "可改+跑命令",
         "yolo": "YOLO"
       },
-      "windowsNote": "Windows 上：Codex 用系统沙盒，只能写项目和允许的目录；Claude 靠 CLI 规则加本软件的检查，写文件工具拦得住，命令里写到哪只认常见写法。",
+      "windowsNote": "Windows 上：Codex 用系统沙盒，只能写项目和允许的目录。Claude 的「可改+跑命令」用 Claude 自带的沙盒（要 Claude Code 2.1.329 以上，并装好沙盒），命令不问，但只能写项目和允许的目录、只能连允许的域名；不满足时窗口开不了。Claude 的 YOLO 不受限，只有本软件拦改文件工具往项目外写，只在确定时用（比如跑 Unity）。",
       "openedByUser": "由你开启",
       "openedByWindow": "由 {{name}} 开启",
       "badgeHint": "点击可修改权限（需重启生效）",
@@ -692,6 +692,9 @@
       "outsideDirsLabel": "项目外可写目录",
       "outsideDirsPlaceholder": "一行一个，例如 D:\\WorkWork\\共享素材",
       "outsideDirsHint": "AI 窗口只能写项目目录和临时目录；这里列的目录也能写。只有你能在这里改，改完要重开窗口才生效。",
+      "sandboxDomainsLabel": "沙盒可联网的域名",
+      "sandboxDomainsPlaceholder": "一行一个，例如 unity3d.com 或 *.example.com",
+      "sandboxDomainsHint": "可改可跑命令的 Claude 窗口在沙盒里跑命令，只能连这些域名和默认的几个（{{defaults}}）。不能写 * 或 *.com 这类太宽的。改完要重开窗口才生效。",
       "workbenchMissing": "数据目录 .workbench/ 读不到，卡片信息不可用",
       "partial": "部分信息读取失败：{{parts}}",
       "partSeparator": "、",
@@ -1495,6 +1498,39 @@
     "expand": "展开次级侧栏",
     "switchTo": "切换到项目：{{name}}",
     "windowCount": "{{count}} 个运行中窗口"
+  },
+  "claudeSandbox": {
+    "title": "Claude 沙盒",
+    "refresh": "刷新",
+    "intro": "「可改+跑命令」的 Claude 窗口在这个沙盒里跑命令：不弹权限确认，但只能写项目和项目外可写目录，只能连允许的域名。要 Claude Code 2.1.329 或更新，并在本机装好沙盒（Windows 上多一个 srt-sandbox 账户）。",
+    "notWindows": "只有 Windows 需要装。",
+    "claudeMissing": "没找到 Claude Code（claude）。先安装 Claude Code。",
+    "state": {
+      "ready": "可以用：可改+跑命令的 Claude 窗口会在沙盒里跑命令。",
+      "notReady": "还不能用：可改+跑命令的 Claude 窗口现在开不了。"
+    },
+    "version": {
+      "ok": "Claude Code {{version}}（需要 {{min}} 或更新）✓",
+      "old": "Claude Code {{version}} 太旧，需要 {{min}} 或更新。关掉 FF-pane 后在 PowerShell 里运行下面这行升级："
+    },
+    "installed": {
+      "yes": "沙盒已装 ✓",
+      "no": "沙盒没装"
+    },
+    "install": {
+      "action": "安装沙盒",
+      "confirmTitle": "安装 Claude 沙盒？",
+      "confirmBody": "会跑 claude sandbox install：本机多一个 srt-sandbox 账户和只管这个账户的网络过滤规则。Windows 会弹一次管理员确认，点「是」。"
+    },
+    "uninstall": {
+      "action": "卸载沙盒",
+      "confirmTitle": "卸载 Claude 沙盒？",
+      "confirmBody": "会跑 claude sandbox uninstall，删掉 srt-sandbox 账户和网络过滤规则，Windows 会弹一次管理员确认。卸了以后「可改+跑命令」的 Claude 窗口开不了；你在 FF-pane 外面用 Claude 沙盒的也会受影响。"
+    },
+    "command": {
+      "ok": "完成。",
+      "failed": "没成功。"
+    }
   },
   "cursor": {
     "title": "Cursor",

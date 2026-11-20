@@ -5,6 +5,7 @@ import { app, BrowserWindow, dialog, ipcMain, protocol, session, shell } from "e
 import { CANVAS_IMAGE_SCHEME } from "../shared/canvas-image-url";
 import { publishEvent, registerInvokeHandlers } from "../shared-ipc/server";
 import { installAppMenu, resolveAppMenuLanguage } from "./app-menu";
+import { createClaudeSandboxHandlers } from "./claude-sandbox-admin";
 import { installCsp } from "./csp";
 import { createCursorAccountHandlers } from "./cursor-account";
 import { createDataHandlers } from "./data";
@@ -307,6 +308,8 @@ async function bootstrap(): Promise<void> {
     ipcMain,
     createCursorAccountHandlers(() => mainWindow),
   );
+  // Claude 沙盒（T11.20）：设置里看状态、装、卸，走用户自己那份 Claude 的 claude sandbox 命令。
+  registerInvokeHandlers(ipcMain, createClaudeSandboxHandlers());
 
   // 知识库层接线（T6.5）：索引库连接 + sqlite-vec 装载 + 导入编排。
   // 独立 try：装配失败（索引库损坏等）只让知识库页不可用，不牵连数据层与会话层。
@@ -335,7 +338,18 @@ async function bootstrap(): Promise<void> {
           layer.idleQueue.drop(terminalId);
           const windowId = metadata?.["windowId"];
           if (typeof windowId === "string" && windowId.trim() !== "") {
-            layer.noteWindowExit(windowId, exit);
+            let outputTail: string | undefined;
+            if (!exit.killed) {
+              try {
+                outputTail = terminalLayer?.manager.getReplayTail(terminalId, 8192);
+              } catch {
+                // 会话已经不在了：不认原因，照常报「自己退出了」
+              }
+            }
+            layer.noteWindowExit(windowId, {
+              ...exit,
+              ...(outputTail !== undefined ? { outputTail } : {}),
+            });
             layer.modelEffort.noteTerminalExit(windowId);
             void layer.rolePromptTemps.release(windowId);
             void layer.releaseConfigHub(windowId);

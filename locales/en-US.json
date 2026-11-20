@@ -359,7 +359,7 @@
         "edit-exec": "Edit + exec",
         "yolo": "YOLO"
       },
-      "windowsNote": "On Windows, Codex uses the OS sandbox and can only write to the project and allowed folders; Claude relies on CLI policy plus an in-app check that fully covers file-writing tools but only recognizes common shell write patterns.",
+      "windowsNote": "On Windows, Codex uses the OS sandbox and can only write to the project and allowed folders. Claude's \"edit + run commands\" level uses Claude's own sandbox (needs Claude Code 2.1.329 or later with the sandbox installed): commands run without prompts but can only write to the project and allowed folders and only reach allowed domains; the window won't open if those aren't met. Claude's YOLO is unrestricted apart from the in-app check on file-writing tools, so use it only when you're sure (for example, to run Unity).",
       "openedByUser": "Opened by you",
       "openedByWindow": "Opened by {{name}}",
       "badgeHint": "Click to change permission (restart required)",
@@ -692,6 +692,9 @@
       "outsideDirsLabel": "Writable folders outside the project",
       "outsideDirsPlaceholder": "One per line, e.g. D:\\WorkWork\\shared-assets",
       "outsideDirsHint": "AI windows can only write inside the project and the temp folder, plus the folders listed here. Only you can change this; reopen windows for it to take effect.",
+      "sandboxDomainsLabel": "Domains the sandbox can reach",
+      "sandboxDomainsPlaceholder": "One per line, e.g. unity3d.com or *.example.com",
+      "sandboxDomainsHint": "Claude windows set to edit and run commands run their commands in a sandbox that can only reach these domains plus the defaults ({{defaults}}). Broad patterns such as * or *.com are not allowed. Reopen windows for changes to take effect.",
       "workbenchMissing": "Cannot read .workbench/ — details unavailable",
       "partial": "Some details failed to load: {{parts}}",
       "partSeparator": ", ",
@@ -1495,6 +1498,39 @@
     "expand": "Expand secondary panel",
     "switchTo": "Switch to project: {{name}}",
     "windowCount": "{{count}} running window(s)"
+  },
+  "claudeSandbox": {
+    "title": "Claude sandbox",
+    "refresh": "Refresh",
+    "intro": "Claude windows set to \"edit + run commands\" run their commands in this sandbox: no permission prompts, but they can only write to the project and the allowed outside folders and only reach allowed domains. Needs Claude Code 2.1.329 or later and the sandbox installed on this PC (on Windows this adds an srt-sandbox account).",
+    "notWindows": "Only needed on Windows.",
+    "claudeMissing": "Claude Code (claude) was not found. Install Claude Code first.",
+    "state": {
+      "ready": "Ready: \"edit + run commands\" Claude windows run their commands in the sandbox.",
+      "notReady": "Not ready: \"edit + run commands\" Claude windows can't open yet."
+    },
+    "version": {
+      "ok": "Claude Code {{version}} (needs {{min}} or later) ✓",
+      "old": "Claude Code {{version}} is too old; needs {{min}} or later. Close FF-pane and run this in PowerShell to upgrade:"
+    },
+    "installed": {
+      "yes": "Sandbox installed ✓",
+      "no": "Sandbox not installed"
+    },
+    "install": {
+      "action": "Install sandbox",
+      "confirmTitle": "Install the Claude sandbox?",
+      "confirmBody": "Runs claude sandbox install: adds an srt-sandbox account and network filter rules that only apply to that account. Windows will ask for administrator approval once; click Yes."
+    },
+    "uninstall": {
+      "action": "Uninstall sandbox",
+      "confirmTitle": "Uninstall the Claude sandbox?",
+      "confirmBody": "Runs claude sandbox uninstall, removing the srt-sandbox account and its network filter rules; Windows will ask for administrator approval once. Afterwards \"edit + run commands\" Claude windows can't open, and anything outside FF-pane that uses the Claude sandbox is affected too."
+    },
+    "command": {
+      "ok": "Done.",
+      "failed": "Didn't succeed."
+    }
   },
   "cursor": {
     "title": "Cursor",

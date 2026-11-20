@@ -32,6 +32,14 @@ function writeFakeCli(dir: string, name: "claude" | "codex", envKey: string): vo
       "  try { body = Buffer.from(require('node:fs').readFileSync(argv[mcpAt + 1], 'utf8')).toString('base64'); } catch {}",
       "  process.stdout.write(tag + '_MCP_B64=' + body + '\\n');",
       "}",
+      // T11.20：沙盒内部开关和 --settings 内容（临时文件随进程清掉，活着时打印）
+      "process.stdout.write(tag + '_ENV_CLAUDE_CODE_NANKEEN_KESTREL=' + (process.env.CLAUDE_CODE_NANKEEN_KESTREL ? 'present' : 'absent') + '\\n');",
+      "const setAt = argv.indexOf('--settings');",
+      "if (setAt >= 0) {",
+      "  let body = 'MISSING';",
+      "  try { body = Buffer.from(require('node:fs').readFileSync(argv[setAt + 1], 'utf8')).toString('base64'); } catch {}",
+      "  process.stdout.write(tag + '_SETTINGS_B64=' + body + '\\n');",
+      "}",
       // 和真 Codex 一样：做完一轮后调用 notify，事件 JSON 里带 thread-id（会话编号）。
       "if (tag === 'FAKE_CODEX') {",
       "  const at = argv.findIndex((a) => a.startsWith('notify=['));",
@@ -1299,5 +1307,170 @@ test("T11.9：技能库导入、改名、替换保留配置，项目勾上后 Cl
     rmSync(fakeBinDir, { recursive: true, force: true });
     rmSync(projectDir, { recursive: true, force: true });
     rmSync(skillRepo, { recursive: true, force: true });
+  }
+});
+
+/** 假 CLI 打印的 base64 段（换行被终端折开时先拼回去）。 */
+function readB64Marker(replay: string, marker: string): string {
+  const flat = replay.replace(/\r?\n/g, "");
+  const at = flat.indexOf(marker);
+  if (at < 0) {
+    return "";
+  }
+  const b64 = /^[A-Za-z0-9+/=]+/.exec(flat.slice(at + marker.length));
+  return Buffer.from(b64?.[0] ?? "", "base64").toString("utf8");
+}
+
+async function seedLocalClaudeProfile(page: LaunchedApp["page"]): Promise<void> {
+  await page.evaluate(async () => {
+    const invoke = (channel: string, req?: unknown) =>
+      // biome-ignore lint/suspicious/noExplicitAny: E2E
+      (window as any).ffpane.invoke(channel, req);
+    const provider = await invoke("providers:create", {
+      draft: {
+        name: "Local Claude",
+        templateId: "local-login",
+        models: [{ id: "sonnet", label: "Sonnet", kind: "chat" }],
+        defaultModelId: "sonnet",
+        enabled: true,
+      },
+    });
+    await invoke("profiles:create", {
+      draft: {
+        name: "Claude WB",
+        runtime: "claude-code",
+        providerId: provider.id,
+        defaultRole: "worker",
+        permissionPreset: {
+          readPaths: ["**"],
+          writePaths: ["**"],
+          shell: "allowed",
+          network: false,
+          dangerousOpsRequireApproval: true,
+        },
+        connectionMode: "local_cli",
+        model: "sonnet",
+      },
+    });
+  });
+}
+
+test("T11.20：项目卡片存沙盒域名；可改+跑命令的 Claude 带项目内沙盒；全放开跳过启动确认；没装沙盒开不了", async () => {
+  test.setTimeout(180_000);
+  const fakeBinDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-sandbox-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "ffpane-e2e-sandbox-proj-"));
+  seedFakeClaude(fakeBinDir);
+  seedFakeCodex(fakeBinDir);
+  const launched = await launchApp({ pathPrepend: fakeBinDir, retainDataRoot: true });
+  let dataRoot = "";
+  try {
+    const { app, page } = launched;
+    dataRoot = launched.dataRoot;
+    await createProject(app, page, projectDir, "E2E Sandbox");
+    const projectId = await page.evaluate(async () => {
+      // biome-ignore lint/suspicious/noExplicitAny: E2E
+      const list = await (window as any).ffpane.invoke("projects:list");
+      return (list as Array<{ id: string; name: string }>).find((p) => p.name === "E2E Sandbox")
+        ?.id;
+    });
+    expect(projectId).toBeTruthy();
+
+    // 项目卡片：不合法的整份不存，报出是哪条；合法的存进去
+    await page.getByTestId(`project-bind-config-${projectId}`).click();
+    const domains = page.getByTestId("project-sandbox-domains");
+    await expect(domains).toBeVisible();
+    await domains.fill("unity3d.com\n*.com");
+    await page.getByTestId("project-config-save").click();
+    await expect(page.getByText(/\*\.com/).last()).toBeVisible();
+    await domains.fill("Unity3D.com\n*.example.org");
+    await page.getByTestId("project-config-save").click();
+    await expect(page.getByTestId("project-config-dialog")).toBeHidden();
+    const saved = await page.evaluate(async (id) => {
+      // biome-ignore lint/suspicious/noExplicitAny: E2E
+      const list = await (window as any).ffpane.invoke("projects:list");
+      return (list as Array<{ id: string; sandboxNetworkDomains?: string[] }>).find(
+        (p) => p.id === id,
+      )?.sandboxNetworkDomains;
+    }, projectId);
+    expect(saved).toEqual(["unity3d.com", "*.example.org"]);
+
+    await page.getByRole("button", { name: /^E2E Sandbox/ }).click();
+    await seedLocalClaudeProfile(page);
+    await gotoRoute(page, "/workbench");
+
+    // 可改+跑命令：内部开关、命令工具放行、settings 里的 sandbox 段带上项目加的域名
+    await page.getByTestId("workbench-new-tab").click();
+    await confirmAiWindow(page, "claude", undefined, "edit-exec", "worker");
+    const execId = await requireWindowId(page, 0);
+    await expect
+      .poll(async () => readReplayForWindow(page, execId), { timeout: 20_000 })
+      .toContain("FAKE_CLAUDE_SETTINGS_B64=");
+    const execReplay = await readReplayForWindow(page, execId);
+    expect(execReplay).toContain("FAKE_CLAUDE_ENV_CLAUDE_CODE_NANKEEN_KESTREL=present");
+    const execArgv = parseArgvJson(execReplay, "FAKE_CLAUDE");
+    expect(execArgv).toContain("PowerShell");
+    expect(execArgv).toContain("Bash");
+    const execSettings = JSON.parse(readB64Marker(execReplay, "FAKE_CLAUDE_SETTINGS_B64=")) as {
+      sandbox?: {
+        failIfUnavailable?: boolean;
+        windows?: { backend?: string };
+        network?: { allowedDomains?: string[] };
+      };
+    };
+    expect(execSettings.sandbox?.failIfUnavailable).toBe(true);
+    expect(execSettings.sandbox?.windows?.backend).toBe("sandboxuser");
+    expect(execSettings.sandbox?.network?.allowedDomains).toEqual(
+      expect.arrayContaining(["pypi.org", "unity3d.com", "*.example.org"]),
+    );
+
+    // 全放开：跳过启动确认，没有沙盒
+    await page.getByTestId("workbench-new-tab").click();
+    await confirmAiWindow(page, "claude", undefined, "yolo", "worker");
+    let yoloId = "";
+    await expect
+      .poll(
+        async () => {
+          const ids = await page
+            .getByTestId("workbench-window")
+            .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-window-id") ?? ""));
+          yoloId = ids.find((id) => id !== "" && id !== execId) ?? "";
+          return yoloId;
+        },
+        { timeout: 20_000 },
+      )
+      .not.toBe("");
+    await expect
+      .poll(async () => readReplayForWindow(page, yoloId), { timeout: 20_000 })
+      .toContain("FAKE_CLAUDE_SETTINGS_B64=");
+    const yoloReplay = await readReplayForWindow(page, yoloId);
+    expect(yoloReplay).toContain("FAKE_CLAUDE_ENV_CLAUDE_CODE_NANKEEN_KESTREL=absent");
+    const yoloSettings = JSON.parse(readB64Marker(yoloReplay, "FAKE_CLAUDE_SETTINGS_B64=")) as {
+      sandbox?: unknown;
+      skipDangerousModePermissionPrompt?: boolean;
+    };
+    expect(yoloSettings.skipDangerousModePermissionPrompt).toBe(true);
+    expect(yoloSettings.sandbox).toBeUndefined();
+  } finally {
+    await launched.cleanup();
+  }
+
+  // 没装沙盒：可改+跑命令的 Claude 开不了，说清怎么办
+  const missing = await launchApp({
+    pathPrepend: fakeBinDir,
+    dataRoot,
+    extraEnv: { FF_PANE_E2E_CLAUDE_SANDBOX: "missing" },
+  });
+  try {
+    const { page } = missing;
+    await gotoRoute(page, "/projects");
+    await page.getByRole("button", { name: /^E2E Sandbox/ }).click();
+    await gotoRoute(page, "/workbench");
+    await page.getByTestId("workbench-new-tab").click();
+    await confirmAiWindow(page, "claude", undefined, "edit-exec", "worker");
+    await expect(page.getByText(/Claude 沙盒没装/).first()).toBeVisible({ timeout: 20_000 });
+  } finally {
+    await missing.cleanup();
+    rmSync(fakeBinDir, { recursive: true, force: true });
+    rmSync(projectDir, { recursive: true, force: true });
   }
 });

@@ -12,6 +12,7 @@ import {
 } from "../../stores/settings-groups";
 import { useUiStore } from "../../stores/ui";
 import { AppearanceSection } from "./AppearanceSection";
+import { ClaudeSandboxSection } from "./ClaudeSandboxSection";
 import { ConfigToolSection } from "./ConfigToolSection";
 import { ConfigsSection } from "./configs/ConfigsSection";
 import { CursorSection } from "./cursor/CursorSection";
@@ -29,6 +30,7 @@ const GROUP_SECTIONS: Record<SettingsGroup, readonly (() => ReactNode)[]> = {
   workbench: [
     () => <WorkbenchLimitSection />,
     () => <WorkbenchDefaultPermissionSection />,
+    () => <ClaudeSandboxSection />,
     () => <WorkbenchRoleManualsSection />,
   ],
   models: [() => <CursorSection />, () => <ProvidersSection />, () => <ConfigsSection />],

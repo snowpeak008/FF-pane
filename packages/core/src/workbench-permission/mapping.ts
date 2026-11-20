@@ -55,7 +55,7 @@ export const CLAUDE_EDIT_DISALLOWED_TOOLS = [...CLAUDE_COMMAND_TOOL_NAMES] as co
  *
  * Codex 0.159.2：`-a` 仅 `on-request` | `never`（`untrusted` 已移除）。
  * 产品决策：edit → on-request；edit-exec → never（对齐 Phase10 表「可跑命令」）。
- * Claude edit-exec：`acceptEdits`，不禁 Bash——交互下 Bash 仍由 CLI 询问（合理默认）。
+ * Claude edit-exec：`acceptEdits`，不禁 Bash；Windows 上由桌面端另加项目内沙盒（T11.20），命令不再询问。
  */
 export const WORKBENCH_PERMISSION_MAPPINGS: readonly WorkbenchPermissionMapping[] = [
   // —— Claude ——
@@ -96,13 +96,16 @@ export const WORKBENCH_PERMISSION_MAPPINGS: readonly WorkbenchPermissionMapping[
     cli: "claude-code",
     freshArgs: ["--permission-mode", "acceptEdits"],
     resumeArgs: ["--permission-mode", "acceptEdits"],
-    notes: "Bash 不加入 disallowed；交互会话下仍由 Claude CLI 询问批准。",
+    notes:
+      "T11.20：Windows 上另加 Claude 自带沙盒（--settings 的 sandbox 段、内部开关、--allowedTools PowerShell,Bash，见 apps/desktop 的 claude-sandbox.ts），命令不问、只能写项目和允许的目录。其他平台照旧，命令由 Claude CLI 询问。",
   },
   {
     level: "yolo",
     cli: "claude-code",
     freshArgs: ["--dangerously-skip-permissions"],
     resumeArgs: ["--dangerously-skip-permissions"],
+    notes:
+      "T11.20：启动确认画面由 FF-pane 的 --settings（skipDangerousModePermissionPrompt）跳过，不靠用户设置。只在 Tony 指定时开。",
   },
   // —— Codex ——
   {

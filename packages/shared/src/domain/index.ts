@@ -26,6 +26,7 @@ export * from "./provider.js";
 export * from "./provider-templates.js";
 export * from "./report.js";
 export * from "./run.js";
+export * from "./sandbox-network.js";
 export * from "./session.js";
 export * from "./task.js";
 export * from "./workbench.js";

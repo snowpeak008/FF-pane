@@ -97,3 +97,5 @@ nsis:
   perMachine: false
   # 安装包文件名不含空格，便于脚本化静默安装
   artifactName: ${productName}-Setup-${version}.${ext}
+  # T11.20：卸载时可选一起卸 Claude 沙盒（默认不卸，静默和升级不问）
+  include: resources/installer.nsh

@@ -1,4 +1,8 @@
-import { isProjectConfigVisibleTo, type ProjectConfig } from "@ff-pane/shared";
+import {
+  DEFAULT_SANDBOX_NETWORK_DOMAINS,
+  isProjectConfigVisibleTo,
+  type ProjectConfig,
+} from "@ff-pane/shared";
 import { AlertTriangle, Check, Settings, Sparkles, Trash2 } from "lucide-react";
 import { type ReactElement, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -64,6 +68,8 @@ export function ProjectCard({
   const [saving, setSaving] = useState(false);
   /** 项目外可写目录（T11.8），一行一个。 */
   const [outsideDirs, setOutsideDirs] = useState("");
+  /** Claude 沙盒里命令能多连的域名（T11.20），一行一个。 */
+  const [sandboxDomains, setSandboxDomains] = useState("");
   /** 技能库（T11.9）和这个项目勾上的技能（原名）。 */
   const [library, setLibrary] = useState<readonly SkillView[]>([]);
   const [skillsOn, setSkillsOn] = useState<readonly string[]>([]);
@@ -84,6 +90,7 @@ export function ProjectCard({
   const openBind = (): void => {
     setBindOpen(true);
     setOutsideDirs((project.outsideWriteDirs ?? []).join("\n"));
+    setSandboxDomains((project.sandboxNetworkDomains ?? []).join("\n"));
     setSkillsOn(project.skills ?? []);
     void (async () => {
       const [configsSettled, settingsSettled, projectsSettled, skillsSettled] = await Promise.all([
@@ -96,6 +103,7 @@ export function ProjectCard({
       if (projectsSettled.status === "success") {
         const fresh = projectsSettled.data.find((item) => item.id === project.id);
         setOutsideDirs((fresh?.outsideWriteDirs ?? []).join("\n"));
+        setSandboxDomains((fresh?.sandboxNetworkDomains ?? []).join("\n"));
         setSkillsOn(fresh?.skills ?? []);
       }
       setLibrary(skillsSettled.status === "success" ? skillsSettled.data.skills : []);
@@ -122,13 +130,25 @@ export function ProjectCard({
       settled.status === "success"
         ? await invokeQuery("projects:set-outside-write-dirs", { id: project.id, dirs })
         : undefined;
-    const skillsSettled =
+    const domains = sandboxDomains
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line !== "");
+    const domainsSettled =
       dirsSettled?.status === "success"
+        ? await invokeQuery("projects:set-sandbox-network-domains", { id: project.id, domains })
+        : undefined;
+    const skillsSettled =
+      domainsSettled?.status === "success"
         ? await invokeQuery("projects:set-skills", { id: project.id, skills: skillsOn })
         : undefined;
     setSaving(false);
     if (dirsSettled?.status === "error") {
       toast.error(dirsSettled.error.message);
+      return;
+    }
+    if (domainsSettled?.status === "error") {
+      toast.error(domainsSettled.error.message);
       return;
     }
     if (skillsSettled?.status === "error") {
@@ -255,6 +275,21 @@ ${t("projects.card.createdAt", {
                 onChange={(event) => setOutsideDirs(event.target.value)}
               />
               <span className="text-xs text-fg-muted">{t("projects.card.outsideDirsHint")}</span>
+            </label>
+            <label className="mt-4 flex flex-col gap-1 text-sm text-fg">
+              {t("projects.card.sandboxDomainsLabel")}
+              <textarea
+                className="min-h-16 w-full rounded-sm border border-border bg-surface px-2 py-1.5 font-mono text-xs text-fg"
+                data-testid="project-sandbox-domains"
+                placeholder={t("projects.card.sandboxDomainsPlaceholder")}
+                value={sandboxDomains}
+                onChange={(event) => setSandboxDomains(event.target.value)}
+              />
+              <span className="text-xs text-fg-muted">
+                {t("projects.card.sandboxDomainsHint", {
+                  defaults: DEFAULT_SANDBOX_NETWORK_DOMAINS.join(", "),
+                })}
+              </span>
             </label>
             <fieldset className="mt-4 flex flex-col gap-1" data-testid="project-skills">
               <legend className="text-sm text-fg">{t("projects.card.skillsLabel")}</legend>

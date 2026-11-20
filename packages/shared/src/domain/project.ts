@@ -77,6 +77,11 @@ export interface ProjectRegistryEntry {
    */
   readonly outsideWriteDirs?: readonly string[];
   /**
+   * T11.20 —— Claude 沙盒里命令能多连的域名（默认名单之外的）。和 outsideWriteDirs 一样只有用户能改、
+   * 存在 projects.json。缺省只用默认名单（见 sandbox-network.ts）。
+   */
+  readonly sandboxNetworkDomains?: readonly string[];
+  /**
    * T11.9 —— 这个项目启用的技能（技能库里的原名）。只有用户在项目卡片里能改，
    * 存在 projects.json，不放进项目。缺省一个都不启用。
    */

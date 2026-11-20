@@ -106,6 +106,30 @@ describe("ProjectRegistry", () => {
     ).rejects.toThrow(ProjectNotFoundError);
   });
 
+  it("沙盒能多连的域名（T11.20）：整份替换、转小写去重、丢掉不合法的、空数组清掉字段", async () => {
+    const a = await registry.addProject({ name: "a", rootPath: "/repos/a" });
+    await registry.setOutsideWriteDirs(a.id, ["D:/x"]);
+    const set = await registry.setSandboxNetworkDomains(a.id, [
+      "Unity3D.com",
+      "unity3d.com",
+      "*.example.org",
+      "*",
+      "*.com",
+      " ",
+    ]);
+    expect(set.sandboxNetworkDomains).toEqual(["unity3d.com", "*.example.org"]);
+    expect(set.outsideWriteDirs).toEqual(["D:/x"]);
+    expect((await registry.listProjects())[0]?.sandboxNetworkDomains).toEqual([
+      "unity3d.com",
+      "*.example.org",
+    ]);
+    const cleared = await registry.setSandboxNetworkDomains(a.id, []);
+    expect(cleared.sandboxNetworkDomains).toBeUndefined();
+    await expect(
+      registry.setSandboxNetworkDomains("project-deadbeef0000" as ProjectId, ["a.com"]),
+    ).rejects.toThrow(ProjectNotFoundError);
+  });
+
   it("项目启用的技能（T11.9）：整份替换、去空去重、空数组清掉字段、不碰项目外可写目录", async () => {
     const a = await registry.addProject({ name: "a", rootPath: "/repos/a" });
     await registry.setOutsideWriteDirs(a.id, ["D:/x"]);

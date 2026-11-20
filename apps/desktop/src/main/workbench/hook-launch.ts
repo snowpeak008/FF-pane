@@ -76,17 +76,30 @@ export function claudeHookExec(
 /**
  * claudeProvider：Claude 中转窗口的地址、模型和 apiKeyHelper，与 hooks 写进同一份 `--settings`。
  * 没有 node 时不装 hooks，但有 claudeProvider 仍要写这份文件。
+ *
+ * T11.20：
+ * - claudeSandbox：可改可跑命令的 Claude 窗口的 `sandbox` 一段（见 claude-sandbox.ts）；
+ * - skipBypassConfirm：全放开的 Claude 窗口跳过启动时那个「Bypass Permissions mode」确认画面，
+ *   不再靠用户自己 settings 里的 skipDangerousModePermissionPrompt（默认选项是退出）。
+ * 有这两样之一时，没有 node、没有中转来源也要写这份文件。
  */
 export function prepareWindowHooks(input: {
   readonly windowId: string;
   readonly nodePath: string | undefined;
   readonly scriptPath: string;
   readonly claudeProvider?: ClaudeProviderSettings;
+  readonly claudeSandbox?: Readonly<Record<string, unknown>>;
+  readonly skipBypassConfirm?: boolean;
 }): PreparedWindowHooks {
   releaseWindowHooks(input.windowId);
   const nodePath =
     input.nodePath === undefined || input.nodePath.trim() === "" ? undefined : input.nodePath;
-  if (nodePath === undefined && input.claudeProvider === undefined) {
+  if (
+    nodePath === undefined &&
+    input.claudeProvider === undefined &&
+    input.claudeSandbox === undefined &&
+    input.skipBypassConfirm !== true
+  ) {
     return { notifyArgv: [], files: [] };
   }
   const dir = join(tmpdir(), `ffpane-wb-hooks-${randomBytes(6).toString("hex")}`);
@@ -111,6 +124,12 @@ export function prepareWindowHooks(input: {
     if (input.claudeProvider.apiKeyHelper !== undefined) {
       settings["apiKeyHelper"] = input.claudeProvider.apiKeyHelper;
     }
+  }
+  if (input.claudeSandbox !== undefined) {
+    settings["sandbox"] = input.claudeSandbox;
+  }
+  if (input.skipBypassConfirm === true) {
+    settings["skipDangerousModePermissionPrompt"] = true;
   }
   const settingsPath = join(dir, "claude-settings.json");
   writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");

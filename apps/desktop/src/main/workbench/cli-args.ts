@@ -72,6 +72,12 @@ export interface BuildInteractiveClaudeArgsInput {
    * 不加 Bash(前缀:*) 放行规则：find -delete、git diff --output 这类前缀也能写盘，放行规则会绕过 plan 的只读判断。
    */
   readonly readOnlyShell?: boolean;
+  /**
+   * T11.20：可改可跑命令的 Claude 窗口在项目内沙盒里跑命令，把两个命令工具也放进 `--allowedTools`，
+   * 命令就不再逐条问（Windows 上 autoAllowBashIfSandboxed 不起作用）。放行后命令仍在沙盒里跑。
+   * 和协作工具合成同一个 `--allowedTools`，不出现两次。
+   */
+  readonly sandboxCommandTools?: readonly string[];
 }
 
 /** 交互式 Codex 启动参数。 */
@@ -138,16 +144,25 @@ export function buildInteractiveClaudeArgs(input: BuildInteractiveClaudeArgsInpu
   if (input.effort !== undefined && input.effort.trim() !== "") {
     args.push("--effort", input.effort.trim());
   }
-  const allowed = (input.allowedTools ?? []).filter((tool) => tool.trim() !== "");
-  if (input.mcpConfigPath !== undefined && input.mcpConfigPath.trim() !== "") {
-    // 可变参数：紧跟 --mcp-config，免得把开场白当成工具名吞掉。没有 MCP 时也没有要放行的协作工具。
+  const sandboxTools = (input.sandboxCommandTools ?? []).filter((tool) => tool.trim() !== "");
+  const hasMcp = input.mcpConfigPath !== undefined && input.mcpConfigPath.trim() !== "";
+  // 没有 MCP 时也没有要放行的协作工具，只剩沙盒的命令工具。
+  const allowed = [
+    ...(hasMcp ? (input.allowedTools ?? []).filter((tool) => tool.trim() !== "") : []),
+    ...sandboxTools,
+  ];
+  if (hasMcp) {
+    // 可变参数：紧跟 --mcp-config，免得把开场白当成工具名吞掉。
     if (allowed.length > 0) {
       args.push("--allowedTools", ...allowed);
     }
-    args.push("--mcp-config", input.mcpConfigPath.trim());
+    args.push("--mcp-config", (input.mcpConfigPath ?? "").trim());
     if (input.strictMcp !== false) {
       args.push("--strict-mcp-config");
     }
+  } else if (allowed.length > 0) {
+    // 用一个值的写法（Claude 自己也这样传），后面跟什么都不会被当成工具名。
+    args.push(`--allowedTools=${allowed.join(",")}`);
   }
   if (input.appendSystemPromptFile !== undefined && input.appendSystemPromptFile.trim() !== "") {
     args.push("--append-system-prompt-file", input.appendSystemPromptFile.trim());

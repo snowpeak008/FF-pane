@@ -21,7 +21,12 @@
  */
 
 import { randomBytes } from "node:crypto";
-import type { EpochMillis, ProjectId, ProjectRegistryEntry } from "@ff-pane/shared";
+import {
+  cleanSandboxDomains,
+  type EpochMillis,
+  type ProjectId,
+  type ProjectRegistryEntry,
+} from "@ff-pane/shared";
 import { readJson, writeJsonAtomic } from "../fs/index.js";
 import {
   ProjectAlreadyRegisteredError,
@@ -68,6 +73,14 @@ export interface ProjectRegistry {
   setOutsideWriteDirs(id: ProjectId, dirs: readonly string[]): Promise<ProjectRegistryEntry>;
   /** T11.9：整份替换这个项目启用的技能，空数组即都不用。 */
   setSkills(id: ProjectId, skills: readonly string[]): Promise<ProjectRegistryEntry>;
+  /**
+   * T11.20：整份替换 Claude 沙盒里能多连的域名，空数组即只用默认名单。
+   * 转小写、去重；不合法的丢掉（界面在调用前已经报错拦下）。
+   */
+  setSandboxNetworkDomains(
+    id: ProjectId,
+    domains: readonly string[],
+  ): Promise<ProjectRegistryEntry>;
 }
 
 const PROJECT_ID_PREFIX = "project";
@@ -176,6 +189,26 @@ export function createProjectRegistry(
       const { outsideWriteDirs: _old, ...rest } = current;
       const next: ProjectRegistryEntry =
         cleaned.length > 0 ? { ...rest, outsideWriteDirs: cleaned } : rest;
+      await saveProjects(
+        projectsFile,
+        projects.map((project) => (project.id === id ? next : project)),
+      );
+      return next;
+    },
+
+    async setSandboxNetworkDomains(
+      id: ProjectId,
+      domains: readonly string[],
+    ): Promise<ProjectRegistryEntry> {
+      const projects = await loadProjects(projectsFile);
+      const current = projects.find((project) => project.id === id);
+      if (current === undefined) {
+        throw new ProjectNotFoundError(id);
+      }
+      const cleaned = cleanSandboxDomains(domains).domains;
+      const { sandboxNetworkDomains: _old, ...rest } = current;
+      const next: ProjectRegistryEntry =
+        cleaned.length > 0 ? { ...rest, sandboxNetworkDomains: cleaned } : rest;
       await saveProjects(
         projectsFile,
         projects.map((project) => (project.id === id ? next : project)),
