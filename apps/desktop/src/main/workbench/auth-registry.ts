@@ -145,6 +145,7 @@ function mergeRendererLayout(
       ...(locked ? { sanitizeLocked: true } : {}),
       ...(existing?.userElevated === true ? { userElevated: true } : {}),
       ...(existing?.userRoleSet === true ? { userRoleSet: true } : {}),
+      ...(existing?.standbyOf !== undefined ? { standbyOf: existing.standbyOf } : {}),
     };
   }
   return authInput;
@@ -169,8 +170,12 @@ export interface WorkbenchAuthRegistry {
    */
   pin(node: WorkbenchAuthNode, projectId: ProjectId): void;
   unpin(windowId: string): void;
-  /** 本进程里 setWindowRole 设为 manager 才授予开窗口能力。冷读布局不算。 */
-  grantManager(windowId: string): void;
+  /**
+   * 本进程里 setWindowRole 设为 manager 才授予开窗口能力。冷读布局不算。
+   * T11.22：顶层管理者接任，同项目里原来已授予的管理者转待命，返回被换下的窗口编号；
+   * 有父级的子管理者继承授权，不接任，返回空数组。
+   */
+  grantManager(windowId: string): readonly string[];
   clearManagerGrant(windowId: string): void;
   isManagerGranted(windowId: string): boolean;
   /** 移除。 */
@@ -324,12 +329,43 @@ export function createWorkbenchAuthRegistry(): WorkbenchAuthRegistry {
       pinned.delete(windowId);
     },
     grantManager(windowId) {
-      if (byId.has(windowId)) {
-        managerGranted.add(windowId);
+      const target = byId.get(windowId);
+      if (target === undefined) {
+        return [];
       }
+      const hasParent = target.parentWindowId !== undefined && target.parentWindowId.trim() !== "";
+      if (hasParent) {
+        // 子管理者继承授权，不接任：否则会把自己的上级降成待命。
+        managerGranted.add(windowId);
+        return [];
+      }
+      const demoted: string[] = [];
+      for (const [id, stored] of [...byId.entries()]) {
+        if (id === windowId || stored.projectId !== target.projectId) {
+          continue;
+        }
+        if (managerGranted.has(id)) {
+          managerGranted.delete(id);
+          remember(id, { ...stored, standbyOf: windowId });
+          demoted.push(id);
+        } else if (stored.standbyOf !== undefined) {
+          remember(id, { ...stored, standbyOf: windowId });
+        }
+      }
+      const { standbyOf: _standby, ...self } = target;
+      void _standby;
+      remember(windowId, self);
+      managerGranted.add(windowId);
+      return demoted;
     },
     clearManagerGrant(windowId) {
       managerGranted.delete(windowId);
+      const stored = byId.get(windowId);
+      if (stored?.standbyOf !== undefined) {
+        const { standbyOf: _standby, ...rest } = stored;
+        void _standby;
+        remember(windowId, rest);
+      }
     },
     isManagerGranted(windowId) {
       return managerGranted.has(windowId) && byId.get(windowId)?.role === "manager";

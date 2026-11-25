@@ -386,6 +386,8 @@
       "rejected": "This window cannot be given that role",
       "dropped": "The window had exited, so the role note was not written. The next launch injects it",
       "grantPending": "Manager authority not restored",
+      "standby": "Standby",
+      "standbyHint": "A newer manager has taken over. Click to make this window the current manager again.",
       "restartForSubagents": "The new role changes whether this window can open sub-agents (only plain windows can). It will restart with its conversation to apply this; if busy it waits until idle.",
       "short": {
         "manager": "Mgr",

@@ -117,6 +117,7 @@ export interface WorkbenchStoreActions {
       permissionNeedsDowngrade: boolean;
       parentClosed: boolean;
       managerGrantPending: boolean;
+      managerStandby: boolean;
       modelOverride: string;
       effortOverride: string;
       compactPercent: number | null;
@@ -637,6 +638,16 @@ export const useWorkbenchStore = create<WorkbenchStore>((set, get) => ({
       }
       if (patch.managerGrantPending === true) {
         Object.assign(next, { managerGrantPending: true });
+      }
+      if (patch.managerStandby === true) {
+        Object.assign(next, { managerStandby: true });
+      } else if (patch.managerStandby === false) {
+        const { managerStandby: _standby, ...rest } = next;
+        void _standby;
+        return {
+          ...current,
+          windows: { ...current.windows, [windowId]: rest },
+        };
       }
       if (patch.modelOverride !== undefined) {
         Object.assign(next, { modelOverride: patch.modelOverride });

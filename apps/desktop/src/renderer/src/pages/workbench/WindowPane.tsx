@@ -493,6 +493,16 @@ export function WindowPane({
             {t("workbench.role.grantPending")}
           </AttentionBadge>
         ) : null}
+        {isCli && window.managerStandby === true ? (
+          <AttentionBadge
+            tone="warning"
+            testId="workbench-manager-standby"
+            hint={t("workbench.role.standbyHint")}
+            onClick={() => chooseRole("manager")}
+          >
+            {t("workbench.role.standby")}
+          </AttentionBadge>
+        ) : null}
         {isCli && window.permissionNeedsDowngrade === true ? (
           <AttentionBadge tone="warning">{t("workbench.permission.needsRestart")}</AttentionBadge>
         ) : null}

@@ -103,7 +103,8 @@ export function runCodexUnarchive(threadId: string): Promise<boolean> {
   });
 }
 
-export type ResumeHandoffReason = "restart" | "new-conversation";
+/** takeover（T11.22）：新管理者接任，或待命的管理者复位成现任。 */
+export type ResumeHandoffReason = "restart" | "new-conversation" | "takeover";
 
 export interface ResumePlan {
   readonly resume: boolean;
@@ -158,6 +159,8 @@ export interface ResumeHandoffInput {
   readonly unread: number;
   /** 管理者的待处理页（相对项目根），文件在才给。 */
   readonly digestPath?: string;
+  /** takeover：被换下的上一任现任管理者的标题。 */
+  readonly previousManagerTitle?: string;
 }
 
 const ROLE_TEXT: Readonly<Record<WorkbenchRole, string>> = {
@@ -191,6 +194,13 @@ export function resumeHandoffText(input: ResumeHandoffInput): string {
       ? `；你不在时团队的状态记在 ${input.digestPath}，先读这一页`
       : "";
   const tail = "然后接着做；做不了就用 ffpane_report blocked 说明原因。";
+  if (input.reason === "takeover") {
+    const previous =
+      input.previousManagerTitle !== undefined
+        ? `原来的现任是「${name(input.previousManagerTitle)}」，已转待命；`
+        : "";
+    return `[交接] 你现在是现任管理者。${who}。${previous}你不记得之前的事。先读 .ffpane/briefs/管理者-近况.md（文件不在就是旧管理者没写过近况），再看待处理页；${inbox}${digest}；用 ffpane_list_windows 看本项目全部执行者现在的状态，它们都归你派活，以实时状态为准；${tail}`;
+  }
   if (input.reason === "new-conversation") {
     return `[交接] 原来的对话找不到了（可能在别处被归档或删除），这是一个新对话，你不记得之前的事。${who}。先用 ffpane_whoami、ffpane_list_windows 弄清现状；${inbox}${digest}；再读 .ffpane/briefs/ 里你自己写的近况和你的任务说明，${tail}`;
   }

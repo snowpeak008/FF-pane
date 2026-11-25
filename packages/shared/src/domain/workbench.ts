@@ -202,6 +202,10 @@ export interface WorkbenchWindow {
    * 只驱动标题栏文案，不授予开窗口能力。
    */
   readonly managerGrantPending?: boolean;
+  /**
+   * T11.22：本窗口是待命管理者（已被别的管理者接任）。只在主进程内存里判定，界面靠事件显示，不落盘。
+   */
+  readonly managerStandby?: boolean;
 }
 
 /** 单个窗口保留的对话条数上限。 */

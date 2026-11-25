@@ -386,6 +386,8 @@
       "rejected": "不能把这个窗口设成该角色",
       "dropped": "窗口已退出，角色说明没写进去。下次启动会自动注入",
       "grantPending": "管理权待恢复",
+      "standby": "待命",
+      "standbyHint": "已被新的现任管理者接任。点这里让这个窗口重新接任现任管理者。",
       "restartForSubagents": "换了角色，能不能开子 agent 也变了（只有普通窗口能开），窗口会续接重启后生效；在忙就等它空闲。",
       "short": {
         "manager": "管",

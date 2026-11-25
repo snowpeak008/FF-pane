@@ -16,6 +16,7 @@ export function WorkbenchFlushBridge(): ReactElement | null {
   useSubscription("workbench:manager-grant", (payload) => {
     useWorkbenchStore.getState().patchWindow(payload.projectId, payload.windowId, {
       managerGrantPending: payload.managerGrantPending,
+      ...(payload.managerStandby !== undefined ? { managerStandby: payload.managerStandby } : {}),
     });
   });
 

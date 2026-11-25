@@ -149,6 +149,13 @@ export async function openChildWindow(
   if (caller === undefined) {
     return { ok: false, error: "找不到调用窗口。" };
   }
+  // T11.22：已被新管理者接任的待命管理者不能再开窗口。
+  if (caller.standbyOf !== undefined) {
+    return {
+      ok: false,
+      error: "你已被新的现任管理者接任，现在待命，不能开窗口。要派活请让现任管理者来做。",
+    };
+  }
   // T11.1：监管者也能开窗，但只能开调研小窗、只读、同时最多 2 个。派活仍是管理者的事。
   const bySupervisor = caller.role === "supervisor";
   if (

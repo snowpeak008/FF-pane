@@ -37,6 +37,11 @@ export interface SetWindowRoleDeps {
   readonly restartForPolicy?: (
     windowId: string,
   ) => Promise<"restarting" | "queued" | "confirm" | "deferred">;
+  /**
+   * T11.22：顶层管理者接任，同项目里原来的现任转待命。参数是新现任和被换下的窗口编号。
+   * 由调用方发通知、补交接；不传则只改登记。
+   */
+  readonly onManagerTakeover?: (newManagerId: string, demotedIds: readonly string[]) => void;
 }
 
 export type SetWindowRoleResult =
@@ -122,7 +127,7 @@ export async function setWindowRole(
     if (!deps.authRegistry.setRole(windowId, role, { userInitiated: actor.kind === "user" })) {
       return { ok: false, reason: "unknown-window" };
     }
-    applyManagerGrant(deps.authRegistry, windowId, role);
+    notifyTakeover(deps, windowId, applyManagerGrant(deps.authRegistry, windowId, role));
     if (options?.deliver === false) {
       return { ok: true, role, delivery: "skipped" };
     }
@@ -159,7 +164,7 @@ export async function setWindowRole(
     return { ok: false, reason: "unknown-window" };
   }
   if (isAi) {
-    applyManagerGrant(deps.authRegistry, windowId, role);
+    notifyTakeover(deps, windowId, applyManagerGrant(deps.authRegistry, windowId, role));
   }
 
   const nextWindow = withRegisteredAuth({ ...found.window, role }, deps.authRegistry.get(windowId));
@@ -228,12 +233,22 @@ function applyManagerGrant(
   registry: WorkbenchAuthRegistry,
   windowId: string,
   role: WorkbenchRole,
-): void {
+): readonly string[] {
   if (role === "manager") {
-    registry.grantManager(windowId);
-    return;
+    return registry.grantManager(windowId);
   }
   registry.clearManagerGrant(windowId);
+  return [];
+}
+
+function notifyTakeover(
+  deps: SetWindowRoleDeps,
+  newManagerId: string,
+  demotedIds: readonly string[],
+): void {
+  if (demotedIds.length > 0) {
+    deps.onManagerTakeover?.(newManagerId, demotedIds);
+  }
 }
 
 async function deliverRoleSwitch(

@@ -744,6 +744,8 @@ export interface WorkbenchManagerGrantEvent {
   readonly projectId: ProjectId;
   readonly windowId: string;
   readonly managerGrantPending: boolean;
+  /** T11.22：true 表示本窗口已被新现任接任，标题栏显示「待命」；false 表示复位。缺省不变。 */
+  readonly managerStandby?: boolean;
 }
 
 /** 某窗口待投递条数。manual 才显示立即发送；blocked 绝不发送。 */

@@ -8,7 +8,8 @@ import { randomUUID } from "node:crypto";
 import {
   authorize,
   canSetRole,
-  isDescendantOf,
+  controlsWindow,
+  reportRedirectTarget,
   type WorkbenchAuthNode,
   walkAncestors,
 } from "@ff-pane/core";
@@ -435,7 +436,7 @@ export function visibleWindowIds(
     }
   }
   for (const id of Object.keys(tree)) {
-    if (isDescendantOf(callerId, id, tree)) {
+    if (controlsWindow(callerId, id, tree)) {
       ids.add(id);
     }
   }
@@ -857,8 +858,7 @@ async function nudge(
     return fail("ffpane_nudge 需要 windowId。");
   }
   const allowed =
-    (targetId !== caller.id && isDescendantOf(caller.id, targetId, tree)) ||
-    (await watches(caller, targetId, deps));
+    controlsWindow(caller.id, targetId, tree) || (await watches(caller, targetId, deps));
   if (!allowed) {
     return fail("只能叫醒自己的后代，或挂在你名下的窗口。");
   }
@@ -934,7 +934,7 @@ async function broadcast(
   const targets = Object.keys(tree).filter((id) =>
     scope === "children"
       ? tree[id]?.parentWindowId === caller.id
-      : isDescendantOf(caller.id, id, tree),
+      : controlsWindow(caller.id, id, tree),
   );
   if (targets.length === 0) {
     return fail("你没有可以广播的后代窗口。");
@@ -1171,20 +1171,22 @@ async function report(
   }
   const node = tree[caller.id];
   const explicit = args["windowId"];
-  const targetId =
+  const requestedId =
     typeof explicit === "string" && explicit.trim() !== "" ? explicit : node?.parentWindowId;
-  if (targetId === undefined || targetId.trim() === "") {
+  if (requestedId === undefined || requestedId.trim() === "") {
     return fail("没有上级可以汇报。");
   }
   const decision = authorize({
     actor: { kind: "window", windowId: caller.id },
     action: "report",
-    targetWindowId: targetId,
+    targetWindowId: requestedId,
     tree,
   });
   if (!decision.ok) {
     return fail("只能向上级链汇报。");
   }
+  // T11.22：上级是已被接任的待命管理者时，汇报改送现任。
+  const targetId = reportRedirectTarget(requestedId, tree);
   const closeAfter = args["closeAfter"] === true;
   if (closeAfter && (status !== "done" || caller.role === "manager")) {
     return fail("closeAfter 只能用在 done 汇报上，管理者不能自关。");
@@ -1524,9 +1526,9 @@ export async function takeInboxDigest(callerId: string, deps: WorkbenchToolDeps)
   for (const message of parsed.messages) {
     const what = message.kind === "report" ? ` 汇报:${message.status ?? "progress"}` : " 消息";
     const fromUser = message.from.windowId === USER_PARTY_ID;
-    const relation = isDescendantOf(message.from.windowId, callerId, tree)
+    const relation = controlsWindow(message.from.windowId, callerId, tree)
       ? "，你的上级：工作安排，照常执行"
-      : isDescendantOf(callerId, message.from.windowId, tree)
+      : controlsWindow(callerId, message.from.windowId, tree)
         ? "，你的下级：汇报，由你判断"
         : "";
     const who = fromUser
@@ -1581,7 +1583,7 @@ export async function takeMidTurnInbox(
       const fromUser = record.from.windowId === USER_PARTY_ID;
       return {
         id: record.id,
-        fromAbove: fromUser || isDescendantOf(record.from.windowId, callerId, tree),
+        fromAbove: fromUser || controlsWindow(record.from.windowId, callerId, tree),
         sender: fromUser ? "用户本人" : displayTitle(record.from.title),
       };
     }),
@@ -1657,8 +1659,8 @@ async function closeWindow(
   if (typeof targetId !== "string" || targetId.trim() === "") {
     return fail("ffpane_close_window 需要 windowId。");
   }
-  if (targetId === caller.id || !isDescendantOf(caller.id, targetId, tree)) {
-    return fail("只能关闭自己的后代窗口。");
+  if (targetId === caller.id || !controlsWindow(caller.id, targetId, tree)) {
+    return fail("只能关闭自己的后代窗口，或你接任的待命管理者及其后代。");
   }
   const decision = authorize({
     actor: { kind: "window", windowId: caller.id },

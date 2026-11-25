@@ -773,10 +773,20 @@ export async function createWorkbenchCliLayer(
       if (node.role !== "manager") {
         continue;
       }
+      if (node.standbyOf !== undefined) {
+        // T11.22：待命管理者的团队由现任一并算，自己不再单独判断暂停。
+        publishTeamPaused(managerId, undefined);
+        continue;
+      }
+      const standbyIds = Object.keys(tree).filter((id) => tree[id]?.standbyOf === managerId);
+      const roots = new Set<string>([managerId, ...standbyIds]);
       const team = Object.keys(tree).filter((id) => {
+        if (standbyIds.includes(id)) {
+          return true;
+        }
         let cursor = tree[id]?.parentWindowId;
         for (let depth = 0; cursor !== undefined && depth < 16; depth += 1) {
-          if (cursor === managerId) {
+          if (roots.has(cursor)) {
             return true;
           }
           cursor = tree[cursor]?.parentWindowId;
@@ -1368,6 +1378,8 @@ export async function createWorkbenchCliLayer(
     readonly projectRoot: string;
     readonly window: WorkbenchWindow;
     readonly windows: Readonly<Record<string, WorkbenchWindow>>;
+    /** takeover：被换下的上一任现任管理者的标题。 */
+    readonly previousManagerTitle?: string;
   }): Promise<void> => {
     const role = authRegistry.get(input.windowId)?.role ?? input.window.role;
     if (role === undefined || role === "none") {
@@ -1391,10 +1403,70 @@ export async function createWorkbenchCliLayer(
           unread,
           ...(openerTitle !== undefined ? { openerTitle } : {}),
           ...(hasDigest ? { digestPath } : {}),
+          ...(input.previousManagerTitle !== undefined
+            ? { previousManagerTitle: input.previousManagerTitle }
+            : {}),
         }),
       );
     } catch (error) {
       console.error(`[wb-resume] handoff for ${input.windowId} failed: ${String(error)}`);
+    }
+  };
+  /**
+   * T11.22：接任后把待命管理者名下执行所挂的监管者改挂到现任名下那一个。
+   * 不挂则汇报仍走旧管理者的监管者，抄送和叫醒都到不了新现任。
+   */
+  const repointSupervisors = async (
+    projectId: string,
+    newManagerId: string,
+    demotedIds: readonly string[],
+  ): Promise<void> => {
+    const all = await layouts.readAll();
+    const layout = all[projectId];
+    if (layout === undefined) {
+      return;
+    }
+    const tree = authRegistry.snapshot();
+    const isUnder = (id: string, rootId: string): boolean => {
+      let cursor = tree[id]?.parentWindowId;
+      for (let depth = 0; cursor !== undefined && depth < 16; depth += 1) {
+        if (cursor === rootId) {
+          return true;
+        }
+        cursor = tree[cursor]?.parentWindowId;
+      }
+      return false;
+    };
+    const supervisorOf = (rootIds: readonly string[]): string | undefined =>
+      Object.keys(tree).find(
+        (id) => tree[id]?.role === "supervisor" && rootIds.some((root) => isUnder(id, root)),
+      );
+    const nextSupervisor = supervisorOf([
+      newManagerId,
+      ...Object.keys(tree).filter((id) => tree[id]?.standbyOf === newManagerId),
+    ]);
+    if (nextSupervisor === undefined) {
+      return;
+    }
+    const demotedSups = new Set(
+      Object.keys(tree).filter(
+        (id) => tree[id]?.role === "supervisor" && demotedIds.some((root) => isUnder(id, root)),
+      ),
+    );
+    if (demotedSups.size === 0) {
+      return;
+    }
+    let changed = false;
+    const windows = { ...layout.windows };
+    for (const window of Object.values(layout.windows)) {
+      if (window.watcherWindowId === undefined || !demotedSups.has(window.watcherWindowId)) {
+        continue;
+      }
+      windows[window.id] = { ...window, watcherWindowId: nextSupervisor };
+      changed = true;
+    }
+    if (changed) {
+      await layouts.saveProject({ ...layout, windows });
     }
   };
   const roleDeps = () => ({
@@ -1421,8 +1493,51 @@ export async function createWorkbenchCliLayer(
       }
       return decision.outcome === "confirm" ? ("confirm" as const) : ("queued" as const);
     },
+    // T11.22：顶层管理者接任。新现任补一句交接，被换下的旧现任收到待命通知。
+    onManagerTakeover: (newManagerId: string, demotedIds: readonly string[]) => {
+      void (async () => {
+        const next = await findStoredWindow(newManagerId);
+        if (next === undefined) {
+          return;
+        }
+        const oneLine = (text: string): string =>
+          text
+            .replace(/[\r\n\t]+/g, " ")
+            .trim()
+            .slice(0, 40);
+        publishManagerGrant(next.window.projectId, newManagerId, false, false);
+        for (const demotedId of demotedIds) {
+          publishManagerGrant(next.window.projectId, demotedId, false, true);
+        }
+        await repointSupervisors(next.window.projectId, newManagerId, demotedIds);
+        const firstDemoted = demotedIds[0];
+        const previous =
+          firstDemoted !== undefined ? await findStoredWindow(firstDemoted) : undefined;
+        await sendResumeHandoff({
+          reason: "takeover",
+          windowId: newManagerId,
+          projectRoot: next.projectRoot,
+          window: next.window,
+          windows: {},
+          ...(previous !== undefined ? { previousManagerTitle: previous.window.title } : {}),
+        });
+        for (const demotedId of demotedIds) {
+          deliverLine(
+            demotedId,
+            `[通知] 「${oneLine(next.window.title)}」已接任现任管理者，你现在待命：不能再开窗口，也不再派活。你名下的执行者归现任管理，汇报改送现任。先把 .ffpane/briefs/管理者-近况.md 更新到最新。`,
+          );
+        }
+      })().catch((error) => {
+        console.error(`[wb-takeover] ${String(error)}`);
+      });
+    },
   });
-  const publishManagerGrant = (projectId: string, windowId: string, pending: boolean): void => {
+  const publishManagerGrant = (
+    projectId: string,
+    windowId: string,
+    pending: boolean,
+    standby?: boolean,
+  ): void => {
     const browser = options.getWindow();
     if (browser === null || browser.isDestroyed()) {
       return;
@@ -1431,6 +1546,7 @@ export async function createWorkbenchCliLayer(
       projectId: projectId as ProjectId,
       windowId,
       managerGrantPending: pending,
+      ...(standby !== undefined ? { managerStandby: standby } : {}),
     });
   };
   const setManagerPending = async (windowId: string, pending: boolean): Promise<void> => {
@@ -3282,7 +3398,41 @@ export async function createWorkbenchCliLayer(
         void disposeConfigHub(windowId);
       },
       closeRegistered: (windowId) => {
+        const wasCurrent = authRegistry.isManagerGranted(windowId);
+        const before = authRegistry.snapshot();
+        const standby = Object.keys(before).filter((id) => before[id]?.standbyOf === windowId);
         authRegistry.closeRegistered(windowId);
+        if (!wasCurrent || standby.length === 0) {
+          return;
+        }
+        // T11.22：现任关掉，待命的管理者按最近活跃复位成现任，其余改指新现任。
+        const activeAt = (id: string): number => {
+          const terminalId = findLiveTerminalId(id);
+          return terminalId === undefined
+            ? 0
+            : (options.manager.get(terminalId)?.lastOutputAt ?? 0);
+        };
+        const pick = [...standby].sort((a, b) => activeAt(b) - activeAt(a))[0];
+        if (pick === undefined) {
+          return;
+        }
+        authRegistry.grantManager(pick);
+        void (async () => {
+          const next = await findStoredWindow(pick);
+          if (next === undefined) {
+            return;
+          }
+          publishManagerGrant(next.window.projectId, pick, false, false);
+          await sendResumeHandoff({
+            reason: "takeover",
+            windowId: pick,
+            projectRoot: next.projectRoot,
+            window: next.window,
+            windows: {},
+          });
+        })().catch((error) => {
+          console.error(`[wb-takeover] restore ${String(error)}`);
+        });
       },
       readLayouts: () => layouts.readAll(),
       saveLayout: (next) => layouts.saveProject(next),

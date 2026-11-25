@@ -5,6 +5,7 @@
 
 import type { WorkbenchOpenedBy, WorkbenchPermissionLevel, WorkbenchRole } from "@ff-pane/shared";
 import { minPermissionLevel, permissionLevelLte } from "@ff-pane/shared";
+import { controlsWindow } from "./manager-group.js";
 
 /** 授权树中的窗口节点。 */
 export interface WorkbenchAuthNode {
@@ -26,6 +27,11 @@ export interface WorkbenchAuthNode {
   readonly userRoleSet?: boolean;
   /** T10.6：窗口角色。缺省视为 none。 */
   readonly role?: WorkbenchRole;
+  /**
+   * T11.22：待命管理者。值是接任它的现任管理者的窗口编号。
+   * 只在主进程内存里记，不落盘；现任对待命管理者和它的整个后代有控制权。
+   */
+  readonly standbyOf?: string;
 }
 
 /** 调用方：界面用户（最高）或某窗口。 */
@@ -225,7 +231,7 @@ export function authorize(input: AuthorizeInput): AuthorizeDecision {
     if (targetWalk.ids.includes(callerId) === false && callerWalk.ids.includes(targetWindowId)) {
       return { ok: false, reason: "cannot-adjust-ancestor" };
     }
-    if (!targetWalk.ids.includes(callerId)) {
+    if (!targetWalk.ids.includes(callerId) && !controlsWindow(callerId, targetWindowId, tree)) {
       return { ok: false, reason: "not-descendant" };
     }
     if (!canDelegate(caller.permission, next)) {
@@ -241,7 +247,7 @@ export function authorize(input: AuthorizeInput): AuthorizeDecision {
     if (callerWalk.ids.includes(targetWindowId)) {
       return { ok: false, reason: "use-report-for-ancestor" };
     }
-    if (targetWalk.ids.includes(callerId)) {
+    if (targetWalk.ids.includes(callerId) || controlsWindow(callerId, targetWindowId, tree)) {
       return { ok: true };
     }
     if (sameParentSiblings(callerId, targetWindowId, tree)) {
@@ -254,7 +260,7 @@ export function authorize(input: AuthorizeInput): AuthorizeDecision {
     if (targetWindowId === callerId) {
       return { ok: false, reason: "control-self-denied" };
     }
-    if (!targetWalk.ids.includes(callerId)) {
+    if (!targetWalk.ids.includes(callerId) && !controlsWindow(callerId, targetWindowId, tree)) {
       return { ok: false, reason: "not-descendant" };
     }
     return { ok: true };
