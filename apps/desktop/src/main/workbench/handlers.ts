@@ -1651,7 +1651,7 @@ export async function createWorkbenchCliLayer(
     }: {
       readonly windowId: string;
       readonly projectRoot: string;
-      readonly runtime: "claude-code" | "codex" | "grok" | "cursor";
+      readonly runtime: "claude-code" | "codex" | "grok" | "cursor" | "agy";
     }) => {
       let enabled: readonly string[] = [];
       try {
@@ -1713,7 +1713,7 @@ export async function createWorkbenchCliLayer(
     }: {
       readonly windowId: string;
       readonly role: import("@ff-pane/shared").WorkbenchRole;
-      readonly runtime: "claude-code" | "codex" | "grok" | "cursor";
+      readonly runtime: "claude-code" | "codex" | "grok" | "cursor" | "agy";
     }) => {
       const roleText = await composeWindowRolePrompt(resourcesDir, overridesDir, role);
       let outputLanguage: string | undefined;

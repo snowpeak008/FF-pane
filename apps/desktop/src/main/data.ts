@@ -86,6 +86,7 @@ import {
   setSkillDisplayName,
 } from "./skills/skill-library";
 import { isSkillAppliesTo } from "./skills/skill-manifest";
+import { listAgyModels } from "./workbench/agy-cli";
 import { validateWorkbenchConfigDraft } from "./workbench/config-draft-validate";
 import { listCursorModels } from "./workbench/cursor-cli";
 import { keepModelEffortOverrides } from "./workbench/model-effort";
@@ -600,6 +601,9 @@ export async function createDataHandlers(
     "providers:list-local-models": async (request) => {
       if (request.runtime === "cursor") {
         return listCursorModels();
+      }
+      if (request.runtime === "agy") {
+        return listAgyModels();
       }
       if (!isCliLoginRuntime(request.runtime)) {
         return {

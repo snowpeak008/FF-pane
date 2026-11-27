@@ -322,6 +322,57 @@ export function buildInteractiveCursorArgs(input: BuildInteractiveCursorArgsInpu
   return args;
 }
 
+/** 交互式 Gemini（agy）启动参数（T11.23）。新开不指定编号，由 SessionStart 钩子报回来。 */
+export interface BuildInteractiveAgyArgsInput {
+  /** 续接编号（`--conversation <id>`）。没有编号时调用方不启动，避免接上最近一条。 */
+  readonly resumeSessionId?: string;
+  readonly model?: string;
+  readonly effort?: string;
+  readonly permission?: WorkbenchPermissionLevel;
+  readonly initialPrompt?: string;
+  /** 初始提示是否留在交互界面（`-i` 跑完提示不走）。新开默认用 `-i`。 */
+  readonly interactivePrompt?: boolean;
+}
+
+/** agy 默认可执行文件名。 */
+export const AGY_INTERACTIVE_COMMAND = "agy";
+
+/**
+ * 组装交互式 `agy` argv（不含可执行文件名）。
+ * - 新开：`-i <初始提示>`，跑完提示留在交互界面；没有初始提示就直接进界面。
+ * - 续接：`--conversation <id>`；agy 没有「打开选择器」的写法，没有编号时调用方不得启动。
+ * - `--mode` / `--dangerously-skip-permissions` 按权限档来（见 `WORKBENCH_PERMISSION_MAPPINGS`）。
+ */
+export function buildInteractiveAgyArgs(input: BuildInteractiveAgyArgsInput): string[] {
+  const args: string[] = [];
+  const resumeId = input.resumeSessionId?.trim() ?? "";
+  if (resumeId !== "") {
+    args.push("--conversation", resumeId);
+  } else if (input.initialPrompt !== undefined && input.initialPrompt.trim() !== "") {
+    // 新开带开场白时用 -i：跑完提示留在交互界面（`-p` 会直接退出）。
+    args.push("-i");
+  }
+  if (input.permission !== undefined) {
+    args.push(
+      ...resolvePermissionCliArgs({
+        cli: "agy",
+        level: input.permission,
+        resume: resumeId !== "",
+      }),
+    );
+  }
+  if (input.model !== undefined && input.model.trim() !== "") {
+    args.push("--model", input.model.trim());
+  }
+  if (input.effort !== undefined && input.effort.trim() !== "") {
+    args.push("--effort", input.effort.trim());
+  }
+  if (input.initialPrompt !== undefined && input.initialPrompt.trim() !== "") {
+    args.push(input.initialPrompt);
+  }
+  return args;
+}
+
 /** 断言密钥明文不出现在 argv / 临时文件内容中（单测与启动后自检）。 */
 export function assertSecretAbsent(secret: string | undefined, surfaces: readonly string[]): void {
   if (secret === undefined || secret.length === 0) {

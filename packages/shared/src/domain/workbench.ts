@@ -52,7 +52,7 @@ export function clampMaxWorkbenchWindows(value: unknown): number {
   return Math.min(MAX_MAX_WORKBENCH_WINDOWS, Math.max(MIN_MAX_WORKBENCH_WINDOWS, floored));
 }
 
-/** 窗口内容种类；T10.4 起含 Claude Code / Codex，T10.16 起含 Grok，T10.17 起含 DeepSeek，T11.10 起含 Cursor。 */
+/** 窗口内容种类；T10.4 起含 Claude Code / Codex，T10.16 起含 Grok，T10.17 起含 DeepSeek，T11.10 起含 Cursor，T11.23 起含 Gemini。 */
 export const WORKBENCH_WINDOW_KINDS = [
   "shell",
   "claude",
@@ -60,6 +60,7 @@ export const WORKBENCH_WINDOW_KINDS = [
   "grok",
   "deepseek",
   "cursor",
+  "gemini",
 ] as const;
 
 /** 窗口内容种类。 */
@@ -82,10 +83,11 @@ export function isAiWorkbenchKind(kind: string): kind is WorkbenchAiKind {
  * AI 窗口 kind ↔ 实际启动的 runtime。
  * DeepSeek 没有自己的命令，启动本机 Claude Code。
  * Grok 用 "grok"，与旧适配器 "grok-build" 分开。Cursor 跑 Cursor CLI（cursor-agent）。
+ * Gemini 本机登录跑 Antigravity CLI（`agy`），程序名就是 agy，所以运行时名也取 "agy"。
  */
 export function workbenchKindToRuntime(
   kind: WorkbenchAiKind,
-): "claude-code" | "codex" | "grok" | "cursor" {
+): "claude-code" | "codex" | "grok" | "cursor" | "agy" {
   if (kind === "codex") {
     return "codex";
   }
@@ -95,17 +97,24 @@ export function workbenchKindToRuntime(
   if (kind === "cursor") {
     return "cursor";
   }
+  if (kind === "gemini") {
+    return "agy";
+  }
   return "claude-code";
 }
 
 /** 注入密钥和地址时用的模板 CLI。DeepSeek 用自己的来源，不走普通 Claude 来源。 */
 export function workbenchKindToInjectionCli(
   kind: WorkbenchAiKind,
-): "claude-code" | "codex" | "grok" | "deepseek" | "cursor" {
+): "claude-code" | "codex" | "grok" | "deepseek" | "cursor" | "gemini" {
   if (kind === "deepseek") {
     return "deepseek";
   }
-  return workbenchKindToRuntime(kind);
+  if (kind === "gemini") {
+    return "gemini";
+  }
+  const runtime = workbenchKindToRuntime(kind);
+  return runtime === "agy" ? "gemini" : runtime;
 }
 
 /** Profile runtime → AI 窗口 kind；非 AI runtime 返回 undefined。 */
@@ -121,6 +130,9 @@ export function runtimeToWorkbenchKind(runtime: string): WorkbenchAiKind | undef
   }
   if (runtime === "cursor") {
     return "cursor";
+  }
+  if (runtime === "agy") {
+    return "gemini";
   }
   return undefined;
 }

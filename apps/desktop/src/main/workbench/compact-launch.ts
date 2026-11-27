@@ -51,7 +51,7 @@ const EMPTY: ManagerCompactLaunch = { env: {} };
  */
 export function resolveManagerCompact(input: {
   readonly role: WorkbenchRole;
-  readonly kind: "claude" | "codex" | "grok" | "deepseek" | "cursor";
+  readonly kind: "claude" | "codex" | "grok" | "deepseek" | "cursor" | "gemini";
   readonly percent: unknown;
   readonly model?: string;
 }): ManagerCompactLaunch {
@@ -76,8 +76,8 @@ export function resolveManagerCompact(input: {
       },
     };
   }
-  if (input.kind === "cursor") {
-    // Cursor CLI 没有压缩比例的设置，交给它自己。
+  if (input.kind === "cursor" || input.kind === "gemini") {
+    // Cursor CLI / agy 都没有压缩比例的设置，交给它自己。
     return EMPTY;
   }
   if (input.kind === "grok") {

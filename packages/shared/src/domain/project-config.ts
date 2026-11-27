@@ -36,6 +36,8 @@ export interface ProjectConfig {
   readonly deepseek?: ProjectConfigRoute;
   /** Cursor 只认本机登录（cursor-agent login），没有中转。 */
   readonly cursor?: ProjectConfigRoute;
+  /** Gemini：第一期只认本机登录（agy 用个人 Google 账号），第二期再加中转（gemini CLI）。 */
+  readonly gemini?: ProjectConfigRoute;
 }
 
 /** 创建 / 更新时提交的内容（id 由存储层生成）。 */
@@ -85,6 +87,7 @@ export function projectConfigRoute(
     readonly grok?: ProjectConfigRoute;
     readonly deepseek?: ProjectConfigRoute;
     readonly cursor?: ProjectConfigRoute;
+    readonly gemini?: ProjectConfigRoute;
   },
   kind: WorkbenchAiKind,
 ): ProjectConfigRoute | undefined {
@@ -99,6 +102,9 @@ export function projectConfigRoute(
   }
   if (kind === "cursor") {
     return config.cursor;
+  }
+  if (kind === "gemini") {
+    return config.gemini;
   }
   return config.deepseek;
 }

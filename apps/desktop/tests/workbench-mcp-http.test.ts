@@ -117,21 +117,23 @@ describe("保活", () => {
 });
 
 describe("接法表", () => {
-  it("默认 Claude、Codex 走 HTTP，Grok、Cursor 走小进程", () => {
+  it("默认 Claude、Codex 走 HTTP，Grok、Cursor、agy 走小进程", () => {
     expect(WORKBENCH_MCP_TRANSPORT_BY_RUNTIME).toEqual({
       "claude-code": "http",
       codex: "http",
       grok: "stdio",
       cursor: "stdio",
+      agy: "stdio",
     });
     expect(workbenchMcpTransportFor("claude-code", {})).toBe("http");
     expect(workbenchMcpTransportFor("codex", {})).toBe("http");
     expect(workbenchMcpTransportFor("grok", {})).toBe("stdio");
     expect(workbenchMcpTransportFor("cursor", {})).toBe("stdio");
+    expect(workbenchMcpTransportFor("agy", {})).toBe("stdio");
   });
 
   it("FF_PANE_MCP_TRANSPORT=stdio 全部退回小进程", () => {
-    for (const runtime of ["claude-code", "codex", "grok", "cursor"] as const) {
+    for (const runtime of ["claude-code", "codex", "grok", "cursor", "agy"] as const) {
       expect(workbenchMcpTransportFor(runtime, { FF_PANE_MCP_TRANSPORT: "stdio" })).toBe("stdio");
     }
   });

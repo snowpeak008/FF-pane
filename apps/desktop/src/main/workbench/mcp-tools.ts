@@ -102,7 +102,7 @@ export interface ToolWindowView {
   /** 冷启动清洗锁。锁住的窗口不能新增记忆。 */
   readonly sanitizeLocked: boolean;
   /** 窗口类型。claude / deepseek 由 hook 把正文附给模型，其余只在提醒行带摘要。 */
-  readonly kind?: "claude" | "codex" | "grok" | "deepseek" | "cursor" | "shell";
+  readonly kind?: "claude" | "codex" | "grok" | "deepseek" | "cursor" | "gemini" | "shell";
   /** 观察本窗口的监管者。 */
   readonly watcherWindowId?: string;
   /** 调研小窗：替哪个窗口查的（T11.1）。 */

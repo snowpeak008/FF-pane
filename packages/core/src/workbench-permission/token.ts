@@ -106,6 +106,7 @@ export type McpTokenDeliveryMode =
   | "claude-env-expand"
   | "grok-env-expand"
   | "cursor-env-expand"
+  | "agy-inherit"
   | "codex-forward";
 
 type McpSpecLike = {
@@ -120,6 +121,8 @@ type McpSpecLike = {
  * 把令牌通道接到 MCP 规格（值永不进配置明文 / Codex `-c`）：
  * - claude-env-expand / grok-env-expand：配置只写 `${FF_PANE_WINDOW_TOKEN}`，由 CLI 从进程 env 展开
  * - cursor-env-expand：同上，写法是 `${env:FF_PANE_WINDOW_TOKEN}`
+ * - agy-inherit：agy 不展开 `${VAR}`，但把自己的环境原样交给 MCP 子进程（2026-11-28 实测），
+ *   所以配置里一个令牌字段都不写，子进程直接继承
  * - codex-forward：仅 env_vars 白名单名（值在 CLI 父进程 env）
  */
 export function injectTokenIntoMcpServers<T extends McpSpecLike>(
@@ -149,6 +152,14 @@ export function injectTokenIntoMcpServers<T extends McpSpecLike>(
           [FF_PANE_WB_PIPE_ENV]: cursorEnvPlaceholder(FF_PANE_WB_PIPE_ENV),
         },
       };
+      continue;
+    }
+    if (mode === "agy-inherit") {
+      // 配置文件里绝不出现令牌：agy 的子进程直接继承 CLI 进程环境
+      const env = { ...(spec.env ?? {}) };
+      delete (env as Record<string, string>)[FF_PANE_WINDOW_TOKEN_ENV];
+      delete (env as Record<string, string>)[FF_PANE_WB_PIPE_ENV];
+      out[name] = { ...spec, ...(Object.keys(env).length > 0 ? { env } : {}) };
       continue;
     }
     const envVars = [

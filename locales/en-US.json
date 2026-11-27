@@ -292,6 +292,7 @@
       "kindGrok": "Grok",
       "kindDeepseek": "DeepSeek",
       "kindCursor": "Cursor",
+      "kindGemini": "Gemini",
       "deepseekHint": "The window shows Claude's interface. The model is DeepSeek. Choose the DeepSeek route first, then fill in the API key and model.",
       "cursorHint": "Adds a few FF-pane hooks to the project's .cursor/hooks.json (your own entries are kept).",
       "profile": "Launch profile",

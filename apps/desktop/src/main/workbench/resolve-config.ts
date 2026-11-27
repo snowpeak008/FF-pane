@@ -56,7 +56,9 @@ export async function resolveProjectLaunchRoute(
   }
   const spec =
     projectConfigRoute(effective, input.kind) ??
-    (input.kind === "cursor" ? { connectionMode: "local_cli" as const } : undefined);
+    (input.kind === "cursor" || input.kind === "gemini"
+      ? { connectionMode: "local_cli" as const }
+      : undefined);
   const cliName =
     input.kind === "claude"
       ? "Claude"
@@ -66,7 +68,9 @@ export async function resolveProjectLaunchRoute(
           ? "Grok"
           : input.kind === "cursor"
             ? "Cursor"
-            : "DeepSeek";
+            : input.kind === "gemini"
+              ? "Gemini"
+              : "DeepSeek";
   if (spec === undefined) {
     return {
       ok: false,

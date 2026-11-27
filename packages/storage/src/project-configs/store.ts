@@ -152,6 +152,9 @@ function pickConfig(value: unknown): ProjectConfig | undefined {
   const cursorRoute = pickRoute(raw["cursor"]);
   // Cursor 只有本机登录：文件里被手改成中转的，读的时候丢掉这一路。
   const cursor = cursorRoute?.connectionMode === "local_cli" ? cursorRoute : undefined;
+  const geminiRoute = pickRoute(raw["gemini"]);
+  // Gemini 第一期只有本机登录（agy）；第二期加中转后再放开。
+  const gemini = geminiRoute?.connectionMode === "local_cli" ? geminiRoute : undefined;
   const isDefault = raw["isDefault"] === true;
   return {
     id: raw["id"] as ProjectConfigId,
@@ -164,6 +167,7 @@ function pickConfig(value: unknown): ProjectConfig | undefined {
     ...(grok !== undefined ? { grok } : {}),
     ...(deepseek !== undefined ? { deepseek } : {}),
     ...(cursor !== undefined ? { cursor } : {}),
+    ...(gemini !== undefined ? { gemini } : {}),
   };
 }
 
@@ -198,6 +202,10 @@ function normalizeRoute(
   if (label === "Cursor") {
     throw new ProjectConfigDraftInvalidError("Cursor 只能用本机登录");
   }
+  if (label === "Gemini") {
+    // 第一期只有本机登录（agy）；中转（gemini CLI）第二期再加。
+    throw new ProjectConfigDraftInvalidError("Gemini 目前只能用本机登录");
+  }
   const providerId = route.providerId?.trim() ?? "";
   if (providerId === "") {
     throw new ProjectConfigDraftInvalidError(`${label} 走中转时必须选择来源`);
@@ -219,15 +227,17 @@ export function normalizeProjectConfigDraft(draft: ProjectConfigDraft): ProjectC
   const grok = normalizeRoute(draft.grok, "Grok");
   const deepseek = normalizeRoute(draft.deepseek, "DeepSeek");
   const cursor = normalizeRoute(draft.cursor, "Cursor");
+  const gemini = normalizeRoute(draft.gemini, "Gemini");
   if (
     claude === undefined &&
     codex === undefined &&
     grok === undefined &&
     deepseek === undefined &&
-    cursor === undefined
+    cursor === undefined &&
+    gemini === undefined
   ) {
     throw new ProjectConfigDraftInvalidError(
-      "至少配置 Claude、Codex、Grok、DeepSeek 或 Cursor 一路",
+      "至少配置 Claude、Codex、Grok、DeepSeek、Cursor 或 Gemini 一路",
     );
   }
   if (
@@ -250,6 +260,7 @@ export function normalizeProjectConfigDraft(draft: ProjectConfigDraft): ProjectC
     ...(grok !== undefined ? { grok } : {}),
     ...(deepseek !== undefined ? { deepseek } : {}),
     ...(cursor !== undefined ? { cursor } : {}),
+    ...(gemini !== undefined ? { gemini } : {}),
   };
 }
 

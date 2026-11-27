@@ -649,6 +649,220 @@ async function runCursorHook(event: string, pipePath: string, token: string): Pr
   }
 }
 
+// ---------- Agy（Gemini 窗口，T11.23）----------
+// 项目 .agents/hooks.json 里的命令是 `"<node>" "<本脚本>" Agy…`。stdin 是 agy 的事件 JSON，
+// stdout 回 agy 的格式。同项目的窗口共用这一份文件，靠环境里的窗口令牌认窗口；
+// 用户自己在项目里跑 agy 时也会跑到这里，那时没有令牌，什么也不做（写入守卫除外）。
+//
+// 事件结构（2026-11-28 实测）：SessionStart / PreInvocation / PostInvocation / Stop 回
+// `{"injectSteps":[{"systemMessage":{"systemMessage":"…"}}]}`；PreToolUse 回 `{"decision":"…","reason":"…"}`，
+// 其中 allow 不能放行命令、必须 auto_approve（实测）；PostToolUse 只回 `{}`。
+
+export const AGY_SCRIPT_EVENTS = new Set([
+  "AgySessionStart",
+  "AgyPromptSubmit",
+  "AgyPostInvocation",
+  "AgyPreToolUse",
+  "AgyStop",
+]);
+
+/** 钩子读完就删的说明文件（与主进程 agy-hook-config.ts 同名）。 */
+export const AGY_CONTEXT_FILE_ENV = "FF_PANE_AGY_CONTEXT_FILE";
+
+/** agy 的 Stop：terminationReason 是 ERROR 时当出错结束。 */
+export function agyStopEvent(raw: string): "Stop" | "StopFailure" {
+  try {
+    const reason = (JSON.parse(raw.trim()) as { terminationReason?: unknown })?.terminationReason;
+    return typeof reason === "string" && reason === "ERROR" ? "StopFailure" : "Stop";
+  } catch {
+    return "Stop";
+  }
+}
+
+/** agy stdin 里的 conversationId：任何事件都带，抓到就报。 */
+export function extractAgyConversationId(raw: string): string | undefined {
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith("{")) {
+    return undefined;
+  }
+  try {
+    const id = (JSON.parse(trimmed) as { conversationId?: unknown })?.conversationId;
+    return typeof id === "string" && THREAD_ID.test(id) ? id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** 改文件类的 agy 工具名。`run_command` 单独处理。 */
+const AGY_FILE_TOOLS = new Set([
+  "write_to_file",
+  "replace_file_content",
+  "multi_replace_file_content",
+]);
+
+/**
+ * PreToolUse 的项目外写入检查。agy 的工具名和参数名跟 Claude 不一样：
+ * 改文件类看 `TargetFile` / `AbsolutePath` / `path`，命令看 `CommandLine`。
+ * 该拒绝返回 agy 的拒绝 JSON，放行返回空串。
+ *
+ * 放行工作台 MCP：懒加载的调用走内置 `call_mcp_tool`（参数 `ServerName`），直接回 auto_approve。
+ * 其余工具不动：返回空串（`{}`）等于不拦，命令仍按权限档走。
+ */
+export function agyPreToolUseOutput(
+  raw: string,
+  rootsEnv: string | undefined,
+  workbenchServerName: string,
+): string {
+  let value: { toolCall?: unknown; cwd?: unknown };
+  try {
+    value = JSON.parse(raw.trim()) as typeof value;
+  } catch {
+    return "";
+  }
+  if (value === null || typeof value !== "object") {
+    return "";
+  }
+  const toolCall = value.toolCall as { name?: unknown; args?: unknown } | undefined;
+  if (toolCall === null || typeof toolCall !== "object" || typeof toolCall.name !== "string") {
+    return "";
+  }
+  const name = toolCall.name;
+  const args =
+    toolCall.args !== null && typeof toolCall.args === "object"
+      ? (toolCall.args as Record<string, unknown>)
+      : {};
+  const pick = (...keys: string[]): string | undefined => {
+    for (const key of keys) {
+      const item = args[key];
+      if (typeof item === "string" && item.trim() !== "") {
+        return item;
+      }
+    }
+    return undefined;
+  };
+  // 工作台 MCP：懒加载经 call_mcp_tool(ServerName)，直接或已展开时工具名带服务器名。
+  const serverName = pick("ServerName", "serverName", "server");
+  if (
+    (name === "call_mcp_tool" &&
+      serverName !== undefined &&
+      serverName.includes(workbenchServerName)) ||
+    name.includes(`mcp_${workbenchServerName}_`) ||
+    name.startsWith(`mcp.${workbenchServerName}.`)
+  ) {
+    return asciiJson({ decision: "auto_approve" });
+  }
+  const roots = parseWriteRoots(rootsEnv);
+  if (roots.length === 0) {
+    return "";
+  }
+  const cwd =
+    (typeof value.cwd === "string" && value.cwd !== "" ? value.cwd : undefined) ?? process.cwd();
+  let guarded: { toolName: string; toolInput: Record<string, unknown> } | undefined;
+  if (AGY_FILE_TOOLS.has(name)) {
+    const filePath = pick("TargetFile", "AbsolutePath", "path", "file_path", "target_file");
+    guarded =
+      filePath === undefined
+        ? undefined
+        : { toolName: "Write", toolInput: { file_path: filePath } };
+  } else if (name === "run_command") {
+    const command = pick("CommandLine", "command");
+    guarded =
+      command === undefined ? undefined : { toolName: "PowerShell", toolInput: { command } };
+  }
+  if (guarded === undefined) {
+    return "";
+  }
+  const reason = checkWrite({ ...guarded, cwd }, roots, homedir(), tmpdir());
+  return reason === undefined ? "" : asciiJson({ decision: "deny", reason });
+}
+
+/** 读出本窗口的说明并删掉文件，只交给模型一次。没有就返回空串。 */
+function consumeAgyContext(): string {
+  const file = process.env[AGY_CONTEXT_FILE_ENV]?.trim() ?? "";
+  if (file === "") {
+    return "";
+  }
+  try {
+    const text = readFileSync(file, "utf8");
+    rmSync(file, { force: true });
+    return text.trim();
+  } catch {
+    return "";
+  }
+}
+
+/** agy 的 injectSteps 输出（系统消息）。文本为空返回空串。 */
+function agyInjectOutput(text: string): string {
+  return text === ""
+    ? ""
+    : asciiJson({ injectSteps: [{ systemMessage: { systemMessage: text } }] });
+}
+
+async function runAgyHook(event: string, pipePath: string, token: string): Promise<void> {
+  const raw = await readStdinText();
+  const workbenchServer = process.env["FF_PANE_WORKBENCH_SERVER"] ?? "ffpane-workbench";
+  if (event === "AgyPreToolUse") {
+    // 项目外写入检查 + 工作台 MCP 放行。不上报、不需要管道。
+    const out = agyPreToolUseOutput(raw, process.env[WRITE_ROOTS_ENV], workbenchServer);
+    if (out !== "") {
+      await writeStdoutLine(out);
+    }
+    return;
+  }
+  if (pipePath === "" || token === "") {
+    // 用户自己开的 agy：不注入、不上报，但上面那段写入守卫仍然有效。
+    return;
+  }
+  if (event === "AgyStop") {
+    const reported = agyStopEvent(raw);
+    await sendHookReport(
+      pipePath,
+      token,
+      reported,
+      undefined,
+      undefined,
+      reported === "StopFailure" ? "unknown" : undefined,
+      extractAgyConversationId(raw),
+    );
+    return;
+  }
+  if (event === "AgyPostInvocation") {
+    // 一轮里有工具调用时会再来几次，这里不注入说明（说明只在 SessionStart / 第一次 PreInvocation 给）。
+    // 中途新消息：有就插进去。
+    const midTurn = await requestInboxDigest(pipePath, token, MID_TURN_TIMEOUT_MS, "inbox-midturn");
+    if (midTurn !== "") {
+      await writeStdoutLine(agyInjectOutput(midTurn));
+    }
+    return;
+  }
+  const conversationId = extractAgyConversationId(raw);
+  await sendHookReport(
+    pipePath,
+    token,
+    event === "AgySessionStart" ? "SessionStart" : "UserPromptSubmit",
+    undefined,
+    undefined,
+    undefined,
+    conversationId,
+  );
+  const parts = [consumeAgyContext()];
+  if (event === "AgyPromptSubmit") {
+    // 平台的新消息提醒：附上未读正文。用户自己发的话：只提一句还有几条未读。
+    parts.push(
+      await requestInboxDigest(
+        pipePath,
+        token,
+        INBOX_DIGEST_TIMEOUT_MS,
+        promptIsInboxReminder(raw) ? "inbox-digest" : "inbox-peek",
+      ),
+    );
+  }
+  const text = parts.filter((part) => part !== "").join("\n\n");
+  if (text !== "") {
+    await writeStdoutLine(agyInjectOutput(text));
+  }
+}
+
 function invokedDirectly(): boolean {
   const entry = process.argv[1] ?? "";
   const normalized = entry.replaceAll("\\", "/");
@@ -678,6 +892,12 @@ if (invokedDirectly()) {
     });
   } else if (CURSOR_SCRIPT_EVENTS.has(named)) {
     void runCursorHook(named, pipePath, token)
+      .catch(() => undefined)
+      .then(() => {
+        process.exit(0);
+      });
+  } else if (AGY_SCRIPT_EVENTS.has(named)) {
+    void runAgyHook(named, pipePath, token)
       .catch(() => undefined)
       .then(() => {
         process.exit(0);

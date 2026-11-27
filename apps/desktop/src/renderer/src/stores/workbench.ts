@@ -266,7 +266,7 @@ function nextShellTitle(layout: ProjectWorkbenchLayout): string {
 }
 
 function nextCliTitle(
-  kind: "claude" | "codex" | "grok" | "deepseek" | "cursor",
+  kind: "claude" | "codex" | "grok" | "deepseek" | "cursor" | "gemini",
   layout: ProjectWorkbenchLayout,
 ): string {
   const n = Object.values(layout.windows).filter((window) => window.kind === kind).length + 1;
@@ -281,6 +281,9 @@ function nextCliTitle(
   }
   if (kind === "cursor") {
     return `Cursor ${n}`;
+  }
+  if (kind === "gemini") {
+    return `Gemini ${n}`;
   }
   return `DeepSeek ${n}`;
 }

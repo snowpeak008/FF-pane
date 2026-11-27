@@ -292,6 +292,7 @@
       "kindGrok": "Grok",
       "kindDeepseek": "DeepSeek",
       "kindCursor": "Cursor",
+      "kindGemini": "Gemini",
       "deepseekHint": "窗口里是 Claude 的界面，模型是 DeepSeek。要先在配置里选 DeepSeek，填密钥和模型。",
       "cursorHint": "会在项目的 .cursor/hooks.json 里加几条本软件的钩子（不动你自己的条目）。",
       "profile": "启动配置",

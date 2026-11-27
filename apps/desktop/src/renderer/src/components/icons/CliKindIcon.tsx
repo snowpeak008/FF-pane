@@ -96,6 +96,20 @@ export function CliKindIcon({
           />
         </svg>
       );
+    case "gemini":
+      // 四角星（Gemini 的标记）
+      return (
+        <svg {...common} aria-hidden="true" className="shrink-0 text-[#4285f4]">
+          <path
+            d="M8 1.4c.5 2.7 1.9 4.1 4.6 4.6-2.7.5-4.1 1.9-4.6 4.6-.5-2.7-1.9-4.1-4.6-4.6 2.7-.5 4.1-1.9 4.6-4.6z"
+            fill="currentColor"
+          />
+          <path
+            d="M12.6 9.6c.25 1.35.95 2.05 2.3 2.3-1.35.25-2.05.95-2.3 2.3-.25-1.35-.95-2.05-2.3-2.3 1.35-.25 2.05-.95 2.3-2.3z"
+            fill="currentColor"
+          />
+        </svg>
+      );
     default:
       return <SquareTerminal aria-hidden size={size} className="shrink-0 text-fg-muted" />;
   }

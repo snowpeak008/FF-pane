@@ -21,7 +21,7 @@
 
 export type WorkbenchMcpTransport = "http" | "stdio";
 
-export type WorkbenchMcpRuntime = "claude-code" | "codex" | "grok" | "cursor";
+export type WorkbenchMcpRuntime = "claude-code" | "codex" | "grok" | "cursor" | "agy";
 
 export const FF_PANE_MCP_TRANSPORT_ENV = "FF_PANE_MCP_TRANSPORT";
 
@@ -32,9 +32,12 @@ export const WORKBENCH_MCP_TRANSPORT_BY_RUNTIME: Readonly<
   codex: "http",
   grok: "stdio",
   cursor: "stdio",
+  // agy 1.5.18 的远程 MCP 只认 Streamable HTTP（`serverUrl`/`url` + `headers`），
+  // 工作台的 HTTP 配置写法还没验证，先走 stdio 小进程。
+  agy: "stdio",
 };
 
-/** 只有 Claude、Codex 有 HTTP 的配置写法；Grok、Cursor 表里改成 http 也照旧走 stdio。 */
+/** 只有 Claude、Codex 有 HTTP 的配置写法；其余表里改成 http 也照旧走 stdio。 */
 const HTTP_CAPABLE: ReadonlySet<WorkbenchMcpRuntime> = new Set(["claude-code", "codex"]);
 
 export function workbenchMcpTransportFor(

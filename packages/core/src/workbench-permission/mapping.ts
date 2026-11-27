@@ -9,7 +9,7 @@
 import type { WorkbenchPermissionLevel } from "@ff-pane/shared";
 
 /** 映射适用的交互式 CLI。 */
-export type WorkbenchPermissionCli = "claude-code" | "codex" | "grok" | "cursor";
+export type WorkbenchPermissionCli = "claude-code" | "codex" | "grok" | "cursor" | "agy";
 
 /** 单条等级 × CLI 映射。 */
 export interface WorkbenchPermissionMapping {
@@ -210,6 +210,38 @@ export const WORKBENCH_PERMISSION_MAPPINGS: readonly WorkbenchPermissionMapping[
     freshArgs: ["--force"],
     resumeArgs: ["--force"],
     notes: "--force：全部放行。项目外写入仍由 preToolUse 钩子拦（T11.8）。",
+  },
+  // —— agy（Antigravity CLI 1.5.18；新开和续接同一组参数）——
+  // 取值为 `--mode accept-edits | auto | plan`（2026-11-28 `agy --help` 实测）。
+  // 命令放行靠 PreToolUse 钩子回 auto_approve（allow 不行，实测），见 agy-hook-config.ts。
+  {
+    level: "read-only",
+    cli: "agy",
+    freshArgs: ["--mode", "plan"],
+    resumeArgs: ["--mode", "plan"],
+    notes: "plan：只读规划，不改文件、不跑命令。",
+  },
+  {
+    level: "edit",
+    cli: "agy",
+    freshArgs: ["--mode", "accept-edits"],
+    resumeArgs: ["--mode", "accept-edits"],
+    notes: "accept-edits：改文件自动接受；命令仍逐条询问。",
+  },
+  {
+    level: "edit-exec",
+    cli: "agy",
+    freshArgs: ["--mode", "accept-edits", "--dangerously-skip-permissions"],
+    resumeArgs: ["--mode", "accept-edits", "--dangerously-skip-permissions"],
+    notes:
+      "agy 没有只放行命令的一档。不加 --dangerously-skip-permissions 时每条命令都弹确认，管理者派的执行窗口会一直卡着（同 Cursor 真机）。项目外写入仍由 PreToolUse 钩子拦；钩子 deny 在 skip-permissions 下是否仍生效待探针确认（计划 §5 第 10 项）。",
+  },
+  {
+    level: "yolo",
+    cli: "agy",
+    freshArgs: ["--dangerously-skip-permissions"],
+    resumeArgs: ["--dangerously-skip-permissions"],
+    notes: "--dangerously-skip-permissions：全部放行。项目外写入仍由 PreToolUse 钩子拦（T11.8）。",
   },
 ];
 

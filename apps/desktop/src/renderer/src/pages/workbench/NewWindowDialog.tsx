@@ -94,7 +94,9 @@ export function NewWindowDialog({
   const route =
     isAiWorkbenchKind(kind) && effective !== undefined
       ? (projectConfigRoute(effective, kind) ??
-        (kind === "cursor" ? { connectionMode: "local_cli" as const } : undefined))
+        (kind === "cursor" || kind === "gemini"
+          ? { connectionMode: "local_cli" as const }
+          : undefined))
       : undefined;
   const routeMissing = kind !== "shell" && !loadingConfig && route === undefined;
 
@@ -192,6 +194,7 @@ export function NewWindowDialog({
                   ["grok", "workbench.newWindow.kindGrok"],
                   ["deepseek", "workbench.newWindow.kindDeepseek"],
                   ["cursor", "workbench.newWindow.kindCursor"],
+                  ["gemini", "workbench.newWindow.kindGemini"],
                 ] as const
               ).map(([value, labelKey]) => (
                 <Button

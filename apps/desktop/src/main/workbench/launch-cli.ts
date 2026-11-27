@@ -49,6 +49,13 @@ import { resolveRuntimeConfigOverrides, resolveRuntimeEnv } from "../session/env
 import { createKnowledgeAuditPath, resolveKnowledgeMcpServer } from "../session/knowledge-tool";
 import type { PtyManager } from "../terminal/manager";
 import type { TerminalRecord } from "../terminal/types";
+import { AGY_COMMAND, agyProcessEnv, agyProxyEnv, resolveAgyTarget } from "./agy-cli";
+import {
+  AGY_CONTEXT_FILE_ENV,
+  writeAgyContextFile,
+  writeAgyProjectHooks,
+  writeAgyProjectMcpConfig,
+} from "./agy-hook-config";
 import type { WorkbenchAuthRegistry } from "./auth-registry";
 import {
   buildClaudeProviderSettings,
@@ -66,6 +73,7 @@ import {
 import {
   assertSecretAbsent,
   assertTokenAbsent,
+  buildInteractiveAgyArgs,
   buildInteractiveClaudeArgs,
   buildInteractiveCodexArgs,
   buildInteractiveCursorArgs,
@@ -154,7 +162,7 @@ export interface LaunchCliWindowInput {
   readonly windowId: string;
   readonly projectId: ProjectId;
   readonly projectRoot: string;
-  readonly kind: "claude" | "codex" | "grok" | "deepseek" | "cursor";
+  readonly kind: "claude" | "codex" | "grok" | "deepseek" | "cursor" | "gemini";
   /** 已按项目配置解析好的这一路。本机登录不带 providerId。 */
   readonly route: LaunchCliRoute;
   readonly cols: number;
@@ -178,7 +186,7 @@ export interface LaunchCliWindowInput {
 
 export interface LaunchCliWindowResult {
   readonly terminal: TerminalRecord;
-  readonly kind: "claude" | "codex" | "grok" | "deepseek" | "cursor";
+  readonly kind: "claude" | "codex" | "grok" | "deepseek" | "cursor" | "gemini";
   readonly nativeSessionId?: string;
   /** Codex：已开始后台认领会话 id。 */
   readonly claimingSession?: boolean;
@@ -240,7 +248,7 @@ export interface LaunchCliWindowDeps {
   readonly resolveSkillMounts?: (input: {
     readonly windowId: string;
     readonly projectRoot: string;
-    readonly runtime: "claude-code" | "codex" | "grok" | "cursor";
+    readonly runtime: "claude-code" | "codex" | "grok" | "cursor" | "agy";
   }) => Promise<{
     readonly claudePluginDir?: string;
     readonly instructions?: string;
@@ -278,7 +286,7 @@ export interface LaunchCliWindowDeps {
   readonly loadRoleInjection?: (input: {
     readonly windowId: string;
     readonly role: WorkbenchRole;
-    readonly runtime: "claude-code" | "codex" | "grok" | "cursor";
+    readonly runtime: "claude-code" | "codex" | "grok" | "cursor" | "agy";
   }) => Promise<{
     readonly claudePromptFile?: string;
     readonly developerInstructions?: string;
@@ -351,7 +359,7 @@ export function assertLaunchCliIpcSafe(request: object): void {
   }
 }
 
-function resolveCliCommand(runtime: "claude-code" | "codex" | "grok" | "cursor"): string {
+function resolveCliCommand(runtime: "claude-code" | "codex" | "grok" | "cursor" | "agy"): string {
   if (runtime === "claude-code") {
     return CLAUDE_INTERACTIVE_COMMAND;
   }
@@ -360,6 +368,9 @@ function resolveCliCommand(runtime: "claude-code" | "codex" | "grok" | "cursor")
   }
   if (runtime === "cursor") {
     return CURSOR_AGENT_COMMAND;
+  }
+  if (runtime === "agy") {
+    return AGY_COMMAND;
   }
   return CODEX_INTERACTIVE_COMMAND;
 }
@@ -496,6 +507,17 @@ async function launchCliWindowBody(
       throw new WorkbenchCliLaunchError(
         "cli-missing",
         "没找到 Cursor CLI（cursor-agent）。先在 PowerShell 里运行 irm 'https://cursor.com/install?win32=true' | iex 安装，再运行 cursor-agent login 登录。",
+      );
+    }
+  }
+  // agy 是原生 exe：PATH 上找，再找默认的 %LOCALAPPDATA%\agy\bin。找不到就别开。
+  let agyTarget: string | undefined;
+  if (runtime === "agy") {
+    agyTarget = resolveAgyTarget(process.env);
+    if (agyTarget === undefined) {
+      throw new WorkbenchCliLaunchError(
+        "cli-missing",
+        "没找到 Antigravity CLI（agy）。先在 PowerShell 里运行 irm https://antigravity.google/cli/install.ps1 | iex 安装，再运行 agy 选 Google 账号登录。",
       );
     }
   }
@@ -641,8 +663,11 @@ async function launchCliWindowBody(
   };
   const windowToken = deps.tokenRegistry.issue(input.windowId);
   const probed =
-    runtime === "cursor" ? undefined : resolveDirectCliTarget(command, [], process.env);
-  // Cursor 的钩子写在项目文件里、跨次启动都在：先用系统 node（路径稳定），没有再用 Cursor 自带的（会随更新换目录）。
+    runtime === "cursor" || runtime === "agy"
+      ? undefined
+      : resolveDirectCliTarget(command, [], process.env);
+  // Cursor / agy 的钩子写在项目文件里、跨次启动都在：用系统 node（路径稳定）。
+  // agy 是原生 exe，没有自带 node，找不到系统 node 就不装钩子。
   const nodePath =
     runtime === "cursor"
       ? (resolveHookNodeExecutable(process.env) ?? cursorTarget?.nodeFile)
@@ -701,6 +726,9 @@ async function launchCliWindowBody(
   let cursorContextFile: string | undefined;
   let cursorHooksPath: string | undefined;
   let cursorCliConfigPath: string | undefined;
+  let agyHooksPath: string | undefined;
+  let agyMcpPath: string | undefined;
+  let agyContextFile: string | undefined;
   const extraProcessEnv: Record<string, string> = { ...compact.env };
   if (sandboxed) {
     extraProcessEnv[CLAUDE_SANDBOX_GATE_ENV] = "1";
@@ -932,6 +960,73 @@ async function launchCliWindowBody(
       ...(cursorPluginDir !== undefined ? { pluginDir: cursorPluginDir } : {}),
       ...(input.initialPrompt !== undefined ? { initialPrompt: input.initialPrompt } : {}),
     });
+  } else if (runtime === "agy") {
+    const wantResume = input.resume === true;
+    if (wantResume && nativeSessionId === undefined) {
+      await releaseFailedLaunch();
+      throw new WorkbenchCliLaunchError(
+        "invalid",
+        "Gemini 续接要有对话编号。请从本窗口的历史对话里选一段再续接。",
+      );
+    }
+    // 新开不指定编号：SessionStart 钩子把 agy 分的 conversationId 报回来。
+    if (!wantResume) {
+      nativeSessionId = undefined;
+    }
+    const configEnabled =
+      deps.isConfigToolEnabled !== undefined
+        ? await deps.isConfigToolEnabled(input.projectRoot)
+        : false;
+    const forFile = configToolForFile({
+      mcpServers,
+      configEnabled,
+      role,
+      moduleDir: deps.moduleDir,
+      placeholder: (name) => `\${${name}}`,
+    });
+    Object.assign(extraProcessEnv, forFile.env);
+    const withToken = injectTokenIntoMcpServers(forFile.servers, windowToken, "agy-inherit");
+    const hookDir = windowHookDir(input.windowId);
+    try {
+      if (hookDir !== undefined) {
+        agyContextFile = await writeAgyContextFile(
+          hookDir,
+          withSkills(roleInjection.developerInstructions),
+        );
+      }
+      if (nodePath !== undefined) {
+        agyHooksPath = await writeAgyProjectHooks({
+          projectRoot: input.projectRoot,
+          nodePath,
+          scriptPath,
+        });
+      }
+      if (Object.keys(withToken).length > 0) {
+        agyMcpPath = await writeAgyProjectMcpConfig({
+          projectRoot: input.projectRoot,
+          servers: withToken,
+          managedNames: [
+            WORKBENCH_MCP_SERVER_NAME,
+            DEFAULT_KNOWLEDGE_TOOL_SERVER_NAME,
+            DEFAULT_CONFIG_TOOL_SERVER_NAME,
+            ...Object.keys(withToken),
+          ],
+        });
+      }
+    } catch (error) {
+      await releaseFailedLaunch();
+      throw error;
+    }
+    if (agyContextFile !== undefined) {
+      extraProcessEnv[AGY_CONTEXT_FILE_ENV] = agyContextFile;
+    }
+    args = buildInteractiveAgyArgs({
+      ...(wantResume && nativeSessionId !== undefined ? { resumeSessionId: nativeSessionId } : {}),
+      ...(model !== undefined ? { model } : {}),
+      ...(effort !== undefined ? { effort } : {}),
+      permission,
+      ...(input.initialPrompt !== undefined ? { initialPrompt: input.initialPrompt } : {}),
+    });
   } else {
     throw new WorkbenchCliLaunchError("unsupported-runtime", `unsupported runtime: ${runtime}`);
   }
@@ -971,6 +1066,9 @@ async function launchCliWindowBody(
       cursorContextFile,
       cursorHooksPath,
       cursorCliConfigPath,
+      agyContextFile,
+      agyHooksPath,
+      agyMcpPath,
     ]) {
       if (cursorFile !== undefined) {
         const body = readFileSync(cursorFile, "utf8");
@@ -995,7 +1093,9 @@ async function launchCliWindowBody(
           args: [cursorTarget.indexJs, ...args],
           resolvedCommand: CURSOR_AGENT_COMMAND,
         }
-      : resolveDirectCliTarget(command, args, process.env);
+      : agyTarget !== undefined
+        ? { file: agyTarget, args: [...args], resolvedCommand: AGY_COMMAND }
+        : resolveDirectCliTarget(command, args, process.env);
   if (direct === undefined) {
     await releaseFailedLaunch();
     throw new WorkbenchCliLaunchError(
@@ -1017,9 +1117,12 @@ async function launchCliWindowBody(
   if (runtime === "cursor") {
     stringEnv = { ...cursorProcessEnv(stringEnv), ...cursorProxyEnv(stringEnv) };
   }
+  if (runtime === "agy") {
+    stringEnv = { ...agyProcessEnv(stringEnv), ...agyProxyEnv(stringEnv) };
+  }
   stringEnv[FF_PANE_WINDOW_TOKEN_ENV] = windowToken;
-  // Cursor 的项目外写入检查也在钩子里（preToolUse），用同一份允许目录。
-  if (runtime === "claude-code" || runtime === "cursor") {
+  // Cursor / agy 的项目外写入检查也在钩子里（PreToolUse），用同一份允许目录。
+  if (runtime === "claude-code" || runtime === "cursor" || runtime === "agy") {
     stringEnv[WRITE_ROOTS_ENV] = JSON.stringify(
       claudeWriteRoots({
         projectRoot: input.projectRoot,
@@ -1103,7 +1206,8 @@ async function launchCliWindowBody(
     // 有 UserPromptSubmit hook 的窗口有可靠的「一轮开始」信号，提交与否只认它。
     ...((runtime === "claude-code" && nodePath !== undefined) ||
     (runtime === "grok" && grokHookPath !== undefined) ||
-    (runtime === "cursor" && cursorHooksPath !== undefined)
+    (runtime === "cursor" && cursorHooksPath !== undefined) ||
+    (runtime === "agy" && agyHooksPath !== undefined)
       ? { verifySubmit: true, turnStartSource: true }
       : {}),
   });
@@ -1158,9 +1262,13 @@ async function launchCliWindowBody(
           ? cursorHooksPath !== undefined
             ? "auto"
             : "manual"
-          : nodePath === undefined
-            ? "manual"
-            : "auto",
+          : runtime === "agy"
+            ? agyHooksPath !== undefined
+              ? "auto"
+              : "manual"
+            : nodePath === undefined
+              ? "manual"
+              : "auto",
     ...(skillMount !== undefined ? { skills: skillMount.report } : {}),
   };
 }
