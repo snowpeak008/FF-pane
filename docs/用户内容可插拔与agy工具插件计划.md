@@ -117,7 +117,28 @@ agy 的 PreToolUse 钩子对 `call_mcp_tool` 且服务器是 `ffpane-workbench_f
 
 ## 10. 还没验证的
 
-- 真实 FF-pane 窗口里，agy 拿到真令牌和管道后调通 `ffpane_whoami`（见下一节）。
+- ~~真实 FF-pane 窗口里，agy 拿到真令牌和管道后调通 `ffpane_whoami`~~ **已验证（2026-11-28）**，见 §11。
 - 真实卸载流程（NSIS）。
 - 带 agy 窗口开着时的自动更新推迟，在真窗口里的表现。
 - §8 里的三项：没令牌时服务器进程的代价、工具列表很长时 agent 多花几步、钩子对 `ServerName` 的匹配（已精确匹配并有单测，待真机）。
+
+## 11. 真窗口端到端验证（2026-11-28）
+
+做法：临时 e2e（不提交），agy 的用户目录指到临时目录（USERPROFILE/HOME），所以真实 `~/.gemini` 不受影响；FF-pane 用开发构建；经 FF-pane 自己的 IPC `agy-plugin:install` 添加插件（等同用户点按钮），再新建一个真的 Gemini 窗口，开场白让它调 `ffpane_whoami`。
+
+结果（agy 的对话转写）：
+1. SessionStart 钩子把角色说明注入了（钩子被载入且生效）。
+2. agent 自己读了描述文件 `…ntigravity-cli\mcpfpane-workbench_ffpane-workbenchfpane_whoami.json`，再用 `call_mcp_tool`（`ServerName` 是 `ffpane-workbench_ffpane-workbench`）调用。
+3. **3 秒内拿到真实结果**：`{"windowId":"win-…","title":"Gemini 1","role":"none","permission":"edit","parent":null,"projectName":"Real Agy",…}`，说明真令牌和真管道都走通了。
+4. 没有停在「Allow calling this tool?」上，钩子的自动批准生效。
+5. agent 最后回答「窗口标题：Gemini 1，角色：none。」
+
+踩到的坑（都是测试环境的，不是产品问题）：
+- 把 agy 的用户目录换成**全新**的临时目录，agy 会先弹首次启动引导（选主题），卡住所有输入。完成标记在 `cache/onboarding.json`（`onboardingComplete: true`），不在 `settings.json`。预置这个文件即可跳过；真实用户的 agy 早就走过引导，不受影响。
+- `workbench-runtime-phase` 徽章只在「等批准」时才渲染，平时没有，所以不能拿它判断忙/空闲。
+
+还没验证：
+- 真实卸载（NSIS）。要打安装包并在测试机上卸一次。
+- 带 agy 窗口开着时自动更新推迟，在真窗口里的表现（单测和真 agy 集成测试里已验证推迟逻辑）。
+- 三个权限档（只读、edit、edit-exec/yolo）各一次，本次只测了 `edit`。
+- 管理者接任、软件重启续接后工具仍可用。
