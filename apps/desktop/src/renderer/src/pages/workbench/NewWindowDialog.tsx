@@ -23,8 +23,9 @@ import {
 import { type ReactElement, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import type { CursorAccountStatus } from "../../../../shared-ipc/contracts";
+import type { CursorAccountStatus, GeminiAccountStatus } from "../../../../shared-ipc/contracts";
 import { CursorAccountPanel } from "../../components/cursor/CursorAccountPanel";
+import { GeminiAccountPanel } from "../../components/gemini/GeminiAccountPanel";
 import { Button } from "../../components/ui/Button";
 import {
   Dialog,
@@ -70,6 +71,7 @@ export function NewWindowDialog({
     queryData(configState)?.cursorDefaultModel,
   );
   const [cursorStatus, setCursorStatus] = useState<CursorAccountStatus | undefined>(undefined);
+  const [geminiStatus, setGeminiStatus] = useState<GeminiAccountStatus | undefined>(undefined);
 
   const [kind, setKind] = useState<NewWindowKindChoice>("shell");
   const [initialPrompt, setInitialPrompt] = useState("");
@@ -160,12 +162,15 @@ export function NewWindowDialog({
 
   // Cursor 没装就开不出来；没登录不拦（CLI 自己也会提示登录），面板上已标黄。
   const cursorMissing = kind === "cursor" && cursorStatus?.installed === false;
+  // agy 没装同样开不出来；没登录不拦（面板已标黄并说明怎么登录）。
+  const geminiMissing = kind === "gemini" && geminiStatus?.installed === false;
   const canConfirm =
     kind === "shell" ||
     (!routeMissing &&
       !loadingConfig &&
       !cliMissing &&
       !cursorMissing &&
+      !geminiMissing &&
       !probing &&
       (permission !== "yolo" || yoloConfirm));
 
@@ -227,6 +232,10 @@ export function NewWindowDialog({
             />
           ) : null}
 
+          {kind === "gemini" ? (
+            <GeminiAccountPanel model={route?.model?.trim() ?? ""} onStatus={setGeminiStatus} />
+          ) : null}
+
           {kind !== "shell" ? (
             <>
               {cliMissing ? (
@@ -252,7 +261,11 @@ export function NewWindowDialog({
                             ? "Grok"
                             : kind === "deepseek"
                               ? "DeepSeek"
-                              : "Codex",
+                              : kind === "cursor"
+                                ? "Cursor"
+                                : kind === "gemini"
+                                  ? "Gemini"
+                                  : "Codex",
                       name: effective?.name ?? "",
                     })}
                   </p>

@@ -983,10 +983,14 @@
         "routeGrok": "Grok",
         "routeDeepseek": "DeepSeek",
         "routeCursor": "Cursor",
+        "routeGemini": "Gemini（Antigravity）",
         "deepseekNote": "密钥必填。窗口里是 Claude 的界面，模型是你填的 DeepSeek。",
         "cursorNote": "只能用本机登录（cursor-agent login）。不勾这一路也能开 Cursor 窗口，用 Cursor 的默认模型。",
         "modelHintDeepseek": "手填模型名，例如 deepseek-flash、deepseek-v4-pro。留空则不指定。",
         "modelHintCursor": "留空用 Cursor 的默认（Auto）。点「读取已探测的模型」看这个账号能用哪些。",
+        "geminiNote": "目前只能用本机登录（agy）。登录要先在 agy 里完成；不勾这一路也能开 Gemini 窗口，用 agy 的默认模型。",
+        "modelHintGemini": "留空用 agy 的默认模型。点「读取已探测的模型」看这个账号能用哪些；读取失败多半是没登录或网络不通。",
+        "relayLaterOption": "中转（下一期支持）",
         "modelPlaceholderDeepseek": "例如 deepseek-flash",
         "connection": "连法",
         "local": "本机登录",
@@ -1589,6 +1593,26 @@
       "list": "列出模型",
       "saveError": "保存默认模型失败",
       "using": "模型 {{model}}"
+    }
+  },
+  "gemini": {
+    "goInstall": "安装 agy",
+    "recheck": "重新检查",
+    "status": {
+      "missing": "没找到 Antigravity CLI（agy）",
+      "unknown": "判断不了登录状态",
+      "loggedOut": "还没登录 agy",
+      "loggedIn": "已登录 agy · 本机登录",
+      "failed": "连接失败：{{detail}}"
+    },
+    "loginHint": "登录要在 agy 自己的界面里完成：在终端里运行 agy，按提示登录，然后回到这里点「重新检查」。",
+    "using": "模型 {{model}}",
+    "defaultModel": "agy 默认",
+    "install": {
+      "confirmTitle": "安装 agy？",
+      "confirmBody": "会在 PowerShell 里跑官方安装命令 irm https://antigravity.google/cli/install.ps1 | iex（从 antigravity.google 下载安装脚本并执行），装到 %LOCALAPPDATA%\\agy。要一两分钟。",
+      "ok": "已安装。",
+      "failed": "安装没成功："
     }
   }
 }

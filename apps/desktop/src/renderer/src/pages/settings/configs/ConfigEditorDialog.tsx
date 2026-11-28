@@ -27,11 +27,11 @@ import {
 import { Field, Input } from "../../../components/ui/Input";
 import { invokeQuery } from "../../../ipc/query";
 
-type RouteSide = "claude" | "codex" | "grok" | "deepseek" | "cursor";
+type RouteSide = "claude" | "codex" | "grok" | "deepseek" | "cursor" | "gemini";
 
 function providersForSide(side: RouteSide, providers: readonly Provider[]): readonly Provider[] {
-  if (side === "cursor") {
-    // Cursor 只有本机登录，没有来源可选
+  if (side === "cursor" || side === "gemini") {
+    // Cursor、Gemini 目前只有本机登录，没有来源可选
     return [];
   }
   const cli =
@@ -132,6 +132,7 @@ export function ConfigEditorDialog({
   const [grok, setGrok] = useState<RouteDraft>(emptyRoute(false));
   const [deepseek, setDeepseek] = useState<RouteDraft>(emptyRoute(false));
   const [cursor, setCursor] = useState<RouteDraft>(emptyRoute(false));
+  const [gemini, setGemini] = useState<RouteDraft>(emptyRoute(false));
   const [error, setError] = useState<string | undefined>(undefined);
   const [saving, setSaving] = useState(false);
 
@@ -155,6 +156,11 @@ export function ConfigEditorDialog({
         ? emptyRoute(false)
         : { ...routeFrom(config.cursor), connectionMode: "local_cli" },
     );
+    setGemini(
+      config === null
+        ? emptyRoute(false)
+        : { ...routeFrom(config.gemini), connectionMode: "local_cli" },
+    );
     setError(undefined);
     setSaving(false);
   }, [config, open]);
@@ -164,7 +170,12 @@ export function ConfigEditorDialog({
   const saveDisabled =
     saving ||
     name.trim() === "" ||
-    (!claude.enabled && !codex.enabled && !grok.enabled && !deepseek.enabled && !cursor.enabled) ||
+    (!claude.enabled &&
+      !codex.enabled &&
+      !grok.enabled &&
+      !deepseek.enabled &&
+      !cursor.enabled &&
+      !gemini.enabled) ||
     (claude.enabled && claude.connectionMode === "relay" && claude.providerId === "") ||
     (codex.enabled && codex.connectionMode === "relay" && codex.providerId === "") ||
     (grok.enabled && grok.connectionMode === "relay" && grok.providerId === "") ||
@@ -193,6 +204,8 @@ export function ConfigEditorDialog({
       setGrok(update);
     } else if (side === "cursor") {
       setCursor(update);
+    } else if (side === "gemini") {
+      setGemini(update);
     } else if (side === "codex") {
       setCodex(update);
     }
@@ -212,7 +225,9 @@ export function ConfigEditorDialog({
             ? "grok-build"
             : side === "cursor"
               ? "cursor"
-              : "codex",
+              : side === "gemini"
+                ? "agy"
+                : "codex",
     });
     const apply = (note: string, models: readonly string[]): void => {
       patchSide(side, { probeNote: note, probedModels: models });
@@ -237,6 +252,7 @@ export function ConfigEditorDialog({
     const grokRoute = toRoute(grok);
     const deepseekRoute = toRoute(deepseek, true);
     const cursorRoute = toRoute({ ...cursor, connectionMode: "local_cli", reasoningEffort: "" });
+    const geminiRoute = toRoute({ ...gemini, connectionMode: "local_cli", reasoningEffort: "" });
     const projectIds = config?.isDefault === true ? [] : ([...scope] as ProjectId[]);
     const draft: ProjectConfigDraft = {
       name: name.trim(),
@@ -248,6 +264,7 @@ export function ConfigEditorDialog({
       ...(grokRoute !== undefined ? { grok: grokRoute } : {}),
       ...(deepseekRoute !== undefined ? { deepseek: deepseekRoute } : {}),
       ...(cursorRoute !== undefined ? { cursor: cursorRoute } : {}),
+      ...(geminiRoute !== undefined ? { gemini: geminiRoute } : {}),
     };
     setSaving(true);
     setError(undefined);
@@ -377,11 +394,21 @@ export function ConfigEditorDialog({
             onChange={setCursor}
             onProbe={() => void probeModels("cursor")}
           />
+          <RouteFields
+            side="gemini"
+            title={t("settings.configs.field.routeGemini")}
+            draft={gemini}
+            providers={[]}
+            relayLater
+            onChange={setGemini}
+            onProbe={() => void probeModels("gemini")}
+          />
           {!claude.enabled &&
           !codex.enabled &&
           !grok.enabled &&
           !deepseek.enabled &&
-          !cursor.enabled ? (
+          !cursor.enabled &&
+          !gemini.enabled ? (
             <p className="text-sm text-danger-text">{t("settings.configs.field.needRoute")}</p>
           ) : null}
           {error !== undefined ? (
@@ -417,6 +444,7 @@ function RouteFields({
   providers,
   relayOnly = false,
   localOnly = false,
+  relayLater = false,
   onChange,
   onProbe,
 }: {
@@ -427,6 +455,8 @@ function RouteFields({
   readonly relayOnly?: boolean;
   /** 只有本机登录（Cursor）：不显示连法和思考强度。 */
   readonly localOnly?: boolean;
+  /** 中转还没做（Gemini 第二期）：连法里列出但不可选。 */
+  readonly relayLater?: boolean;
   readonly onChange: (next: RouteDraft) => void;
   readonly onProbe: () => void;
 }): ReactElement {
@@ -464,6 +494,11 @@ function RouteFields({
               {t("settings.configs.field.cursorNote")}
             </p>
           ) : null}
+          {side === "gemini" ? (
+            <p className="text-2xs text-fg-muted" data-testid={`config-${side}-note`}>
+              {t("settings.configs.field.geminiNote")}
+            </p>
+          ) : null}
           {relayOnly || localOnly ? null : (
             <Field htmlFor={`config-${side}-mode`} label={t("settings.configs.field.connection")}>
               <select
@@ -480,7 +515,11 @@ function RouteFields({
                 }
               >
                 <option value="local_cli">{t("settings.configs.field.local")}</option>
-                <option value="relay">{t("settings.configs.field.relay")}</option>
+                <option value="relay" disabled={relayLater}>
+                  {relayLater
+                    ? t("settings.configs.field.relayLaterOption")
+                    : t("settings.configs.field.relay")}
+                </option>
               </select>
             </Field>
           )}
@@ -510,7 +549,9 @@ function RouteFields({
                 ? t("settings.configs.field.modelHintDeepseek")
                 : side === "cursor"
                   ? t("settings.configs.field.modelHintCursor")
-                  : t("settings.configs.field.modelHint")
+                  : side === "gemini"
+                    ? t("settings.configs.field.modelHintGemini")
+                    : t("settings.configs.field.modelHint")
             }
           >
             <Input
@@ -558,7 +599,7 @@ function RouteFields({
               </select>
             ) : null}
           </Field>
-          {localOnly ? null : (
+          {localOnly || side === "gemini" ? null : (
             <Field htmlFor={`config-${side}-effort`} label={t("settings.configs.field.effort")}>
               <select
                 id={`config-${side}-effort`}

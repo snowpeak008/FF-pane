@@ -337,3 +337,60 @@ agy 启动参数里和权限有关的只有 `--mode`、`--dangerously-skip-permi
 2. 探针通过、Tony 说开工，再按 §6 的顺序写代码。在此之前不动代码、不动项目里的 `.agents/`、不碰 `~/.gemini`。
    - 2026-11-28：Tony 说开工，第一期代码已写完（§5.1），等真机验收后提交。
 3. 第二期开工前，先确认 §7.7 的探针和中转站协议。
+
+## 10. 登录状态与界面体验（2026-11-28，Tony 要求对照 Codex、Cursor 补齐）
+
+只有设计，没动代码。
+
+### 10.1 现状的缺口
+
+- 设置页的配置编辑器没有 Gemini 一块：用户没地方选连法，也没地方选 agy 模型，没有「读取模型」按钮。后端存储认 `gemini` 一路，界面没有入口。
+- 新建窗口对话框把 Gemini 当成 Cursor 那样直接按本机登录放行，不检查 agy 装没装，也不看登没登录，要等开窗失败才知道。
+- 配置缺失的报错文案里，Gemini 会落到「Codex」这个默认词上。
+
+### 10.2 怎么判断 agy 登没登录（2026-11-28 实测）
+
+- agy 没有 `status`、`login`、`logout`、`whoami` 子命令（`agy --help` 实测，子命令只有 acp、agent、changelog、install、mcp、models、plugin、remote-control、update 等）。登录只能在 agy 自己的交互界面里完成，不能像 Cursor 那样由软件跑 `login` 取链接。
+- 登录信息在 Windows 凭据管理器的 `gemini:antigravity` 条目里，不在 `~/.gemini`。换 HOME 隔离不了：空 HOME 照样认证成功，日志写 `authenticated via keyring`。
+- 判断办法：`cmdkey /list` 的输出里有没有一行 `LegacyGeneric:target=gemini:antigravity`。这一段是纯 ASCII，不受系统语言影响；真名命中 1 条，编造的名字命中 0 条。主进程用 execFile 直接调 `cmdkey`，不经 Git Bash，没有路径改写问题。
+- 不能用的办法：
+  - `cmdkey /list:名字`：退出码存在和不存在都是 0，输出是本地化文字（GBK）。
+  - `agy models`：已登录和空 HOME 下都能列出模型，不能区分。
+  - `cli.log` 里的「not logged into Antigravity」：每次启动瞬间都会出现，已登录也有，只是噪音。
+- 条目在，只说明登录过，不保证令牌现在有效。令牌过期时 agy 会用刷新令牌自己续；真失效要等试连或开窗才知道，所以界面留「连接失败」一档。
+- 没验证：条目真的不存在时 agy 的行为。不为测这个把 Tony 的账号退出来。
+
+### 10.3 界面做法
+
+四种状态：没装、没登录、已登录、连接失败。状态检测在主进程做（新通道 `gemini:status`），只读 `cmdkey` 和 agy 是否存在，不调用模型，不耗额度，不弹窗；每次打开新建窗口对话框读一次。
+
+- 新建窗口选 Gemini：显示一行状态，样子照 Cursor 的账号面板。
+  - 没装：拦住，给「去安装」，官方命令 `irm https://antigravity.google/cli/install.ps1 | iex`，界面确认后才跑。
+  - 没登录：标黄，不拦；说明「先在 agy 里登录」，并给一个「打开登录窗口」按钮，开一个普通 agy 终端窗口让用户在里面登录，关掉后状态自动刷新。agy 首次启动是否自己提示登录，交互界面里还没验证。
+  - 已登录：显示「已登录 · 本机登录 · 模型 xxx」。
+  - 连接失败：标红并给原因。来源是读取模型失败，或开窗时 agy 报错。
+- 设置页配置编辑器加 Gemini 一块：
+  - 连法下拉放「本机登录（agy）」和「中转（gemini CLI）」；中转现在不可选，标「下一期支持」，第二期只需放开。
+  - 模型输入框加「读取模型」按钮，跑 `agy models`（约 7 秒，要联网，不耗额度）；读到的模型给下拉。它同时当连通性检查，失败就把状态标成「连接失败」。
+  - 不显示思考强度：agy 的模型 id 本身带档位，例如 `gemini-4-neon-high`。
+- 新建窗口对话框：显示「使用配置 xxx（本机登录）」；配置缺失提示里的程序名改成 Gemini；没装 agy 时和 Claude、Codex 一样拦住。
+
+### 10.4 代码范围（Tony 说开始后）
+
+- 主进程：新增 `gemini:status`（读 `cmdkey` 和 agy 位置），`providers:list-local-models` 加 agy 一路，`shared-ipc/contracts.ts` 加类型。
+- 渲染进程：新增 Gemini 账号面板，`NewWindowDialog.tsx` 接入，`ConfigEditorDialog.tsx` 加 Gemini 一块，两份 locales 加文案。
+- 测试：状态解析（命中、不命中、没装），读取模型失败时的状态。
+
+### 10.5 默认做法与待定
+
+- Tony 说其他细节我自己优化，上面是按 Codex、Cursor 的体验取的默认做法。
+- 待真机验证：「打开登录窗口」这条路里，agy 首次启动的登录提示和登录完成后凭据条目出现的时机。验证前先按「提示用户自己在 agy 里登录」的最保守说法写文案。
+
+### 10.6 实现记录（2026-11-28 已写完，待真机验收）
+
+- 主进程：`apps/desktop/src/main/gemini-account.ts` 新增 `gemini:status`（agy 在不在 + `cmdkey /list` 里有没有 `target=gemini:antigravity` 一行，行尾必须到头，不把名字相近的条目当成它）和 `gemini:install`（官方安装命令，界面先确认）。`cmdkey` 的输出按 latin1 读，只认 ASCII 段。契约和通道名单在 `shared-ipc/contracts.ts`，处理器在 `index.ts` 注册。
+- 新建窗口：新增 `components/gemini/GeminiAccountPanel.tsx`，四种状态：没装（拦住，给「安装 agy」，确认后才跑）、没登录（标黄，提示怎么登录）、已登录（显示「已登录 · 本机登录 · 模型」）、连接失败（标红带原因）。「已登录」之后后台读一次 `agy models` 当连通性检查，失败就转成连接失败。没装拦开窗，没登录不拦。报错文案里的程序名补上 Cursor 和 Gemini，不再落到 Codex。
+- 设置页：配置编辑器加 Gemini 一块。连法下拉里「中转」置灰，标「下一期支持」；模型框带「读取已探测的模型」，走 `agy models`；不显示思考强度。
+- 和 §10.3 不同的一处：没有做「打开登录窗口」按钮。agy 首次启动会不会自己提示登录还没在交互界面里验证，先不替用户开窗口，改成文案告诉用户在终端里运行 agy 登录，再点「重新检查」。验证后再决定要不要加按钮。
+- 测试：`apps/desktop/tests/gemini-account.test.ts` 9 条（命中、名字相近不误判、没装、读凭据失败、非 Windows）。全量单测除了老的 `gemini-cli.test.ts` 无认证真机测试外全部通过；类型检查、文案检查通过；biome 只剩别的会话的 `.claude/`、`.mcp.json` 解析报错。
+- 没验证：界面在真实窗口里的样子，以及条目不存在时 agy 的实际表现（不为测这个把 Tony 的账号退出来）。

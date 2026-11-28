@@ -541,6 +541,17 @@ export interface CursorCommandResult {
   readonly output: string;
 }
 
+/**
+ * Gemini 窗口（agy 本机登录）的账号状态（T11.23 §10）。
+ * authenticated 缺省 = 判断不了（不是 Windows、读不了凭据管理器），detail 里是原因。
+ * 「连接失败」不在这里：它来自读取模型或开窗时的报错，由界面自己标。
+ */
+export interface GeminiAccountStatus {
+  readonly installed: boolean;
+  readonly authenticated?: boolean;
+  readonly detail?: string;
+}
+
 /** 设置里「Claude 沙盒」一栏看的状态（T11.20）。 */
 export interface ClaudeSandboxStatusView {
   /** 只有 Windows 要装（其他平台 Claude 自带的沙盒不用装）。 */
@@ -1982,6 +1993,10 @@ export interface IpcInvokeContracts {
   "cursor:update": { request: undefined; response: CursorCommandResult };
   /** 跑官方安装命令（界面先确认）。 */
   "cursor:install": { request: undefined; response: CursorCommandResult };
+  /** agy 装没装、有没有登录过（读 Windows 凭据管理器的条目名，不调用模型）。 */
+  "gemini:status": { request: undefined; response: GeminiAccountStatus };
+  /** 跑 agy 官方安装命令（界面先确认）。 */
+  "gemini:install": { request: undefined; response: CursorCommandResult };
   /** T11.20：Claude 版本够不够、Windows 沙盒装没装。 */
   "claude-sandbox:status": { request: undefined; response: ClaudeSandboxStatusView };
   /** T11.20：`claude sandbox install`（界面先确认；会弹一次 UAC）。 */
@@ -2254,6 +2269,8 @@ export const INVOKE_CHANNELS = [
   "cursor:logout",
   "cursor:update",
   "cursor:install",
+  "gemini:status",
+  "gemini:install",
   "runtimes:reasoning-effort-levels",
   "secrets:masked-tail",
   "config:get",

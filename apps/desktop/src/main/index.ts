@@ -22,6 +22,7 @@ import {
   startMainWatchdog,
   watchWindowResponsiveness,
 } from "./diagnostics";
+import { createGeminiAccountHandlers } from "./gemini-account";
 import { createKnowledgeHandlers } from "./knowledge";
 import type { MemoryIndexService } from "./memory-index";
 import { createQuitCoordinator, type QuitCoordinatorDeps } from "./session/quit";
@@ -308,6 +309,8 @@ async function bootstrap(): Promise<void> {
     ipcMain,
     createCursorAccountHandlers(() => mainWindow),
   );
+  // Gemini 窗口（T11.23 §10）：agy 装没装、登没登录（读凭据管理器条目名），以及一键安装。
+  registerInvokeHandlers(ipcMain, createGeminiAccountHandlers());
   // Claude 沙盒（T11.20）：设置里看状态、装、卸，走用户自己那份 Claude 的 claude sandbox 命令。
   registerInvokeHandlers(ipcMain, createClaudeSandboxHandlers());
 

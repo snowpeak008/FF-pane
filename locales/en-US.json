@@ -983,10 +983,14 @@
         "routeGrok": "Grok",
         "routeDeepseek": "DeepSeek",
         "routeCursor": "Cursor",
+        "routeGemini": "Gemini (Antigravity)",
         "deepseekNote": "API key is required. The window shows Claude's interface, and the model is the DeepSeek model you type.",
         "cursorNote": "Local login only (cursor-agent login). Cursor windows also open without this route, using Cursor's default model.",
         "modelHintDeepseek": "Type a model name, for example deepseek-flash or deepseek-v4-pro. Leave empty to omit it.",
         "modelHintCursor": "Leave empty for Cursor's default (Auto). Click Load probed models to see what this account can use.",
+        "geminiNote": "Local sign-in only for now (agy). Sign in inside agy first; you can open a Gemini window without ticking this route, and it will use agy's default model.",
+        "modelHintGemini": "Leave empty to use agy's default model. Click \"List models\" to see what this account can use; a failure usually means you are not signed in or the network is down.",
+        "relayLaterOption": "Relay (coming next phase)",
         "modelPlaceholderDeepseek": "e.g. deepseek-flash",
         "connection": "Connection",
         "local": "Local login",
@@ -1589,6 +1593,26 @@
       "list": "List models",
       "saveError": "Couldn't save the default model",
       "using": "model {{model}}"
+    }
+  },
+  "gemini": {
+    "goInstall": "Install agy",
+    "recheck": "Check again",
+    "status": {
+      "missing": "Antigravity CLI (agy) not found",
+      "unknown": "Can't tell the sign-in state",
+      "loggedOut": "Not signed in to agy",
+      "loggedIn": "Signed in to agy · local sign-in",
+      "failed": "Connection failed: {{detail}}"
+    },
+    "loginHint": "Sign-in happens inside agy itself: run agy in a terminal, follow the prompts, then come back here and click \"Check again\".",
+    "using": "model {{model}}",
+    "defaultModel": "agy default",
+    "install": {
+      "confirmTitle": "Install agy?",
+      "confirmBody": "This runs the official install command in PowerShell: irm https://antigravity.google/cli/install.ps1 | iex (downloads the install script from antigravity.google and runs it), installing to %LOCALAPPDATA%\\agy. Takes a minute or two.",
+      "ok": "Installed.",
+      "failed": "Install failed: "
     }
   }
 }
