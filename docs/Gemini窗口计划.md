@@ -479,3 +479,12 @@ Provider 下拉里 Cursor、Grok 同样是漏的，原因同上：下拉名单�
 - 做法（Tony 定：所有权限档都跳过）：启动参数加 `--settings={"trustedWorkspaces":[项目根, 窗口工作目录]}`，去重，放在开场白前面。只信任窗口所在的项目目录，本次会话有效，不写 agy 用户设置，仍守「开窗前后都不改 `~/.gemini`」。
 - 验证：伪终端里用完整参数（`--mode plan --model … --settings … -i=开场白`）在新目录实跑，无信任页，开场白进新对话开始生成，模型 `Gemini 4 Carbon (Low)`。单测加 2 条（`--settings` 只含 trustedWorkspaces 且去重、没给目录不带）。
 - 没验证：路径带中文或空格时（FF-pane 的终端层拼命令行）、续接 `--conversation` 加 `--settings` 是否正常。
+
+### 11.10 agy 的 MCP 工具只有插件路线可用（2026-11-28 实测，Tony 要求继续查）
+
+- 管理者冒烟测试（agy 转写 `brain/87b49c4e…`）里，agent 全程只用了 `run_command`、`read_file`，没有任何 MCP 工具；它自己用 shell 连了 FF-pane 的 HTTP 接口。
+- 工作区 `.agents/mcp_config.json`、`.agents/hooks.json` 都被 agy 载入（`/mcp` 显示 ✓ ffpane-workbench 30 个工具，`/hooks` 5 类钩子）。但 agent 拿不到工具，试过：三种模式、有无 `--settings`、永久信任目录、`eager`、`trust`、等 MCP 连上再问、让 subagent 去调，**都不行**；只有一个工具的最小 MCP 服务器也一样，所以不是 ffpane 的服务器问题。
+- **插件自带的 MCP 服务器可以**：agent 自己读 `~/.gemini/antigravity-cli/mcp/<服务器>/<工具>.json`，再用 `call_mcp_tool` 调用（服务器名 `<插件名>_<服务器名>`）；真正的 ffpane 服务器收到了调用，窗口令牌能通过环境变量传到插件启动的服务器进程。每次调用需批准。
+- 结论与方案见 `用户内容可插拔与agy工具插件计划.md`：做成用户自愿添加、可卸载、带台账的 agy 插件；没装不兜底。
+- 订正：前面写的「agy 日志里加载了 0 个 hooks.json」是我自己跑 `agy mcp list` 子命令产生的，不能当证据，已收回。
+- 测试留下的副作用已还原：临时插件已卸载、描述缓存已删、我误加进 agy 信任名单的探针目录已移除。
