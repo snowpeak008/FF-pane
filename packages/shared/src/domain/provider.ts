@@ -166,6 +166,25 @@ export function providerModelKind(model: ProviderModel): ModelKind {
   return model.kind ?? "chat";
 }
 
+/** 来源里的对话模型 id（嵌入模型不算）。顺序保持来源里的顺序。 */
+export function providerChatModelIds(provider: Pick<Provider, "models">): readonly string[] {
+  return provider.models
+    .filter((model) => providerModelKind(model) === "chat")
+    .map((model) => model.id);
+}
+
+/**
+ * 本机登录来源里留下的模型 = 允许使用的模型集合（Tony 2026-11-28 定）。
+ * 清单为空 = 不限制；没指定模型（用 CLI 自己的默认）也不检查。
+ */
+export function isModelAllowedBySource(
+  allowed: readonly string[],
+  model: string | undefined,
+): boolean {
+  const wanted = model?.trim() ?? "";
+  return allowed.length === 0 || wanted === "" || allowed.includes(wanted);
+}
+
 /** 是否为本机 CLI 登录模板（不注入密钥/地址）。 */
 export function isLocalLoginProvider(provider: Pick<Provider, "templateId">): boolean {
   return provider.templateId === "local-login";

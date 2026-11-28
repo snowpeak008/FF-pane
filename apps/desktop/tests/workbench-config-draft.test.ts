@@ -193,6 +193,47 @@ describe("validateWorkbenchConfigDraft", () => {
     ).rejects.toThrow(/中转来源不存在/);
   });
 
+  it("本机登录路线带的来源：不存在、不是本机已登录模板都拒绝；是本机已登录模板才通过", async () => {
+    const make = (providerId: string) => ({
+      name: "本机来源",
+      isDefault: false,
+      gemini: { connectionMode: "local_cli" as const, providerId: providerId as never },
+    });
+    await expect(
+      validateWorkbenchConfigDraft({
+        draft: make("missing"),
+        getProvider: async () => undefined,
+        boundProjects: [],
+      }),
+    ).rejects.toThrow(/本机登录的来源不存在/);
+    await expect(
+      validateWorkbenchConfigDraft({
+        draft: make("relay-1"),
+        getProvider: async () => ({ templateId: "openai-compatible" }),
+        boundProjects: [],
+      }),
+    ).rejects.toThrow(/本机已登录/);
+    const ok = await validateWorkbenchConfigDraft({
+      draft: make("src-1"),
+      getProvider: async () => ({ templateId: "local-login" }),
+      boundProjects: [],
+    });
+    expect(ok.gemini).toEqual({ connectionMode: "local_cli", providerId: "src-1" });
+  });
+
+  it("本机登录不带来源：不查来源，和以前一样通过", async () => {
+    let asked = 0;
+    await validateWorkbenchConfigDraft({
+      draft: { name: "不限制", isDefault: false, codex: LOCAL, cursor: LOCAL },
+      getProvider: async () => {
+        asked += 1;
+        return undefined;
+      },
+      boundProjects: [],
+    });
+    expect(asked).toBe(0);
+  });
+
   it("名单外仍绑定的项目不许收窄", async () => {
     await expect(
       validateWorkbenchConfigDraft({

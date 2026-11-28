@@ -12,7 +12,10 @@ import type { WorkbenchPermissionLevel } from "./workbench-permission.js";
 /** 配置里的一路：本机登录或中转。模型与思考强度可空（空 = 用 CLI 自己的默认）。 */
 export interface ProjectConfigRoute {
   readonly connectionMode: ConnectionMode;
-  /** 中转时必填。本机登录不保存来源。 */
+  /**
+   * 中转时必填。本机登录时可选：指向一个「本机已登录」模板的来源，来源里留下的模型就是这一路允许使用的
+   * 模型（清单为空 = 不限制）。不选 = 不限制。账号仍是 CLI 自己登录的那个，来源不存账号。
+   */
   readonly providerId?: ProviderId;
   readonly model?: string;
   readonly reasoningEffort?: ReasoningEffortLevel;

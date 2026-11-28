@@ -74,7 +74,10 @@ export function configReferencesProvider(
       config.claude?.providerId === providerId ||
       config.codex?.providerId === providerId ||
       config.grok?.providerId === providerId ||
-      config.deepseek?.providerId === providerId,
+      config.deepseek?.providerId === providerId ||
+      // Cursor、Gemini 只有本机登录；本机登录路线现在也可以带一个来源（决定允许用哪些模型）。
+      config.cursor?.providerId === providerId ||
+      config.gemini?.providerId === providerId,
   );
 }
 
@@ -125,7 +128,16 @@ function pickRoute(value: unknown): ProjectConfig["claude"] {
       ...extras,
     };
   }
-  return { connectionMode: "local_cli", ...extras };
+  // 本机登录可以带一个本机登录来源，决定允许用哪些模型。
+  const sourceId =
+    typeof raw["providerId"] === "string" && raw["providerId"].trim() !== ""
+      ? raw["providerId"].trim()
+      : undefined;
+  return {
+    connectionMode: "local_cli",
+    ...(sourceId !== undefined ? { providerId: sourceId as ProviderId } : {}),
+    ...extras,
+  };
 }
 
 function pickConfig(value: unknown): ProjectConfig | undefined {
@@ -197,7 +209,12 @@ function normalizeRoute(
     if (label === "DeepSeek") {
       throw new ProjectConfigDraftInvalidError("DeepSeek 必须选择来源并填写密钥");
     }
-    return { connectionMode: "local_cli" as ConnectionMode, ...extras };
+    const sourceId = route.providerId?.trim() ?? "";
+    return {
+      connectionMode: "local_cli" as ConnectionMode,
+      ...(sourceId !== "" ? { providerId: sourceId as ProviderId } : {}),
+      ...extras,
+    };
   }
   if (label === "Cursor") {
     throw new ProjectConfigDraftInvalidError("Cursor 只能用本机登录");

@@ -42,14 +42,59 @@ describe("project configs", () => {
     expect(await store.listConfigs()).toHaveLength(1);
   });
 
-  it("可以只配一路，本机登录不保存来源", async () => {
+  it("可以只配一路；本机登录可以带一个本机登录来源（决定允许用哪些模型），空白模型被丢掉", async () => {
     const created = await store.createConfig({
       name: "只开 Claude",
       isDefault: true,
-      claude: { connectionMode: "local_cli", providerId: "prov" as ProviderId, model: "  " },
+      claude: { connectionMode: "local_cli", providerId: " prov " as ProviderId, model: "  " },
     });
     expect(created.codex).toBeUndefined();
-    expect(created.claude).toEqual({ connectionMode: "local_cli" });
+    expect(created.claude).toEqual({ connectionMode: "local_cli", providerId: "prov" });
+    // 读回来仍在
+    const listed = await store.listConfigs();
+    expect(listed[0]?.claude).toEqual({ connectionMode: "local_cli", providerId: "prov" });
+  });
+
+  it("本机登录不带来源 = 和以前完全一样；空白来源 id 当没有", async () => {
+    const created = await store.createConfig({
+      name: "不限制",
+      isDefault: true,
+      codex: { connectionMode: "local_cli", providerId: "  " as ProviderId },
+      gemini: { connectionMode: "local_cli", model: "m1" },
+    });
+    expect(created.codex).toEqual({ connectionMode: "local_cli" });
+    expect(created.gemini).toEqual({ connectionMode: "local_cli", model: "m1" });
+  });
+
+  it("本机登录路线引用的来源，也算还在用（不能当成没人用而删掉）", async () => {
+    const created = await store.createConfig({
+      name: "本机来源",
+      isDefault: true,
+      codex: { connectionMode: "local_cli", providerId: "src-codex" as ProviderId },
+      cursor: { connectionMode: "local_cli", providerId: "src-cursor" as ProviderId },
+      gemini: { connectionMode: "local_cli", providerId: "src-gemini" as ProviderId },
+    });
+    for (const id of ["src-codex", "src-cursor", "src-gemini"]) {
+      expect(configReferencesProvider([created], id as ProviderId)).toBe(true);
+    }
+    expect(configReferencesProvider([created], "nobody" as ProviderId)).toBe(false);
+  });
+
+  it("Cursor、Gemini 也能带本机登录来源；中转路线的来源照旧", async () => {
+    const created = await store.createConfig({
+      name: "各路",
+      isDefault: true,
+      cursor: { connectionMode: "local_cli", providerId: "src-c" as ProviderId },
+      gemini: { connectionMode: "local_cli", providerId: "src-g" as ProviderId, model: "x" },
+      claude: { connectionMode: "relay", providerId: "relay-1" as ProviderId },
+    });
+    expect(created.cursor?.providerId).toBe("src-c");
+    expect(created.gemini).toEqual({
+      connectionMode: "local_cli",
+      providerId: "src-g",
+      model: "x",
+    });
+    expect(created.claude).toEqual({ connectionMode: "relay", providerId: "relay-1" });
   });
 
   it("删默认必须换默认，最后一张不能删", async () => {
