@@ -341,6 +341,7 @@
         "grok": "Grok",
         "deepseek": "DeepSeek",
         "cursor": "Cursor",
+        "gemini": "Gemini",
         "templateId": "Provider template",
         "baseUrl": "Base URL",
         "models": "Models",
@@ -556,7 +557,8 @@
         "codex": "Codex",
         "grok": "Grok",
         "deepseek": "DeepSeek",
-        "cursor": "Cursor"
+        "cursor": "Cursor",
+        "gemini": "Gemini"
       },
       "status": {
         "running": "Running",

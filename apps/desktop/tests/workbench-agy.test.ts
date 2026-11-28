@@ -198,12 +198,11 @@ describe("写入位置", () => {
 });
 
 describe("buildInteractiveAgyArgs", () => {
-  it("新开带开场白用 -i，续接用 --conversation", () => {
+  it("新开带开场白写成 -i=开场白 放最后，续接用 --conversation", () => {
     expect(buildInteractiveAgyArgs({ permission: "edit", initialPrompt: "你好" })).toEqual([
-      "-i",
       "--mode",
       "accept-edits",
-      "你好",
+      "-i=你好",
     ]);
     expect(buildInteractiveAgyArgs({ permission: "read-only", resumeSessionId: "abc" })).toEqual([
       "--conversation",
@@ -312,5 +311,31 @@ describe("环境与模型", () => {
     const models = parseAgyModels("gemini-3.5-flash - Gemini 3.5 Flash (default)\ngemini-3-pro\n");
     expect(models.map((item) => item.id)).toEqual(["gemini-3.5-flash", "gemini-3-pro"]);
     expect(models[0]?.isDefault).toBe(true);
+  });
+});
+
+describe("buildInteractiveAgyArgs：-i 绝不能吃掉后面的开关（真机复现的启动失败）", () => {
+  it("带模型、强度、开场白时，-i=开场白 在最后，前面没有单独的 -i", () => {
+    const args = buildInteractiveAgyArgs({
+      permission: "read-only",
+      model: "gemini-4-carbon-low",
+      effort: "low",
+      initialPrompt: "只回复 OK",
+    });
+    expect(args).toEqual([
+      "--mode",
+      "plan",
+      "--model",
+      "gemini-4-carbon-low",
+      "--effort",
+      "low",
+      "-i=只回复 OK",
+    ]);
+    expect(args).not.toContain("-i");
+    expect(args[args.length - 1]?.startsWith("-i=")).toBe(true);
+  });
+
+  it("没有开场白就不带 -i", () => {
+    expect(buildInteractiveAgyArgs({ permission: "edit" })).toEqual(["--mode", "accept-edits"]);
   });
 });

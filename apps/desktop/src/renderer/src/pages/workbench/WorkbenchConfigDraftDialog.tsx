@@ -145,6 +145,15 @@ function ConfigFields({ pending }: { readonly pending: WorkbenchConfigDraftEvent
             : routeText(current.cursor),
         after: routeText(draft.cursor),
       },
+      {
+        key: "gemini",
+        label: t("workbench.configDraft.field.gemini"),
+        before:
+          current === undefined
+            ? t("workbench.configDraft.currentEmpty")
+            : routeText(current.gemini),
+        after: routeText(draft.gemini),
+      },
     ];
     return (
       <div className="flex flex-col gap-3">

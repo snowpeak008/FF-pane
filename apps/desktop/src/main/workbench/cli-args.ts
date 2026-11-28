@@ -356,7 +356,9 @@ export const AGY_INTERACTIVE_COMMAND = "agy";
 
 /**
  * 组装交互式 `agy` argv（不含可执行文件名）。
- * - 新开：`-i <初始提示>`，跑完提示留在交互界面；没有初始提示就直接进界面。
+ * - 开场白写成 `-i=<开场白>`，放在所有开关后面。agy 的 `-i`（`--prompt-interactive`）要带值，
+ *   写成 `-i --mode …` 时它会把 `--mode` 当成开场白，真正的开场白被丢掉，agy 直接报错退出
+ *   （2026-11-28 真机：模型和权限档都没生效，窗口一启动就退出）。跑完开场白留在交互界面。
  * - 续接：`--conversation <id>`；agy 没有「打开选择器」的写法，没有编号时调用方不得启动。
  * - `--mode` / `--dangerously-skip-permissions` 按权限档来（见 `WORKBENCH_PERMISSION_MAPPINGS`）。
  */
@@ -365,9 +367,6 @@ export function buildInteractiveAgyArgs(input: BuildInteractiveAgyArgsInput): st
   const resumeId = input.resumeSessionId?.trim() ?? "";
   if (resumeId !== "") {
     args.push("--conversation", resumeId);
-  } else if (input.initialPrompt !== undefined && input.initialPrompt.trim() !== "") {
-    // 新开带开场白时用 -i：跑完提示留在交互界面（`-p` 会直接退出）。
-    args.push("-i");
   }
   if (input.permission !== undefined) {
     args.push(
@@ -385,7 +384,7 @@ export function buildInteractiveAgyArgs(input: BuildInteractiveAgyArgsInput): st
     args.push("--effort", input.effort.trim());
   }
   if (input.initialPrompt !== undefined && input.initialPrompt.trim() !== "") {
-    args.push(input.initialPrompt);
+    args.push(`-i=${input.initialPrompt}`);
   }
   return args;
 }

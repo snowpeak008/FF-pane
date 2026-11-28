@@ -292,7 +292,9 @@ export function WindowPane({
             ? t("workbench.window.kind.deepseek")
             : window.kind === "cursor"
               ? t("workbench.window.kind.cursor")
-              : t("workbench.window.kind.shell");
+              : window.kind === "gemini"
+                ? t("workbench.window.kind.gemini")
+                : t("workbench.window.kind.shell");
 
   const lifecycle: WindowLifecycle =
     exitCode !== undefined
@@ -513,7 +515,9 @@ export function WindowPane({
           permission={permission}
           canGoOnline={isCli && (role === "supervisor" || role === "manager")}
           online={online}
-          showCompact={isCli && role === "manager" && window.kind !== "cursor"}
+          showCompact={
+            isCli && role === "manager" && window.kind !== "cursor" && window.kind !== "gemini"
+          }
           onResumeCurrent={() => {
             queueConversationPlan(
               planConversationLaunch({
@@ -788,16 +792,9 @@ export function WindowPane({
           {...(isCli
             ? {
                 cliLaunch: {
-                  kind:
-                    window.kind === "codex"
-                      ? "codex"
-                      : window.kind === "grok"
-                        ? "grok"
-                        : window.kind === "deepseek"
-                          ? "deepseek"
-                          : window.kind === "cursor"
-                            ? "cursor"
-                            : "claude",
+                  // 窗口是什么种类就按什么启动。不能把没列出的种类回落成 claude：
+                  // Gemini 曾因此被开成 Claude，自动重启时还进了 Claude 的历史对话选择器。
+                  kind: isAiWorkbenchKind(window.kind) ? window.kind : "claude",
                   projectRoot,
                   autoStart: autoStart || resumeNext,
                   permission,

@@ -456,3 +456,16 @@ Provider 下拉里 Cursor、Grok 同样是漏的，原因同上：下拉名单�
 - 测试：`workbench-mcp.test.ts` 加 2 条（`gemini`、`agy` 别名都能开；真正的开子窗口路径按 gemini 启动并记进布局）。全量单测通过。
 - 没验证：真机用 agy 实际开出来（要装新包后由管理者或界面实测）；`handlers.ts` 的 kind 映射没有单测，靠类型检查和上面两条间接覆盖。
 - 另一个缺口，已补：管理者的自配置工具（`config-tool.ts`）原来路由名单里没有 `gemini`，管理者没法用它改 Gemini 这一路。现在字段白名单、工具说明、解析、脱敏视图都带上 `gemini`；只收本机登录，写中转会被拒（和 Cursor 同口径）。主进程那一侧没有另一份名单，草案走存储层校验，那里本来就认。`mcp-config-tool.test.ts` 加 1 条；全量单测 3130 通过。
+
+### 11.8 agy 窗口被开成 Claude、起来后停在历史对话列表（2026-11-28，Tony 和管理者实测）
+
+两个独立的错叠在一起：
+
+1. **启动参数拼错（agy 立刻退出）**：我们拼的是 `agy -i --mode plan --model M <开场白>`。agy 的 `-i`（`--prompt-interactive`）要带值，它把后面的 `--mode` 当成了开场白，真正的开场白被丢弃，agy 报「`-i` took "--mode" as its prompt …，请写成 `-i='开场白'`」后退出（2026-11-28 在伪终端里直接复现，新目录和有历史对话的真实项目目录都一样）。所以管理者那次测试里模型和权限档都没生效：agy 日志里模型是默认的 `Gemini 3.8 Flash (Medium)`、模式是 `auto`，不是平台记的 `gemini-4-carbon-low` 和 `plan`。原来的单测把错误拼法当正确答案写进去了。
+   - 改成：开关在前，开场白写成 `-i=<开场白>` 放最后。同样在伪终端里验证：agy 日志 `SetCycleMode called: plan`、模型 `Gemini 4 Carbon (Low)`，状态栏 `plan · Gemini 4 Carbon · low`。新目录会先停在「是否信任此文件夹」（已知）。
+2. **界面把 Gemini 窗口当成 Claude 启动**：`WindowPane.tsx` 给终端传启动种类时，用一串三元判断，没列出的种类一律写成 `claude`。agy 一退出，窗口自动重启，用的是 `claude` 的续接选择器，屏幕上那页「Enter to resume · Esc to close」的旧对话列表是 **Claude Code 的**（列的是本项目以前 Claude 窗口的对话），管理者的开窗消息被打进了这个选择器。从界面新建 Gemini 窗口同样是开出 Claude。
+   - 这里订正 §11.7：当时我说「界面新建 Gemini 会报 kind must be…」是不对的，界面根本没把 `gemini` 传到后端，是悄悄开了 Claude；后端 `handlers.ts` 里补的映射仍然需要（管理者开窗那条路直接传 `gemini`）。
+   - 改成：窗口种类直接传给启动入口。同时补上窗口标题里的「Gemini」名称（原来显示成 Shell）、Gemini 窗口不显示「压缩」入口（agy 没有压缩比例）、管理者改配置的草案对话框里补上 Gemini 一行。
+- 测试：`workbench-agy.test.ts` 改了错误的期望，并加了「`-i` 不能吃掉后面开关」的用例；全量单测 3132 通过。
+- 没验证：装新包后从界面新建 Gemini 窗口、让管理者再跑一次冒烟测试；续接时带开场白也用了 `-i=`，这一步没在真机试过。
+- 另：`workbench-cli.spec.ts` 里两条 Codex 的 e2e（「notify 报出会话编号」「agent-turn-complete 之后才自动投递」）失败，原因是 Codex 启动参数里多了 `--dangerously-bypass-hook-trust`（T11.7 加的），而 T10.6 写的断言还写着「不应有」。和本次无关，没动，另列待办。
