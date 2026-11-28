@@ -1148,9 +1148,15 @@ export async function createWorkbenchCliLayer(
         if (meta?.sessionId !== undefined) {
           noteCodexThread(windowId, meta.sessionId);
         }
-      } else if (kind === "claude" || kind === "deepseek" || kind === "cursor") {
+      } else if (
+        kind === "claude" ||
+        kind === "deepseek" ||
+        kind === "cursor" ||
+        kind === "gemini"
+      ) {
         // Claude 的钩子也只装在这个进程上：报来的编号是它当前的对话（/resume、/clear 会换）。
-        // Cursor 的钩子虽写在项目文件里，但凭本窗口令牌上报，报来的编号同样是本窗口的。
+        // Cursor、agy 的钩子虽写在项目文件里，但凭本窗口令牌上报，报来的编号同样是本窗口的
+        // （agy 新开不预分配编号，靠 SessionStart 钩子报回 conversationId，续接要用它）。
         if (meta?.sessionId !== undefined) {
           noteClaudeSession(windowId, terminalId, meta.sessionId);
         }
@@ -2237,7 +2243,8 @@ export async function createWorkbenchCliLayer(
       kind !== "codex" &&
       kind !== "grok" &&
       kind !== "deepseek" &&
-      kind !== "cursor"
+      kind !== "cursor" &&
+      kind !== "gemini"
     ) {
       return { ok: false, error: "只能重启 AI 窗口。" };
     }
@@ -2506,9 +2513,11 @@ export async function createWorkbenchCliLayer(
                 ? "deepseek"
                 : request.kind === "cursor"
                   ? "cursor"
-                  : undefined;
+                  : request.kind === "gemini"
+                    ? "gemini"
+                    : undefined;
       if (kind === undefined) {
-        throw new Error("kind must be claude, codex, grok, deepseek, or cursor");
+        throw new Error("kind must be claude, codex, grok, deepseek, cursor, or gemini");
       }
       const resolved = await resolveProjectLaunchRoute({
         projectRoot: request.projectRoot,

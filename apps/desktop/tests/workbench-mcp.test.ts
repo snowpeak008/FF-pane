@@ -2204,6 +2204,116 @@ describe("模型、思考强度与就地修复", () => {
     expect((plain.json as { model: string }).model).toContain("用户自己的配置");
   });
 
+  it("ffpane_open_window 认 gemini，也认 agy 这个别名（转成 gemini 再开）", async () => {
+    const h = harness(tempDir());
+    const seen: Array<{ cli: string }> = [];
+    const deps: WorkbenchToolDeps = {
+      ...h.deps,
+      openChild: async (_caller, args) => {
+        seen.push({ cli: args.cli });
+        return {
+          ok: true,
+          windowId: "w-1",
+          title: args.title,
+          permission: args.permission,
+          capped: false,
+        };
+      },
+    };
+    for (const cli of ["gemini", "agy"]) {
+      const opened = await call(deps, "A", "ffpane_open_window", {
+        cli,
+        role: "worker",
+        permission: "edit",
+        title: "执行",
+      });
+      expect(opened.isError).not.toBe(true);
+    }
+    expect(seen).toEqual([{ cli: "gemini" }, { cli: "gemini" }]);
+    const bad = await call(deps, "A", "ffpane_open_window", {
+      cli: "nope",
+      role: "worker",
+      permission: "edit",
+      title: "执行",
+    });
+    expect(bad.isError).toBe(true);
+    expect(JSON.stringify(bad.json ?? bad)).toContain("gemini");
+    expect(seen).toHaveLength(2);
+  });
+
+  it("开子窗口：cli 是 gemini 时按 gemini 窗口启动并记进布局", async () => {
+    const root = tempDir();
+    const registry = createWorkbenchAuthRegistry();
+    registry.pin(
+      { id: "A", permission: "edit", role: "manager", openedBy: "user" },
+      "proj-1" as never,
+    );
+    registry.grantManager("A");
+    const manager: WorkbenchWindow = {
+      id: "A",
+      projectId: "proj-1" as never,
+      title: "总管",
+      kind: "claude",
+      cwd: root,
+      createdAt: 1,
+      permission: "edit",
+      role: "manager",
+      openedBy: "user",
+    };
+    const saved: ProjectWorkbenchLayout[] = [];
+    const launchedKinds: string[] = [];
+    const opened = await openChildWindow(
+      "A",
+      { cli: "gemini", role: "worker", permission: "edit", title: "Gemini 执行" },
+      {
+        authRegistry: registry,
+        readLayouts: async () => ({
+          "proj-1": {
+            projectId: "proj-1" as never,
+            tabs: [{ id: "tab-1", title: "Tab", slots: ["A", null, null, null, null, null] }],
+            activeTabId: "tab-1",
+            windows: { A: manager },
+            maximizedWindowId: null,
+            focusedWindowId: "A",
+          },
+        }),
+        saveLayout: async (next) => {
+          saved.push(next);
+        },
+        launch: async (input) => {
+          launchedKinds.push(input.kind);
+          return {
+            terminal: { id: "term" },
+            kind: "gemini",
+            effectivePermission: "edit",
+            permissionCapped: false,
+          } as unknown as LaunchCliWindowResult;
+        },
+        resolveRoute: async () => ({
+          ok: true as const,
+          route: {
+            connectionMode: "local_cli" as const,
+            configId: "cfg" as never,
+            configName: "默认配置",
+          },
+        }),
+        describeCaller: async () => ({
+          title: "总管",
+          projectId: "proj-1",
+          projectRoot: root,
+          permission: "edit" as const,
+        }),
+        aliveCount: () => 1,
+        maxWindows: async () => 8,
+        publish: () => undefined,
+        newId: () => "w-1",
+      },
+    );
+    expect(opened).toMatchObject({ ok: true });
+    expect(launchedKinds).toEqual(["gemini"]);
+    expect(saved[0]?.windows["w-1"]).toMatchObject({ kind: "gemini" });
+  });
+
   it("开子窗口：模型和强度进启动参数，也记在窗口上", async () => {
     const root = tempDir();
     const registry = createWorkbenchAuthRegistry();

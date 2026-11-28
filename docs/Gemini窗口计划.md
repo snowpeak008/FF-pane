@@ -443,3 +443,16 @@ Provider 下拉里 Cursor、Grok 同样是漏的，原因同上：下拉名单�
 - 原来设置 → 模型页顶部有一块独立的 Cursor（`CursorSection`），里面是软件内登录、换账号、退出、更新、安装 cursor-agent，以及 Cursor 窗口的默认模型；Provider「本机已登录」里新加的 Cursor 项只有登录状态和读取模型，两处看着重复，但功能不是一回事。
 - 处理：顶部那块从设置页移除，原样嵌进 Provider 编辑器：选「本机已登录」、CLI 下拉选 `cursor` 时显示完整的账号管理，Provider 里不再单独探测 Cursor 登录徽章（避免两处各查一遍）。功能一个没删，默认模型仍写进全局设置 `cursorDefaultModel`，与保存 Provider 无关。
 - 测试：`cursor-account.spec.ts` 改成先打开 Provider 编辑器再选 cursor；该 e2e 与 `provider-config-ux.spec.ts` 共 4 条通过，全量单测 3127 通过。
+
+### 11.7 管理者开不了 agy 窗口（2026-11-28，管理者实测反馈）
+
+- 现象：管理者调 `ffpane_open_window`，写 `cli: agy`，报「cli 只能是 claude、codex、grok、deepseek 或 cursor」。
+- 根因：2.0.2 只把 Gemini 接进了 `launch-cli.ts`（启动本身）和新建窗口对话框的外观，**几个入口没放行 `gemini`**：
+  1. `mcp-tools.ts` 和 `open-child.ts` 的 `cli` 白名单、`workbench-tools.ts` 的工具定义枚举（管理者开窗）；
+  2. `handlers.ts` 的 `workbench:launch-cli`：`kind` 映射没有 `gemini`，直接抛「kind must be …」，所以**从界面新建 Gemini 窗口同样开不起来**，不只是管理者；
+  3. `handlers.ts` 的重启白名单，以及钩子上报会话编号的分支（agy 新开靠 SessionStart 钩子上报 `conversationId`，没记下来，续接会断）；
+  4. `resume-handoff.ts` 的类型。
+- 修：以上全部放行 `gemini`；管理者写 `agy` 当作 `gemini` 的别名收下；工具说明里写上 gemini 启动 agy。会话编号并入 Claude、Cursor 同一个分支（凭窗口令牌上报，报来的就是本窗口的）。
+- 测试：`workbench-mcp.test.ts` 加 2 条（`gemini`、`agy` 别名都能开；真正的开子窗口路径按 gemini 启动并记进布局）。全量单测通过。
+- 没验证：真机用 agy 实际开出来（要装新包后由管理者或界面实测）；`handlers.ts` 的 kind 映射没有单测，靠类型检查和上面两条间接覆盖。
+- 另一个缺口，没动：管理者的自配置工具（`config-tool.ts`）路由名单里没有 `gemini`，管理者没法用它改 Gemini 这一路。开窗不依赖它（没配这一路按本机登录开）。

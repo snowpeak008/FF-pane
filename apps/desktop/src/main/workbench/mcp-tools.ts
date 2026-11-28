@@ -739,7 +739,8 @@ async function openWindow(
   args: Readonly<Record<string, unknown>>,
   deps: WorkbenchToolDeps,
 ): Promise<ToolTextResult> {
-  const cli = args["cli"];
+  // agy 是 Gemini 窗口跑的程序名，管理者常直接写它，当作 gemini 的别名收下。
+  const cli = args["cli"] === "agy" ? "gemini" : args["cli"];
   const role = args["role"];
   const permission = args["permission"];
   const title = args["title"];
@@ -748,9 +749,10 @@ async function openWindow(
     cli !== "codex" &&
     cli !== "grok" &&
     cli !== "deepseek" &&
-    cli !== "cursor"
+    cli !== "cursor" &&
+    cli !== "gemini"
   ) {
-    return fail("cli 只能是 claude、codex、grok、deepseek 或 cursor。");
+    return fail("cli 只能是 claude、codex、grok、deepseek、cursor 或 gemini（agy）。");
   }
   if (!isWorkbenchRole(role) || typeof permission !== "string" || typeof title !== "string") {
     return fail("ffpane_open_window 需要 cli、role、permission 和 title。");

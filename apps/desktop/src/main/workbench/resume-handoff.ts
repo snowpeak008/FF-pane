@@ -119,7 +119,7 @@ export interface ResumePlan {
  */
 export async function planResume(
   input: {
-    readonly kind: "claude" | "codex" | "grok" | "deepseek" | "cursor";
+    readonly kind: "claude" | "codex" | "grok" | "deepseek" | "cursor" | "gemini";
     readonly resume: boolean;
     readonly firstLaunchThisRun: boolean;
     readonly nativeSessionId?: string;

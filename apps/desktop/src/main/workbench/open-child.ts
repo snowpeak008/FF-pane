@@ -30,7 +30,7 @@ import { stripControls, WORKBENCH_ROLE_LABEL } from "./remind";
 import type { LaunchCliRoute } from "./resolve-config";
 
 export interface OpenChildArgs {
-  readonly cli: "claude" | "codex" | "grok" | "deepseek" | "cursor";
+  readonly cli: "claude" | "codex" | "grok" | "deepseek" | "cursor" | "gemini";
   readonly role: WorkbenchRole;
   readonly permission: WorkbenchPermissionLevel;
   readonly title: string;
@@ -67,7 +67,7 @@ export interface OpenChildDeps {
   readonly saveLayout: (layout: ProjectWorkbenchLayout) => Promise<void>;
   readonly launch: (input: LaunchCliWindowInput) => Promise<LaunchCliWindowResult>;
   readonly resolveRoute: (input: {
-    readonly cli: "claude" | "codex" | "grok" | "deepseek" | "cursor";
+    readonly cli: "claude" | "codex" | "grok" | "deepseek" | "cursor" | "gemini";
     readonly projectId: string;
     readonly projectRoot: string;
   }) => Promise<
@@ -191,9 +191,13 @@ export async function openChildWindow(
     args.cli !== "codex" &&
     args.cli !== "grok" &&
     args.cli !== "deepseek" &&
-    args.cli !== "cursor"
+    args.cli !== "cursor" &&
+    args.cli !== "gemini"
   ) {
-    return { ok: false, error: "cli 只能是 claude、codex、grok、deepseek 或 cursor。" };
+    return {
+      ok: false,
+      error: "cli 只能是 claude、codex、grok、deepseek、cursor 或 gemini（agy）。",
+    };
   }
   const described = await deps.describeCaller(callerId);
   if (described === undefined) {

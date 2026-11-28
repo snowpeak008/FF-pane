@@ -319,9 +319,9 @@ const TOOL_DEFINITIONS: readonly McpToolDefinition[] = [
       properties: {
         cli: {
           type: "string",
-          enum: ["claude", "codex", "grok", "deepseek", "cursor"],
+          enum: ["claude", "codex", "grok", "deepseek", "cursor", "gemini"],
           description:
-            "子窗口使用的 CLI。deepseek 启动本机 Claude，模型是 DeepSeek。cursor 启动本机 Cursor CLI（用户的 Cursor 账号）。",
+            "子窗口使用的 CLI。deepseek 启动本机 Claude，模型是 DeepSeek。cursor 启动本机 Cursor CLI（用户的 Cursor 账号）。gemini 启动本机 Antigravity CLI（agy，用户的 Google 账号登录），写 agy 也行。",
         },
         profileId: {
           type: "string",
