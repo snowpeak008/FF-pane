@@ -248,14 +248,24 @@ describe("launchCliWindow 角色与 hooks", () => {
       const codex = captured.at(-1);
       const codexToken = codex?.env["FF_PANE_WINDOW_TOKEN"] ?? "";
       const joined = codex?.args.join("\n") ?? "";
-      expect(joined).not.toContain("--dangerously-bypass-hook-trust");
+      // T11.7：Codex 窗口有意装一条 PostToolUse 内联 hook（干活中途收消息），
+      // 并且必须带 --dangerously-bypass-hook-trust，否则内联 hooks 根本不跑（真机实测）。
+      // 这里仍然保证：只加这一条 hooks 配置、不带别的 hook 事件、不绕过沙盒、不把参数经 shell 拼、不泄漏令牌。
+      expect(joined).toContain("hooks.PostToolUse=");
+      expect(joined).toContain("--dangerously-bypass-hook-trust");
       expect(joined).not.toContain("--dangerously-bypass-approvals-and-sandbox");
       expect(codex?.env["FF_PANE_WRITE_ROOTS"]).toBeUndefined();
       expect(joined).not.toContain("features.hooks");
       expect(joined).not.toContain("hooks.PermissionRequest");
       expect(joined).not.toContain("hooks.Stop");
+      expect(joined).not.toContain("hooks.UserPromptSubmit");
       expect(joined).not.toMatch(/cmd\.exe|powershell|\.cmd|\.bat/i);
       expect(joined).not.toContain(codexToken);
+      // 内联 hook 的命令串带 `& ` 前缀（PowerShell 不认裸引号路径），且不含令牌
+      const hookConfig = codex?.args.find((arg) => arg.startsWith("hooks.PostToolUse=")) ?? "";
+      expect(hookConfig).toContain("& ");
+      expect(hookConfig).toContain("CodexPostToolUse");
+      expect(hookConfig).not.toContain(codexToken);
       const notifyArg = codex?.args.find((arg) => arg.startsWith("notify=[")) ?? "";
       const notifyArgv = JSON.parse(notifyArg.slice("notify=".length)) as string[];
       expect(notifyArgv).toHaveLength(2);

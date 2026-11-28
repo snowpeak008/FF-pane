@@ -50,6 +50,13 @@ import type { OpenChildArgs, OpenChildSuccess } from "./open-child";
 import { openChildWindow } from "./open-child";
 import { clampReadOutputBytes, clampReadScreenLines, stripTerminalControls } from "./output-text";
 import {
+  formatLedgerEntry,
+  ledgerHeader,
+  type ReviewLedgerEntry,
+  reviewLedgerFileName,
+  validateReview,
+} from "./plan-review";
+import {
   buildCoalescedReminder,
   buildNewMessageReminder,
   isReportStatus,
@@ -59,6 +66,14 @@ import {
   sanitizeThreadText,
   WORKBENCH_ROLE_LABEL,
 } from "./remind";
+import { assertDoneChecks, checksDigest, parseChecks } from "./report-checks";
+import {
+  appendLedgerEntries,
+  readReviewLedger,
+  rejectedNumbersOf,
+  roundsSoFar,
+  setLedgerStatus,
+} from "./review-ledger";
 import type { SetWindowRoleResult } from "./set-role";
 import { gateSupervisorToManager, parseStatusPage, statusPageProblem } from "./status-handoff";
 import { bookAssignment, bookReport, executeTasksTool, summarizeForManager } from "./task-tools";
@@ -537,6 +552,10 @@ export async function executeWorkbenchTool(
       return restartWindow(callerId, args, deps);
     case "ffpane_tasks":
       return executeTasksTool(caller, args, deps);
+    case "ffpane_submit_review":
+      return submitReview(caller, args);
+    case "ffpane_resolve_review":
+      return resolveReview(caller, args);
     default:
       return fail(`未知工具：${name}`);
   }
@@ -995,6 +1014,110 @@ async function broadcast(
   });
 }
 
+// ---------- T11.4：计划评审 ----------
+
+/** 只有评审窗口和管理者交评审。 */
+const REVIEW_ROLES = new Set(["reviewer", "manager"]);
+
+async function submitReview(
+  caller: ToolWindowView,
+  args: Readonly<Record<string, unknown>>,
+): Promise<ToolTextResult> {
+  if (!REVIEW_ROLES.has(caller.role)) {
+    return fail("只有检查窗口和管理者能交计划评审。");
+  }
+  const planPath = typeof args["planPath"] === "string" ? args["planPath"].trim() : "";
+  if (planPath === "" || !planPath.startsWith(".ffpane/briefs/")) {
+    return fail("planPath 必须是 .ffpane/briefs/ 里的计划路径。");
+  }
+  const findings = args["findings"];
+  if (!Array.isArray(findings) || findings.length === 0) {
+    return fail(
+      "findings 要至少一条。每条写 level、layer、location、suggestion，阻断级还要 evidence。",
+    );
+  }
+  const ledger = await readReviewLedger(caller.projectRoot, planPath);
+  const round = roundsSoFar(ledger.rows, caller.title) + 1;
+  const checked = validateReview({
+    findings,
+    round,
+    rejectedNumbers: rejectedNumbersOf(ledger.rows),
+  });
+  if (!checked.ok) {
+    return fail(checked.error);
+  }
+  const written = await appendLedgerEntries({
+    projectRoot: caller.projectRoot,
+    planPath,
+    header: ledgerHeader(planPath),
+    entries: checked.findings.map((finding) => ({
+      level: finding.level,
+      layer: finding.layer,
+      reviewer: caller.title,
+      round: checked.round,
+      status: "待定" as const,
+      location: finding.location,
+      suggestion: finding.suggestion,
+      ...(finding.evidence !== undefined ? { evidence: finding.evidence } : {}),
+    })),
+    format: formatLedgerEntry,
+  });
+  const blocking = checked.findings.filter((finding) => finding.level === "blocking").length;
+  return ok({
+    round: checked.round,
+    ledger: reviewLedgerFileName(planPath),
+    recorded: written.map((entry) => ({ number: entry.number, level: entry.level })),
+    note:
+      blocking > 0
+        ? `第 ${checked.round} 轮：${blocking} 条阻断，等管理者处理；写进台账后告诉管理者去 ffpane_resolve_review。`
+        : `第 ${checked.round} 轮记进台账。细节类不进讨论，交执行注意事项。`,
+  });
+}
+
+const RESOLVE_STATUSES = ["采纳", "否决", "延后", "交拍板"] as const;
+
+async function resolveReview(
+  caller: ToolWindowView,
+  args: Readonly<Record<string, unknown>>,
+): Promise<ToolTextResult> {
+  if (caller.role !== "manager") {
+    return fail("只有管理者能处理评审台账。");
+  }
+  const planPath = typeof args["planPath"] === "string" ? args["planPath"].trim() : "";
+  if (planPath === "" || !planPath.startsWith(".ffpane/briefs/")) {
+    return fail("planPath 必须是 .ffpane/briefs/ 里的计划路径。");
+  }
+  const number = args["number"];
+  if (typeof number !== "number" || !Number.isInteger(number)) {
+    return fail("number 要填台账里的编号。");
+  }
+  const status = args["status"];
+  if (typeof status !== "string" || !(RESOLVE_STATUSES as readonly string[]).includes(status)) {
+    return fail(`status 只能是 ${RESOLVE_STATUSES.join("、")}。`);
+  }
+  if (status === "否决" && (typeof args["reason"] !== "string" || args["reason"].trim() === "")) {
+    return fail("否决必须写 reason。");
+  }
+  const found = await setLedgerStatus({
+    projectRoot: caller.projectRoot,
+    planPath,
+    number,
+    status: status as ReviewLedgerEntry["status"],
+  });
+  if (!found) {
+    return fail(`台账里没有第 ${number} 条。先看 ffpane_submit_review 报上来的编号。`);
+  }
+  return ok({
+    number,
+    status,
+    ...(status === "交拍板"
+      ? {
+          note: "这条要用户拍板：用 ffpane_request_decision 发给他，brief 里带上这条的编号和内容。",
+        }
+      : {}),
+  });
+}
+
 async function lockTool(
   caller: ToolWindowView,
   args: Readonly<Record<string, unknown>>,
@@ -1238,6 +1361,25 @@ async function report(
   if (!detail.ok) {
     return fail(detail.error);
   }
+  // T11.4：报 done 必须带检查结果（或说明为什么没有）。
+  const parsedChecks = parseChecks(args["checks"]);
+  if (!parsedChecks.ok) {
+    return fail(parsedChecks.error);
+  }
+  const noChecksReason =
+    typeof args["noChecksReason"] === "string" && args["noChecksReason"].trim() !== ""
+      ? args["noChecksReason"].trim().slice(0, 300)
+      : undefined;
+  const checksGate = assertDoneChecks({
+    status,
+    role: caller.role,
+    checks: parsedChecks.checks,
+    noChecksReason,
+  });
+  if (!checksGate.ok) {
+    return fail(checksGate.error);
+  }
+  const checksText = checksDigest(parsedChecks.checks, noChecksReason);
   const target = await deps.describe(targetId);
   if (target === undefined) {
     return fail("找不到上级窗口。");
@@ -1257,13 +1399,16 @@ async function report(
   }
   const deliveredText = gated.kind === "wake" ? gated.text : summary;
   const deliveredStatus = gated.kind === "wake" ? gated.status : status;
+  // T11.4：检查结果附在摘要后面，管理者和监管者不用读正文猜。
+  const textWithChecks =
+    checksText !== "" ? `${deliveredText}\n\n检查：\n${checksText}` : deliveredText;
   const deliveredBrief = gated.kind === "wake" ? gated.statusPath : brief.path;
   const record = await persist(
     caller,
     target,
     {
       kind: "report",
-      text: deliveredText,
+      text: textWithChecks,
       status: deliveredStatus,
       ...(files !== undefined ? { files } : {}),
       ...(deliveredBrief !== undefined ? { briefPath: deliveredBrief } : {}),
@@ -1297,7 +1442,7 @@ async function report(
       watcher,
       {
         kind: "report",
-        text: deliveredText,
+        text: textWithChecks,
         status: deliveredStatus,
         ...(files !== undefined ? { files } : {}),
         ...(deliveredBrief !== undefined ? { briefPath: deliveredBrief } : {}),
@@ -1324,7 +1469,7 @@ async function report(
         asker,
         {
           kind: "report",
-          text: deliveredText,
+          text: textWithChecks,
           status: deliveredStatus,
           ...(files !== undefined ? { files } : {}),
           ...(deliveredBrief !== undefined ? { briefPath: deliveredBrief } : {}),
@@ -1351,7 +1496,7 @@ async function report(
           taskId: reportTaskId,
           status: deliveredStatus,
           reporter: { windowId: caller.id, title: caller.title, role: caller.role },
-          summary: deliveredText,
+          summary: textWithChecks,
           now: deps.now,
         });
   return ok({

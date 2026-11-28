@@ -323,3 +323,25 @@ settings 文档里的 thinking（**只登记，不作本单下发面**）：
 - 与既有文档：§2 参数表与 §9 均无 effort/thinking 字样——**一致**。本小节把「无」写成硬结论
 
 **不做：** 无调研支撑的参数透传；把行为参数塞进 extraArgs 碰运气；改写用户 settings.json 冒充逐轮下发。
+
+## 待修（2026-11-28 真机发现）
+
+**两条策略规则在真机被整条丢弃。** gemini 的策略引擎用 RE2（Go），不支持负向前瞻 `(?!`。真机跑 `gemini -p` 时 stderr 打了两条：
+
+```
+[USER] Policy file error in ff-pane-run.toml:
+  Invalid regex pattern
+Pattern: (?:\x00|[{,])"file_path":"(?![^\x00]*(?:…允许片段…))
+Error: error parsing regexp: invalid or unsupported Perl syntax: `(?!`
+```
+
+**受影响的两条规则**（`policy.ts`）：
+
+- `write-scope`（第 354 行）：`file_path(?!…)`——写作用域限制。
+- `shell-verify-only`（第 395 行）：`command(?!(?:验证命令))`——只放行任务合同里的验证命令。
+
+两条都靠负向前瞻表达「不在允许范围内就拒」。RE2 不支持这种写法，规则被静默丢弃 = **这两层防护在 gemini 窗口里当前不生效**。其余规则（dangerous-ops、network、shell-forbidden、空 write_scope）用的是无 `argsPattern` 或简单模式，不受影响。
+
+**为什么单测没发现：** `isGeminiSafePolicyRegExp` 只检查 ReDoS 形态（`)` 后接量词），不检查 RE2 不支持的 Perl 语法。测试里用 JS `new RegExp` 验证语法，JS 支持前瞻，所以通过。
+
+**怎么修（待定）**：改成 RE2 能表达的形式——给 `deny` 规则列出允许片段的显式集合，或用 `allow` 规则放行 + `deny` 兜底；也可以把「越界判定」完全交给运行后的事后校验（调研 §8.3 建议 2 已这么写过）。修的时候要同时给 `isGeminiSafePolicyRegExp` 补一条「拒绝 `(?=`、`(?!`、`(?<=`、`(?<!`」的自检，防止再漏。

@@ -38,6 +38,8 @@ export const WORKBENCH_MCP_TOOL_NAMES = [
   "ffpane_wait_events",
   "ffpane_restart_window",
   "ffpane_tasks",
+  "ffpane_submit_review",
+  "ffpane_resolve_review",
 ] as const;
 
 export type WorkbenchMcpToolName = (typeof WORKBENCH_MCP_TOOL_NAMES)[number];
@@ -74,9 +76,56 @@ export const WORKBENCH_READ_ONLY_TOOL_NAMES: readonly WorkbenchMcpToolName[] = [
   "ffpane_wait_events",
   // 任务账本：只读档能 list；改账本只有现任管理者，由平台代码判断。
   "ffpane_tasks",
+  // 计划评审：检查窗口只读档也能交评审；处理台账只有管理者，由平台代码判断。
+  "ffpane_submit_review",
 ];
 
 const TOOL_DEFINITIONS: readonly McpToolDefinition[] = [
+  {
+    name: "ffpane_submit_review",
+    description:
+      "T11.4 计划评审：评审窗口把问题逐条交上来，平台记进 .ffpane/reviews/ 的台账。每条写 level（blocking 阻断 / important 重要 / detail 细节）、layer（goal 目标 / boundary 边界 / implementation 实现）、location（计划哪一节）、suggestion；阻断级必须附 evidence（读过的一行或实际跑出的输出），没有证据不收。每轮最多 5 条阻断加重要，实现层自动降为细节、不进讨论。第二轮只核对第一轮改好没有，不提新的非阻断问题。同一计划同一窗口最多两轮；已否决的编号不许重提。只有检查窗口和管理者能交。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        planPath: { type: "string", description: "计划路径，必须在 .ffpane/briefs/ 内。" },
+        findings: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              level: { type: "string", enum: ["blocking", "important", "detail"] },
+              layer: { type: "string", enum: ["goal", "boundary", "implementation"] },
+              location: { type: "string", description: "计划里哪一节。" },
+              evidence: { type: "string", description: "阻断级必填：读过的一行或实际跑出的输出。" },
+              suggestion: { type: "string" },
+              refersTo: { type: "number", description: "第二轮引用第一轮哪一条的编号。" },
+            },
+            required: ["level", "layer", "location", "suggestion"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["planPath", "findings"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "ffpane_resolve_review",
+    description:
+      "T11.4 计划评审：管理者逐条处理台账里的问题。status 只能是 采纳、否决（必须写 reason）、延后、交拍板；交拍板的用 ffpane_request_decision 发给用户。只有管理者能用。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        planPath: { type: "string", description: "计划路径，必须在 .ffpane/briefs/ 内。" },
+        number: { type: "number", description: "台账里的编号。" },
+        status: { type: "string", enum: ["采纳", "否决", "延后", "交拍板"] },
+        reason: { type: "string", description: "否决时必填。" },
+      },
+      required: ["planPath", "number", "status"],
+      additionalProperties: false,
+    },
+  },
   {
     name: "ffpane_tasks",
     description:
@@ -343,7 +392,7 @@ const TOOL_DEFINITIONS: readonly McpToolDefinition[] = [
   {
     name: "ffpane_report",
     description:
-      "向上级链汇报。windowId 缺省时汇报给直接上级。status 只能是 done、blocked、failed、progress。summary 上限 8KB，更长请改用 ffpane_write_brief。files 是项目内相对路径，不能越出项目根。监管者汇报给管理者时，summary 只能是近况四行，briefPath 是近况路径；四行不合格会返回错误，说明哪一行不对并附模板，不写入收件箱，也不叫醒管理者。detailPath 只能是详细记录的路径。",
+      "向上级链汇报。windowId 缺省时汇报给直接上级。status 只能是 done、blocked、failed、progress。summary 上限 8KB，更长请改用 ffpane_write_brief。files 是项目内相对路径，不能越出项目根。监管者汇报给管理者时，summary 只能是近况四行，briefPath 是近况路径；四行不合格会返回错误，说明哪一行不对并附模板，不写入收件箱，也不叫醒管理者。detailPath 只能是详细记录的路径。报 done 时必须带 checks（每条一个命令和结果），确实没有可跑的检查时改用 noChecksReason 说明原因。",
     inputSchema: {
       type: "object",
       properties: {
@@ -370,6 +419,29 @@ const TOOL_DEFINITIONS: readonly McpToolDefinition[] = [
           type: "string",
           description:
             "可选。这次汇报对应任务账本里哪一条。带上就按状态自动记账：progress 记执行情况，blocked 标卡住，done 标待检查，failed 标失败。",
+        },
+        checks: {
+          type: "array",
+          description:
+            "T11.4。报 done 时必填：每条一个命令和结果。管理者和监管者看汇报时一眼就能看到跑了什么、结果如何。",
+          items: {
+            type: "object",
+            properties: {
+              command: { type: "string", description: "跑的命令，或检查项一句话。" },
+              result: {
+                type: "string",
+                enum: ["pass", "fail", "not_run"],
+                description: "pass 通过、fail 不通过、not_run 没跑。",
+              },
+              note: { type: "string", description: "可选，一行说明。" },
+            },
+            required: ["command", "result"],
+            additionalProperties: false,
+          },
+        },
+        noChecksReason: {
+          type: "string",
+          description: "T11.4。确实没有可跑的检查时，用一句话说明为什么没有，替代 checks。",
         },
       },
       required: ["status", "summary"],

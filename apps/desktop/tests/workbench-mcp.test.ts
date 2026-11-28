@@ -270,6 +270,95 @@ async function call(
   return { text: result.text, isError: result.isError === true, json };
 }
 
+describe("T11.4 计划评审", () => {
+  const PLAN = ".ffpane/briefs/登录重构.md";
+  const finding = (overrides: Record<string, unknown> = {}) => ({
+    level: "important",
+    layer: "boundary",
+    location: "§3.2",
+    suggestion: "补窗口之间的接口",
+    ...overrides,
+  });
+
+  it("评审窗口交评审：写进台账、编号从 1 起；第二轮接着编", async () => {
+    const root = tempDir();
+    const { deps, tree, views } = harness(root);
+    tree["C"] = node("C", "reviewer", "B");
+    views["C"] = { ...(views["C"] as ToolWindowView), role: "reviewer" };
+    const first = await call(deps, "C", "ffpane_submit_review", {
+      planPath: PLAN,
+      findings: [finding(), finding({ level: "blocking", evidence: "apps/x.ts:42" })],
+    });
+    expect(first.isError).toBe(false);
+    expect(first.json).toMatchObject({ round: 1 });
+    const ledger = readFileSync(join(root, ".ffpane", "reviews", "登录重构.md"), "utf8");
+    expect(ledger).toContain("| 1 | 重要 | 边界 |");
+    expect(ledger).toContain("apps/x.ts:42");
+    // 第二轮只核对，不提新的非阻断
+    const second = await call(deps, "C", "ffpane_submit_review", {
+      planPath: PLAN,
+      findings: [finding({ level: "blocking", evidence: "跑出 ENOENT" })],
+    });
+    expect(second.json).toMatchObject({ round: 2 });
+  });
+
+  it("阻断没证据退回；第三轮退回；执行窗口不能交", async () => {
+    const { deps } = harness(tempDir());
+    const noEvidence = await call(deps, "A", "ffpane_submit_review", {
+      planPath: PLAN,
+      findings: [finding({ level: "blocking" })],
+    });
+    expect(noEvidence.isError).toBe(true);
+    expect(noEvidence.text).toContain("证据");
+    expect(
+      (await call(deps, "B", "ffpane_submit_review", { planPath: PLAN, findings: [finding()] }))
+        .isError,
+    ).toBe(true);
+  });
+
+  it("管理者处理台账：采纳；否决没写理由退回；不存在的编号退回", async () => {
+    const root = tempDir();
+    const { deps, tree, views } = harness(root);
+    tree["C"] = node("C", "reviewer", "B");
+    views["C"] = { ...(views["C"] as ToolWindowView), role: "reviewer" };
+    await call(deps, "C", "ffpane_submit_review", { planPath: PLAN, findings: [finding()] });
+    expect(
+      (
+        await call(deps, "A", "ffpane_resolve_review", {
+          planPath: PLAN,
+          number: 1,
+          status: "采纳",
+        })
+      ).isError,
+    ).toBe(false);
+    const noReason = await call(deps, "A", "ffpane_resolve_review", {
+      planPath: PLAN,
+      number: 1,
+      status: "否决",
+    });
+    expect(noReason.isError).toBe(true);
+    expect(
+      (
+        await call(deps, "A", "ffpane_resolve_review", {
+          planPath: PLAN,
+          number: 99,
+          status: "采纳",
+        })
+      ).isError,
+    ).toBe(true);
+    // 执行窗口不能处理台账
+    expect(
+      (
+        await call(deps, "B", "ffpane_resolve_review", {
+          planPath: PLAN,
+          number: 1,
+          status: "采纳",
+        })
+      ).isError,
+    ).toBe(true);
+  });
+});
+
 describe("工具授权", () => {
   it("可见范围只有自己、后代和上级链", async () => {
     const { deps } = harness(tempDir());
@@ -303,7 +392,12 @@ describe("工具授权", () => {
     const send = (from: string, to: string) =>
       call(deps, from, "ffpane_send_message", { windowId: to, text: "去做" });
     const report = (from: string, to: string) =>
-      call(deps, from, "ffpane_report", { windowId: to, status: "done", summary: "好了" });
+      call(deps, from, "ffpane_report", {
+        windowId: to,
+        status: "done",
+        summary: "好了",
+        checks: [{ command: "pnpm test", result: "pass" }],
+      });
 
     expect((await send("A", "B")).isError).toBe(false);
     expect((await send("A", "C")).isError).toBe(false);
@@ -637,6 +731,7 @@ describe("清单新增工具", () => {
     const done = await call(deps, "B", "ffpane_report", {
       status: "done",
       summary: "记录在 x",
+      checks: [{ command: "pnpm test", result: "pass" }],
       closeAfter: true,
     });
     expect(done.json).toMatchObject({ closing: expect.stringContaining("由上级关闭") });
@@ -736,6 +831,7 @@ describe("调研请求（T11.1）", () => {
       status: "done",
       summary: ".ffpane/briefs/调研-调用处.md",
       briefPath: ".ffpane/briefs/调研-调用处.md",
+      checks: [{ command: "读了调用处", result: "pass" }],
       closeAfter: true,
     });
     expect(reported.json).toMatchObject({ researchFor: "D" });
@@ -889,7 +985,11 @@ describe("监管者观察", () => {
     const watchedHarness = watched(root);
     const reminders = watchedHarness.reminders;
     const deps = supervisorOnline(watchedHarness.deps);
-    const done = await call(deps, "B", "ffpane_report", { status: "done", summary: "记录在 x" });
+    const done = await call(deps, "B", "ffpane_report", {
+      status: "done",
+      summary: "记录在 x",
+      checks: [{ command: "pnpm test", result: "pass" }],
+    });
     // T11.24：done 不再被监管者挡住，上级一定要被叫醒；监管者同时收到抄送。
     expect(done.json).toMatchObject({ delivery: "delivered", cc: { windowId: "S" } });
     expect(reminders.map((item) => item.windowId)).toEqual(["A", "S"]);
@@ -920,7 +1020,11 @@ describe("监管者观察", () => {
     };
     // progress 静默，但仍不记兜底：兜底只追 done，而 done 现在会叫醒。
     await call(deps, "B", "ffpane_report", { status: "progress", summary: "做到一半" });
-    await call(deps, "B", "ffpane_report", { status: "done", summary: "记录在 x" });
+    await call(deps, "B", "ffpane_report", {
+      status: "done",
+      summary: "记录在 x",
+      checks: [{ command: "pnpm test", result: "pass" }],
+    });
     await call(deps, "B", "ffpane_report", { status: "failed", summary: "挂了" });
     expect(watchedIds).toEqual([]);
   });
@@ -970,7 +1074,11 @@ describe("监管者观察", () => {
   it("监管者掉线：done 也叫醒上级，抄送照样留给监管者", async () => {
     const root = tempDir();
     const { deps, reminders } = watched(root);
-    const done = await call(deps, "B", "ffpane_report", { status: "done", summary: "记录在 x" });
+    const done = await call(deps, "B", "ffpane_report", {
+      status: "done",
+      summary: "记录在 x",
+      checks: [{ command: "pnpm test", result: "pass" }],
+    });
     expect(done.json).toMatchObject({ delivery: "delivered", cc: { windowId: "S" } });
     expect(reminders.map((item) => item.windowId).sort()).toEqual(["A", "S"]);
   });
