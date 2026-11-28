@@ -246,6 +246,15 @@ export interface LaunchCliWindowDeps {
    * T11.9：按项目启用的技能给这个窗口准备挂载。Claude 返回插件目录，Codex / Grok 返回要追加到说明里的技能清单。
    * 缺省不挂技能。出错时由实现自己兜住，不让开窗失败。
    */
+  /** T11.6：按需手册。Claude 走插件目录，其余把清单接在说明后面；没有就不挂。 */
+  readonly resolveManualMounts?: (input: {
+    readonly windowId: string;
+    readonly role: WorkbenchRole;
+    readonly runtime: "claude-code" | "codex" | "grok" | "cursor" | "agy";
+  }) => Promise<{
+    readonly claudePluginDir?: string;
+    readonly index?: string;
+  }>;
   readonly resolveSkillMounts?: (input: {
     readonly windowId: string;
     readonly projectRoot: string;
@@ -638,6 +647,19 @@ async function launchCliWindowBody(
           runtime,
         })
       : undefined;
+  // T11.6：按需手册。清单并进角色说明，正文在挂载目录里按需读。
+  const manualMount =
+    deps.resolveManualMounts !== undefined
+      ? await deps.resolveManualMounts({ windowId: input.windowId, role, runtime })
+      : undefined;
+  const withManuals = (text: string | undefined): string | undefined =>
+    manualMount?.index === undefined
+      ? text
+      : text === undefined || text.trim() === ""
+        ? manualMount.index
+        : `${text.trimEnd()}
+
+${manualMount.index}`;
   const withSkills = (text: string | undefined): string | undefined =>
     skillMount?.instructions === undefined
       ? text
@@ -796,9 +818,13 @@ async function launchCliWindowBody(
         ? { appendSystemPromptFile: roleInjection.claudePromptFile }
         : {}),
       ...(hooks.settingsPath !== undefined ? { settingsFile: hooks.settingsPath } : {}),
-      ...(skillMount?.claudePluginDir !== undefined
-        ? { pluginDirs: [skillMount.claudePluginDir] }
-        : {}),
+      ...(() => {
+        const dirs = [
+          ...(skillMount?.claudePluginDir !== undefined ? [skillMount.claudePluginDir] : []),
+          ...(manualMount?.claudePluginDir !== undefined ? [manualMount.claudePluginDir] : []),
+        ];
+        return dirs.length > 0 ? { pluginDirs: dirs } : {};
+      })(),
       ...(input.initialPrompt !== undefined ? { initialPrompt: input.initialPrompt } : {}),
     });
   } else if (runtime === "codex") {
@@ -818,7 +844,7 @@ async function launchCliWindowBody(
     if (resuming && nativeSessionId === undefined) {
       resumePicker = true;
     }
-    const developerInstructions = withSkills(roleInjection.developerInstructions);
+    const developerInstructions = withManuals(withSkills(roleInjection.developerInstructions));
     args = buildInteractiveCodexArgs({
       cwd,
       ...(model !== undefined ? { model } : {}),
@@ -903,7 +929,7 @@ async function launchCliWindowBody(
         throw error;
       }
     }
-    const grokRules = withSkills(roleInjection.grokRules);
+    const grokRules = withManuals(withSkills(roleInjection.grokRules));
     args = buildInteractiveGrokArgs({
       ...(model !== undefined ? { model } : {}),
       ...(effort !== undefined ? { effort } : {}),
@@ -948,7 +974,7 @@ async function launchCliWindowBody(
         cursorPluginDir = await writeCursorPlugin({ dir: hookDir, servers: withToken });
         cursorContextFile = await writeCursorContextFile(
           hookDir,
-          withSkills(roleInjection.developerInstructions),
+          withManuals(withSkills(roleInjection.developerInstructions)),
         );
       }
       const projectDir = cursorProjectDir(cwd);
@@ -1007,7 +1033,7 @@ async function launchCliWindowBody(
       if (hookDir !== undefined) {
         agyContextFile = await writeAgyContextFile(
           hookDir,
-          withSkills(roleInjection.developerInstructions),
+          withManuals(withSkills(roleInjection.developerInstructions)),
         );
       }
       if (nodePath !== undefined) {

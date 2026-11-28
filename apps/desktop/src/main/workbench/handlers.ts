@@ -26,6 +26,7 @@ import {
   type ProjectId,
   type Provider,
   setActivePage,
+  type WorkbenchRole,
   type WorkbenchWindow,
 } from "@ff-pane/shared";
 import {
@@ -66,7 +67,7 @@ import {
   toMountCandidates,
 } from "../skills/skill-library";
 import { planSkillMounts } from "../skills/skill-manifest";
-import { SkillMountRegistry } from "../skills/skill-mounts";
+import { removeMountDir, SkillMountRegistry } from "../skills/skill-mounts";
 import { WORKBENCH_WINDOW_LIMIT_ERROR_PREFIX } from "../terminal/handlers";
 import type { PtyManager } from "../terminal/manager";
 import { API_ERROR_SAME_TURN_MS, createApiErrorTracker } from "./api-error-tracker";
@@ -156,6 +157,7 @@ import {
   withModelEffortOverrides,
 } from "./model-effort";
 import { createNamedLocks, type LockGrant } from "./named-locks";
+import { manualsForRole, readManualDir, writeManualMount } from "./on-demand-manuals";
 import { createOnlineHub } from "./online-hub";
 import { openChildWindow } from "./open-child";
 import { clampReadOutputBytes, renderTerminalText } from "./output-text";
@@ -384,6 +386,18 @@ export async function createWorkbenchCliLayer(
     resourcesPath: process.resourcesPath,
     appPath: app.getAppPath(),
   });
+  // T11.6：内置按需手册。源是本目录旁边的 workbench-manuals/；每窗口写到数据根的 manual-mounts/ 下。
+  const manualsDir = join(resourcesDir, "..", "workbench-manuals");
+  const manualMountRoot = join(layout.rootDir, "manual-mounts");
+  const manualMountDirs = new Map<string, string>();
+  const releaseManualMount = async (windowId: string): Promise<void> => {
+    const dir = manualMountDirs.get(windowId);
+    if (dir === undefined) {
+      return;
+    }
+    manualMountDirs.delete(windowId);
+    await removeMountDir(dir).catch(() => undefined);
+  };
   const overridesDir = resolveWorkbenchRoleOverridesDir(layout.rootDir);
   const getMax =
     options.getMaxWorkbenchWindows ?? (async () => (await config.readConfig()).maxWorkbenchWindows);
@@ -1731,6 +1745,42 @@ export async function createWorkbenchCliLayer(
             skipped: enabled.map((name) => ({ name, reason: "mount-failed" as const })),
           },
         };
+      }
+    },
+    resolveManualMounts: async ({
+      windowId,
+      role,
+      runtime,
+    }: {
+      readonly windowId: string;
+      readonly role: WorkbenchRole;
+      readonly runtime: "claude-code" | "codex" | "grok" | "cursor" | "agy";
+    }) => {
+      try {
+        await releaseManualMount(windowId);
+        const picked = manualsForRole(readManualDir(manualsDir), role);
+        if (picked.length === 0) {
+          return {};
+        }
+        const prepared = await writeManualMount({
+          baseDir: manualMountRoot,
+          windowId,
+          manuals: picked,
+          runtime,
+        });
+        if (prepared.claudePluginDir !== undefined) {
+          manualMountDirs.set(windowId, prepared.claudePluginDir);
+        }
+        return {
+          ...(prepared.claudePluginDir !== undefined
+            ? { claudePluginDir: prepared.claudePluginDir }
+            : {}),
+          ...(prepared.index !== undefined ? { index: prepared.index } : {}),
+        };
+      } catch {
+        // 手册出问题不让开窗失败
+        await releaseManualMount(windowId).catch(() => undefined);
+        return {};
       }
     },
     releaseSkillMounts: (windowId: string) => skillMounts.release(windowId),
@@ -3466,6 +3516,7 @@ export async function createWorkbenchCliLayer(
         releaseWindowHooks(windowId);
         void rolePromptTemps.release(windowId);
         void skillMounts.release(windowId).catch(() => undefined);
+        void releaseManualMount(windowId);
         void disposeConfigHub(windowId);
       },
       closeRegistered: (windowId) => {

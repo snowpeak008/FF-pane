@@ -68,6 +68,12 @@ describe("workbench role manuals", () => {
     expect(yml).toContain("to: workbench-roles");
   });
 
+  it("T11.6：按需手册也打进 extraResources", () => {
+    const yml = readFileSync(join(desktopDir, "electron-builder.yml"), "utf8");
+    expect(yml).toContain("from: resources/workbench-manuals");
+    expect(yml).toContain("to: workbench-manuals");
+  });
+
   it("开发态走 appPath/resources，打包后走 resourcesPath", () => {
     expect(
       resolveWorkbenchRoleResourcesDir({
