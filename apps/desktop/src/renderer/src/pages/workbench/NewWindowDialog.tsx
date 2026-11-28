@@ -66,6 +66,9 @@ export function NewWindowDialog({
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { state: configState } = useInvokeQuery("config:get");
+  // 本机登录这一路选了来源时，窗口对话框里显示来源名（模型限制来自它）。
+  const { state: providersState } = useInvokeQuery("providers:list");
+  const providerList = providersState.status === "success" ? providersState.data : [];
   const globalPermission =
     queryData(configState)?.defaultWorkbenchPermission ?? DEFAULT_WORKBENCH_WINDOW_PERMISSION;
   const cursorDefaultModel = effectiveCursorDefaultModel(
@@ -180,7 +183,12 @@ export function NewWindowDialog({
       ? ""
       : route.connectionMode === "relay"
         ? t("workbench.newWindow.routeRelay")
-        : t("workbench.newWindow.routeLocal");
+        : "providerId" in route && route.providerId !== undefined && route.providerId !== ""
+          ? t("workbench.newWindow.routeLocalSource", {
+              source:
+                providerList.find((item) => item.id === route.providerId)?.name ?? route.providerId,
+            })
+          : t("workbench.newWindow.routeLocal");
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

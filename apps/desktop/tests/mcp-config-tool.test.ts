@@ -164,6 +164,25 @@ describe("parseConfigDraftArgs", () => {
     expect(refused.ok).toBe(false);
   });
 
+  it("本机登录路线可以带本机登录来源的 providerId（限制模型用），原样进草案；中转路线照旧", () => {
+    const ok = parseConfigDraftArgs({
+      name: "限制模型",
+      codex: { connectionMode: "local_cli", providerId: "src-1", model: "m-a" },
+      cursor: { connectionMode: "local_cli", providerId: "src-2" },
+      claude: { connectionMode: "relay", providerId: "relay-1" },
+    });
+    expect(ok.ok).toBe(true);
+    if (ok.ok && ok.parsed.kind === "config") {
+      expect(ok.parsed.draft.codex).toEqual({
+        connectionMode: "local_cli",
+        providerId: "src-1",
+        model: "m-a",
+      });
+      expect(ok.parsed.draft.cursor).toEqual({ connectionMode: "local_cli", providerId: "src-2" });
+      expect(ok.parsed.draft.claude).toEqual({ connectionMode: "relay", providerId: "relay-1" });
+    }
+  });
+
   it("Gemini 路线：只收本机登录，中转被拒；脱敏视图和字段白名单都带上它", () => {
     const ok = parseConfigDraftArgs({
       name: "夜班",

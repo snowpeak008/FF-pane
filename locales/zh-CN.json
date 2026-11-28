@@ -311,7 +311,8 @@
       "usingConfig": "使用配置「{{name}}」· {{route}}",
       "goSettings": "去设置",
       "cancel": "取消",
-      "confirm": "打开"
+      "confirm": "打开",
+      "routeLocalSource": "本机登录 · 来源「{{source}}」"
     },
     "configDraft": {
       "titleCreate": "确认新建",
@@ -794,8 +795,8 @@
         },
         "listModels": "读取本地模型",
         "noEnumeration": "该 CLI 无本地模型枚举途径；模型留空即使用 CLI 默认模型。",
-        "modelsEmpty": "模型清单来自 CLI 枚举（不支持手填）。留空即使用 CLI 默认模型。",
-        "modelHint": "本机登录模板的模型由 CLI 自管：清单只能经「读取本地模型」枚举，Profile 侧留空即用 CLI 默认模型。",
+        "modelsEmpty": "模型清单来自 CLI 枚举（不支持手填）。清单为空就不限制模型。",
+        "modelHint": "这个来源只决定能用哪些模型：下面留下的就是允许用的，不想用的点垃圾桶删掉；清单为空就不限制。要在「配置」里给本机登录那一路选上这个来源才会生效。账号仍是这个 CLI 自己登录的那个，来源不存账号；在终端里自己切模型不受限制。",
         "listError": {
           "unsupported": "该 CLI 不支持本地模型枚举",
           "cli_missing": "PATH 中找不到该 CLI，请确认已安装",
@@ -1016,7 +1017,15 @@
           "xhigh": "xhigh",
           "max": "max"
         },
-        "needRoute": "至少配置 Claude、Codex、Grok、DeepSeek 或 Cursor 一路。"
+        "needRoute": "至少配置 Claude、Codex、Grok、DeepSeek 或 Cursor 一路。",
+        "source": "来源（可选）",
+        "sourceNone": "不选（不限制模型）",
+        "sourceHint": "选一个「本机已登录」类型的来源：模型只能从它里面留下的里选。账号仍是这个 CLI 自己登录的那个，来源不存账号。不选就不限制。",
+        "sourceEmpty": "还没有「本机已登录」类型的来源。可以到 Provider 里新建一个，留下想用的模型。",
+        "sourceGone": "（来源已被删除或停用，请重选）",
+        "modelFromSource": "不指定（用来源的默认模型，没有就用 CLI 自己的默认）",
+        "modelOutsideSource": "（不在来源里）{{model}}",
+        "modelNotAllowed": "{{title}}：模型「{{model}}」不在来源「{{source}}」允许的模型里，请重选。"
       },
       "edit": {
         "title": "编辑配置",

@@ -311,7 +311,8 @@
       "usingConfig": "Using config \"{{name}}\" · {{route}}",
       "goSettings": "Go to Settings",
       "cancel": "Cancel",
-      "confirm": "Open"
+      "confirm": "Open",
+      "routeLocalSource": "Local login · source \"{{source}}\""
     },
     "configDraft": {
       "titleCreate": "Confirm create",
@@ -794,8 +795,8 @@
         },
         "listModels": "Read local models",
         "noEnumeration": "This CLI has no local model enumeration. Leave the model empty to use the CLI default.",
-        "modelsEmpty": "The model list comes from CLI enumeration (manual entry is disabled). Leave empty to use the CLI default model.",
-        "modelHint": "Models for local-login come from the CLI: list them via Read local models; leave Profile model empty for CLI default.",
+        "modelsEmpty": "The model list comes from the CLI (no manual entry). An empty list means no restriction.",
+        "modelHint": "This source only decides which models can be used: the ones kept below are allowed, delete the rest with the trash button; an empty list means no restriction. It takes effect once a config's local-login route picks this source. The account is still the one the CLI itself is logged in with, and switching models inside the terminal is not restricted.",
         "listError": {
           "unsupported": "This CLI does not support local model enumeration",
           "cli_missing": "The CLI was not found on PATH. Please make sure it is installed",
@@ -1016,7 +1017,15 @@
           "xhigh": "xhigh",
           "max": "max"
         },
-        "needRoute": "Configure at least one route: Claude, Codex, Grok, DeepSeek, or Cursor."
+        "needRoute": "Configure at least one route: Claude, Codex, Grok, DeepSeek, or Cursor.",
+        "source": "Source (optional)",
+        "sourceNone": "None (no model restriction)",
+        "sourceHint": "Pick a \"Local login\" source: models can only be chosen from the ones kept in it. The account is still the one the CLI itself is logged in with; the source stores no account. Leave empty for no restriction.",
+        "sourceEmpty": "There is no \"Local login\" source yet. Create one under Provider and keep the models you want.",
+        "sourceGone": "(the source was deleted or disabled, pick again)",
+        "modelFromSource": "Not specified (the source's default model, else the CLI's own default)",
+        "modelOutsideSource": "(not in the source) {{model}}",
+        "modelNotAllowed": "{{title}}: model \"{{model}}\" is not among the models allowed by source \"{{source}}\". Please pick again."
       },
       "edit": {
         "title": "Edit config",

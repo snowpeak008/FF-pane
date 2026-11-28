@@ -11,6 +11,8 @@ import type {
 } from "@ff-pane/shared";
 import {
   getProviderTemplate,
+  isModelAllowedBySource,
+  providerChatModelIds,
   REASONING_EFFORT_LEVELS,
   WORKBENCH_PERMISSION_LEVELS,
 } from "@ff-pane/shared";
@@ -101,7 +103,13 @@ function toRoute(draft: RouteDraft, relayOnly = false): ProjectConfigRoute | und
       ...extras,
     };
   }
-  return { connectionMode: "local_cli", ...extras };
+  // 本机登录可以选一个「本机已登录」来源，决定允许用哪些模型；不选 = 不限制。
+  const sourceId = draft.providerId.trim();
+  return {
+    connectionMode: "local_cli",
+    ...(sourceId !== "" ? { providerId: sourceId as ProviderId } : {}),
+    ...extras,
+  };
 }
 
 const selectClass = "rounded-sm border border-border bg-surface px-2 py-1.5 text-sm text-fg";
@@ -166,6 +174,30 @@ export function ConfigEditorDialog({
   }, [config, open]);
 
   const relayProviders = providers.filter((provider) => provider.templateId !== "local-login");
+  // 本机登录这一路可选的来源：只列「本机已登录」模板、没停用的。
+  const localSources = providers.filter(
+    (provider) => provider.templateId === "local-login" && provider.enabled !== false,
+  );
+
+  /** 选了来源、来源里有对话模型、而填的模型不在里面：返回提示，否则 undefined。 */
+  const modelProblem = (draft: RouteDraft, title: string): string | undefined => {
+    if (!draft.enabled || draft.connectionMode !== "local_cli" || draft.providerId === "") {
+      return undefined;
+    }
+    const source = localSources.find((item) => item.id === draft.providerId);
+    if (source === undefined) {
+      return undefined;
+    }
+    const allowed = providerChatModelIds(source);
+    if (isModelAllowedBySource(allowed, draft.model)) {
+      return undefined;
+    }
+    return t("settings.configs.field.modelNotAllowed", {
+      title,
+      model: draft.model.trim(),
+      source: source.name,
+    });
+  };
 
   const saveDisabled =
     saving ||
@@ -247,6 +279,16 @@ export function ConfigEditorDialog({
   };
 
   const submit = async (): Promise<void> => {
+    const problem =
+      modelProblem(claude, t("settings.configs.field.routeClaude")) ??
+      modelProblem(codex, t("settings.configs.field.routeCodex")) ??
+      modelProblem(grok, t("settings.configs.field.routeGrok")) ??
+      modelProblem(cursor, t("settings.configs.field.routeCursor")) ??
+      modelProblem(gemini, t("settings.configs.field.routeGemini"));
+    if (problem !== undefined) {
+      setError(problem);
+      return;
+    }
     const claudeRoute = toRoute(claude);
     const codexRoute = toRoute(codex);
     const grokRoute = toRoute(grok);
@@ -354,6 +396,7 @@ export function ConfigEditorDialog({
           )}
           <RouteFields
             side="claude"
+            localSources={localSources}
             title={t("settings.configs.field.routeClaude")}
             draft={claude}
             providers={providersForSide("claude", relayProviders)}
@@ -362,6 +405,7 @@ export function ConfigEditorDialog({
           />
           <RouteFields
             side="codex"
+            localSources={localSources}
             title={t("settings.configs.field.routeCodex")}
             draft={codex}
             providers={providersForSide("codex", relayProviders)}
@@ -370,6 +414,7 @@ export function ConfigEditorDialog({
           />
           <RouteFields
             side="grok"
+            localSources={localSources}
             title={t("settings.configs.field.routeGrok")}
             draft={grok}
             providers={providersForSide("grok", relayProviders)}
@@ -378,6 +423,7 @@ export function ConfigEditorDialog({
           />
           <RouteFields
             side="deepseek"
+            localSources={localSources}
             title={t("settings.configs.field.routeDeepseek")}
             draft={deepseek}
             providers={providersForSide("deepseek", relayProviders)}
@@ -387,6 +433,7 @@ export function ConfigEditorDialog({
           />
           <RouteFields
             side="cursor"
+            localSources={localSources}
             title={t("settings.configs.field.routeCursor")}
             draft={cursor}
             providers={[]}
@@ -396,6 +443,7 @@ export function ConfigEditorDialog({
           />
           <RouteFields
             side="gemini"
+            localSources={localSources}
             title={t("settings.configs.field.routeGemini")}
             draft={gemini}
             providers={[]}
@@ -442,6 +490,7 @@ function RouteFields({
   title,
   draft,
   providers,
+  localSources,
   relayOnly = false,
   localOnly = false,
   relayLater = false,
@@ -452,6 +501,8 @@ function RouteFields({
   readonly title: string;
   readonly draft: RouteDraft;
   readonly providers: readonly Provider[];
+  /** 本机登录这一路可选的来源（「本机已登录」模板）。 */
+  readonly localSources: readonly Provider[];
   readonly relayOnly?: boolean;
   /** 只有本机登录（Cursor）：不显示连法和思考强度。 */
   readonly localOnly?: boolean;
@@ -461,7 +512,11 @@ function RouteFields({
   readonly onProbe: () => void;
 }): ReactElement {
   const { t } = useTranslation();
+  const isLocal = !relayOnly && draft.connectionMode === "local_cli";
   const provider = providers.find((item) => item.id === draft.providerId);
+  const source = isLocal ? localSources.find((item) => item.id === draft.providerId) : undefined;
+  // 选了本机登录来源且来源里有对话模型：模型只能从里面选。
+  const sourceModels = source === undefined ? [] : providerChatModelIds(source);
   const modelOptions = [
     ...new Set([...draft.probedModels, ...(provider?.models.map((model) => model.id) ?? [])]),
   ];
@@ -510,7 +565,7 @@ function RouteFields({
                   onChange({
                     ...draft,
                     connectionMode: event.target.value === "relay" ? "relay" : "local_cli",
-                    providerId: event.target.value === "relay" ? draft.providerId : "",
+                    providerId: "",
                   })
                 }
               >
@@ -541,6 +596,45 @@ function RouteFields({
               </select>
             </Field>
           ) : null}
+          {isLocal ? (
+            <Field
+              htmlFor={`config-${side}-source`}
+              label={t("settings.configs.field.source")}
+              hint={
+                localSources.length === 0 && draft.providerId === ""
+                  ? t("settings.configs.field.sourceEmpty")
+                  : t("settings.configs.field.sourceHint")
+              }
+            >
+              <select
+                id={`config-${side}-source`}
+                className={selectClass}
+                data-testid={`config-${side}-source`}
+                value={draft.providerId}
+                onChange={(event) => {
+                  const nextId = event.target.value;
+                  const next = localSources.find((item) => item.id === nextId);
+                  const allowedNext = next === undefined ? [] : providerChatModelIds(next);
+                  onChange({
+                    ...draft,
+                    providerId: nextId,
+                    // 换了来源，原来填的模型不在新来源里就清掉，免得带着一个不允许的模型保存。
+                    model: isModelAllowedBySource(allowedNext, draft.model) ? draft.model : "",
+                  });
+                }}
+              >
+                <option value="">{t("settings.configs.field.sourceNone")}</option>
+                {localSources.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+                {draft.providerId !== "" && source === undefined ? (
+                  <option value={draft.providerId}>{t("settings.configs.field.sourceGone")}</option>
+                ) : null}
+              </select>
+            </Field>
+          ) : null}
           <Field
             htmlFor={`config-${side}-model`}
             label={t("settings.configs.field.model")}
@@ -554,24 +648,46 @@ function RouteFields({
                     : t("settings.configs.field.modelHint")
             }
           >
-            <Input
-              id={`config-${side}-model`}
-              data-testid={`config-${side}-model`}
-              list={`config-${side}-models`}
-              value={draft.model}
-              placeholder={
-                side === "deepseek"
-                  ? t("settings.configs.field.modelPlaceholderDeepseek")
-                  : t("settings.configs.field.modelPlaceholder")
-              }
-              onChange={(event) => onChange({ ...draft, model: event.target.value })}
-            />
+            {sourceModels.length > 0 ? (
+              <select
+                id={`config-${side}-model`}
+                className={selectClass}
+                data-testid={`config-${side}-model-allowed`}
+                value={draft.model}
+                onChange={(event) => onChange({ ...draft, model: event.target.value })}
+              >
+                <option value="">{t("settings.configs.field.modelFromSource")}</option>
+                {sourceModels.map((model) => (
+                  <option key={model} value={model}>
+                    {model}
+                  </option>
+                ))}
+                {draft.model !== "" && !sourceModels.includes(draft.model) ? (
+                  <option value={draft.model}>
+                    {t("settings.configs.field.modelOutsideSource", { model: draft.model })}
+                  </option>
+                ) : null}
+              </select>
+            ) : (
+              <Input
+                id={`config-${side}-model`}
+                data-testid={`config-${side}-model`}
+                list={`config-${side}-models`}
+                value={draft.model}
+                placeholder={
+                  side === "deepseek"
+                    ? t("settings.configs.field.modelPlaceholderDeepseek")
+                    : t("settings.configs.field.modelPlaceholder")
+                }
+                onChange={(event) => onChange({ ...draft, model: event.target.value })}
+              />
+            )}
             <datalist id={`config-${side}-models`}>
               {modelOptions.map((model) => (
                 <option key={model} value={model} />
               ))}
             </datalist>
-            {draft.connectionMode === "local_cli" ? (
+            {draft.connectionMode === "local_cli" && sourceModels.length === 0 ? (
               <Button type="button" size="sm" variant="secondary" onClick={onProbe}>
                 {t("settings.configs.field.listModels")}
               </Button>
@@ -581,7 +697,7 @@ function RouteFields({
                 {draft.probeNote}
               </p>
             ) : null}
-            {draft.probedModels.length > 0 ? (
+            {draft.probedModels.length > 0 && sourceModels.length === 0 ? (
               // 读到的模型直接给个下拉，不用先点进输入框才看得到
               <select
                 aria-label={t("settings.configs.field.pickProbedModel")}

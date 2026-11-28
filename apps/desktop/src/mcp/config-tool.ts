@@ -344,7 +344,10 @@ const CONFIG_ROUTE_SCHEMA = {
     },
     providerId: {
       type: "string",
-      description: "Required when connectionMode is relay. Ignored for local_cli.",
+      description:
+        "Required when connectionMode is relay (a relay provider). Optional for local_cli: the id of a Local login provider " +
+        "(template local-login); then only the models kept in that provider may be used for this route (an empty model list " +
+        "means no restriction). The account is still the one the CLI itself is logged in with. Omit for no restriction.",
     },
     model: {
       type: "string",
