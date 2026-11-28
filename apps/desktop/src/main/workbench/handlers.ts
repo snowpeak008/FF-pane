@@ -184,7 +184,11 @@ import {
   sanitizeThreadText,
   WORKBENCH_ROLE_LABEL,
 } from "./remind";
-import { modelNotAllowedMessage, resolveProjectLaunchRoute } from "./resolve-config";
+import {
+  dropDisallowedModelOverride,
+  modelNotAllowedMessage,
+  resolveProjectLaunchRoute,
+} from "./resolve-config";
 import { describeShortage, resourceLimitsFromConfig, takeResourceSnapshot } from "./resource-guard";
 import {
   planResume as planResumeLaunch,
@@ -2302,7 +2306,10 @@ export async function createWorkbenchCliLayer(
           projectId: stored.projectId,
           projectRoot: project.rootPath,
           kind,
-          route: withModelEffortOverrides(resolved.route, stored),
+          route: withModelEffortOverrides(
+            resolved.route,
+            dropDisallowedModelOverride(resolved.route, stored),
+          ),
           cols: oldRecord?.cols ?? 120,
           rows: oldRecord?.rows ?? 32,
           ...(stored.cwd.trim() !== "" ? { cwd: stored.cwd } : {}),
@@ -2536,7 +2543,10 @@ export async function createWorkbenchCliLayer(
       const projectLayout = (await layouts.readAll())[request.projectId];
       const storedWindow = projectLayout?.windows[request.windowId];
       modelEffort.noteLaunchRead(request.windowId, generationBeforeRead);
-      const route = withModelEffortOverrides(resolved.route, storedWindow);
+      const route = withModelEffortOverrides(
+        resolved.route,
+        dropDisallowedModelOverride(resolved.route, storedWindow),
+      );
       const resumePlan = await planResume({
         kind,
         resume: request.resume === true,

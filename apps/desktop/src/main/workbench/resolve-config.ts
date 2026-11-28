@@ -60,6 +60,26 @@ export function modelNotAllowedMessage(
   return `模型「${model?.trim() ?? ""}」不在来源「${route.providerName ?? "本机登录来源"}」允许的模型里。允许：${allowed.join("、")}。`;
 }
 
+/**
+ * 重启、续接时窗口里存着的「模型覆盖」要再过一遍来源的允许集合：
+ * 换模型之后用户可能把来源清单改窄了，旧覆盖不能绕过限制。
+ * 不允许的覆盖直接丢掉（回到配置解析出的模型），窗口照常续接，不报错。
+ */
+export function dropDisallowedModelOverride<
+  W extends { readonly modelOverride?: string } | undefined,
+>(route: Pick<LaunchCliRoute, "allowedModels" | "providerName">, window: W): W {
+  if (
+    window === undefined ||
+    window.modelOverride === undefined ||
+    modelNotAllowedMessage(route, window.modelOverride) === undefined
+  ) {
+    return window;
+  }
+  const { modelOverride: _dropped, ...rest } = window;
+  void _dropped;
+  return rest as W;
+}
+
 export interface ResolveProjectLaunchRouteInput {
   readonly projectRoot: string;
   readonly projectId: string;

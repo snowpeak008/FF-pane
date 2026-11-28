@@ -10,6 +10,7 @@ import {
 } from "@ff-pane/storage";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  dropDisallowedModelOverride,
   modelNotAllowedMessage,
   resolveProjectLaunchRoute,
 } from "../src/main/workbench/resolve-config";
@@ -266,5 +267,20 @@ describe("本机登录来源限制模型（计划 docs/本机登录来源限制�
     expect(modelNotAllowedMessage({ providerName: "S" }, "x")).toBeUndefined();
     expect(modelNotAllowedMessage({ allowedModels: [] }, "x")).toBeUndefined();
     expect(modelNotAllowedMessage(route, "m-z")).toContain("m-a");
+  });
+
+  it("dropDisallowedModelOverride：重启续接时清单外的旧模型覆盖被丢掉，其余原样", () => {
+    const route = { allowedModels: ["m-a"], providerName: "S" };
+    expect(dropDisallowedModelOverride(route, { modelOverride: "m-z" })).toEqual({});
+    expect(dropDisallowedModelOverride(route, { modelOverride: "m-a" })).toEqual({
+      modelOverride: "m-a",
+    });
+    expect(dropDisallowedModelOverride(route, undefined)).toBeUndefined();
+    const noLimit = { providerName: "S" };
+    expect(dropDisallowedModelOverride(noLimit, { modelOverride: "m-z" })).toEqual({
+      modelOverride: "m-z",
+    });
+    const win = { modelOverride: "m-z", effortOverride: "high" };
+    expect(dropDisallowedModelOverride(route, win)).toEqual({ effortOverride: "high" });
   });
 });
