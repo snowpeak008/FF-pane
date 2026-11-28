@@ -128,7 +128,7 @@ agy 的 PreToolUse 钩子对 `call_mcp_tool` 且服务器是 `ffpane-workbench_f
 
 结果（agy 的对话转写）：
 1. SessionStart 钩子把角色说明注入了（钩子被载入且生效）。
-2. agent 自己读了描述文件 `…ntigravity-cli\mcpfpane-workbench_ffpane-workbenchfpane_whoami.json`，再用 `call_mcp_tool`（`ServerName` 是 `ffpane-workbench_ffpane-workbench`）调用。
+2. agent 自己读了描述文件 `~/.gemini/antigravity-cli/mcp/ffpane-workbench_ffpane-workbench/ffpane_whoami.json`，再用 `call_mcp_tool`（`ServerName` 是 `ffpane-workbench_ffpane-workbench`）调用。
 3. **3 秒内拿到真实结果**：`{"windowId":"win-…","title":"Gemini 1","role":"none","permission":"edit","parent":null,"projectName":"Real Agy",…}`，说明真令牌和真管道都走通了。
 4. 没有停在「Allow calling this tool?」上，钩子的自动批准生效。
 5. agent 最后回答「窗口标题：Gemini 1，角色：none。」
