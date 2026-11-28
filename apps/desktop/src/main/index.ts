@@ -35,6 +35,11 @@ import {
   runPtyCheck,
   type TerminalLayer,
 } from "./terminal";
+import {
+  type AgyPluginMainOptions,
+  createAgyPluginHandlers,
+  runAgyPluginAutoUpdate,
+} from "./user-mods/agy-plugin-main";
 import { loadWindowState, trackWindowState } from "./window-state";
 import {
   createWorkbenchAuthRegistry,
@@ -311,6 +316,18 @@ async function bootstrap(): Promise<void> {
   );
   // Gemini 窗口（T11.23 §10）：agy 装没装、登没登录（读凭据管理器条目名），以及一键安装。
   registerInvokeHandlers(ipcMain, createGeminiAccountHandlers());
+  // agy 的 ffpane 工具插件：用户在设置里自己添加/卸载；启动时只更新「已装且过期」的，没装的不补装。
+  const agyPluginOptions: AgyPluginMainOptions = {
+    spec: { execPath: process.execPath, moduleDir },
+    appVersion: app.getVersion(),
+    globalRoot: resolveGlobalRoot(),
+    agyWindowsRunning: () =>
+      terminalLayer?.manager
+        .list()
+        .some((record) => !record.exited && record.metadata?.["kind"] === "gemini") ?? false,
+  };
+  registerInvokeHandlers(ipcMain, createAgyPluginHandlers(agyPluginOptions));
+  void runAgyPluginAutoUpdate(agyPluginOptions).then((line) => console.log(`[user-mods] ${line}`));
   // Claude 沙盒（T11.20）：设置里看状态、装、卸，走用户自己那份 Claude 的 claude sandbox 命令。
   registerInvokeHandlers(ipcMain, createClaudeSandboxHandlers());
 

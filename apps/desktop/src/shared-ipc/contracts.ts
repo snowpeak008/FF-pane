@@ -552,6 +552,32 @@ export interface GeminiAccountStatus {
   readonly detail?: string;
 }
 
+/**
+ * agy 的 ffpane 工具插件状态（计划 docs/用户内容可插拔与agy工具插件计划.md）。
+ * 没添加就没有 ffpane 工具；添加由用户在设置里点按钮，不会自动装。
+ */
+export type AgyPluginView =
+  | { readonly state: "agy-missing" }
+  | { readonly state: "not-installed" }
+  /** agy 里有同名插件但不是 FF-pane 装的：不动它。 */
+  | { readonly state: "foreign" }
+  | {
+      readonly state: "installed";
+      /** 内容和现在的 FF-pane 一致；不一致时启动会自动更新。 */
+      readonly current: boolean;
+      /** 用户在 agy 里禁用了它。 */
+      readonly enabled: boolean;
+      readonly path: string;
+      /** 最近一次自动更新失败的原因。 */
+      readonly lastError?: string;
+    };
+
+export interface AgyPluginActionResult {
+  readonly ok: boolean;
+  readonly error?: string;
+  readonly status: AgyPluginView;
+}
+
 /** 设置里「Claude 沙盒」一栏看的状态（T11.20）。 */
 export interface ClaudeSandboxStatusView {
   /** 只有 Windows 要装（其他平台 Claude 自带的沙盒不用装）。 */
@@ -1997,6 +2023,12 @@ export interface IpcInvokeContracts {
   "gemini:status": { request: undefined; response: GeminiAccountStatus };
   /** 跑 agy 官方安装命令（界面先确认）。 */
   "gemini:install": { request: undefined; response: CursorCommandResult };
+  /** agy 的 ffpane 工具插件：装没装、是不是最新。只读。 */
+  "agy-plugin:status": { request: undefined; response: AgyPluginView };
+  /** 用户点「添加」或「更新」。 */
+  "agy-plugin:install": { request: undefined; response: AgyPluginActionResult };
+  /** 用户点「卸载」。 */
+  "agy-plugin:uninstall": { request: undefined; response: AgyPluginActionResult };
   /** T11.20：Claude 版本够不够、Windows 沙盒装没装。 */
   "claude-sandbox:status": { request: undefined; response: ClaudeSandboxStatusView };
   /** T11.20：`claude sandbox install`（界面先确认；会弹一次 UAC）。 */
@@ -2271,6 +2303,9 @@ export const INVOKE_CHANNELS = [
   "cursor:install",
   "gemini:status",
   "gemini:install",
+  "agy-plugin:status",
+  "agy-plugin:install",
+  "agy-plugin:uninstall",
   "runtimes:reasoning-effort-levels",
   "secrets:masked-tail",
   "config:get",
