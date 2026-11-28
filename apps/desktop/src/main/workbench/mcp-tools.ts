@@ -61,6 +61,7 @@ import {
 } from "./remind";
 import type { SetWindowRoleResult } from "./set-role";
 import { gateSupervisorToManager, parseStatusPage, statusPageProblem } from "./status-handoff";
+import { bookAssignment, bookReport, executeTasksTool, summarizeForManager } from "./task-tools";
 import {
   appendThreadRecord,
   assertProjectFiles,
@@ -534,6 +535,8 @@ export async function executeWorkbenchTool(
       return requestDecision(caller, args, deps);
     case "ffpane_restart_window":
       return restartWindow(callerId, args, deps);
+    case "ffpane_tasks":
+      return executeTasksTool(caller, args, deps);
     default:
       return fail(`未知工具：${name}`);
   }
@@ -771,6 +774,22 @@ async function openWindow(
   if (!opened.ok) {
     return fail(opened.error);
   }
+  // T11.24：带 taskId 派活时自动记账（标成执行中、记负责窗口）。记不了账不影响开窗。
+  const taskId = typeof args["taskId"] === "string" ? args["taskId"].trim() : "";
+  let booked: Awaited<ReturnType<typeof bookAssignment>> | undefined;
+  if (taskId !== "") {
+    const opener = await deps.describe(callerId);
+    if (opener !== undefined) {
+      booked = await bookAssignment({
+        projectRoot: opener.projectRoot,
+        taskId,
+        assignee: { windowId: opened.windowId, title: opened.title, role },
+        ...(typeof args["briefPath"] === "string" ? { briefPath: args["briefPath"] } : {}),
+        byTitle: opener.title,
+        now: deps.now,
+      });
+    }
+  }
   return ok({
     windowId: opened.windowId,
     title: opened.title,
@@ -782,6 +801,7 @@ async function openWindow(
     ...(reasoningEffort !== undefined && opened.reasoningEffort === undefined
       ? { effortNote: `这一路不支持思考强度 ${reasoningEffort}，没有写进启动参数。` }
       : {}),
+    ...(booked?.note !== undefined ? { taskNote: booked.note } : {}),
   });
 }
 
@@ -1250,20 +1270,17 @@ async function report(
     caller.watcherWindowId !== undefined && caller.watcherWindowId !== target.id
       ? await deps.describe(caller.watcherWindowId)
       : undefined;
-  // 挂了监管者且它在线：例行的 done / progress 交给监管者看，不打断上级；卡住和失败照常叫醒。
-  // 监管者掉线或暂停时照常交给上级。
+  // 监管者只在旁边复核，不再挡在必经路径上（T11.24）。
+  // 原来 done 和 progress 都只进上级收件箱、不叫醒上级，指望监管者转交；监管者没转就卡住，
+  // 用户看到的「监管者在线却没人管」就是这么来的。现在 done 一律叫醒上级：监管者聪明就多一层预警，
+  // 它没管也不影响消息到达。progress 只是进度，本来就不该叫醒人。
   const watcherState = watcher !== undefined ? deps.windowState(watcher.id) : undefined;
   const quietParent =
     watcher !== undefined &&
     watcherState?.online === true &&
     watcherState.lastApiError?.paused !== true &&
     targetId === node?.parentWindowId &&
-    (deliveredStatus === "done" || deliveredStatus === "progress");
-  if (quietParent && deliveredStatus === "done") {
-    // 监管者在线时 done 不叫醒上级；它 10 分钟没转、上级也没读，平台再提醒上级一次（T11.0b）。
-    // progress 只是进度，不追。
-    deps.watchSilentReport?.(target.id, record.id);
-  }
+    deliveredStatus === "progress";
   const delivery = quietParent
     ? "silent"
     : await remindTarget(target, caller, "report", deliveredStatus, record, deps, true);
@@ -1319,6 +1336,19 @@ async function report(
   if (closeAfter) {
     deps.closeSelfLater(caller.id);
   }
+  // T11.24：带 taskId 的汇报自动记账（进度 / 卡住 / 待检查 / 失败）。记不了账不影响汇报本身。
+  const reportTaskId = typeof args["taskId"] === "string" ? args["taskId"].trim() : "";
+  const booked =
+    reportTaskId === ""
+      ? undefined
+      : await bookReport({
+          projectRoot: caller.projectRoot,
+          taskId: reportTaskId,
+          status: deliveredStatus,
+          reporter: { windowId: caller.id, title: caller.title, role: caller.role },
+          summary: deliveredText,
+          now: deps.now,
+        });
   return ok({
     id: record.id,
     threadFile: record.threadFile,
@@ -1330,6 +1360,7 @@ async function report(
       : {}),
     ...(researchCc !== undefined ? { researchFor: researchCc } : {}),
     ...(closeAfter ? { closing: "汇报已送出，本窗口几秒后由上级关闭。不要再开始新的工作。" } : {}),
+    ...(booked?.note !== undefined ? { taskNote: booked.note } : {}),
   });
 }
 
@@ -1904,7 +1935,7 @@ export function hasInboxHook(view: ToolWindowView): boolean {
   return view.kind === "claude" || view.kind === "deepseek" || view.kind === "cursor";
 }
 
-function remindTarget(
+async function remindTarget(
   target: ToolWindowView,
   from: ToolWindowView,
   kind: "message" | "report",
@@ -1921,6 +1952,9 @@ function remindTarget(
         summary:
           record.briefPath !== undefined ? `${record.text} 说明：${record.briefPath}` : record.text,
       };
+  // T11.24：管理者每收到一条提醒，末尾附一句任务账本现状。
+  const ledger =
+    target.role === "manager" ? await summarizeForManager(target.projectRoot) : undefined;
   const delivery = deps.remind(
     target.id,
     (count) =>
@@ -1931,8 +1965,9 @@ function remindTarget(
             kind,
             ...(status !== undefined ? { status } : {}),
             body,
+            ...(ledger !== undefined ? { ledger } : {}),
           })
-        : buildCoalescedReminder(count, body),
+        : buildCoalescedReminder(count, body, ledger),
     from.id,
     { waitSubmit },
   );

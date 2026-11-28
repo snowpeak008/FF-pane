@@ -203,6 +203,7 @@ import {
 } from "./role-resources";
 import { setWindowRole } from "./set-role";
 import { buildSilentReportReminder, createSilentReportWatch } from "./silent-report-watch";
+import { ledgerListForManager } from "./task-tools";
 import { createTeamDigest, digestRelativePath } from "./team-digest";
 import {
   appendThreadRecord,
@@ -1394,6 +1395,9 @@ export async function createWorkbenchCliLayer(
       const parentId =
         authRegistry.get(input.windowId)?.parentWindowId ?? input.window.parentWindowId;
       const openerTitle = parentId !== undefined ? input.windows[parentId]?.title : undefined;
+      // T11.24：管理者交接时直接带上未完成清单，别只让它去翻文件。
+      const ledgerList =
+        role === "manager" ? await ledgerListForManager(input.projectRoot) : undefined;
       deliverLine(
         input.windowId,
         resumeHandoffText({
@@ -1406,6 +1410,7 @@ export async function createWorkbenchCliLayer(
           ...(input.previousManagerTitle !== undefined
             ? { previousManagerTitle: input.previousManagerTitle }
             : {}),
+          ...(ledgerList !== undefined ? { ledgerList } : {}),
         }),
       );
     } catch (error) {

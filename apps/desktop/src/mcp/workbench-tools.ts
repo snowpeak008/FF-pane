@@ -37,6 +37,7 @@ export const WORKBENCH_MCP_TOOL_NAMES = [
   "ffpane_request_decision",
   "ffpane_wait_events",
   "ffpane_restart_window",
+  "ffpane_tasks",
 ] as const;
 
 export type WorkbenchMcpToolName = (typeof WORKBENCH_MCP_TOOL_NAMES)[number];
@@ -71,9 +72,58 @@ export const WORKBENCH_READ_ONLY_TOOL_NAMES: readonly WorkbenchMcpToolName[] = [
   "ffpane_lock",
   "ffpane_nudge",
   "ffpane_wait_events",
+  // 任务账本：只读档能 list；改账本只有现任管理者，由平台代码判断。
+  "ffpane_tasks",
 ];
 
 const TOOL_DEFINITIONS: readonly McpToolDefinition[] = [
+  {
+    name: "ffpane_tasks",
+    description:
+      "任务账本（平台保管，用户看不到）。要派给别的窗口、要跨几轮、要检查验收的事才建账；查进度、问一句这类小事不建。任务以账本为准，不要凭记忆。action：list 列未完成的（执行者只看派给自己的）；add 建任务（title、acceptance 必填；已有同主题未完成任务时会拒绝，请带 parentId 挂成它的子任务，确实是新事再传 force: true）；split 把一个大任务拆成 2 到 10 个子任务（只拆一层，每条分给不同执行者）；assign 派给本项目的窗口（taskId、windowId，大任务不直接派，派子任务）；verdict 检查窗口或管理者写结论（result 为 pass 或 rework，reason 必填，检查者不能是执行者本人）；close 标完成（没有检查窗口的小任务可传 waived: true 并写 reason 免检）；cancel 取消（连同没做完的子任务）。改账本只有现任管理者能做。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: {
+          type: "string",
+          enum: ["list", "add", "split", "assign", "verdict", "close", "cancel"],
+          description: "要做什么。",
+        },
+        taskId: { type: "string", description: "任务 id（assign、verdict、close、cancel 用）。" },
+        parentId: { type: "string", description: "父任务 id（add 挂子任务、split 用）。" },
+        title: { type: "string", description: "任务标题（add）。" },
+        detail: { type: "string", description: "任务内容（add）。" },
+        acceptance: { type: "string", description: "验收标准，一两句（add）。" },
+        after: {
+          type: "string",
+          description: "可选。前一条任务的 id，它没做完就不能派这一条（add）。",
+        },
+        source: { type: "string", description: "可选。来源，例如「用户临时提」（add）。" },
+        force: { type: "boolean", description: "可选。确认和已有任务不重合时传 true（add）。" },
+        subtasks: {
+          type: "array",
+          description: "子任务，2 到 10 条（split）。after 填「第几条之后」，从 1 数。",
+          items: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+              detail: { type: "string" },
+              acceptance: { type: "string" },
+              after: { type: "number" },
+            },
+            required: ["title", "acceptance"],
+          },
+        },
+        windowId: { type: "string", description: "要派的窗口 id（assign）。" },
+        brief: { type: "string", description: "可选。派活说明的路径（assign）。" },
+        result: { type: "string", enum: ["pass", "rework"], description: "结论（verdict）。" },
+        reason: { type: "string", description: "理由（verdict、cancel、免检的 close）。" },
+        waived: { type: "boolean", description: "免检（close），必须同时写 reason。" },
+      },
+      required: ["action"],
+      additionalProperties: false,
+    },
+  },
   {
     name: "ffpane_restart_window",
     description:
@@ -260,6 +310,11 @@ const TOOL_DEFINITIONS: readonly McpToolDefinition[] = [
           description:
             "可选。子窗口的思考强度：none、minimal、low、medium、high、xhigh、max。用启动参数传（Claude 的 --effort、Codex 的 -c model_reasoning_effort），不改用户的全局配置。",
         },
+        taskId: {
+          type: "string",
+          description:
+            "可选。派的是任务账本里哪一条（taskId）。带上就把那条标成执行中、记下负责窗口和 briefPath。",
+        },
       },
       required: ["cli", "role", "permission", "title"],
       additionalProperties: false,
@@ -310,6 +365,11 @@ const TOOL_DEFINITIONS: readonly McpToolDefinition[] = [
           type: "boolean",
           description:
             "可选。只用于 done：汇报送出后几秒，由上级关闭本窗口。说明里要求做完自关时才用。管理者不能用。",
+        },
+        taskId: {
+          type: "string",
+          description:
+            "可选。这次汇报对应任务账本里哪一条。带上就按状态自动记账：progress 记执行情况，blocked 标卡住，done 标待检查，failed 标失败。",
         },
       },
       required: ["status", "summary"],

@@ -864,23 +864,31 @@ describe("监管者观察", () => {
     };
   }
 
-  it("监管者在线：done 抄送给监管者、不叫醒上级；failed 照常叫醒", async () => {
+  it("监管者在线：done 仍叫醒上级（监管者只做旁路复核）；progress 静默", async () => {
     const root = tempDir();
     const watchedHarness = watched(root);
     const reminders = watchedHarness.reminders;
     const deps = supervisorOnline(watchedHarness.deps);
     const done = await call(deps, "B", "ffpane_report", { status: "done", summary: "记录在 x" });
-    expect(done.json).toMatchObject({ delivery: "silent", cc: { windowId: "S" } });
-    expect(reminders.map((item) => item.windowId)).toEqual(["S"]);
+    // T11.24：done 不再被监管者挡住，上级一定要被叫醒；监管者同时收到抄送。
+    expect(done.json).toMatchObject({ delivery: "delivered", cc: { windowId: "S" } });
+    expect(reminders.map((item) => item.windowId)).toEqual(["A", "S"]);
     const records = await readThreadIndex(root);
     expect(records.map((record) => record.to.windowId).sort()).toEqual(["A", "S"]);
 
+    const progress = await call(deps, "B", "ffpane_report", {
+      status: "progress",
+      summary: "做到一半",
+    });
+    expect(progress.json).toMatchObject({ delivery: "silent" });
+
     const failed = await call(deps, "B", "ffpane_report", { status: "failed", summary: "挂了" });
     expect(failed.json).toMatchObject({ delivery: "delivered", cc: { windowId: "S" } });
-    expect(reminders.map((item) => item.windowId)).toEqual(["S", "A", "S"]);
+    // done：A 叫醒 + S 抄送；progress：不叫醒 A，但 S 照样收到抄送；failed：A + S。
+    expect(reminders.map((item) => item.windowId)).toEqual(["A", "S", "S", "A", "S"]);
   });
 
-  it("T11.0b：没叫醒上级的 done 记下来，等兜底；叫醒了的不记", async () => {
+  it("T11.24：done 不再走兜底（它本来就该叫醒上级）", async () => {
     const root = tempDir();
     const h = watched(root);
     const watchedIds: { managerId: string; recordId: string }[] = [];
@@ -890,14 +898,11 @@ describe("监管者观察", () => {
         watchedIds.push({ managerId, recordId });
       },
     };
-    const done = await call(deps, "B", "ffpane_report", { status: "done", summary: "记录在 x" });
-    expect(done.json).toMatchObject({ delivery: "silent" });
-    const toManager = (await readThreadIndex(root)).find((record) => record.to.windowId === "A");
-    expect(watchedIds).toEqual([{ managerId: "A", recordId: toManager?.id }]);
-
+    // progress 静默，但仍不记兜底：兜底只追 done，而 done 现在会叫醒。
     await call(deps, "B", "ffpane_report", { status: "progress", summary: "做到一半" });
+    await call(deps, "B", "ffpane_report", { status: "done", summary: "记录在 x" });
     await call(deps, "B", "ffpane_report", { status: "failed", summary: "挂了" });
-    expect(watchedIds).toHaveLength(1);
+    expect(watchedIds).toEqual([]);
   });
 
   it("T11.0b：监管者在线时，管理者等事件直接拿到 stop，排着的事一并交出", async () => {

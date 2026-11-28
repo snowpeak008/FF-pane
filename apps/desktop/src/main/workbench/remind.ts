@@ -140,14 +140,22 @@ export function buildNewMessageReminder(input: {
   readonly kind: "message" | "report";
   readonly status?: ReportStatus;
   readonly body?: ReminderBody;
+  /** T11.24：管理者窗口附一句任务账本现状。其它角色不传。 */
+  readonly ledger?: string;
 }): string {
   const title = sanitizeReminderTitle(input.title);
   const role = WORKBENCH_ROLE_LABEL[input.role];
   const what = input.kind === "report" ? `汇报:${input.status ?? "progress"}` : "消息";
-  return `[新消息] 来自 ${title}（${role}）：${what}${reminderTail(input.body)}`;
+  const ledger =
+    input.ledger !== undefined && input.ledger.trim() !== "" ? ` ${input.ledger.trim()}` : "";
+  return `[新消息] 来自 ${title}（${role}）：${what}${reminderTail(input.body)}${ledger}`;
 }
 
-export function buildCoalescedReminder(count: number, body?: ReminderBody): string {
+export function buildCoalescedReminder(
+  count: number,
+  body?: ReminderBody,
+  ledger?: string,
+): string {
   const n = Number.isFinite(count) && count > 0 ? Math.floor(count) : 1;
   const latest =
     body?.id !== undefined && MESSAGE_ID.test(body.id) ? `，最新一条 id ${body.id}` : "";
@@ -159,5 +167,6 @@ export function buildCoalescedReminder(count: number, body?: ReminderBody): stri
           ...(body.summary !== undefined ? { summary: body.summary } : {}),
         },
   );
-  return `[新消息] 你有 ${n} 条新消息${latest}${tail}`;
+  const extra = ledger !== undefined && ledger.trim() !== "" ? ` ${ledger.trim()}` : "";
+  return `[新消息] 你有 ${n} 条新消息${latest}${tail}${extra}`;
 }
