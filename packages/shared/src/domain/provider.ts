@@ -167,9 +167,11 @@ export function providerModelKind(model: ProviderModel): ModelKind {
 }
 
 /** 来源里的对话模型 id（嵌入模型不算）。顺序保持来源里的顺序。 */
-export function providerChatModelIds(provider: Pick<Provider, "models">): readonly string[] {
+export function providerChatModelIds(provider: {
+  readonly models: readonly { readonly id: string; readonly kind?: ModelKind }[];
+}): readonly string[] {
   return provider.models
-    .filter((model) => providerModelKind(model) === "chat")
+    .filter((model) => (model.kind ?? "chat") === "chat")
     .map((model) => model.id);
 }
 

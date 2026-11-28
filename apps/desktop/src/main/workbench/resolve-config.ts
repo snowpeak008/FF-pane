@@ -5,8 +5,11 @@
  */
 
 import {
+  isModelAllowedBySource,
+  type ModelKind,
   type ProjectConfigId,
   projectConfigRoute,
+  providerChatModelIds,
   selectEffectiveProjectConfig,
   type WorkbenchAiKind,
 } from "@ff-pane/shared";
@@ -25,6 +28,36 @@ export interface LaunchCliRoute {
   readonly reasoningEffort?: string;
   readonly configId: ProjectConfigId;
   readonly configName: string;
+  /**
+   * 本机登录路线选了来源、且来源里有对话模型时：允许使用的模型 id。空或没有 = 不限制。
+   * 只管 FF-pane 自己指定的模型；CLI 自己的默认模型不检查。
+   */
+  readonly allowedModels?: readonly string[];
+}
+
+/** 开窗取路线要用的来源信息。完整的 Provider 本身就满足它。 */
+export interface RouteProviderInfo {
+  readonly id: string;
+  readonly name: string;
+  readonly templateId?: string;
+  readonly enabled?: boolean;
+  readonly models?: readonly { readonly id: string; readonly kind?: ModelKind }[];
+  readonly defaultModelId?: string;
+}
+
+/**
+ * 管理者开窗、给窗口换模型时用：指定的模型不在这一路的允许集合里，返回人话；允许或不限制返回 undefined。
+ * 没指定模型（用 CLI 自己的默认）不检查。
+ */
+export function modelNotAllowedMessage(
+  route: Pick<LaunchCliRoute, "allowedModels" | "providerName">,
+  model: string | undefined,
+): string | undefined {
+  const allowed = route.allowedModels ?? [];
+  if (isModelAllowedBySource(allowed, model)) {
+    return undefined;
+  }
+  return `模型「${model?.trim() ?? ""}」不在来源「${route.providerName ?? "本机登录来源"}」允许的模型里。允许：${allowed.join("、")}。`;
 }
 
 export interface ResolveProjectLaunchRouteInput {
@@ -32,9 +65,7 @@ export interface ResolveProjectLaunchRouteInput {
   readonly projectId: string;
   readonly kind: WorkbenchAiKind;
   readonly configs: ProjectConfigStore;
-  readonly getProvider: (
-    id: string,
-  ) => Promise<{ readonly id: string; readonly name: string } | undefined>;
+  readonly getProvider: (id: string) => Promise<RouteProviderInfo | undefined>;
   /** 设置里的 Cursor 默认模型（T11.18）：Cursor 这一路没填模型时用它。 */
   readonly cursorDefaultModel?: string;
 }
@@ -83,19 +114,76 @@ export async function resolveProjectLaunchRoute(
       error: `配置「${effective.name}」的 DeepSeek 必须选择来源并填写密钥。`,
     };
   }
-  const model =
-    spec.model?.trim() ||
-    (input.kind === "cursor" ? input.cursorDefaultModel?.trim() || undefined : undefined);
+  const explicitModel = spec.model?.trim() || undefined;
+  const cursorModel =
+    input.kind === "cursor" ? input.cursorDefaultModel?.trim() || undefined : undefined;
   const reasoningEffort = spec.reasoningEffort;
-  const shared = {
+  const sharedBase = {
     configId: effective.id,
     configName: effective.name,
-    ...(model !== undefined ? { model } : {}),
     ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
   };
   if (spec.connectionMode === "local_cli") {
-    return { ok: true, route: { connectionMode: "local_cli", ...shared } };
+    const sourceId = spec.providerId?.trim() ?? "";
+    if (sourceId === "") {
+      // 没选来源：和以前完全一样，不限制。
+      const model = explicitModel ?? cursorModel;
+      return {
+        ok: true,
+        route: {
+          connectionMode: "local_cli",
+          ...sharedBase,
+          ...(model !== undefined ? { model } : {}),
+        },
+      };
+    }
+    // 选了本机登录来源：它里面留下的对话模型就是允许使用的模型（清单为空 = 不限制）。
+    const source = await input.getProvider(sourceId);
+    if (source === undefined) {
+      return { ok: false, error: `配置「${effective.name}」的 ${cliName} 本机登录来源不存在。` };
+    }
+    if (source.templateId !== undefined && source.templateId !== "local-login") {
+      return {
+        ok: false,
+        error: `配置「${effective.name}」的 ${cliName} 本机登录选的来源「${source.name}」不是「本机已登录」类型。`,
+      };
+    }
+    if (source.enabled === false) {
+      return {
+        ok: false,
+        error: `配置「${effective.name}」的 ${cliName} 本机登录来源「${source.name}」已停用。`,
+      };
+    }
+    const allowed = providerChatModelIds({ models: source.models ?? [] });
+    const denied = modelNotAllowedMessage(
+      { allowedModels: allowed, providerName: source.name },
+      explicitModel,
+    );
+    if (denied !== undefined) {
+      return { ok: false, error: `配置「${effective.name}」的 ${cliName} 指定了${denied}` };
+    }
+    // 没指定模型：用来源的默认模型（要在清单里）；都没有就不传，让 CLI 用自己的默认。
+    const sourceDefault = source.defaultModelId?.trim() || undefined;
+    const model =
+      explicitModel ??
+      (sourceDefault !== undefined && isModelAllowedBySource(allowed, sourceDefault)
+        ? sourceDefault
+        : undefined) ??
+      cursorModel;
+    return {
+      ok: true,
+      route: {
+        connectionMode: "local_cli",
+        providerId: source.id,
+        providerName: source.name,
+        ...sharedBase,
+        ...(model !== undefined ? { model } : {}),
+        ...(allowed.length > 0 ? { allowedModels: allowed } : {}),
+      },
+    };
   }
+  const model = explicitModel ?? cursorModel;
+  const shared = { ...sharedBase, ...(model !== undefined ? { model } : {}) };
   const providerId = spec.providerId?.trim() ?? "";
   if (providerId === "") {
     return { ok: false, error: `配置「${effective.name}」的 ${cliName} 中转来源没有选。` };

@@ -2386,6 +2386,100 @@ describe("模型、思考强度与就地修复", () => {
     expect(await run(undefined)).not.toContain("没有 ffpane 工具");
   });
 
+  it("管理者开窗指定的模型：本机登录来源允许的才开；清单外的拒绝；不指定不检查", async () => {
+    const run = async (model: string | undefined, allowedModels: readonly string[] | undefined) => {
+      const root = tempDir();
+      const registry = createWorkbenchAuthRegistry();
+      registry.pin(
+        { id: "A", permission: "edit", role: "manager", openedBy: "user" },
+        "proj-1" as never,
+      );
+      registry.grantManager("A");
+      const manager: WorkbenchWindow = {
+        id: "A",
+        projectId: "proj-1" as never,
+        title: "总管",
+        kind: "claude",
+        cwd: root,
+        createdAt: 1,
+        permission: "edit",
+        role: "manager",
+        openedBy: "user",
+      };
+      let launched = 0;
+      const opened = await openChildWindow(
+        "A",
+        {
+          cli: "gemini",
+          role: "worker",
+          permission: "edit",
+          title: "Gemini 执行",
+          ...(model !== undefined ? { model } : {}),
+        },
+        {
+          authRegistry: registry,
+          readLayouts: async () => ({
+            "proj-1": {
+              projectId: "proj-1" as never,
+              tabs: [{ id: "tab-1", title: "Tab", slots: ["A", null, null, null, null, null] }],
+              activeTabId: "tab-1",
+              windows: { A: manager },
+              maximizedWindowId: null,
+              focusedWindowId: "A",
+            },
+          }),
+          saveLayout: async () => undefined,
+          launch: async () => {
+            launched += 1;
+            return {
+              terminal: { id: "term" },
+              kind: "gemini",
+              effectivePermission: "edit",
+              permissionCapped: false,
+            } as unknown as LaunchCliWindowResult;
+          },
+          resolveRoute: async () => ({
+            ok: true as const,
+            route: {
+              connectionMode: "local_cli" as const,
+              configId: "cfg" as never,
+              configName: "默认配置",
+              providerId: "src-1",
+              providerName: "谷歌号",
+              ...(allowedModels !== undefined ? { allowedModels } : {}),
+            },
+          }),
+          describeCaller: async () => ({
+            title: "总管",
+            projectId: "proj-1",
+            projectRoot: root,
+            permission: "edit" as const,
+          }),
+          aliveCount: () => 1,
+          maxWindows: async () => 8,
+          publish: () => undefined,
+          newId: () => "w-1",
+        },
+      );
+      return { opened, launched };
+    };
+    const allowed = await run("m-a", ["m-a", "m-b"]);
+    expect(allowed.opened.ok).toBe(true);
+    expect(allowed.launched).toBe(1);
+
+    const denied = await run("m-z", ["m-a", "m-b"]);
+    expect(denied.opened.ok).toBe(false);
+    expect(denied.launched).toBe(0);
+    expect(denied.opened.ok ? "" : denied.opened.error).toContain("m-a");
+    expect(denied.opened.ok ? "" : denied.opened.error).toContain("谷歌号");
+
+    // 不指定模型：不检查，用 CLI 自己的默认
+    expect((await run(undefined, ["m-a"])).opened.ok).toBe(true);
+    // 清单为空 / 没选来源（没有 allowedModels）：不限制
+    expect((await run("whatever", undefined)).opened.ok).toBe(true);
+    expect((await run("whatever", [])).opened.ok).toBe(true);
+  });
+
   it("开子窗口：模型和强度进启动参数，也记在窗口上", async () => {
     const root = tempDir();
     const registry = createWorkbenchAuthRegistry();

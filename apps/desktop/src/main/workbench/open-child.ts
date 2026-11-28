@@ -27,7 +27,7 @@ import {
 } from "./launch-cli";
 import { withModelEffortOverrides } from "./model-effort";
 import { stripControls, WORKBENCH_ROLE_LABEL } from "./remind";
-import type { LaunchCliRoute } from "./resolve-config";
+import { type LaunchCliRoute, modelNotAllowedMessage } from "./resolve-config";
 
 export interface OpenChildArgs {
   readonly cli: "claude" | "codex" | "grok" | "deepseek" | "cursor" | "gemini";
@@ -232,6 +232,11 @@ export async function openChildWindow(
       ok: false,
       error: `${route.error}可以改用已经配好的 CLI 开窗，或请用户在设置里给这个配置补上这一路。不要反复重试。`,
     };
+  }
+  // 配置里本机登录这一路选了来源时，管理者指定的模型也要在来源允许的模型里；没指定模型不检查。
+  const denied = modelNotAllowedMessage(route.route, args.model);
+  if (denied !== undefined) {
+    return { ok: false, error: `${denied}请换成允许的模型，或不指定模型。` };
   }
   const layouts = await deps.readLayouts();
   const layout = layouts[described.projectId];

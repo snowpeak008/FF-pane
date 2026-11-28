@@ -184,7 +184,7 @@ import {
   sanitizeThreadText,
   WORKBENCH_ROLE_LABEL,
 } from "./remind";
-import { resolveProjectLaunchRoute } from "./resolve-config";
+import { modelNotAllowedMessage, resolveProjectLaunchRoute } from "./resolve-config";
 import { describeShortage, resourceLimitsFromConfig, takeResourceSnapshot } from "./resource-guard";
 import {
   planResume as planResumeLaunch,
@@ -2265,10 +2265,7 @@ export async function createWorkbenchCliLayer(
       projectId: stored.projectId,
       kind,
       configs: projectConfigs,
-      getProvider: async (id) => {
-        const provider = await providers.getProvider(id as never);
-        return provider === undefined ? undefined : { id: provider.id, name: provider.name };
-      },
+      getProvider: async (id) => providers.getProvider(id as never),
       cursorDefaultModel: await cursorDefaultModel(),
     });
     if (!resolved.ok) {
@@ -2529,10 +2526,7 @@ export async function createWorkbenchCliLayer(
         projectId: request.projectId,
         kind,
         configs: projectConfigs,
-        getProvider: async (id) => {
-          const provider = await providers.getProvider(id as never);
-          return provider === undefined ? undefined : { id: provider.id, name: provider.name };
-        },
+        getProvider: async (id) => providers.getProvider(id as never),
         cursorDefaultModel: await cursorDefaultModel(),
       });
       if (!resolved.ok) {
@@ -3345,10 +3339,7 @@ export async function createWorkbenchCliLayer(
             projectId: routeInput.projectId,
             kind: routeInput.cli,
             configs: projectConfigs,
-            getProvider: async (id) => {
-              const provider = await providers.getProvider(id as never);
-              return provider === undefined ? undefined : { id: provider.id, name: provider.name };
-            },
+            getProvider: async (id) => providers.getProvider(id as never),
             cursorDefaultModel: await cursorDefaultModel(),
           }),
         describeCaller: async (windowId) => {
@@ -3753,6 +3744,29 @@ export async function createWorkbenchCliLayer(
       });
       if (!allowed.ok) {
         return allowed;
+      }
+      // 这个窗口所在项目的配置里，本机登录这一路选了来源时，新模型要在来源允许的模型里。
+      // 配置解析不出来（比如被删了）就不在这里拦：它自己重启时会报清楚。
+      if (parsed.model !== undefined) {
+        const owner = (await projects.listProjects()).find(
+          (item) => item.id === found.window.projectId,
+        );
+        if (owner !== undefined) {
+          const resolvedRoute = await resolveProjectLaunchRoute({
+            projectRoot: owner.rootPath,
+            projectId: found.window.projectId,
+            kind: found.window.kind,
+            configs: projectConfigs,
+            getProvider: async (id) => providers.getProvider(id as never),
+            cursorDefaultModel: await cursorDefaultModel(),
+          });
+          if (resolvedRoute.ok) {
+            const denied = modelNotAllowedMessage(resolvedRoute.route, parsed.model);
+            if (denied !== undefined) {
+              return { ok: false, error: denied };
+            }
+          }
+        }
       }
       const nextWindow = {
         ...found.window,
