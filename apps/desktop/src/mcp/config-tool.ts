@@ -372,6 +372,7 @@ export const CONFIG_CONFIG_DRAFT_FIELDS = [
   "grok",
   "deepseek",
   "cursor",
+  "gemini",
 ] as const;
 
 /** 自配置 sidecar 用来识别调用者角色的环境变量。只有 manager 能调用。 */
@@ -447,6 +448,11 @@ export const CONFIG_DRAFT_CONFIG_TOOL: McpToolDefinition = {
         ...CONFIG_ROUTE_SCHEMA,
         description:
           "Cursor route. Must be local_cli (the user's own Cursor login); model is optional (e.g. auto). Without this route Cursor windows still open with Cursor's default model.",
+      },
+      gemini: {
+        ...CONFIG_ROUTE_SCHEMA,
+        description:
+          "Gemini route (runs the local Antigravity CLI, agy). Must be local_cli (the user's own Google login); model is optional and is the display name agy expects. Without this route Gemini windows still open with agy's default model.",
       },
     },
     required: ["name"],
@@ -838,6 +844,12 @@ function parseConfigRoute(
       error: 'Field "cursor.connectionMode" must be "local_cli". Cursor only uses the local login.',
     };
   }
+  if (label === "gemini" && record["connectionMode"] !== "local_cli") {
+    return {
+      error:
+        'Field "gemini.connectionMode" must be "local_cli". Gemini only uses the local agy login for now.',
+    };
+  }
   if (label === "deepseek" && record["connectionMode"] !== "relay") {
     return {
       error: 'Field "deepseek.connectionMode" must be "relay". DeepSeek requires an API key.',
@@ -936,6 +948,14 @@ export function parseConfigDraftArgs(args: Readonly<Record<string, unknown>>): P
     }
     cursor = parsed.route;
   }
+  let gemini: ProjectConfigRoute | undefined;
+  if (args["gemini"] !== undefined) {
+    const parsed = parseConfigRoute(args["gemini"], "gemini");
+    if (!("ok" in parsed)) {
+      return { ok: false, error: parsed.error };
+    }
+    gemini = parsed.route;
+  }
   const id = nonEmptyString(args["id"]);
   const draft: ProjectConfigDraft = {
     name,
@@ -951,6 +971,7 @@ export function parseConfigDraftArgs(args: Readonly<Record<string, unknown>>): P
     ...(grok !== undefined ? { grok } : {}),
     ...(deepseek !== undefined ? { deepseek } : {}),
     ...(cursor !== undefined ? { cursor } : {}),
+    ...(gemini !== undefined ? { gemini } : {}),
   };
   return { ok: true, parsed: { kind: "config", ...(id !== undefined ? { id } : {}), draft } };
 }
@@ -1022,6 +1043,7 @@ export function sanitizeProjectConfig(config: ProjectConfig): {
   readonly grok?: ProjectConfigRoute;
   readonly deepseek?: ProjectConfigRoute;
   readonly cursor?: ProjectConfigRoute;
+  readonly gemini?: ProjectConfigRoute;
 } {
   return {
     id: config.id,
@@ -1038,6 +1060,7 @@ export function sanitizeProjectConfig(config: ProjectConfig): {
     ...(config.grok !== undefined ? { grok: sanitizeRoute(config.grok) } : {}),
     ...(config.deepseek !== undefined ? { deepseek: sanitizeRoute(config.deepseek) } : {}),
     ...(config.cursor !== undefined ? { cursor: sanitizeRoute(config.cursor) } : {}),
+    ...(config.gemini !== undefined ? { gemini: sanitizeRoute(config.gemini) } : {}),
   };
 }
 

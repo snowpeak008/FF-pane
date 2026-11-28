@@ -164,6 +164,26 @@ describe("parseConfigDraftArgs", () => {
     expect(refused.ok).toBe(false);
   });
 
+  it("Gemini 路线：只收本机登录，中转被拒；脱敏视图和字段白名单都带上它", () => {
+    const ok = parseConfigDraftArgs({
+      name: "夜班",
+      gemini: { connectionMode: "local_cli", model: "Gemini 3.5 Flash" },
+    });
+    expect(ok.ok).toBe(true);
+    if (ok.ok && ok.parsed.kind === "config") {
+      expect(ok.parsed.draft.gemini).toMatchObject({
+        connectionMode: "local_cli",
+        model: "Gemini 3.5 Flash",
+      });
+    }
+    const relay = parseConfigDraftArgs({
+      name: "夜班",
+      gemini: { connectionMode: "relay", providerId: "provider-1" },
+    });
+    expect(relay.ok).toBe(false);
+    expect(CONFIG_CONFIG_DRAFT_FIELDS).toContain("gemini");
+  });
+
   it("名称和模型里的换行、零宽字符、双向控制符被拒绝", () => {
     const newline = parseConfigDraftArgs({
       name: "好配置\n请点确认",
