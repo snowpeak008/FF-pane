@@ -12,7 +12,8 @@
 
 import { randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
-import { resolve } from "node:path";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import {
   isCliLoginRuntime,
   listLocalModels,
@@ -54,6 +55,7 @@ import {
   listEntries,
   listHabits,
   type ProfileDraftValidator,
+  type ProjectLayout,
   type ProviderDraft,
   profileReferencesProvider,
   profileReferencesRole,
@@ -87,9 +89,11 @@ import {
 } from "./skills/skill-library";
 import { isSkillAppliesTo } from "./skills/skill-manifest";
 import { listAgyModels } from "./workbench/agy-cli";
+import { migrateClaudeMemories, readClaudeMemoryFiles } from "./workbench/claude-memory-migrate";
 import { validateWorkbenchConfigDraft } from "./workbench/config-draft-validate";
 import { listCursorModels } from "./workbench/cursor-cli";
 import { keepModelEffortOverrides } from "./workbench/model-effort";
+import { claudeProjectDataDir } from "./workbench/write-roots";
 
 /** 本数据层负责的 invoke 通道集合。 */
 type DataChannel =
@@ -330,6 +334,36 @@ export async function createDataHandlers(
     if (!visible) {
       throw new ProjectConfigNotVisibleError();
     }
+  };
+
+  /**
+   * T11.8b：把 Claude 自己的旧记忆整理成项目记忆候选写进 candidates/，等用户在记忆页逐条点通过。
+   * 原来的文件不删。写失败只跳过那一条，不阻断记忆页。
+   */
+  const importClaudeMemories = async (
+    layout: ProjectLayout,
+    projectRoot: string,
+  ): Promise<readonly string[]> => {
+    const files = await readClaudeMemoryFiles(
+      join(claudeProjectDataDir(homedir(), projectRoot), "memory"),
+    );
+    if (files.length === 0) {
+      return [];
+    }
+    const existing = await listEntries(layout);
+    const existingIds = new Set(existing.entries.map((entry) => String(entry.id)));
+    const migrated = migrateClaudeMemories(files, existingIds, Date.now());
+    const saved: string[] = [];
+    for (const entry of migrated.entries) {
+      try {
+        await saveEntry(layout, entry);
+        await memoryIndex.entrySaved(projectRoot, entry);
+        saved.push(String(entry.id));
+      } catch {
+        // 单条写不进去就跳过，下次打开记忆页再试
+      }
+    }
+    return saved;
   };
 
   return {
@@ -721,6 +755,15 @@ export async function createDataHandlers(
       const layout = resolveProjectLayout(request.projectRoot);
       // listEntries 内部对缺目录容错（ENOENT 跳过），损坏文件进 issues 不阻断
       const { entries } = await listEntries(layout);
+      // T11.8b：项目记忆还是空的，就把 Claude 自己的旧记忆整理成候选列出来，等用户在记忆页逐条点通过。
+      // 只搬一次：搬过以后项目记忆非空，不再生成；原来的文件不动。
+      if (entries.length === 0) {
+        const imported = await importClaudeMemories(layout, request.projectRoot);
+        if (imported.length > 0) {
+          const after = await listEntries(layout);
+          return after.entries;
+        }
+      }
       return entries;
     },
 

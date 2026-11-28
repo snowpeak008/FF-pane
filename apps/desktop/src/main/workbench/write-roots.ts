@@ -4,8 +4,11 @@
  * - Claude：经环境变量交给 PreToolUse hook（`mcp/write-guard.ts`）检查。
  * - Codex：项目目录本来就是 workspace-write 沙盒能写的，这里只补「项目外可写目录」。
  *
- * 能写：项目目录、系统临时目录、Claude 计划模式的 `~/.claude/plans`、Claude 自己记忆的那个目录
- * （记忆搬进项目记忆之前先留着，T11.8b）、Tony 在项目卡片里填的项目外可写目录。
+ * 能写：项目目录、系统临时目录、Claude 计划模式的 `~/.claude/plans`、
+ * Tony 在项目卡片里填的项目外可写目录。
+ *
+ * Claude 自己记忆的目录（`~/.claude/projects/<cwd>/memory`）原来留着例外，T11.8b 起不再放行：
+ * FF-pane 的 Claude 窗口已关掉自动记忆（`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`），旧记忆搬成项目记忆候选。
  */
 
 import { join, resolve } from "node:path";
@@ -49,8 +52,6 @@ export function claudeWriteRoots(input: {
     input.projectRoot,
     input.tmp,
     join(input.home, ".claude", "plans"),
-    join(claudeProjectDataDir(input.home, input.projectRoot), "memory"),
-    join(claudeProjectDataDir(input.home, input.cwd), "memory"),
     ...input.outsideDirs,
   ]);
 }

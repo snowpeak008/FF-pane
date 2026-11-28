@@ -27,7 +27,7 @@ describe("write-roots", () => {
     );
   });
 
-  it("Claude 能写：项目在第一个，再是临时目录、计划、自己记忆、项目外可写目录；去重", () => {
+  it("项目在第一个，再是临时目录、计划、项目外可写目录；去重", () => {
     const roots = claudeWriteRoots({
       projectRoot: PROJECT,
       cwd: PROJECT,
@@ -39,9 +39,19 @@ describe("write-roots", () => {
       PROJECT,
       TMP,
       "C:\\Users\\admin\\.claude\\plans",
-      "C:\\Users\\admin\\.claude\\projects\\D--WorkWork-gamedesign---2------\\memory",
       "D:\\WorkWork\\共享素材",
     ]);
+  });
+
+  it("T11.8b：Claude 自己的记忆目录不再放行", () => {
+    const roots = claudeWriteRoots({
+      projectRoot: PROJECT,
+      cwd: PROJECT,
+      home: HOME,
+      tmp: TMP,
+      outsideDirs: [],
+    });
+    expect(roots.some((root) => root.includes(".claude\\projects"))).toBe(false);
   });
 
   it("Codex：有项目外可写目录才传 writable_roots", () => {

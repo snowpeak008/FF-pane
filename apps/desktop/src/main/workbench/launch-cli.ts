@@ -737,6 +737,10 @@ async function launchCliWindowBody(
   if (claudeProvider?.apiKeyHelper !== undefined && secret !== undefined) {
     extraProcessEnv[CLAUDE_KEY_ENV] = secret;
   }
+  // T11.8b：FF-pane 的 Claude 窗口不读写 Claude 自己的全局记忆，项目记忆走 ffpane_memory_*。
+  if (runtime === "claude-code") {
+    extraProcessEnv["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "1";
+  }
 
   let nativeSessionId: string | undefined = input.nativeSessionId?.trim() || undefined;
   let args: string[];
