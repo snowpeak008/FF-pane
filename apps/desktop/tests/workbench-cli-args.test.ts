@@ -204,6 +204,23 @@ describe("buildInteractiveCodexArgs", () => {
     `);
   });
 
+  it("T11.7：内联 hooks 排在最后，免审核参数单独一个", () => {
+    const args = buildInteractiveCodexArgs({
+      cwd: "D:\\repo",
+      configOverrides: { model_reasoning_effort: JSON.stringify("low") },
+      extraConfig: { "hooks.PostToolUse": "[]" },
+      bypassHookTrust: true,
+      initialPrompt: "hi",
+    });
+    expect(args.filter((arg) => arg === "hooks.PostToolUse=[]")).toHaveLength(1);
+    expect(args.indexOf("hooks.PostToolUse=[]")).toBeGreaterThan(
+      args.indexOf('model_reasoning_effort="low"'),
+    );
+    expect(args).toContain("--dangerously-bypass-hook-trust");
+    // 开场白仍在最后
+    expect(args.at(-1)).toBe("hi");
+  });
+
   it("新开与续接都追加 developer_instructions，不覆盖已有 -c", () => {
     const text = "角色说明\n第二行";
     const fresh = buildInteractiveCodexArgs({

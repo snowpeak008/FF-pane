@@ -104,6 +104,16 @@ export interface BuildInteractiveCodexArgsInput {
    * 这条覆盖会盖过用户 config.toml 里的 notify，且只对本次进程生效。
    */
   readonly notifyArgv?: readonly string[];
+  /**
+   * T11.7：每窗口的内联 hooks，写成 `-c hooks.PostToolUse=[{hooks=[{type="command",command="…"}]}]`。
+   * command 走 PowerShell，引号路径前必须带 `& `（2026-11-28 实测：不带会静默不执行）。
+   */
+  readonly extraConfig?: Readonly<Record<string, string>>;
+  /**
+   * T11.7：`--dangerously-bypass-hook-trust`。会让用户在 `~/.codex` 和项目 `.codex` 里自己配的 hooks
+   * 也免审核运行，只在 Tony 明确同意时开。
+   */
+  readonly bypassHookTrust?: boolean;
 }
 
 /**
@@ -220,6 +230,13 @@ export function buildInteractiveCodexArgs(input: BuildInteractiveCodexArgsInput)
   if (input.notifyArgv !== undefined && input.notifyArgv.length > 0) {
     const encoded = input.notifyArgv.map((part) => JSON.stringify(part)).join(",");
     args.push("-c", `notify=[${encoded}]`);
+  }
+  // 内联 hooks 放在最后，同名覆盖盖不过它。
+  for (const [key, value] of Object.entries(input.extraConfig ?? {})) {
+    args.push("-c", `${key}=${value}`);
+  }
+  if (input.bypassHookTrust === true) {
+    args.push("--dangerously-bypass-hook-trust");
   }
   if (input.initialPrompt !== undefined && input.initialPrompt.trim() !== "") {
     args.push(input.initialPrompt);

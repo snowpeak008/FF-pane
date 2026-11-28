@@ -106,6 +106,7 @@ import {
 } from "./grok-hook-config";
 import { writeGrokProjectMcpConfig } from "./grok-mcp-config";
 import {
+  codexMidTurnHookConfig,
   prepareWindowHooks,
   releaseWindowHooks,
   resolveWorkbenchHookScriptPath,
@@ -823,6 +824,17 @@ async function launchCliWindowBody(
       ...(resuming && nativeSessionId !== undefined ? { resumeSessionId: nativeSessionId } : {}),
       ...(developerInstructions !== undefined ? { developerInstructions } : {}),
       ...(hooks.notifyArgv.length > 0 ? { notifyArgv: hooks.notifyArgv } : {}),
+      ...(hooks.notifyArgv.length > 0
+        ? {
+            extraConfig: codexMidTurnHookConfig(
+              hooks.notifyArgv[0] ?? "",
+              hooks.notifyArgv[1] ?? "",
+            ),
+            // Tony 2026-11-28 定：11.7 补完。不带这个参数内联 hooks 根本不跑（实测）。
+            // 代价：本次启动里用户自己在 ~/.codex、项目 .codex 里配的 hooks 也免审核运行。
+            bypassHookTrust: true,
+          }
+        : {}),
       ...(input.initialPrompt !== undefined ? { initialPrompt: input.initialPrompt } : {}),
     });
   } else if (runtime === "grok") {

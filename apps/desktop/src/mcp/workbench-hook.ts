@@ -902,6 +902,28 @@ if (invokedDirectly()) {
       .then(() => {
         process.exit(0);
       });
+  } else if (named === "CodexPostToolUse") {
+    // T11.7：Codex 每调用完一个工具问一次中途消息，有就作为 additionalContext 交给模型。
+    // 不上报：Codex 的回合信号仍由 notify 负责，这里只加消息，免得改变现有的状态判断。
+    void readStdinText()
+      .then(async () => {
+        if (pipePath === "" || token === "") {
+          return;
+        }
+        const midTurn = await requestInboxDigest(
+          pipePath,
+          token,
+          MID_TURN_TIMEOUT_MS,
+          "inbox-midturn",
+        );
+        if (midTurn !== "") {
+          await writeStdoutLine(inboxHookOutput(midTurn, "PostToolUse"));
+        }
+      })
+      .catch(() => undefined)
+      .then(() => {
+        process.exit(0);
+      });
   } else if (event === "PreToolUse") {
     // 只做项目外写入检查，不上报、不需要管道。
     void readStdinText()

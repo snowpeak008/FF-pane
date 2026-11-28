@@ -140,6 +140,22 @@ export function prepareWindowHooks(input: {
   };
 }
 
+/**
+ * T11.7：Codex 的 PostToolUse 内联 hooks 配置值（`-c hooks.PostToolUse=` 后面那一串）。
+ * 2026-11-28 实测：命令串走 PowerShell，`& "node.exe" "脚本" CodexPostToolUse` 才能执行；
+ * 直接写引号路径会静默不跑（同一次运行里带 `& ` 的跑了、不带的没有）。
+ * 脚本只读环境里的管道和令牌，不往配置里写任何令牌。
+ */
+export function codexMidTurnHookConfig(
+  nodePath: string,
+  scriptPath: string,
+): Readonly<Record<string, string>> {
+  const command = `& ${JSON.stringify(nodePath)} ${JSON.stringify(scriptPath)} CodexPostToolUse`;
+  return {
+    "hooks.PostToolUse": `[{hooks=[{type="command",command=${JSON.stringify(command)},timeout=10}]}]`,
+  };
+}
+
 /** 本窗口的钩子临时目录（装了钩子才有）。Cursor 的插件和说明文件也放这里，关窗一起删。 */
 export function windowHookDir(windowId: string): string | undefined {
   return dirs.get(windowId);
