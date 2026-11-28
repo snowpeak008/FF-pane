@@ -40,6 +40,7 @@ import {
   createAgyPluginHandlers,
   createAgyPluginStatusReader,
   runAgyPluginAutoUpdate,
+  shouldAutoUpdateAgyPlugin,
 } from "./user-mods/agy-plugin-main";
 import { loadWindowState, trackWindowState } from "./window-state";
 import {
@@ -48,6 +49,7 @@ import {
   releaseMcpForTerminalMetadata,
   type WorkbenchCliLayer,
 } from "./workbench";
+import { isAutomatedTestEnv } from "./workbench/codex-claim";
 import { createLayoutFlushBridge, WORKBENCH_LAYOUT_FLUSH_BUDGET_MS } from "./workbench-flush";
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
@@ -328,7 +330,15 @@ async function bootstrap(): Promise<void> {
         .some((record) => !record.exited && record.metadata?.["kind"] === "gemini") ?? false,
   };
   registerInvokeHandlers(ipcMain, createAgyPluginHandlers(agyPluginOptions));
-  void runAgyPluginAutoUpdate(agyPluginOptions).then((line) => console.log(`[user-mods] ${line}`));
+  if (
+    shouldAutoUpdateAgyPlugin({ isPackaged: app.isPackaged, automatedTest: isAutomatedTestEnv() })
+  ) {
+    void runAgyPluginAutoUpdate(agyPluginOptions).then((line) =>
+      console.log(`[user-mods] ${line}`),
+    );
+  } else {
+    console.log("[user-mods] 开发构建或自动化测试：不自动更新用户的 agy 插件");
+  }
   // Claude 沙盒（T11.20）：设置里看状态、装、卸，走用户自己那份 Claude 的 claude sandbox 命令。
   registerInvokeHandlers(ipcMain, createClaudeSandboxHandlers());
 

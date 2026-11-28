@@ -179,6 +179,18 @@ export function createAgyPluginStatusReader(
 }
 
 /**
+ * 启动时要不要自动更新用户已装的插件。只有安装版（打包后的 app）才更新：
+ * 开发构建和自动化测试的可执行文件路径跟安装版不一样，会把用户真实装好的插件判成「过期」并改写，
+ * 还会在用户的插件目录里留下 agy 的临时暂存目录（2026-11-28 跑 e2e 时真的发生过）。
+ */
+export function shouldAutoUpdateAgyPlugin(input: {
+  readonly isPackaged: boolean;
+  readonly automatedTest: boolean;
+}): boolean {
+  return input.isPackaged && !input.automatedTest;
+}
+
+/**
  * 启动时调用，不阻塞启动、不抛。只更新「已装且过期」的；没装的什么都不做。
  * 返回一句话给日志。
  */

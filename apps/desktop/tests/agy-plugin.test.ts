@@ -17,6 +17,7 @@ import {
   installAgyPlugin,
   uninstallAgyPlugin,
 } from "../src/main/user-mods/agy-plugin";
+import { shouldAutoUpdateAgyPlugin } from "../src/main/user-mods/agy-plugin-main";
 import {
   EMPTY_LEDGER,
   findEntry,
@@ -315,5 +316,14 @@ describe("台账解析", () => {
       updatedAt: 2,
     };
     expect(parseLedger(JSON.stringify({ entries: [ok, { kind: "x" }, 5] })).entries).toEqual([ok]);
+  });
+});
+
+describe("启动时自动更新只在安装版里做", () => {
+  it("开发构建、自动化测试都不动用户真实的插件", () => {
+    expect(shouldAutoUpdateAgyPlugin({ isPackaged: true, automatedTest: false })).toBe(true);
+    expect(shouldAutoUpdateAgyPlugin({ isPackaged: false, automatedTest: false })).toBe(false);
+    expect(shouldAutoUpdateAgyPlugin({ isPackaged: true, automatedTest: true })).toBe(false);
+    expect(shouldAutoUpdateAgyPlugin({ isPackaged: false, automatedTest: true })).toBe(false);
   });
 });
