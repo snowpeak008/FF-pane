@@ -56,6 +56,7 @@ import {
   writeAgyProjectHooks,
   writeAgyProjectMcpConfig,
 } from "./agy-hook-config";
+import { agyPluginNote, withAgyPluginNote } from "./agy-plugin-note";
 import type { WorkbenchAuthRegistry } from "./auth-registry";
 import {
   buildClaudeProviderSettings,
@@ -212,6 +213,8 @@ export interface LaunchCliWindowResult {
 
 export interface LaunchCliWindowDeps {
   readonly manager: PtyManager;
+  /** agy 的 ffpane 工具插件是否已添加且可用；没接或查不出来就不写相关说明。 */
+  readonly agyPluginInstalled?: () => Promise<boolean | undefined>;
   readonly getProvider: (id: string) => Promise<
     | {
         readonly id: string;
@@ -1031,9 +1034,13 @@ ${manualMount.index}`;
     const hookDir = windowHookDir(input.windowId);
     try {
       if (hookDir !== undefined) {
+        const pluginInstalled = await deps.agyPluginInstalled?.().catch(() => undefined);
         agyContextFile = await writeAgyContextFile(
           hookDir,
-          withManuals(withSkills(roleInjection.developerInstructions)),
+          withAgyPluginNote(
+            withManuals(withSkills(roleInjection.developerInstructions)) ?? "",
+            agyPluginNote(pluginInstalled),
+          ),
         );
       }
       if (nodePath !== undefined) {

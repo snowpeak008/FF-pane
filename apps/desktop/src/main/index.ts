@@ -38,6 +38,7 @@ import {
 import {
   type AgyPluginMainOptions,
   createAgyPluginHandlers,
+  createAgyPluginStatusReader,
   runAgyPluginAutoUpdate,
 } from "./user-mods/agy-plugin-main";
 import { loadWindowState, trackWindowState } from "./window-state";
@@ -402,6 +403,14 @@ async function bootstrap(): Promise<void> {
       getWindow: () => mainWindow,
       getMaxWorkbenchWindows: async () => (await configStore.readConfig()).maxWorkbenchWindows,
       authRegistry: workbenchAuthRegistry,
+      // 没添加 agy 插件就没有 ffpane 工具；查不出来（比如没装 agy）按「不知道」处理，不乱说。
+      agyPluginInstalled: async () => {
+        const view = await createAgyPluginStatusReader(agyPluginOptions)();
+        if (view.state === "agy-missing") {
+          return undefined;
+        }
+        return view.state === "installed" && view.enabled;
+      },
       ...(sharedMemoryIndex !== undefined ? { memoryIndex: sharedMemoryIndex } : {}),
     });
     registerInvokeHandlers(ipcMain, workbenchCliLayer.handlers);

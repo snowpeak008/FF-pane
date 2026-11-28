@@ -114,6 +114,23 @@ test("local-login 建档流：登录状态显示 + 本地模型枚举 + 手填�
   await expect(page.getByText("Codex Login Provider", { exact: true })).toBeVisible();
 });
 
+test("local-login 选 agy：显示 ffpane 工具插件面板（只看状态，不点添加）", async () => {
+  const { page } = launched;
+  await gotoRoute(page, "/settings?group=models");
+  await page.getByRole("button", { name: "New provider" }).click();
+  await page.getByTestId("provider-template-local-login").click();
+  await page.locator("#provider-cli-runtime").selectOption("agy");
+  const panel = page.getByTestId("agy-plugin-panel");
+  await expect(panel).toBeVisible();
+  // 没装 agy 的机器是 agy-missing，装了没添加是 not-installed；两种都不该有「已添加」
+  await expect(panel).not.toHaveAttribute("data-state", "current");
+  await expect(page.getByTestId("agy-plugin-state")).toBeVisible();
+  // 选回别的 CLI，面板消失
+  await page.locator("#provider-cli-runtime").selectOption("codex");
+  await expect(panel).toHaveCount(0);
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+});
+
 test("anthropic-compatible：经模板新建、编辑、删除", async () => {
   const { page } = launched;
   await gotoRoute(page, "/settings?group=models");

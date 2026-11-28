@@ -741,11 +741,17 @@ export function agyPreToolUseOutput(
     return undefined;
   };
   // 工作台 MCP：懒加载经 call_mcp_tool(ServerName)，直接或已展开时工具名带服务器名。
-  const serverName = pick("ServerName", "serverName", "server");
+  // 参数值在真机里是带引号的字符串（"\"ffpane-workbench_ffpane-workbench\""），先去引号再精确比。
+  // 只认工作台自己的两个名字：直接配的服务器，和插件自带的（插件名_服务器名）。
+  // 不能用 includes：别人装的名字里带这几个字的服务器不该被自动放行。
+  const serverName = pick("ServerName", "serverName", "server")
+    ?.trim()
+    .replace(/^["']+|["']+$/g, "");
   if (
     (name === "call_mcp_tool" &&
       serverName !== undefined &&
-      serverName.includes(workbenchServerName)) ||
+      (serverName === workbenchServerName ||
+        serverName === `${workbenchServerName}_${workbenchServerName}`)) ||
     name.includes(`mcp_${workbenchServerName}_`) ||
     name.startsWith(`mcp.${workbenchServerName}.`)
   ) {

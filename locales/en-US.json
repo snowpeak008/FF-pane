@@ -1616,5 +1616,30 @@
       "ok": "Installed.",
       "failed": "Install failed: "
     }
+  },
+  "agyPlugin": {
+    "title": "ffpane tools plugin (agy)",
+    "intro": "Without it, agy windows still open but have no ffpane tools (reports, inbox, assigning work, etc.). Adding installs one plugin in agy's plugin folder (~/.gemini/config/plugins). You can remove it here at any time, and uninstalling FF-pane removes it too.",
+    "autoUpdate": "An added plugin is updated automatically when FF-pane starts (postponed while an agy window is open). A plugin you did not add is never installed for you.",
+    "lastError": "The last automatic update failed: {{error}}",
+    "state": {
+      "missing": "agy not found",
+      "notInstalled": "Not added",
+      "current": "Added",
+      "stale": "Added · update pending",
+      "disabled": "Added · disabled in agy",
+      "foreign": "agy has a plugin with this name that FF-pane did not add; it is left alone"
+    },
+    "add": "Add",
+    "update": "Update now",
+    "remove": "Remove",
+    "done": "Done. New agy windows pick it up; reopen windows that are already open.",
+    "failed": "It did not work.",
+    "confirmAddTitle": "Add the ffpane tools plugin to agy?",
+    "confirmAddBody": "Runs agy's own plugin install to put one plugin at ~/.gemini/config/plugins/ffpane-workbench. It only contains the FF-pane workbench MCP server entry, no secrets. You can remove it here at any time.",
+    "confirmRemoveTitle": "Remove agy's ffpane tools plugin?",
+    "confirmRemoveBody": "After removal, new agy windows have no ffpane tools. Windows that are already open are unaffected until reopened.",
+    "notice": "The ffpane tools plugin is not added: this window has no ffpane tools (reports, inbox, etc.). Add it in Settings → Models → Provider → Local login → agy.",
+    "noticeForeign": "agy has a plugin with this name that FF-pane did not add: this window has no ffpane tools."
   }
 }

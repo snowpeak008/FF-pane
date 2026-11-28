@@ -265,6 +265,32 @@ describe("钩子载荷", () => {
       decision: "auto_approve",
     });
   });
+
+  it("插件自带的服务器（带引号的 插件名_服务器名）auto_approve；名字相近的别人的不放行", () => {
+    const call = (serverName: string): string =>
+      JSON.stringify({
+        cwd: "D:proj",
+        toolCall: { name: "call_mcp_tool", args: { ServerName: serverName, ToolName: "x" } },
+      });
+    // 真机里的参数值带引号
+    for (const ok of [
+      '"ffpane-workbench_ffpane-workbench"',
+      "ffpane-workbench_ffpane-workbench",
+      '"ffpane-workbench"',
+    ]) {
+      expect(JSON.parse(agyPreToolUseOutput(call(ok), roots, "ffpane-workbench"))).toEqual({
+        decision: "auto_approve",
+      });
+    }
+    for (const other of [
+      "evil-ffpane-workbench",
+      "ffpane-workbench-evil_x",
+      '"someone_ffpane-workbench"',
+      "other-server",
+    ]) {
+      expect(agyPreToolUseOutput(call(other), roots, "ffpane-workbench")).toBe("");
+    }
+  });
 });
 
 describe("环境与模型", () => {

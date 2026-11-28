@@ -85,6 +85,8 @@ export interface OpenChildDeps {
   >;
   readonly aliveCount: () => number;
   readonly maxWindows: () => Promise<number>;
+  /** agy 的 ffpane 工具插件是否已添加且可用；没接就不提醒。 */
+  readonly agyPluginInstalled?: () => Promise<boolean | undefined>;
   /** 开窗前查内存和磁盘。不够时返回原因。 */
   readonly checkResources?: (projectRoot: string) => Promise<string | undefined>;
   readonly publish: (input: {
@@ -400,7 +402,14 @@ export async function openChildWindow(
     managerWindowId: callerId,
     ...(briefRelative !== undefined ? { briefPath: briefRelative } : {}),
   });
+  const agyHasNoTools =
+    args.cli === "gemini" && (await deps.agyPluginInstalled?.().catch(() => undefined)) === false;
   const notes = [
+    ...(agyHasNoTools
+      ? [
+          "这个 agy 窗口没有 ffpane 工具（用户没有在 FF-pane 设置里添加 agy 插件）：它不能用 ffpane_report 汇报、不能读收件箱、不能拿锁。别派需要这些的活；要看它的结果请用 ffpane_read_output。",
+        ]
+      : []),
     ...(actuallyCapped
       ? [`请求权限 ${args.permission} 高于你的 ${callerPermission}，已封顶为 ${effective}。`]
       : []),

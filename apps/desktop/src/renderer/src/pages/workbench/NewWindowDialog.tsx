@@ -25,6 +25,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import type { CursorAccountStatus, GeminiAccountStatus } from "../../../../shared-ipc/contracts";
 import { CursorAccountPanel } from "../../components/cursor/CursorAccountPanel";
+import { AgyPluginNotice } from "../../components/gemini/AgyPluginPanel";
 import { GeminiAccountPanel } from "../../components/gemini/GeminiAccountPanel";
 import { Button } from "../../components/ui/Button";
 import {
@@ -233,7 +234,10 @@ export function NewWindowDialog({
           ) : null}
 
           {kind === "gemini" ? (
-            <GeminiAccountPanel model={route?.model?.trim() ?? ""} onStatus={setGeminiStatus} />
+            <>
+              <GeminiAccountPanel model={route?.model?.trim() ?? ""} onStatus={setGeminiStatus} />
+              <AgyPluginNotice />
+            </>
           ) : null}
 
           {kind !== "shell" ? (

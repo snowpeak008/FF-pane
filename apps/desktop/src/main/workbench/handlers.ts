@@ -283,6 +283,8 @@ export interface WorkbenchCliLayerOptions {
   readonly getMaxWorkbenchWindows?: () => number | Promise<number>;
   /** 与 data 层共享的权威权限表；缺省则本层自建。 */
   readonly authRegistry?: WorkbenchAuthRegistry;
+  /** agy 的 ffpane 工具插件是否已添加且可用（没添加就没有 ffpane 工具）。 */
+  readonly agyPluginInstalled?: () => Promise<boolean | undefined>;
   /**
    * 与记忆页共用的索引服务。缺省时本层自建一份，检索仍能从 Markdown 对账，
    * 但已打开的另一份连接不会立刻看到新条目。
@@ -1685,6 +1687,9 @@ export async function createWorkbenchCliLayer(
   };
   const launchDeps = () => ({
     manager: options.manager,
+    ...(options.agyPluginInstalled !== undefined
+      ? { agyPluginInstalled: options.agyPluginInstalled }
+      : {}),
     getProvider: async (id: string) => {
       const provider = await providers.getProvider(id as never);
       return provider as Provider | undefined;
@@ -3328,6 +3333,9 @@ export async function createWorkbenchCliLayer(
     openChild: (callerId, childArgs) =>
       openChildWindow(callerId, childArgs, {
         authRegistry,
+        ...(options.agyPluginInstalled !== undefined
+          ? { agyPluginInstalled: options.agyPluginInstalled }
+          : {}),
         readLayouts: () => layouts.readAll(),
         saveLayout: (next) => layouts.saveProject(next),
         launch: (input) => launchCliWindow(input, launchDeps()),

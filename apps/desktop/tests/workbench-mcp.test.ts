@@ -2314,6 +2314,78 @@ describe("模型、思考强度与就地修复", () => {
     expect(saved[0]?.windows["w-1"]).toMatchObject({ kind: "gemini" });
   });
 
+  it("管理者开 agy 窗口：没添加插件时返回里提醒没有 ffpane 工具，已添加或查不出来不提醒", async () => {
+    const run = async (installed: boolean | undefined): Promise<string | undefined> => {
+      const root = tempDir();
+      const registry = createWorkbenchAuthRegistry();
+      registry.pin(
+        { id: "A", permission: "edit", role: "manager", openedBy: "user" },
+        "proj-1" as never,
+      );
+      registry.grantManager("A");
+      const manager: WorkbenchWindow = {
+        id: "A",
+        projectId: "proj-1" as never,
+        title: "总管",
+        kind: "claude",
+        cwd: root,
+        createdAt: 1,
+        permission: "edit",
+        role: "manager",
+        openedBy: "user",
+      };
+      const opened = await openChildWindow(
+        "A",
+        { cli: "gemini", role: "worker", permission: "edit", title: "Gemini 执行" },
+        {
+          authRegistry: registry,
+          readLayouts: async () => ({
+            "proj-1": {
+              projectId: "proj-1" as never,
+              tabs: [{ id: "tab-1", title: "Tab", slots: ["A", null, null, null, null, null] }],
+              activeTabId: "tab-1",
+              windows: { A: manager },
+              maximizedWindowId: null,
+              focusedWindowId: "A",
+            },
+          }),
+          saveLayout: async () => undefined,
+          launch: async () =>
+            ({
+              terminal: { id: "term" },
+              kind: "gemini",
+              effectivePermission: "edit",
+              permissionCapped: false,
+            }) as unknown as LaunchCliWindowResult,
+          resolveRoute: async () => ({
+            ok: true as const,
+            route: {
+              connectionMode: "local_cli" as const,
+              configId: "cfg" as never,
+              configName: "默认配置",
+            },
+          }),
+          describeCaller: async () => ({
+            title: "总管",
+            projectId: "proj-1",
+            projectRoot: root,
+            permission: "edit" as const,
+          }),
+          aliveCount: () => 1,
+          maxWindows: async () => 8,
+          publish: () => undefined,
+          newId: () => "w-1",
+          agyPluginInstalled: async () => installed,
+        },
+      );
+      return opened.ok ? opened.note : undefined;
+    };
+    expect(await run(false)).toContain("没有 ffpane 工具");
+    // note 里还有别的句子（比如没挂监管者），这里只看 agy 这一句有没有
+    expect(await run(true)).not.toContain("没有 ffpane 工具");
+    expect(await run(undefined)).not.toContain("没有 ffpane 工具");
+  });
+
   it("开子窗口：模型和强度进启动参数，也记在窗口上", async () => {
     const root = tempDir();
     const registry = createWorkbenchAuthRegistry();

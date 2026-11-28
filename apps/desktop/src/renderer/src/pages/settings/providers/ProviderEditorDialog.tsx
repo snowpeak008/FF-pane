@@ -12,6 +12,7 @@ import {
   type CliLoginProbeView,
   supportsLocalModelsWire,
 } from "../../../../../shared-ipc/contracts";
+import { AgyPluginPanel } from "../../../components/gemini/AgyPluginPanel";
 import { InlineIpcError } from "../../../components/states/InlineIpcError";
 import { Badge } from "../../../components/ui/Badge";
 import { Button } from "../../../components/ui/Button";
@@ -223,6 +224,7 @@ function CliLoginSection({
       ) : null}
       <span className="text-2xs text-fg-subtle">{t("settings.providers.cliLogin.modelHint")}</span>
       {isCursor ? <CursorSection embedded /> : null}
+      {runtime === "agy" ? <AgyPluginPanel /> : null}
     </div>
   );
 }

@@ -1616,5 +1616,30 @@
       "ok": "已安装。",
       "failed": "安装没成功："
     }
+  },
+  "agyPlugin": {
+    "title": "ffpane 工具插件（agy）",
+    "intro": "不添加：agy 窗口照常能开，但没有 ffpane 工具（汇报、收件箱、派活等）。添加会在 agy 的插件目录（~/.gemini/config/plugins）里装一个插件，随时可以在这里卸载，卸载 FF-pane 时也会一并移除。",
+    "autoUpdate": "已添加的插件会在 FF-pane 启动时自动更新（有 agy 窗口开着就等下次）。没添加的不会被补装。",
+    "lastError": "上次自动更新没成功：{{error}}",
+    "state": {
+      "missing": "没找到 agy",
+      "notInstalled": "未添加",
+      "current": "已添加",
+      "stale": "已添加 · 待更新",
+      "disabled": "已添加 · 在 agy 里被禁用",
+      "foreign": "agy 里有同名插件，不是 FF-pane 添加的，不会动它"
+    },
+    "add": "添加",
+    "update": "立即更新",
+    "remove": "卸载",
+    "done": "完成。新开的 agy 窗口生效，已开着的窗口要重开。",
+    "failed": "没有成功。",
+    "confirmAddTitle": "给 agy 添加 ffpane 工具插件？",
+    "confirmAddBody": "会用 agy 自己的 plugin install 命令，在 ~/.gemini/config/plugins/ffpane-workbench 装一个插件，里面只有 FF-pane 工作台的 MCP 服务器配置，不含密钥。你可以随时在这里卸载。",
+    "confirmRemoveTitle": "卸载 agy 的 ffpane 工具插件？",
+    "confirmRemoveBody": "卸载后，新开的 agy 窗口没有 ffpane 工具。已开着的窗口不受影响，直到重开。",
+    "notice": "没有添加 ffpane 工具插件：这个窗口没有 ffpane 工具（汇报、收件箱等）。可以到 设置 → 模型 → Provider →「本机已登录」→ agy 里添加。",
+    "noticeForeign": "agy 里有一个同名插件，不是 FF-pane 添加的：这个窗口没有 ffpane 工具。"
   }
 }
