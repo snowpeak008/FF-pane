@@ -140,5 +140,23 @@ agy 的 PreToolUse 钩子对 `call_mcp_tool` 且服务器是 `ffpane-workbench_f
 还没验证：
 - 真实卸载（NSIS）。要打安装包并在测试机上卸一次。
 - 带 agy 窗口开着时自动更新推迟，在真窗口里的表现（单测和真 agy 集成测试里已验证推迟逻辑）。
-- 三个权限档（只读、edit、edit-exec/yolo）各一次，本次只测了 `edit`。
 - 管理者接任、软件重启续接后工具仍可用。
+
+## 12. 四个权限档的真窗口验证（2026-11-28）
+
+做法同 §11：开发构建 + 真 agy，agy 用户目录指到临时目录，每档开一个真 Gemini 窗口，让 agent 依次调 `ffpane_whoami`、`ffpane_read_inbox`，读 agy 自己的对话转写判断。
+
+| 档 | agy 启动参数里的模式 | 结果 | `whoami` 返回的权限 |
+|---|---|---|---|
+| `read-only` | `--mode plan` | 通过（21 秒，两个工具都成功） | `read-only` |
+| `edit` | `--mode accept-edits` | 通过（§11） | `edit` |
+| `edit-exec` | `--mode accept-edits --dangerously-skip-permissions` | 通过（24 秒） | `edit-exec` |
+| `yolo` | `--dangerously-skip-permissions` | 通过（30 秒） | `yolo` |
+
+四档都没有停在 MCP 工具的批准上（钩子对 `ffpane-workbench_ffpane-workbench` 的自动批准生效），都带了 `--settings={"trustedWorkspaces":[项目]}`，没有停在信任确认。
+
+要留意的两点：
+1. **只读档第一次没通过，原因是 agent 先选了跑 shell 命令，而不是 MCP 工具。** 提示里没禁止时，agent 在 plan 模式下先跑了一条 `Get-ChildItem` 翻目录；plan 模式下命令要人批准，无人值守就卡在批准上。这不是 MCP 不可用：在隔离目录里单独验证，plan 模式下同样的提问，agent 读了描述文件并用 `call_mcp_tool` 调到了 ffpane 服务器。换成不诱导跑命令的提示就一次通过。含义：**只读窗口的任务说明里最好别让 agent 去翻文件系统找环境信息**；它真要跑命令就会进「等批准」状态，管理者能看到（`workbench-runtime-phase` 徽章）。
+2. **agy 的进程退出时不一定立刻释放插件和 home 目录**：测试收尾删临时目录时遇到过 `EPERM`，过一会儿才能删。这和自动更新的设计一致：有 agy 窗口开着时推迟，更新失败不留半成品并记下原因，下次再试。
+
+没验证：管理者接任、软件重启续接后工具是否仍可用；真实卸载（NSIS）。
