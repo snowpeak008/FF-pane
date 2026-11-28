@@ -233,6 +233,14 @@ export const PROVIDER_INJECTION_MAPPINGS: readonly ProviderInjectionMapping[] = 
     env: {},
     configOverrides: {},
   },
+  {
+    templateId: "local-login",
+    cli: "gemini",
+    requireBaseUrl: false,
+    apiKeyEnv: "",
+    env: {},
+    configOverrides: {},
+  },
 ];
 
 const MAPPING_INDEX = new Map<string, ProviderInjectionMapping>(

@@ -10,7 +10,6 @@ import { type ReactElement, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   type CliLoginProbeView,
-  type CliLoginRuntimeWire,
   supportsLocalModelsWire,
 } from "../../../../../shared-ipc/contracts";
 import { InlineIpcError } from "../../../components/states/InlineIpcError";
@@ -28,7 +27,11 @@ import { inputVariants } from "../../../components/ui/input.variants";
 import type { IpcErrorInfo } from "../../../ipc/errors";
 import { invokeQuery } from "../../../ipc/query";
 import { cn } from "../../../lib/cn";
-import { createCliLoginProbeCache } from "./cli-login-probe";
+import {
+  agyStatusToProbeView,
+  createCliLoginProbeCache,
+  type LoginProbeRuntime,
+} from "./cli-login-probe";
 import {
   baseUrlRequired,
   buildProviderDraft,
@@ -45,8 +48,8 @@ import {
 
 const MODEL_KINDS: readonly ModelKind[] = ["chat", "embedding"];
 
-/** 探测下拉只列出 Claude 与 Codex。其余运行时的探测代码仍保留。 */
-const VISIBLE_CLI_LOGIN_RUNTIMES: readonly CliLoginRuntimeWire[] = ["claude-code", "codex"];
+/** 探测下拉列出 Claude、Codex 和 Gemini（agy）。其余运行时的探测代码仍保留。 */
+const VISIBLE_CLI_LOGIN_RUNTIMES: readonly LoginProbeRuntime[] = ["claude-code", "codex", "agy"];
 
 const LOGIN_STATUS_TONE = {
   logged_in: "success",
@@ -55,7 +58,18 @@ const LOGIN_STATUS_TONE = {
   unknown: "neutral",
 } as const;
 
+/** agy 没有 status 子命令，登录状态来自 gemini:status（凭据管理器里的条目）。 */
+async function probeAgyLogin(): Promise<CliLoginProbeView> {
+  const settled = await invokeQuery("gemini:status");
+  return settled.status === "success"
+    ? agyStatusToProbeView(settled.data)
+    : { status: "unknown", detail: settled.error.message, probedWith: "gemini:status" };
+}
+
 const loginProbeCache = createCliLoginProbeCache(async (runtime) => {
+  if (runtime === "agy") {
+    return probeAgyLogin();
+  }
   const settled = await invokeQuery("providers:probe-cli-login", { runtime });
   return settled.status === "success"
     ? settled.data
@@ -68,7 +82,7 @@ function CliLoginSection({
   readonly onModels: (models: readonly ModelRow[], defaultModelId: string | undefined) => void;
 }): ReactElement {
   const { t } = useTranslation();
-  const [runtime, setRuntime] = useState<CliLoginRuntimeWire>("codex");
+  const [runtime, setRuntime] = useState<LoginProbeRuntime>("codex");
   const [probing, setProbing] = useState(false);
   const [probe, setProbe] = useState<CliLoginProbeView | undefined>(undefined);
   const [probeTick, setProbeTick] = useState({ force: false });
@@ -115,7 +129,7 @@ function CliLoginSection({
   }, [runtime, onModels, t]);
 
   const selectClass = cn(inputVariants({}), "cursor-pointer");
-  const canList = supportsLocalModelsWire(runtime);
+  const canList = runtime === "agy" || supportsLocalModelsWire(runtime);
 
   return (
     <div
@@ -129,7 +143,7 @@ function CliLoginSection({
             className={cn(selectClass, "w-40")}
             value={runtime}
             onChange={(e) => {
-              setRuntime(e.target.value as CliLoginRuntimeWire);
+              setRuntime(e.target.value as LoginProbeRuntime);
               setProbeTick({ force: false });
             }}
           >

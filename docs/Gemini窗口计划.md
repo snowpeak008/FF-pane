@@ -394,3 +394,42 @@ agy 启动参数里和权限有关的只有 `--mode`、`--dangerously-skip-permi
 - 和 §10.3 不同的一处：没有做「打开登录窗口」按钮。agy 首次启动会不会自己提示登录还没在交互界面里验证，先不替用户开窗口，改成文案告诉用户在终端里运行 agy 登录，再点「重新检查」。验证后再决定要不要加按钮。
 - 测试：`apps/desktop/tests/gemini-account.test.ts` 9 条（命中、名字相近不误判、没装、读凭据失败、非 Windows）。全量单测除了老的 `gemini-cli.test.ts` 无认证真机测试外全部通过；类型检查、文案检查通过；biome 只剩别的会话的 `.claude/`、`.mcp.json` 解析报错。
 - 没验证：界面在真实窗口里的样子，以及条目不存在时 agy 的实际表现（不为测这个把 Tony 的账号退出来）。
+
+## 11. Provider 口径更正与补齐（2026-11-28，Tony 指出 Provider 页加不了 agy）
+
+### 11.1 口径更正
+
+Provider 是**模型来源**，不固定是中转还是登录：Claude、Codex 有「订阅账号登录」（`local-login` 模板）和「中转」两个方向，Gemini 也一样。前面 §3、§7、§10 里「Provider = 中转来源，所以 Gemini 第一期不进 Provider」的说法是错的，以本节为准。
+
+### 11.2 现状与根因
+
+- 后端早有 agy：`gemini:status` 读登录、`providers:list-local-models` 的 `agy` 一路读模型，窗口种类和项目配置路由也在。
+- 缺口全在 Provider 这一层：
+  1. 设置页 Provider 编辑器「本机已登录」里的 CLI 下拉写死只列 `claude-code`、`codex`（`ProviderEditorDialog.tsx` 的 `VISIBLE_CLI_LOGIN_RUNTIMES`），选不到 agy，看不到 agy 登录状态，也读不了 agy 模型。
+  2. `PROVIDER_TEMPLATE_CLIS` 没有 `gemini`，`local-login` 的适用 CLI 只有 claude-code、codex，模板卡片和注入映射表里没有 Gemini 的位置。
+- 注意：`local-login` 在 Provider 里只是一条共享的「本地 CLI」来源，下拉只用来探登录状态和读模型，不落盘；配置里的 `local_cli` 路线本来就不带 providerId。所以订阅方向补的是 Provider 页的可见性和模板声明，不涉及存储格式。
+
+### 11.3 分两步
+
+**第一步（订阅方向，本次做）**
+- `PROVIDER_TEMPLATE_CLIS` 加 `gemini`；`local-login` 适用 CLI 加 `gemini`；注入映射表登记 `local-login × gemini`（空映射，同 claude-code、codex）。
+- Provider 编辑器 CLI 下拉加 `agy`：登录状态走 `gemini:status`（映射成同一种「已登录 / 未登录 / 未安装 / 未知」徽章），「读取本地模型」走 `providers:list-local-models` 的 `agy`。
+- 模板卡片文案、en-US、zh-CN 补上 Gemini（agy）。
+- 测试：登录状态映射、探测缓存对 agy 的处理、模板与注入映射表对照。
+
+**第二步（中转方向，仍是原第二期，§7）**
+- 新增 `gemini-compatible` 模板、探测方式 `gemini`（原生接口，`x-goog-api-key`）、注入 `GEMINI_API_KEY`、`GOOGLE_GEMINI_BASE_URL`，配置编辑器放开 Gemini 的「中转」，`store.ts` 放开 Gemini 路线的 providerId。
+- 这一步要配套 `gemini` 启动分支（`gemini-cli.ts`、`gemini-hook-config.ts`），不做启动就放开模板会让用户配出开不了窗的来源，所以不单独先放。
+
+### 11.4 同类遗留
+
+Provider 下拉里 Cursor、Grok 也不在（Cursor 同样是本机登录来源）。本次不动，另列待办。
+
+### 11.5 实现记录（2026-11-28，第一步已写完，待真机看界面）
+
+- 模板：`PROVIDER_TEMPLATE_CLIS` 加 `gemini`；`local-login` 适用 CLI 加 `gemini`；注入映射表登记 `local-login × gemini`（空映射）。
+- Provider 编辑器「本机已登录」的 CLI 下拉多了 `agy`：登录徽章走 `gemini:status`（`agyStatusToProbeView` 转成已登录 / 未登录 / 未安装 / 未知），「读取本地模型」走 `providers:list-local-models` 的 `agy`。
+- 文案：`local-login` 模板说明（zh-CN、en-US）写上 Gemini（agy）。
+- 测试：`cli-login-ui.test.ts` 加 3 条状态映射。全量单测 3125 通过，桌面端类型检查、i18n 检查、biome 都过。
+- 没验证：Provider 页在真实窗口里的样子；agy 在下拉里读模型的实际耗时（`agy models` 约 7 秒）。
+- 第二步（中转）没动，见 §11.3。

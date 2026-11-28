@@ -9,7 +9,10 @@ import {
   LOCAL_MODEL_RUNTIMES,
 } from "@ff-pane/adapters";
 import { describe, expect, it } from "vitest";
-import { createCliLoginProbeCache } from "../src/renderer/src/pages/settings/providers/cli-login-probe";
+import {
+  agyStatusToProbeView,
+  createCliLoginProbeCache,
+} from "../src/renderer/src/pages/settings/providers/cli-login-probe";
 import { usesCliEnumeratedModels } from "../src/renderer/src/pages/settings/providers/provider-form";
 import {
   CLI_LOGIN_RUNTIME_WIRES,
@@ -128,5 +131,24 @@ describe("local-login 模型手填禁用判定（T9.2 ③ / T10.3）", () => {
     expect(usesCliEnumeratedModels("openai-compatible")).toBe(false);
     expect(usesCliEnumeratedModels("anthropic-compatible")).toBe(false);
     expect(usesCliEnumeratedModels("openai-official")).toBe(false);
+  });
+});
+
+describe("agy 登录状态转成 Provider 页的登录徽章（Gemini 订阅方向）", () => {
+  it("没装 → cli_missing", () => {
+    expect(agyStatusToProbeView({ installed: false }).status).toBe("cli_missing");
+  });
+
+  it("装了、凭据在 → logged_in；凭据不在 → logged_out", () => {
+    expect(agyStatusToProbeView({ installed: true, authenticated: true }).status).toBe("logged_in");
+    expect(agyStatusToProbeView({ installed: true, authenticated: false }).status).toBe(
+      "logged_out",
+    );
+  });
+
+  it("读不了凭据管理器（authenticated 缺省）→ unknown，并带上原因", () => {
+    const view = agyStatusToProbeView({ installed: true, detail: "读不了" });
+    expect(view.status).toBe("unknown");
+    expect(view.detail).toBe("读不了");
   });
 });

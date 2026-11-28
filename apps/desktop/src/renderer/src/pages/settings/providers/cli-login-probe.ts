@@ -9,7 +9,30 @@
  * - **手动刷新旁路**：用户点「刷新」时绕过缓存强制重探（forceRefresh）。
  */
 
-import type { CliLoginProbeView, CliLoginRuntimeWire } from "../../../../../shared-ipc/contracts";
+import type {
+  CliLoginProbeView,
+  CliLoginRuntimeWire,
+  GeminiAccountStatus,
+} from "../../../../../shared-ipc/contracts";
+
+/** 能探登录态的来源：adapters 的 CLI，加上 Gemini 窗口用的 agy（走 gemini:status）。 */
+export type LoginProbeRuntime = CliLoginRuntimeWire | "agy";
+
+/** agy 的账号状态（gemini:status）转成和其他 CLI 一样的登录徽章。 */
+export function agyStatusToProbeView(account: GeminiAccountStatus): CliLoginProbeView {
+  const probedWith = "gemini:status";
+  const detail = account.detail ?? "";
+  if (!account.installed) {
+    return { status: "cli_missing", detail, probedWith };
+  }
+  if (account.authenticated === true) {
+    return { status: "logged_in", detail, probedWith };
+  }
+  if (account.authenticated === false) {
+    return { status: "logged_out", detail, probedWith };
+  }
+  return { status: "unknown", detail, probedWith };
+}
 
 /** 缓存 TTL（毫秒）。 */
 export const CLI_LOGIN_PROBE_TTL_MS = 30_000;
@@ -20,11 +43,11 @@ interface CacheEntry {
 }
 
 /** 探测执行函数（生产 = invokeQuery 包装；测试注入假实现）。 */
-export type ProbeRunner = (runtime: CliLoginRuntimeWire) => Promise<CliLoginProbeView>;
+export type ProbeRunner = (runtime: LoginProbeRuntime) => Promise<CliLoginProbeView>;
 
 export interface CliLoginProbeCache {
   /** 取登录态：缓存新鲜即复用，在飞即共享，否则发起探测。 */
-  probe(runtime: CliLoginRuntimeWire, force?: boolean): Promise<CliLoginProbeView>;
+  probe(runtime: LoginProbeRuntime, force?: boolean): Promise<CliLoginProbeView>;
   /** 清空缓存（测试用）。 */
   clear(): void;
 }
@@ -35,8 +58,8 @@ export function createCliLoginProbeCache(
   now: () => number = Date.now,
   ttlMs: number = CLI_LOGIN_PROBE_TTL_MS,
 ): CliLoginProbeCache {
-  const cache = new Map<CliLoginRuntimeWire, CacheEntry>();
-  const inflight = new Map<CliLoginRuntimeWire, Promise<CliLoginProbeView>>();
+  const cache = new Map<LoginProbeRuntime, CacheEntry>();
+  const inflight = new Map<LoginProbeRuntime, Promise<CliLoginProbeView>>();
 
   return {
     async probe(runtime, force = false) {
