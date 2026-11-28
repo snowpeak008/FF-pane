@@ -124,6 +124,13 @@ describe("生成的插件内容", () => {
     expect(agyPluginDigest(files)).not.toBe(agyPluginDigest(buildAgyPluginFiles(MOVED)));
   });
 
+  it('标记文件里 owner 单独一行写成 "owner": "ff-pane"（安装包卸载钩子用 findstr 认它）', () => {
+    const marker = buildAgyPluginFiles(SPEC)[AGY_PLUGIN_OWNER_FILE] ?? "";
+    expect(marker.split(/\r?\n/).some((line) => /owner.*ff-pane/.test(line))).toBe(true);
+    // 别人的标记不能被同一条规则认成我们的
+    expect(/owner.*ff-pane/.test('{"owner":"someone"}')).toBe(false);
+  });
+
   it("没有标记就不算我们的", () => {
     expect(hasOwnerMarker(undefined)).toBe(false);
     expect(hasOwnerMarker({ [AGY_PLUGIN_OWNER_FILE]: '{"owner":"someone"}' })).toBe(false);

@@ -98,3 +98,26 @@ agy 的 PreToolUse 钩子对 `call_mcp_tool` 且服务器是 `ffpane-workbench_f
 - 用户自己在终端开 agy 时，插件的服务器会被拉起（一个 FF-pane 进程），调用才报错。要确认拉起代价可以接受，必要时让服务器在没有令牌时立即退出。
 - 同一个 agy 会话里，插件服务器的**工具列表很长**（30 个），描述文件按需读取是否会让 agent 多花几步，需要真机观察。
 - 钩子对 `call_mcp_tool` 的参数里服务器名的匹配方式（`ServerName` 带引号）需要照真机数据写。
+
+## 9. 实现记录（2026-11-28，Tony 说开工后；分三次提交）
+
+已做（均有单测，全量 3160 条左右通过）：
+
+1. **台账与插件模块**（`apps/desktop/src/main/user-mods/ledger.ts`、`agy-plugin.ts`）：生成插件三个文件（`plugin.json`、`mcp_config.json`、归属标记 `ffpane-owner.json`），判断状态（没装 agy / 没添加 / 已添加最新或过期 / 用户禁用 / 同名别人的），添加、更新、卸载、自动更新。所有对外动作经注入的依赖。
+   - 真 agy 的行为（2026-11-28 实测）决定了设计：重复 `agy plugin install <目录>` 是**整体替换**（旧文件会清掉），所以「更新」就是再装一次；用户在 agy 里**禁用**的状态在更新后保留；`agy plugin list --json` 有名字、启用状态、版本、路径。
+   - 插件内容只取决于安装位置，不带 FF-pane 版本，免得每次升级都算「过期」。
+2. **主进程接线**（`agy-plugin-main.ts`、`index.ts`、`contracts.ts`）：`agy-plugin:status / install / uninstall` 三个通道；启动后异步检查一次，**只更新已装且过期的**；没装的不补装；有 agy 窗口开着就推迟。兜底删目录前有护栏（必须正好是 `<插件目录>/ffpane-workbench` 且有归属标记）。
+   - 真 agy 集成测试（`agy-plugin-real.test.ts`）把 agy 的用户目录指到临时目录，走完 添加 → 过期 → 有窗口时推迟 → 自动更新 → 卸载 → 卸载后启动不补装，并确认真实 `~/.gemini` 没动。
+3. **设置界面**（`AgyPluginPanel.tsx`）：设置 → Provider →「本机已登录」→ agy 里显示状态和「添加 / 立即更新 / 卸载」；添加和卸载前都有确认，说明写了什么、怎么卸。新建 Gemini 窗口没添加时一行说明，不弹窗。
+4. **窗口内说明和管理者提醒**：agy 窗口的说明文件里，按有没有插件写「怎么调」或「没有，别自己去找地址令牌」（`agy-plugin-note.ts`）；管理者用 `ffpane_open_window` 开 agy 窗口时，没添加会在返回里提醒。
+5. **钩子自动批准收紧**：`call_mcp_tool` 的服务器名去引号后精确匹配 `ffpane-workbench` 或 `ffpane-workbench_ffpane-workbench`，原来的 `includes` 会放行名字里带这几个字的别人的服务器。真机里 `ServerName` 参数值是带引号的字符串。
+6. **安装包卸载钩子**（`resources/installer.nsh`）：卸载 FF-pane 时，如果 `~\.gemini\config\plugins\ffpane-workbench\ffpane-owner.json` 里 `owner` 是 `ff-pane`，调 agy 卸载，失败或没装 agy 就兜底删这个目录；静默卸载也做，升级覆盖安装不做。
+   - 判断命令 `findstr /R /C:"owner.*ff-pane"` 已实测：我们的标记返回 0，别人的、缺字段的、缺文件的都返回 1；单测钉住标记里 `"owner": "ff-pane"` 在同一行。
+   - **没验证**：NSIS 脚本本身在真实卸载里的行为，要打安装包（编译会检查语法）并在测试机上卸一次。
+
+## 10. 还没验证的
+
+- 真实 FF-pane 窗口里，agy 拿到真令牌和管道后调通 `ffpane_whoami`（见下一节）。
+- 真实卸载流程（NSIS）。
+- 带 agy 窗口开着时的自动更新推迟，在真窗口里的表现。
+- §8 里的三项：没令牌时服务器进程的代价、工具列表很长时 agent 多花几步、钩子对 `ServerName` 的匹配（已精确匹配并有单测，待真机）。
