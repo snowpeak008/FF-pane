@@ -1067,6 +1067,8 @@ ${manualMount.index}`;
       ...(model !== undefined ? { model } : {}),
       ...(effort !== undefined ? { effort } : {}),
       permission,
+      // 只信任窗口所在的项目目录，本次会话有效，不写用户的 agy 设置。
+      trustedWorkspaces: [input.projectRoot, cwd],
       ...(input.initialPrompt !== undefined ? { initialPrompt: input.initialPrompt } : {}),
     });
   } else {

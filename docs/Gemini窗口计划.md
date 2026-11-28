@@ -469,3 +469,13 @@ Provider 下拉里 Cursor、Grok 同样是漏的，原因同上：下拉名单�
 - 测试：`workbench-agy.test.ts` 改了错误的期望，并加了「`-i` 不能吃掉后面开关」的用例；全量单测 3132 通过。
 - 没验证：装新包后从界面新建 Gemini 窗口、让管理者再跑一次冒烟测试；续接时带开场白也用了 `-i=`，这一步没在真机试过。
 - 另：`workbench-cli.spec.ts` 里两条 Codex 的 e2e（「notify 报出会话编号」「agent-turn-complete 之后才自动投递」）失败，原因是 Codex 启动参数里多了 `--dangerously-bypass-hook-trust`（T11.7 加的），而 T10.6 写的断言还写着「不应有」。和本次无关，没动，另列待办。
+
+### 11.9 agy 的信任确认（2026-11-28，Tony 实测：第一次开窗要点「信任此文件夹」）
+
+- 结论（§3.2 里「待探针确认」的两项，现已实测）：
+  1. `--dangerously-skip-permissions`（我们的 yolo 档）**不跳过**信任确认，它只管工具调用的批准。agy 有 yolo，没有「免信任」的开关。
+  2. `--settings=<JSON>`（官方：只对本次会话生效、不保存）能带 `trustedWorkspaces`，写了项目目录就不再弹确认页，直接进输入框；用户的 `~/.gemini/antigravity-cli/settings.json` 没有被改（名单条数不变，探针目录没混进去）。
+- 为什么要处理：管理者开的 agy 窗口没人去点确认页，开窗消息会被打进这一页（和历史列表那次同类）。
+- 做法（Tony 定：所有权限档都跳过）：启动参数加 `--settings={"trustedWorkspaces":[项目根, 窗口工作目录]}`，去重，放在开场白前面。只信任窗口所在的项目目录，本次会话有效，不写 agy 用户设置，仍守「开窗前后都不改 `~/.gemini`」。
+- 验证：伪终端里用完整参数（`--mode plan --model … --settings … -i=开场白`）在新目录实跑，无信任页，开场白进新对话开始生成，模型 `Gemini 4 Carbon (Low)`。单测加 2 条（`--settings` 只含 trustedWorkspaces 且去重、没给目录不带）。
+- 没验证：路径带中文或空格时（FF-pane 的终端层拼命令行）、续接 `--conversation` 加 `--settings` 是否正常。

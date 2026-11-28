@@ -339,3 +339,25 @@ describe("buildInteractiveAgyArgs：-i 绝不能吃掉后面的开关（真机�
     expect(buildInteractiveAgyArgs({ permission: "edit" })).toEqual(["--mode", "accept-edits"]);
   });
 });
+
+describe("buildInteractiveAgyArgs：预先信任项目目录（本次会话，不写用户设置）", () => {
+  it("--settings 只含 trustedWorkspaces，去重，放在开场白前面", () => {
+    const args = buildInteractiveAgyArgs({
+      permission: "read-only",
+      trustedWorkspaces: ["D:proj", "D:proj", " "],
+      initialPrompt: "你好",
+    });
+    expect(args).toEqual([
+      "--mode",
+      "plan",
+      `--settings=${JSON.stringify({ trustedWorkspaces: ["D:proj"] })}`,
+      "-i=你好",
+    ]);
+  });
+
+  it("没给目录就不带 --settings", () => {
+    expect(
+      buildInteractiveAgyArgs({ permission: "edit" }).some((a) => a.startsWith("--settings")),
+    ).toBe(false);
+  });
+});

@@ -349,6 +349,12 @@ export interface BuildInteractiveAgyArgsInput {
   readonly initialPrompt?: string;
   /** 初始提示是否留在交互界面（`-i` 跑完提示不走）。新开默认用 `-i`。 */
   readonly interactivePrompt?: boolean;
+  /**
+   * 本次会话要预先信任的目录（项目根）。写成 `--settings={"trustedWorkspaces":[…]}`：
+   * 只对这个会话生效、agy 不保存，不动用户的 agy 设置，也免得停在「是否信任此文件夹」
+   * （`--dangerously-skip-permissions` 不管这一项；管理者开的窗口没人去点它）。
+   */
+  readonly trustedWorkspaces?: readonly string[];
 }
 
 /** agy 默认可执行文件名。 */
@@ -382,6 +388,12 @@ export function buildInteractiveAgyArgs(input: BuildInteractiveAgyArgsInput): st
   }
   if (input.effort !== undefined && input.effort.trim() !== "") {
     args.push("--effort", input.effort.trim());
+  }
+  const trusted = (input.trustedWorkspaces ?? [])
+    .map((item) => item.trim())
+    .filter((item) => item !== "");
+  if (trusted.length > 0) {
+    args.push(`--settings=${JSON.stringify({ trustedWorkspaces: [...new Set(trusted)] })}`);
   }
   if (input.initialPrompt !== undefined && input.initialPrompt.trim() !== "") {
     args.push(`-i=${input.initialPrompt}`);
