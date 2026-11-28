@@ -180,6 +180,7 @@ import {
   buildNewMessageReminder,
   sanitizeReminderTitle,
   sanitizeThreadText,
+  WORKBENCH_ROLE_LABEL,
 } from "./remind";
 import { resolveProjectLaunchRoute } from "./resolve-config";
 import { describeShortage, resourceLimitsFromConfig, takeResourceSnapshot } from "./resource-guard";
@@ -201,8 +202,13 @@ import {
   resolveWorkbenchRoleOverridesDir,
   resolveWorkbenchRoleResourcesDir,
 } from "./role-resources";
+import { buildRosterClosedLine, buildRosterOpenedLine } from "./roster-notice";
 import { setWindowRole } from "./set-role";
 import { buildSilentReportReminder, createSilentReportWatch } from "./silent-report-watch";
+import {
+  buildSupervisorUnhandledLine,
+  createSupervisorHandleWatch,
+} from "./supervisor-handle-watch";
 import { ledgerListForManager } from "./task-tools";
 import { createTeamDigest, digestRelativePath } from "./team-digest";
 import {
@@ -524,6 +530,12 @@ export async function createWorkbenchCliLayer(
   const teamDigest = createTeamDigest({ now: () => Date.now() });
   /** 监管者在线时没叫醒上级的汇报，久了没人读再提醒上级（T11.0b）。 */
   const silentReports = createSilentReportWatch({ now: () => Date.now() });
+  /** 提醒交给在线监管者后，窗口 15 分钟还是同一种状态，平台直接报上级一次（T11.1b §5）。 */
+  const handleWatch = createSupervisorHandleWatch({ now: () => Date.now() });
+  const stateKeyOf = (windowId: string): string | undefined => {
+    const terminalId = findLiveTerminalId(windowId);
+    return terminalId === undefined ? undefined : idleQueue.phaseOf(terminalId);
+  };
   /** 能不能把事交给这个窗口：终端在跑、没因错误暂停；当监管者用时还要在线（在等事件）。 */
   const canReceive = (windowId: string, asSupervisor: boolean): boolean =>
     findLiveTerminalId(windowId) !== undefined &&
@@ -584,6 +596,12 @@ export async function createWorkbenchCliLayer(
       canReceive(watcherId, true)
     ) {
       deliverLine(watcherId, line);
+      if (parentId !== undefined && parentId !== windowId) {
+        const stateKey = stateKeyOf(windowId);
+        if (stateKey !== undefined) {
+          handleWatch.note({ windowId, managerId: parentId, stateKey, what });
+        }
+      }
       return;
     }
     if (parentId === undefined || parentId === windowId) {
@@ -861,12 +879,25 @@ export async function createWorkbenchCliLayer(
       );
     }
   };
+  /** 监管者收到提醒 15 分钟了，窗口还是老样子：直接报上级一次；上级收不了就记进待处理。 */
+  const checkSupervisorHandled = async (): Promise<void> => {
+    for (const due of handleWatch.takeDue(stateKeyOf)) {
+      const stored = await findStoredWindow(due.windowId);
+      const title = sanitizeReminderTitle(stored?.window.title ?? due.windowId);
+      if (canReceive(due.managerId, false)) {
+        deliverLine(due.managerId, buildSupervisorUnhandledLine(title, due.windowId, due.what));
+      } else {
+        await holdForManager(due.managerId, due.windowId, due.what);
+      }
+    }
+  };
   const stallTimer = setInterval(() => {
     checkStalls();
     drainOffline();
     checkSupervisors();
     checkTeams();
     checkSilentReports().catch(() => undefined);
+    checkSupervisorHandled().catch(() => undefined);
   }, 30_000);
   stallTimer.unref?.();
   const PERMISSION_WAIT_NOTICE_MS = 90_000;
@@ -919,8 +950,28 @@ export async function createWorkbenchCliLayer(
         void teamDigest.clear(parentId, windowId);
       }
     }
+    if (exit.killed) {
+      // T11.1b §4：被关掉的窗口，告诉盯它的监管者不用再盯（自己退出的由 notifyOverseer 报）。
+      void (async () => {
+        const stored = await findStoredWindow(windowId);
+        const watcherId = stored?.window.watcherWindowId;
+        if (stored === undefined || watcherId === undefined || !canReceive(watcherId, true)) {
+          return;
+        }
+        const role = authRegistry.get(windowId)?.role ?? stored.window.role;
+        deliverLine(
+          watcherId,
+          buildRosterClosedLine({
+            windowId,
+            title: stored.window.title,
+            roleLabel: role !== undefined ? WORKBENCH_ROLE_LABEL[role] : "窗口",
+          }),
+        );
+      })();
+    }
     onlineHub.forget(windowId);
     silentReports.forget(windowId);
+    handleWatch.forget(windowId);
     stopCodexTail(windowId);
     for (const grant of locks.releaseWindow(windowId)) {
       notifyLockGranted(grant);
@@ -3259,7 +3310,22 @@ export async function createWorkbenchCliLayer(
             resourceLimitsFromConfig(await config.readConfig()),
           ),
         maxWindows: async () => clampMaxWorkbenchWindows(await getMax()),
-        publish: ({ projectId, window, managerWindowId }) => {
+        publish: ({ projectId, window, managerWindowId, briefPath }) => {
+          // T11.1b §4：新开的窗口归某个在线监管者盯，平台直接告诉它，管理者不用手动发名单。
+          const watcherId = window.watcherWindowId;
+          if (watcherId !== undefined && canReceive(watcherId, true)) {
+            deliverLine(
+              watcherId,
+              buildRosterOpenedLine(
+                {
+                  windowId: window.id,
+                  title: window.title,
+                  roleLabel: window.role !== undefined ? WORKBENCH_ROLE_LABEL[window.role] : "窗口",
+                },
+                briefPath,
+              ),
+            );
+          }
           const browser = options.getWindow();
           if (browser === null || browser.isDestroyed()) {
             return;

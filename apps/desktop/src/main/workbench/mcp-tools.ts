@@ -1024,6 +1024,11 @@ async function lockTool(
     return fail("锁名只能是 1 到 64 个字母、数字、点、下划线或减号，例如 unity。");
   }
   if (action === "acquire") {
+    if (caller.role === "manager") {
+      return fail(
+        "管理者不拿锁。要用 Unity 这类独占资源的测试、构建、烘焙派给执行，说明里写先拿锁。",
+      );
+    }
     const result = deps.locks.acquire(caller.projectId, name, caller.id);
     if (result.state === "held") {
       return ok({

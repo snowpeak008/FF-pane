@@ -612,6 +612,26 @@ describe("清单新增工具", () => {
     );
   });
 
+  it("T11.1b §9：管理者不能拿锁，list 和 release 照常；执行拿锁不受影响", async () => {
+    const { deps } = harness(tempDir());
+    const denied = await call(deps, "A", "ffpane_lock", { action: "acquire", name: "unity" });
+    expect(denied.isError).toBe(true);
+    expect(denied.text).toContain("管理者不拿锁");
+    // 锁没有被管理者拿走
+    expect((await call(deps, "A", "ffpane_lock", { action: "list" })).json).toEqual({ locks: [] });
+    // 执行照常拿锁（回归）
+    expect(
+      (await call(deps, "B", "ffpane_lock", { action: "acquire", name: "unity" })).json,
+    ).toMatchObject({ state: "held" });
+    // 管理者 release 不报错（万一之前拿过，能放掉）；不是持有者所以放不掉别人的锁
+    const released = await call(deps, "A", "ffpane_lock", { action: "release", name: "unity" });
+    expect(released.isError).not.toBe(true);
+    expect(released.json).toMatchObject({ released: false });
+    expect((await call(deps, "A", "ffpane_lock", { action: "list" })).json).toMatchObject({
+      locks: [{ name: "unity", holder: { windowId: "B" } }],
+    });
+  });
+
   it("closeAfter：done 汇报后由上级关闭；别的状态或管理者不行", async () => {
     const { deps, selfClosed } = harness(tempDir());
     const done = await call(deps, "B", "ffpane_report", {

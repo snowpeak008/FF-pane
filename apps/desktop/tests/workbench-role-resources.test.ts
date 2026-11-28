@@ -57,6 +57,11 @@ describe("workbench role manuals", () => {
     expect(manager).toContain("派完活就结束本轮");
   });
 
+  it("T11.1b §9：管理者说明书写明不亲自跑测试和构建", () => {
+    const manager = readFileSync(join(resourcesDir, "manager.md"), "utf8");
+    expect(manager).toContain("不亲自跑测试");
+  });
+
   it("electron-builder 把 workbench-roles 打进 extraResources", () => {
     const yml = readFileSync(join(desktopDir, "electron-builder.yml"), "utf8");
     expect(yml).toContain("from: resources/workbench-roles");

@@ -91,6 +91,8 @@ export interface OpenChildDeps {
     readonly projectId: string;
     readonly window: WorkbenchWindow;
     readonly managerWindowId: string;
+    /** 开窗时给的执行说明路径（名单推送用）。 */
+    readonly briefPath?: string;
   }) => void;
   readonly now?: () => number;
   readonly newId?: () => string;
@@ -392,6 +394,7 @@ export async function openChildWindow(
     projectId: described.projectId,
     window: child,
     managerWindowId: callerId,
+    ...(briefRelative !== undefined ? { briefPath: briefRelative } : {}),
   });
   const notes = [
     ...(actuallyCapped

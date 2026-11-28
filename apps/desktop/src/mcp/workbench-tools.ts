@@ -639,7 +639,7 @@ const TOOL_DEFINITIONS: readonly McpToolDefinition[] = [
   {
     name: "ffpane_lock",
     description:
-      "本项目的命名锁，给一台机器只能开一个的资源排队（如 unity）。acquire 拿锁：空着就拿到，有人占着就排队，轮到你时收到「[锁]」提醒，排队时结束本轮等提醒、不要轮询。release 放锁或退出排队，下一个排队的窗口自动拿到。窗口退出或被关闭时它的锁自动放掉。list 列出谁持有、谁在排队。",
+      "本项目的命名锁，给一台机器只能开一个的资源排队（如 unity）。acquire 拿锁：空着就拿到，有人占着就排队，轮到你时收到「[锁]」提醒，排队时结束本轮等提醒、不要轮询。release 放锁或退出排队，下一个排队的窗口自动拿到。窗口退出或被关闭时它的锁自动放掉。list 列出谁持有、谁在排队。管理者不能 acquire：测试、构建、烘焙这类要独占资源的活派给执行。",
     inputSchema: {
       type: "object",
       properties: {
