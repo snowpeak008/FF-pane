@@ -1,5 +1,6 @@
 /**
- * 设置 → 模型 → Cursor（T11.18，计划 docs/Cursor账号管理计划.md）。
+ * Cursor 账号管理（T11.18，计划 docs/Cursor账号管理计划.md）。
+ * 不再单独占设置页顶部，嵌在 Provider 编辑器「本机已登录」里选 Cursor 时显示（embedded）。
  * 一眼看清 Cursor 能不能用：装没装、登录的账号和档位、CLI 版本；
  * 软件里登录 / 换账号（退出再登录）/ 退出 / 更新 / 安装；FF-pane 开 Cursor 窗口的默认模型。
  */
@@ -48,7 +49,12 @@ function useRunningCursorWindows(): number {
   );
 }
 
-export function CursorSection(): ReactElement {
+export function CursorSection({
+  embedded = false,
+}: {
+  /** 嵌在 Provider 编辑器里：不再单独显示大标题。 */
+  readonly embedded?: boolean;
+} = {}): ReactElement {
   const { t } = useTranslation();
   const statusQuery = useInvokeQuery("cursor:status");
   const status = queryData(statusQuery.state);
@@ -153,7 +159,7 @@ export function CursorSection(): ReactElement {
   return (
     <section className="flex flex-col gap-2" data-testid="settings-cursor">
       <div className="flex items-center gap-2">
-        <h2 className="text-sm font-medium text-fg">{t("cursor.title")}</h2>
+        {embedded ? null : <h2 className="text-sm font-medium text-fg">{t("cursor.title")}</h2>}
         <Tooltip content={t("cursor.refresh")}>
           <Button
             variant="ghost"

@@ -15,7 +15,6 @@ import { AppearanceSection } from "./AppearanceSection";
 import { ClaudeSandboxSection } from "./ClaudeSandboxSection";
 import { ConfigToolSection } from "./ConfigToolSection";
 import { ConfigsSection } from "./configs/ConfigsSection";
-import { CursorSection } from "./cursor/CursorSection";
 import { KnowledgeToolSection } from "./KnowledgeToolSection";
 import { LanguageSection } from "./LanguageSection";
 import { ProvidersSection } from "./providers/ProvidersSection";
@@ -33,7 +32,7 @@ const GROUP_SECTIONS: Record<SettingsGroup, readonly (() => ReactNode)[]> = {
     () => <ClaudeSandboxSection />,
     () => <WorkbenchRoleManualsSection />,
   ],
-  models: [() => <CursorSection />, () => <ProvidersSection />, () => <ConfigsSection />],
+  models: [() => <ProvidersSection />, () => <ConfigsSection />],
   skills: [() => <SkillsSection />],
   tools: [() => <KnowledgeToolSection />, () => <ConfigToolSection />],
 };

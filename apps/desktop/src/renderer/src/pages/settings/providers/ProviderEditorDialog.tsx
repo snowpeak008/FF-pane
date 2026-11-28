@@ -27,6 +27,7 @@ import { inputVariants } from "../../../components/ui/input.variants";
 import type { IpcErrorInfo } from "../../../ipc/errors";
 import { invokeQuery } from "../../../ipc/query";
 import { cn } from "../../../lib/cn";
+import { CursorSection } from "../cursor/CursorSection";
 import {
   agyStatusToProbeView,
   createCliLoginProbeCache,
@@ -99,7 +100,15 @@ function CliLoginSection({
   const [listing, setListing] = useState(false);
   const [listError, setListError] = useState<string | undefined>(undefined);
 
+  // 选 Cursor 时由下面嵌入的 Cursor 账号管理自己看状态，这里不再重复探测。
+  const isCursor = runtime === "cursor";
+
   useEffect(() => {
+    if (isCursor) {
+      setProbing(false);
+      setProbe(undefined);
+      return;
+    }
     let cancelled = false;
     setProbing(true);
     setProbe(undefined);
@@ -112,7 +121,7 @@ function CliLoginSection({
     return () => {
       cancelled = true;
     };
-  }, [runtime, probeTick]);
+  }, [runtime, probeTick, isCursor]);
 
   const listModels = useCallback(async () => {
     setListing(true);
@@ -164,28 +173,30 @@ function CliLoginSection({
             ))}
           </select>
         </Field>
-        <div className="flex items-center gap-1.5 pb-1.5" data-testid="cli-login-status">
-          {probing ? (
-            <Badge tone="neutral">{t("settings.providers.cliLogin.probing")}</Badge>
-          ) : probe !== undefined ? (
-            <Badge tone={LOGIN_STATUS_TONE[probe.status]}>
-              {t(`settings.providers.cliLogin.status.${probe.status}`)}
-            </Badge>
-          ) : null}
-          <Button
-            variant="ghost"
-            size="sm"
-            iconOnly
-            disabled={probing}
-            aria-label={t("settings.providers.cliLogin.refresh")}
-            title={t("settings.providers.cliLogin.refresh")}
-            onClick={() => setProbeTick({ force: true })}
-          >
-            <RefreshCw aria-hidden size={14} />
-          </Button>
-        </div>
+        {isCursor ? null : (
+          <div className="flex items-center gap-1.5 pb-1.5" data-testid="cli-login-status">
+            {probing ? (
+              <Badge tone="neutral">{t("settings.providers.cliLogin.probing")}</Badge>
+            ) : probe !== undefined ? (
+              <Badge tone={LOGIN_STATUS_TONE[probe.status]}>
+                {t(`settings.providers.cliLogin.status.${probe.status}`)}
+              </Badge>
+            ) : null}
+            <Button
+              variant="ghost"
+              size="sm"
+              iconOnly
+              disabled={probing}
+              aria-label={t("settings.providers.cliLogin.refresh")}
+              title={t("settings.providers.cliLogin.refresh")}
+              onClick={() => setProbeTick({ force: true })}
+            >
+              <RefreshCw aria-hidden size={14} />
+            </Button>
+          </div>
+        )}
       </div>
-      {probe !== undefined && !probing ? (
+      {probe !== undefined && !probing && !isCursor ? (
         <span className="font-mono text-2xs text-fg-muted select-text">{probe.detail}</span>
       ) : null}
       <div className="flex items-center gap-2">
@@ -211,6 +222,7 @@ function CliLoginSection({
         </p>
       ) : null}
       <span className="text-2xs text-fg-subtle">{t("settings.providers.cliLogin.modelHint")}</span>
+      {isCursor ? <CursorSection embedded /> : null}
     </div>
   );
 }

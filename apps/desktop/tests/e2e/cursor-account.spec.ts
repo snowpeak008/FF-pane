@@ -86,6 +86,14 @@ async function createProject(launched: LaunchedApp, dir: string, name: string): 
   await expect(page.getByRole("button", { name: new RegExp(`^${name}`) })).toBeVisible();
 }
 
+/** Cursor 账号管理在设置 → 模型 → 新建 Provider →「本机已登录」→ 选 cursor 里。 */
+async function openCursorAccountInProviderEditor(page: LaunchedApp["page"]): Promise<void> {
+  await gotoRoute(page, "/settings?group=models");
+  await page.getByRole("button", { name: "New provider" }).click();
+  await page.getByTestId("provider-template-local-login").click();
+  await page.locator("#provider-cli-runtime").selectOption("cursor");
+}
+
 test("设置里登录 Cursor、选默认模型、退出；新开窗口看得到账号", async () => {
   test.setTimeout(120_000);
   const fakeDir = seedFakeCursor();
@@ -93,7 +101,7 @@ test("设置里登录 Cursor、选默认模型、退出；新开窗口看得到�
   const launched = await launchApp({ pathPrepend: fakeDir });
   try {
     const { page } = launched;
-    await gotoRoute(page, "/settings?group=models");
+    await openCursorAccountInProviderEditor(page);
     const status = page.getByTestId("cursor-status");
     await expect(status).toHaveAttribute("data-signed-in", "no", { timeout: 20_000 });
     await expect(page.getByTestId("cursor-status-text")).toHaveText("Not signed in to Cursor");
@@ -144,7 +152,7 @@ test("设置里登录 Cursor、选默认模型、退出；新开窗口看得到�
     await page.keyboard.press("Escape");
 
     // 退出登录
-    await gotoRoute(page, "/settings?group=models");
+    await openCursorAccountInProviderEditor(page);
     await expect(status).toHaveAttribute("data-signed-in", "yes", { timeout: 20_000 });
     await page.getByTestId("cursor-logout").click();
     await expect(status).toHaveAttribute("data-signed-in", "no", { timeout: 20_000 });

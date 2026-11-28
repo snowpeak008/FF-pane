@@ -437,3 +437,9 @@ Provider 下拉里 Cursor、Grok 同样是漏的，原因同上：下拉名单�
 - 测试：`cli-login-ui.test.ts` 加 3 条状态映射。全量单测 3125 通过，桌面端类型检查、i18n 检查、biome 都过。
 - 没验证：Provider 页在真实窗口里的样子；agy 在下拉里读模型的实际耗时（`agy models` 约 7 秒）。
 - 第二步（中转）没动，见 §11.3。
+
+### 11.6 Cursor 账号管理并进 Provider（2026-11-28，Tony 指出顶部和 Provider 里各有一个 Cursor）
+
+- 原来设置 → 模型页顶部有一块独立的 Cursor（`CursorSection`），里面是软件内登录、换账号、退出、更新、安装 cursor-agent，以及 Cursor 窗口的默认模型；Provider「本机已登录」里新加的 Cursor 项只有登录状态和读取模型，两处看着重复，但功能不是一回事。
+- 处理：顶部那块从设置页移除，原样嵌进 Provider 编辑器：选「本机已登录」、CLI 下拉选 `cursor` 时显示完整的账号管理，Provider 里不再单独探测 Cursor 登录徽章（避免两处各查一遍）。功能一个没删，默认模型仍写进全局设置 `cursorDefaultModel`，与保存 Provider 无关。
+- 测试：`cursor-account.spec.ts` 改成先打开 Provider 编辑器再选 cursor；该 e2e 与 `provider-config-ux.spec.ts` 共 4 条通过，全量单测 3127 通过。
