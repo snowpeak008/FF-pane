@@ -864,7 +864,7 @@
         },
         "local-login": {
           "name": "Local CLI login",
-          "description": "Use the Claude Code / Codex / Gemini (agy) account already logged in on this machine. Injects nothing."
+          "description": "Use the Claude Code / Codex / Grok / Cursor / Gemini (agy) account already logged in on this machine. Injects nothing."
         }
       },
       "option": {

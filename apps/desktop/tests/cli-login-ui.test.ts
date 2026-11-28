@@ -12,6 +12,8 @@ import { describe, expect, it } from "vitest";
 import {
   agyStatusToProbeView,
   createCliLoginProbeCache,
+  cursorStatusToProbeView,
+  LOCAL_LOGIN_PROBE_RUNTIMES,
 } from "../src/renderer/src/pages/settings/providers/cli-login-probe";
 import { usesCliEnumeratedModels } from "../src/renderer/src/pages/settings/providers/provider-form";
 import {
@@ -150,5 +152,28 @@ describe("agy 登录状态转成 Provider 页的登录徽章（Gemini 订阅方�
     const view = agyStatusToProbeView({ installed: true, detail: "读不了" });
     expect(view.status).toBe("unknown");
     expect(view.detail).toBe("读不了");
+  });
+});
+
+describe("Provider 页本机登录下拉：Claude、Codex 之外的 CLI（Grok、Cursor、Gemini）", () => {
+  it("下拉包含工作台能开窗的本机登录 CLI", () => {
+    expect([...LOCAL_LOGIN_PROBE_RUNTIMES]).toEqual([
+      "claude-code",
+      "codex",
+      "grok-build",
+      "cursor",
+      "agy",
+    ]);
+  });
+
+  it("Cursor 状态转登录徽章", () => {
+    expect(cursorStatusToProbeView({ installed: false }).status).toBe("cli_missing");
+    expect(cursorStatusToProbeView({ installed: true, authenticated: true }).status).toBe(
+      "logged_in",
+    );
+    expect(cursorStatusToProbeView({ installed: true, authenticated: false }).status).toBe(
+      "logged_out",
+    );
+    expect(cursorStatusToProbeView({ installed: true }).status).toBe("unknown");
   });
 });

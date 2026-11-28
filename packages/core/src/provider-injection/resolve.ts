@@ -235,6 +235,22 @@ export const PROVIDER_INJECTION_MAPPINGS: readonly ProviderInjectionMapping[] = 
   },
   {
     templateId: "local-login",
+    cli: "grok",
+    requireBaseUrl: false,
+    apiKeyEnv: "",
+    env: {},
+    configOverrides: {},
+  },
+  {
+    templateId: "local-login",
+    cli: "cursor",
+    requireBaseUrl: false,
+    apiKeyEnv: "",
+    env: {},
+    configOverrides: {},
+  },
+  {
+    templateId: "local-login",
     cli: "gemini",
     requireBaseUrl: false,
     apiKeyEnv: "",

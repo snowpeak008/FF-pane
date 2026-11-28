@@ -421,9 +421,13 @@ Provider 是**模型来源**，不固定是中转还是登录：Claude、Codex �
 - 新增 `gemini-compatible` 模板、探测方式 `gemini`（原生接口，`x-goog-api-key`）、注入 `GEMINI_API_KEY`、`GOOGLE_GEMINI_BASE_URL`，配置编辑器放开 Gemini 的「中转」，`store.ts` 放开 Gemini 路线的 providerId。
 - 这一步要配套 `gemini` 启动分支（`gemini-cli.ts`、`gemini-hook-config.ts`），不做启动就放开模板会让用户配出开不了窗的来源，所以不单独先放。
 
-### 11.4 同类遗留
+### 11.4 Cursor、Grok 一并补上（2026-11-28，Tony 要求）
 
-Provider 下拉里 Cursor、Grok 也不在（Cursor 同样是本机登录来源）。本次不动，另列待办。
+Provider 下拉里 Cursor、Grok 同样是漏的，原因同上：下拉名单是最早只有 Claude、Codex 时写死的，后来加了 DeepSeek、Cursor、Grok、Gemini 都没跟着改。已一起补：
+- 下拉名单改成数据驱动（`LOCAL_LOGIN_PROBE_RUNTIMES`：claude-code、codex、grok-build、cursor、agy），以后加新的本机登录 CLI 只改这一处。
+- Cursor：登录状态走 `cursor:status`，读模型走 `providers:list-local-models` 的 `cursor`。Grok：登录探测和读模型 adapters 早就有（`grok-build`），只是下拉没列。
+- 模板：`PROVIDER_TEMPLATE_CLIS` 加 `cursor`；`local-login` 适用 CLI 变成 claude-code、codex、grok、cursor、gemini；注入映射表补 `local-login × grok / cursor`（空映射）。DeepSeek 只有中转，不在其中。
+- 测试：下拉名单、Cursor 状态映射。全量单测 3127 通过，类型检查、i18n、biome 过。
 
 ### 11.5 实现记录（2026-11-28，第一步已写完，待真机看界面）
 

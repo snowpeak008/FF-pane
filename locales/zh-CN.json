@@ -864,7 +864,7 @@
         },
         "local-login": {
           "name": "本机已登录",
-          "description": "使用本机 Claude Code / Codex / Gemini（agy）已登录账号，不注入密钥或地址。"
+          "description": "使用本机 Claude Code / Codex / Grok / Cursor / Gemini（agy）已登录账号，不注入密钥或地址。"
         }
       },
       "option": {

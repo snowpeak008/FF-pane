@@ -12,12 +12,13 @@ import {
   type ProviderTemplateId,
 } from "./provider.js";
 
-/** 模板适用的 CLI。Grok 中转只用 grok-compatible。DeepSeek 只用 deepseek。gemini 目前只有本机登录（agy），中转第二步再加。 */
+/** 模板适用的 CLI。Grok 中转只用 grok-compatible。DeepSeek 只用 deepseek。cursor、gemini 目前只有本机登录，gemini 中转第二步再加。 */
 export const PROVIDER_TEMPLATE_CLIS = [
   "claude-code",
   "codex",
   "grok",
   "deepseek",
+  "cursor",
   "gemini",
 ] as const;
 
@@ -148,7 +149,7 @@ export const BUILTIN_PROVIDER_TEMPLATES: readonly ProviderTemplateDefinition[] =
     id: "local-login",
     nameKey: "settings.providers.template.local-login.name",
     descriptionKey: "settings.providers.template.local-login.description",
-    applicableClis: ["claude-code", "codex", "gemini"],
+    applicableClis: ["claude-code", "codex", "grok", "cursor", "gemini"],
     fields: { baseUrl: "hidden", apiKey: "hidden", models: "optional" },
     probe: "none",
   },

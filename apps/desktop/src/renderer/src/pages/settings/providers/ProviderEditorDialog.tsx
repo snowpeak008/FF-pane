@@ -30,6 +30,8 @@ import { cn } from "../../../lib/cn";
 import {
   agyStatusToProbeView,
   createCliLoginProbeCache,
+  cursorStatusToProbeView,
+  LOCAL_LOGIN_PROBE_RUNTIMES,
   type LoginProbeRuntime,
 } from "./cli-login-probe";
 import {
@@ -48,9 +50,6 @@ import {
 
 const MODEL_KINDS: readonly ModelKind[] = ["chat", "embedding"];
 
-/** 探测下拉列出 Claude、Codex 和 Gemini（agy）。其余运行时的探测代码仍保留。 */
-const VISIBLE_CLI_LOGIN_RUNTIMES: readonly LoginProbeRuntime[] = ["claude-code", "codex", "agy"];
-
 const LOGIN_STATUS_TONE = {
   logged_in: "success",
   logged_out: "warning",
@@ -66,9 +65,20 @@ async function probeAgyLogin(): Promise<CliLoginProbeView> {
     : { status: "unknown", detail: settled.error.message, probedWith: "gemini:status" };
 }
 
+/** Cursor 的登录状态来自 cursor:status（cursor-agent 自带的状态命令）。 */
+async function probeCursorLogin(): Promise<CliLoginProbeView> {
+  const settled = await invokeQuery("cursor:status");
+  return settled.status === "success"
+    ? cursorStatusToProbeView(settled.data)
+    : { status: "unknown", detail: settled.error.message, probedWith: "cursor:status" };
+}
+
 const loginProbeCache = createCliLoginProbeCache(async (runtime) => {
   if (runtime === "agy") {
     return probeAgyLogin();
+  }
+  if (runtime === "cursor") {
+    return probeCursorLogin();
   }
   const settled = await invokeQuery("providers:probe-cli-login", { runtime });
   return settled.status === "success"
@@ -129,7 +139,7 @@ function CliLoginSection({
   }, [runtime, onModels, t]);
 
   const selectClass = cn(inputVariants({}), "cursor-pointer");
-  const canList = runtime === "agy" || supportsLocalModelsWire(runtime);
+  const canList = runtime === "agy" || runtime === "cursor" || supportsLocalModelsWire(runtime);
 
   return (
     <div
@@ -147,7 +157,7 @@ function CliLoginSection({
               setProbeTick({ force: false });
             }}
           >
-            {VISIBLE_CLI_LOGIN_RUNTIMES.map((rt) => (
+            {LOCAL_LOGIN_PROBE_RUNTIMES.map((rt) => (
               <option key={rt} value={rt}>
                 {rt}
               </option>
